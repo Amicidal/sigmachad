@@ -291,6 +291,18 @@ export class KnowledgeGraphService extends EventEmitter {
     return this.structuralSearch(request);
   }
 
+  /**
+   * Find entities by type
+   */
+  async findEntitiesByType(entityType: string): Promise<Entity[]> {
+    const request: GraphSearchRequest = {
+      query: '',
+      searchType: 'structural',
+      entityTypes: [entityType as any]
+    };
+    return this.structuralSearch(request);
+  }
+
   private async semanticSearch(request: GraphSearchRequest): Promise<Entity[]> {
     // Get vector embeddings for the query
     const embeddings = await this.generateEmbedding({

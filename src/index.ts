@@ -10,11 +10,13 @@ import { DatabaseService, createDatabaseConfig } from './services/DatabaseServic
 import { KnowledgeGraphService } from './services/KnowledgeGraphService.js';
 import { FileWatcher } from './services/FileWatcher.js';
 import { ASTParser } from './services/ASTParser.js';
+import { DocumentationParser } from './services/DocumentationParser.js';
 import { APIGateway } from './api/APIGateway.js';
 import { SynchronizationCoordinator } from './services/SynchronizationCoordinator.js';
 import { ConflictResolution } from './services/ConflictResolution.js';
 import { SynchronizationMonitoring } from './services/SynchronizationMonitoring.js';
 import { RollbackCapabilities } from './services/RollbackCapabilities.js';
+import { SecurityScanner } from './services/SecurityScanner.js';
 
 async function main() {
   console.log('🚀 Starting Memento...');
@@ -40,6 +42,15 @@ async function main() {
     if ('initialize' in astParser && typeof (astParser as any).initialize === 'function') {
       await (astParser as any).initialize();
     }
+
+    // Initialize documentation parser
+    console.log('📚 Initializing documentation parser...');
+    const docParser = new DocumentationParser(kgService, dbService);
+
+    // Initialize security scanner
+    console.log('🔒 Initializing security scanner...');
+    const securityScanner = new SecurityScanner(dbService, kgService);
+    await securityScanner.initialize();
 
     // Initialize synchronization services
     console.log('🔄 Initializing synchronization services...');
@@ -138,15 +149,24 @@ async function main() {
 
     // Initialize API Gateway with enhanced services
     console.log('🌐 Initializing API Gateway...');
-    const apiGateway = new APIGateway(kgService, dbService, fileWatcher, astParser, {
-      port: parseInt(process.env.PORT || '3000'),
-      host: process.env.HOST || '0.0.0.0',
-    }, {
-      syncCoordinator,
-      syncMonitor,
-      conflictResolver,
-      rollbackCapabilities,
-    });
+    const apiGateway = new APIGateway(
+      kgService, 
+      dbService, 
+      fileWatcher, 
+      astParser, 
+      docParser,
+      securityScanner,
+      {
+        port: parseInt(process.env.PORT || '3000'),
+        host: process.env.HOST || '0.0.0.0',
+      }, 
+      {
+        syncCoordinator,
+        syncMonitor,
+        conflictResolver,
+        rollbackCapabilities,
+      }
+    );
 
     // Start API Gateway
     await apiGateway.start();

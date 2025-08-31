@@ -351,6 +351,70 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_test_results_test_id ON test_results(test_id);
       CREATE INDEX IF NOT EXISTS idx_test_results_timestamp ON test_results(timestamp);
       CREATE INDEX IF NOT EXISTS idx_test_results_status ON test_results(status);
+
+      -- Test suites table
+      CREATE TABLE IF NOT EXISTS test_suites (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        suite_name VARCHAR(255) NOT NULL,
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        framework VARCHAR(50),
+        total_tests INTEGER DEFAULT 0,
+        passed_tests INTEGER DEFAULT 0,
+        failed_tests INTEGER DEFAULT 0,
+        skipped_tests INTEGER DEFAULT 0,
+        duration INTEGER DEFAULT 0,
+        coverage JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(suite_name, timestamp)
+      );
+
+      -- Test coverage table
+      CREATE TABLE IF NOT EXISTS test_coverage (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        test_id VARCHAR(255) NOT NULL,
+        suite_id UUID REFERENCES test_suites(id),
+        lines DECIMAL(5,2) DEFAULT 0,
+        branches DECIMAL(5,2) DEFAULT 0,
+        functions DECIMAL(5,2) DEFAULT 0,
+        statements DECIMAL(5,2) DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      -- Test performance table
+      CREATE TABLE IF NOT EXISTS test_performance (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        test_id VARCHAR(255) NOT NULL,
+        suite_id UUID REFERENCES test_suites(id),
+        memory_usage BIGINT,
+        cpu_usage DECIMAL(5,2),
+        network_requests INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      -- Flaky test analyses table
+      CREATE TABLE IF NOT EXISTS flaky_test_analyses (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        test_id VARCHAR(255) NOT NULL UNIQUE,
+        test_name VARCHAR(255) NOT NULL,
+        flaky_score DECIMAL(3,2) DEFAULT 0,
+        total_runs INTEGER DEFAULT 0,
+        failure_rate DECIMAL(5,4) DEFAULT 0,
+        success_rate DECIMAL(5,4) DEFAULT 0,
+        recent_failures INTEGER DEFAULT 0,
+        patterns JSONB,
+        recommendations JSONB,
+        analyzed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      -- Indexes for test tables
+      CREATE INDEX IF NOT EXISTS idx_test_suites_timestamp ON test_suites(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_test_suites_framework ON test_suites(framework);
+      CREATE INDEX IF NOT EXISTS idx_test_coverage_test_id ON test_coverage(test_id);
+      CREATE INDEX IF NOT EXISTS idx_test_coverage_suite_id ON test_coverage(suite_id);
+      CREATE INDEX IF NOT EXISTS idx_test_performance_test_id ON test_performance(test_id);
+      CREATE INDEX IF NOT EXISTS idx_test_performance_suite_id ON test_performance(suite_id);
+      CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_test_id ON flaky_test_analyses(test_id);
+      CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_flaky_score ON flaky_test_analyses(flaky_score);
     `;
         await this.postgresQuery(postgresSchema);
         // FalkorDB graph setup
@@ -407,6 +471,209 @@ export class DatabaseService {
     }
     isInitialized() {
         return this.initialized;
+    }
+    /**
+     * Store test suite execution results
+     */
+    async storeTestSuiteResult(suiteResult) {
+        if (!this.initialized) {
+            throw new Error('Database service not initialized');
+        }
+        const client = await this.postgresPool.connect();
+        try {
+            await client.query('BEGIN');
+            // Insert test suite result
+            const suiteQuery = `
+        INSERT INTO test_suites (suite_name, timestamp, framework, total_tests, passed_tests, failed_tests, skipped_tests, duration)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (suite_name, timestamp) DO NOTHING
+        RETURNING id
+      `;
+            const suiteValues = [
+                suiteResult.suiteName,
+                suiteResult.timestamp,
+                suiteResult.framework,
+                suiteResult.totalTests,
+                suiteResult.passedTests,
+                suiteResult.failedTests,
+                suiteResult.skippedTests,
+                suiteResult.duration
+            ];
+            const suiteResultQuery = await client.query(suiteQuery, suiteValues);
+            const suiteId = suiteResultQuery.rows[0]?.id;
+            if (suiteId) {
+                // Insert individual test results
+                for (const result of suiteResult.results) {
+                    const testQuery = `
+            INSERT INTO test_results (suite_id, test_id, test_name, status, duration, error_message, stack_trace)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `;
+                    await client.query(testQuery, [
+                        suiteId,
+                        result.testId,
+                        result.testName,
+                        result.status,
+                        result.duration,
+                        result.errorMessage,
+                        result.stackTrace
+                    ]);
+                    // Insert coverage data if available
+                    if (result.coverage) {
+                        const coverageQuery = `
+              INSERT INTO test_coverage (test_id, suite_id, lines, branches, functions, statements)
+              VALUES ($1, $2, $3, $4, $5, $6)
+            `;
+                        await client.query(coverageQuery, [
+                            result.testId,
+                            suiteId,
+                            result.coverage.lines,
+                            result.coverage.branches,
+                            result.coverage.functions,
+                            result.coverage.statements
+                        ]);
+                    }
+                    // Insert performance data if available
+                    if (result.performance) {
+                        const perfQuery = `
+              INSERT INTO test_performance (test_id, suite_id, memory_usage, cpu_usage, network_requests)
+              VALUES ($1, $2, $3, $4, $5)
+            `;
+                        await client.query(perfQuery, [
+                            result.testId,
+                            suiteId,
+                            result.performance.memoryUsage,
+                            result.performance.cpuUsage,
+                            result.performance.networkRequests
+                        ]);
+                    }
+                }
+            }
+            await client.query('COMMIT');
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
+    /**
+     * Store flaky test analyses
+     */
+    async storeFlakyTestAnalyses(analyses) {
+        if (!this.initialized) {
+            throw new Error('Database service not initialized');
+        }
+        const client = await this.postgresPool.connect();
+        try {
+            await client.query('BEGIN');
+            for (const analysis of analyses) {
+                const query = `
+          INSERT INTO flaky_test_analyses (test_id, test_name, flaky_score, total_runs, failure_rate, success_rate, recent_failures, patterns, recommendations, analyzed_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          ON CONFLICT (test_id) DO UPDATE SET
+            flaky_score = EXCLUDED.flaky_score,
+            total_runs = EXCLUDED.total_runs,
+            failure_rate = EXCLUDED.failure_rate,
+            success_rate = EXCLUDED.success_rate,
+            recent_failures = EXCLUDED.recent_failures,
+            patterns = EXCLUDED.patterns,
+            recommendations = EXCLUDED.recommendations,
+            analyzed_at = EXCLUDED.analyzed_at
+        `;
+                await client.query(query, [
+                    analysis.testId,
+                    analysis.testName,
+                    analysis.flakyScore,
+                    analysis.totalRuns,
+                    analysis.failureRate,
+                    analysis.successRate,
+                    analysis.recentFailures,
+                    JSON.stringify(analysis.patterns),
+                    JSON.stringify(analysis.recommendations),
+                    new Date()
+                ]);
+            }
+            await client.query('COMMIT');
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
+    /**
+     * Get test execution history for an entity
+     */
+    async getTestExecutionHistory(entityId, limit = 50) {
+        if (!this.initialized) {
+            throw new Error('Database service not initialized');
+        }
+        const client = await this.postgresPool.connect();
+        try {
+            const query = `
+        SELECT tr.*, ts.suite_name, ts.framework, ts.timestamp as suite_timestamp
+        FROM test_results tr
+        JOIN test_suites ts ON tr.suite_id = ts.id
+        WHERE tr.test_id = $1
+        ORDER BY ts.timestamp DESC
+        LIMIT $2
+      `;
+            const result = await client.query(query, [entityId, limit]);
+            return result.rows;
+        }
+        finally {
+            client.release();
+        }
+    }
+    /**
+     * Get performance metrics history
+     */
+    async getPerformanceMetricsHistory(entityId, days = 30) {
+        if (!this.initialized) {
+            throw new Error('Database service not initialized');
+        }
+        const client = await this.postgresPool.connect();
+        try {
+            const query = `
+        SELECT tp.*, ts.timestamp
+        FROM test_performance tp
+        JOIN test_suites ts ON tp.suite_id = ts.id
+        WHERE tp.test_id = $1 AND ts.timestamp >= NOW() - INTERVAL '${days} days'
+        ORDER BY ts.timestamp DESC
+      `;
+            const result = await client.query(query, [entityId]);
+            return result.rows;
+        }
+        finally {
+            client.release();
+        }
+    }
+    /**
+     * Get coverage history
+     */
+    async getCoverageHistory(entityId, days = 30) {
+        if (!this.initialized) {
+            throw new Error('Database service not initialized');
+        }
+        const client = await this.postgresPool.connect();
+        try {
+            const query = `
+        SELECT tc.*, ts.timestamp
+        FROM test_coverage tc
+        JOIN test_suites ts ON tc.suite_id = ts.id
+        WHERE tc.test_id = $1 AND ts.timestamp >= NOW() - INTERVAL '${days} days'
+        ORDER BY ts.timestamp DESC
+      `;
+            const result = await client.query(query, [entityId]);
+            return result.rows;
+        }
+        finally {
+            client.release();
+        }
     }
 }
 // Singleton instance

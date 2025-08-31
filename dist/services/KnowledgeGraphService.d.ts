@@ -20,6 +20,10 @@ export declare class KnowledgeGraphService extends EventEmitter {
     createRelationship(relationship: GraphRelationship): Promise<void>;
     getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
     search(request: GraphSearchRequest): Promise<Entity[]>;
+    /**
+     * Find entities by type
+     */
+    findEntitiesByType(entityType: string): Promise<Entity[]>;
     private semanticSearch;
     private structuralSearch;
     getEntityExamples(entityId: string): Promise<GraphExamples>;

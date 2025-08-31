@@ -6,6 +6,7 @@
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../../services/DatabaseService.js';
+import { SecurityScanner } from '../../services/SecurityScanner.js';
 
 interface SecurityScanRequest {
   entityIds?: string[];
@@ -43,7 +44,8 @@ interface VulnerabilityReport {
 export async function registerSecurityRoutes(
   app: FastifyInstance,
   kgService: KnowledgeGraphService,
-  dbService: DatabaseService
+  dbService: DatabaseService,
+  securityScanner: SecurityScanner
 ): Promise<void> {
 
   // POST /api/security/scan - Scan for security issues
@@ -74,27 +76,19 @@ export async function registerSecurityRoutes(
     try {
       const params: SecurityScanRequest = request.body as SecurityScanRequest;
 
-      // TODO: Implement security scanning
-      const result: SecurityScanResult = {
-        issues: [],
-        vulnerabilities: [],
-        summary: {
-          totalIssues: 0,
-          bySeverity: {},
-          byType: {}
-        }
-      };
+      const result = await securityScanner.performScan(params);
 
       reply.send({
         success: true,
         data: result
       });
     } catch (error) {
+      console.error('Security scan error:', error);
       reply.status(500).send({
         success: false,
         error: {
           code: 'SCAN_FAILED',
-          message: 'Failed to perform security scan'
+          message: error instanceof Error ? error.message : 'Failed to perform security scan'
         }
       });
     }
@@ -103,34 +97,19 @@ export async function registerSecurityRoutes(
   // GET /api/security/vulnerabilities - Get vulnerability report
   app.get('/vulnerabilities', async (request, reply) => {
     try {
-      // TODO: Generate vulnerability report
-      const report: VulnerabilityReport = {
-        summary: {
-          total: 0,
-          critical: 0,
-          high: 0,
-          medium: 0,
-          low: 0
-        },
-        vulnerabilities: [],
-        byPackage: {},
-        remediation: {
-          immediate: [],
-          planned: [],
-          monitoring: []
-        }
-      };
+      const report = await securityScanner.getVulnerabilityReport();
 
       reply.send({
         success: true,
         data: report
       });
     } catch (error) {
+      console.error('Vulnerability report error:', error);
       reply.status(500).send({
         success: false,
         error: {
           code: 'REPORT_FAILED',
-          message: 'Failed to generate vulnerability report'
+          message: error instanceof Error ? error.message : 'Failed to generate vulnerability report'
         }
       });
     }
@@ -160,25 +139,20 @@ export async function registerSecurityRoutes(
         includeSecrets?: boolean;
       };
 
-      // TODO: Perform security audit
-      const audit = {
-        scope: scope || 'full',
-        startTime: new Date().toISOString(),
-        findings: [],
-        recommendations: [],
-        score: 0
-      };
+      const auditScope = (scope as 'full' | 'recent' | 'critical-only') || 'full';
+      const audit = await securityScanner.performSecurityAudit(auditScope);
 
       reply.send({
         success: true,
         data: audit
       });
     } catch (error) {
+      console.error('Security audit error:', error);
       reply.status(500).send({
         success: false,
         error: {
           code: 'AUDIT_FAILED',
-          message: 'Failed to perform security audit'
+          message: error instanceof Error ? error.message : 'Failed to perform security audit'
         }
       });
     }
@@ -214,9 +188,14 @@ export async function registerSecurityRoutes(
         offset?: number;
       };
 
-      // TODO: Retrieve security issues
-      const issues: any[] = [];
-      const total = 0;
+      const filters = {
+        severity: severity ? [severity] : undefined,
+        status: status ? [status as 'open' | 'resolved' | 'acknowledged' | 'false-positive'] : undefined,
+        limit: limit || 50,
+        offset: offset || 0
+      };
+
+      const { issues, total } = await securityScanner.getSecurityIssues(filters);
 
       reply.send({
         success: true,
@@ -229,11 +208,12 @@ export async function registerSecurityRoutes(
         }
       });
     } catch (error) {
+      console.error('Security issues retrieval error:', error);
       reply.status(500).send({
         success: false,
         error: {
           code: 'ISSUES_FAILED',
-          message: 'Failed to retrieve security issues'
+          message: error instanceof Error ? error.message : 'Failed to retrieve security issues'
         }
       });
     }
@@ -257,24 +237,31 @@ export async function registerSecurityRoutes(
         vulnerabilityId?: string;
       };
 
-      // TODO: Generate security fix suggestions
-      const fix = {
-        issueId: issueId || vulnerabilityId,
-        fixes: [],
-        priority: 'medium',
-        effort: 'medium'
-      };
+      if (!issueId && !vulnerabilityId) {
+        reply.status(400).send({
+          success: false,
+          error: {
+            code: 'MISSING_ID',
+            message: 'Either issueId or vulnerabilityId is required'
+          }
+        });
+        return;
+      }
+
+      const targetId = issueId || vulnerabilityId!;
+      const fix = await securityScanner.generateSecurityFix(targetId);
 
       reply.send({
         success: true,
         data: fix
       });
     } catch (error) {
+      console.error('Security fix generation error:', error);
       reply.status(500).send({
         success: false,
         error: {
           code: 'FIX_FAILED',
-          message: 'Failed to generate security fix'
+          message: error instanceof Error ? error.message : 'Failed to generate security fix'
         }
       });
     }
@@ -301,26 +288,22 @@ export async function registerSecurityRoutes(
         scope?: string;
       };
 
-      // TODO: Generate compliance report
-      const compliance = {
-        framework: framework || 'owasp',
-        scope: scope || 'full',
-        overallScore: 0,
-        requirements: [],
-        gaps: [],
-        recommendations: []
-      };
+      const frameworkName = framework || 'owasp';
+      const complianceScope = scope || 'full';
+
+      const compliance = await securityScanner.getComplianceStatus(frameworkName, complianceScope);
 
       reply.send({
         success: true,
         data: compliance
       });
     } catch (error) {
+      console.error('Compliance status error:', error);
       reply.status(500).send({
         success: false,
         error: {
           code: 'COMPLIANCE_FAILED',
-          message: 'Failed to generate compliance report'
+          message: error instanceof Error ? error.message : 'Failed to generate compliance report'
         }
       });
     }
@@ -357,12 +340,24 @@ export async function registerSecurityRoutes(
         schedule?: string;
       };
 
-      // TODO: Set up security monitoring
+      const monitoringConfig = {
+        enabled: true,
+        schedule: (schedule as 'hourly' | 'daily' | 'weekly') || 'daily',
+        alerts: alerts.map(alert => ({
+          type: alert.type,
+          severity: alert.severity,
+          threshold: alert.threshold || 1,
+          channels: alert.channels || ['console']
+        }))
+      };
+
+      await securityScanner.setupMonitoring(monitoringConfig);
+
       const monitoring = {
         alerts: alerts.length,
-        schedule: schedule || 'daily',
+        schedule: monitoringConfig.schedule,
         status: 'active',
-        nextRun: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        nextRun: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // Next daily run
       };
 
       reply.send({
@@ -370,11 +365,12 @@ export async function registerSecurityRoutes(
         data: monitoring
       });
     } catch (error) {
+      console.error('Security monitoring setup error:', error);
       reply.status(500).send({
         success: false,
         error: {
           code: 'MONITOR_FAILED',
-          message: 'Failed to set up security monitoring'
+          message: error instanceof Error ? error.message : 'Failed to set up security monitoring'
         }
       });
     }

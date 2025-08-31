@@ -12,10 +12,13 @@ import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../services/DatabaseService.js';
 import { FileWatcher } from '../services/FileWatcher.js';
 import { ASTParser } from '../services/ASTParser.js';
+import { DocumentationParser } from '../services/DocumentationParser.js';
 import { SynchronizationCoordinator } from '../services/SynchronizationCoordinator.js';
 import { ConflictResolution } from '../services/ConflictResolution.js';
 import { SynchronizationMonitoring } from '../services/SynchronizationMonitoring.js';
 import { RollbackCapabilities } from '../services/RollbackCapabilities.js';
+import { TestEngine } from '../services/TestEngine.js';
+import { SecurityScanner } from '../services/SecurityScanner.js';
 
 // Import route handlers
 import { registerDesignRoutes } from './routes/design.js';
@@ -58,6 +61,8 @@ export class APIGateway {
   private config: APIGatewayConfig;
   private mcpRouter: MCPRouter;
   private wsRouter: WebSocketRouter;
+  private testEngine: TestEngine;
+  private securityScanner: SecurityScanner;
   private syncServices?: SynchronizationServices;
 
   constructor(
@@ -65,6 +70,8 @@ export class APIGateway {
     private dbService: DatabaseService,
     private fileWatcher: FileWatcher,
     private astParser: ASTParser,
+    private docParser: DocumentationParser,
+    securityScanner: SecurityScanner,
     config: Partial<APIGatewayConfig> = {},
     syncServices?: SynchronizationServices
   ) {
@@ -91,8 +98,14 @@ export class APIGateway {
       ignoreTrailingSlash: true,
     });
 
+    // Initialize TestEngine
+    this.testEngine = new TestEngine(this.kgService, this.dbService);
+
+    // Use the provided SecurityScanner
+    this.securityScanner = securityScanner;
+
     // Initialize MCP Router
-    this.mcpRouter = new MCPRouter(this.kgService, this.dbService, this.astParser);
+    this.mcpRouter = new MCPRouter(this.kgService, this.dbService, this.astParser, this.testEngine, this.securityScanner);
 
     // Initialize WebSocket Router
     this.wsRouter = new WebSocketRouter(this.kgService, this.dbService, this.fileWatcher);
@@ -203,14 +216,14 @@ export class APIGateway {
         try {
           // Register all route modules
           registerDesignRoutes(app, this.kgService, this.dbService);
-          registerTestRoutes(app, this.kgService, this.dbService);
+          registerTestRoutes(app, this.kgService, this.dbService, this.testEngine);
           registerGraphRoutes(app, this.kgService, this.dbService);
           registerCodeRoutes(app, this.kgService, this.dbService, this.astParser);
           registerImpactRoutes(app, this.kgService, this.dbService);
           // registerVDBRoutes(app, this.kgService, this.dbService); // Commented out - file removed
           registerSCMRoutes(app, this.kgService, this.dbService);
-          registerDocsRoutes(app, this.kgService, this.dbService);
-          registerSecurityRoutes(app, this.kgService, this.dbService);
+          registerDocsRoutes(app, this.kgService, this.dbService, this.docParser);
+          registerSecurityRoutes(app, this.kgService, this.dbService, this.securityScanner);
           registerAdminRoutes(
             app,
             this.kgService,

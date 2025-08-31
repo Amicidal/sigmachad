@@ -2,7 +2,7 @@
  * Security Operations Routes
  * Handles security scanning, vulnerability assessment, and security monitoring
  */
-export async function registerSecurityRoutes(app, kgService, dbService) {
+export async function registerSecurityRoutes(app, kgService, dbService, securityScanner) {
     // POST /api/security/scan - Scan for security issues
     app.post('/scan', {
         schema: {
@@ -30,27 +30,19 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const params = request.body;
-            // TODO: Implement security scanning
-            const result = {
-                issues: [],
-                vulnerabilities: [],
-                summary: {
-                    totalIssues: 0,
-                    bySeverity: {},
-                    byType: {}
-                }
-            };
+            const result = await securityScanner.performScan(params);
             reply.send({
                 success: true,
                 data: result
             });
         }
         catch (error) {
+            console.error('Security scan error:', error);
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'SCAN_FAILED',
-                    message: 'Failed to perform security scan'
+                    message: error instanceof Error ? error.message : 'Failed to perform security scan'
                 }
             });
         }
@@ -58,34 +50,19 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
     // GET /api/security/vulnerabilities - Get vulnerability report
     app.get('/vulnerabilities', async (request, reply) => {
         try {
-            // TODO: Generate vulnerability report
-            const report = {
-                summary: {
-                    total: 0,
-                    critical: 0,
-                    high: 0,
-                    medium: 0,
-                    low: 0
-                },
-                vulnerabilities: [],
-                byPackage: {},
-                remediation: {
-                    immediate: [],
-                    planned: [],
-                    monitoring: []
-                }
-            };
+            const report = await securityScanner.getVulnerabilityReport();
             reply.send({
                 success: true,
                 data: report
             });
         }
         catch (error) {
+            console.error('Vulnerability report error:', error);
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'REPORT_FAILED',
-                    message: 'Failed to generate vulnerability report'
+                    message: error instanceof Error ? error.message : 'Failed to generate vulnerability report'
                 }
             });
         }
@@ -109,25 +86,20 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const { scope, includeDependencies, includeSecrets } = request.body;
-            // TODO: Perform security audit
-            const audit = {
-                scope: scope || 'full',
-                startTime: new Date().toISOString(),
-                findings: [],
-                recommendations: [],
-                score: 0
-            };
+            const auditScope = scope || 'full';
+            const audit = await securityScanner.performSecurityAudit(auditScope);
             reply.send({
                 success: true,
                 data: audit
             });
         }
         catch (error) {
+            console.error('Security audit error:', error);
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'AUDIT_FAILED',
-                    message: 'Failed to perform security audit'
+                    message: error instanceof Error ? error.message : 'Failed to perform security audit'
                 }
             });
         }
@@ -155,9 +127,13 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const { severity, type, status, limit, offset } = request.query;
-            // TODO: Retrieve security issues
-            const issues = [];
-            const total = 0;
+            const filters = {
+                severity: severity ? [severity] : undefined,
+                status: status ? [status] : undefined,
+                limit: limit || 50,
+                offset: offset || 0
+            };
+            const { issues, total } = await securityScanner.getSecurityIssues(filters);
             reply.send({
                 success: true,
                 data: issues,
@@ -170,11 +146,12 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
             });
         }
         catch (error) {
+            console.error('Security issues retrieval error:', error);
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'ISSUES_FAILED',
-                    message: 'Failed to retrieve security issues'
+                    message: error instanceof Error ? error.message : 'Failed to retrieve security issues'
                 }
             });
         }
@@ -193,24 +170,30 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const { issueId, vulnerabilityId } = request.body;
-            // TODO: Generate security fix suggestions
-            const fix = {
-                issueId: issueId || vulnerabilityId,
-                fixes: [],
-                priority: 'medium',
-                effort: 'medium'
-            };
+            if (!issueId && !vulnerabilityId) {
+                reply.status(400).send({
+                    success: false,
+                    error: {
+                        code: 'MISSING_ID',
+                        message: 'Either issueId or vulnerabilityId is required'
+                    }
+                });
+                return;
+            }
+            const targetId = issueId || vulnerabilityId;
+            const fix = await securityScanner.generateSecurityFix(targetId);
             reply.send({
                 success: true,
                 data: fix
             });
         }
         catch (error) {
+            console.error('Security fix generation error:', error);
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'FIX_FAILED',
-                    message: 'Failed to generate security fix'
+                    message: error instanceof Error ? error.message : 'Failed to generate security fix'
                 }
             });
         }
@@ -232,26 +215,21 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const { framework, scope } = request.query;
-            // TODO: Generate compliance report
-            const compliance = {
-                framework: framework || 'owasp',
-                scope: scope || 'full',
-                overallScore: 0,
-                requirements: [],
-                gaps: [],
-                recommendations: []
-            };
+            const frameworkName = framework || 'owasp';
+            const complianceScope = scope || 'full';
+            const compliance = await securityScanner.getComplianceStatus(frameworkName, complianceScope);
             reply.send({
                 success: true,
                 data: compliance
             });
         }
         catch (error) {
+            console.error('Compliance status error:', error);
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'COMPLIANCE_FAILED',
-                    message: 'Failed to generate compliance report'
+                    message: error instanceof Error ? error.message : 'Failed to generate compliance report'
                 }
             });
         }
@@ -283,12 +261,22 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const { alerts, schedule } = request.body;
-            // TODO: Set up security monitoring
+            const monitoringConfig = {
+                enabled: true,
+                schedule: schedule || 'daily',
+                alerts: alerts.map(alert => ({
+                    type: alert.type,
+                    severity: alert.severity,
+                    threshold: alert.threshold || 1,
+                    channels: alert.channels || ['console']
+                }))
+            };
+            await securityScanner.setupMonitoring(monitoringConfig);
             const monitoring = {
                 alerts: alerts.length,
-                schedule: schedule || 'daily',
+                schedule: monitoringConfig.schedule,
                 status: 'active',
-                nextRun: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+                nextRun: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // Next daily run
             };
             reply.send({
                 success: true,
@@ -296,11 +284,12 @@ export async function registerSecurityRoutes(app, kgService, dbService) {
             });
         }
         catch (error) {
+            console.error('Security monitoring setup error:', error);
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'MONITOR_FAILED',
-                    message: 'Failed to set up security monitoring'
+                    message: error instanceof Error ? error.message : 'Failed to set up security monitoring'
                 }
             });
         }

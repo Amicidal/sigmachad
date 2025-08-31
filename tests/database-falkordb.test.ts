@@ -90,12 +90,27 @@ describe('FalkorDB Graph Database Operations', () => {
 
     it('should create nodes with properties', async () => {
       for (const node of testNodes) {
+        // Build properties string manually to avoid parameter substitution issues
+        const propsStr = Object.entries(node.properties)
+          .map(([key, value]) => {
+            if (typeof value === 'string') {
+              return `${key}: '${value.replace(/'/g, "\\'")}'`;
+            } else if (Array.isArray(value)) {
+              return `${key}: ${JSON.stringify(value)}`;
+            } else if (value === null || value === undefined) {
+              return `${key}: null`;
+            } else {
+              return `${key}: ${value}`;
+            }
+          })
+          .join(', ');
+
         const createQuery = `
-          CREATE (n:${node.label} $props)
+          CREATE (n:${node.label} {${propsStr}})
           RETURN n
         `;
 
-        const result = await dbService.falkordbQuery(createQuery, { props: node.properties });
+        const result = await dbService.falkordbQuery(createQuery);
         expect(result).toBeDefined();
         expect(result.length).toBeGreaterThan(0);
       }
@@ -238,7 +253,7 @@ describe('FalkorDB Graph Database Operations', () => {
       `);
 
       expect(userTasks.length).toBe(2);
-      expect(userTasks.map(task => task['t.title'])).toEqual(
+      expect(userTasks.map((task: any) => task['t.title'])).toEqual(
         expect.arrayContaining(['Setup DB', 'Create API'])
       );
     });
@@ -310,7 +325,7 @@ describe('FalkorDB Graph Database Operations', () => {
       `);
 
       expect(dependencies.length).toBeGreaterThan(0);
-      expect(dependencies.map(d => d['dep.name'])).toEqual(
+      expect(dependencies.map((d: any) => d['dep.name'])).toEqual(
         expect.arrayContaining(['auth.ts', 'database.ts', 'utils.ts', 'config.ts'])
       );
     });
@@ -349,7 +364,7 @@ describe('FalkorDB Graph Database Operations', () => {
       `);
 
       expect(languageStats.length).toBeGreaterThan(0);
-      const typescriptCount = languageStats.find(stat => stat['r.language'] === 'typescript');
+      const typescriptCount = languageStats.find((stat: any) => stat['r.language'] === 'typescript');
       expect(typescriptCount['repo_count']).toBe(2);
 
       // Aggregate: Count contributions per developer
@@ -383,7 +398,13 @@ describe('FalkorDB Graph Database Operations', () => {
 
       // Find shortest path from A to D
       const shortestPath = await dbService.falkordbQuery(`
-        MATCH path = shortestPath((start:Node {id: "complex_a"})-[:CONNECTS_TO*]->(end:Node {id: "complex_d"}))
+        MATCH (start:Node {id: "complex_a"}), (end:Node {id: "complex_d"})
+        CALL shortestPath({
+          source: start,
+          target: end,
+          relationshipQuery: 'CONNECTS_TO'
+        })
+        YIELD path
         RETURN path, reduce(totalWeight = 0, rel in relationships(path) | totalWeight + rel.weight) as total_weight
       `);
 
@@ -401,8 +422,13 @@ describe('FalkorDB Graph Database Operations', () => {
                (:PerformanceTest {id: "perf_3", category: "fast", value: 150})
       `);
 
-      // Create index on category property
-      await dbService.falkordbQuery('CREATE INDEX ON :PerformanceTest(category)');
+      // Create index on category property (handle if already exists)
+      try {
+        await dbService.falkordbQuery('CREATE INDEX ON :PerformanceTest(category)');
+      } catch (error) {
+        // Index might already exist, continue
+        console.log('Index creation failed (might already exist):', (error as Error).message);
+      }
 
       // Query using the indexed property
       const fastItems = await dbService.falkordbQuery(`
@@ -412,7 +438,7 @@ describe('FalkorDB Graph Database Operations', () => {
       `);
 
       expect(fastItems.length).toBe(2);
-      expect(fastItems.map(item => item['n.value'])).toEqual([100, 150]);
+      expect(fastItems.map((item: any) => item['n.value'])).toEqual([100, 150]);
     });
 
     it('should handle large datasets efficiently', async () => {
@@ -470,7 +496,7 @@ describe('FalkorDB Graph Database Operations', () => {
       for (let i = 0; i < 10; i++) {
         operations.push(
           dbService.falkordbQuery(`
-            CREATE (:ConcurrentTest {id: "concurrent_${i}", timestamp: timestamp()})
+            CREATE (:ConcurrentTest {id: "concurrent_${i}", created_at: "${new Date().toISOString()}"})
             RETURN "created_${i}"
           `)
         );

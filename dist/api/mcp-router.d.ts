@@ -7,6 +7,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../services/DatabaseService.js';
 import { ASTParser } from '../services/ASTParser.js';
+import { TestEngine } from '../services/TestEngine.js';
+import { SecurityScanner } from '../services/SecurityScanner.js';
 interface ToolExecutionMetrics {
     toolName: string;
     executionCount: number;
@@ -22,11 +24,13 @@ export declare class MCPRouter {
     private kgService;
     private dbService;
     private astParser;
+    private testEngine;
+    private securityScanner;
     private server;
     private tools;
     private metrics;
     private executionHistory;
-    constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, astParser: ASTParser);
+    constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, astParser: ASTParser, testEngine: TestEngine, securityScanner: SecurityScanner);
     private registerTools;
     private registerTool;
     private setupRequestHandlers;
@@ -76,6 +80,13 @@ export declare class MCPRouter {
         errors: string[];
     }>;
     startStdio(): Promise<void>;
+    private handleAnalyzeTestResults;
+    private handleGetCoverage;
+    private handleGetPerformance;
+    private handleParseTestResults;
+    private analyzePerformanceTrends;
+    private calculatePerformanceTrend;
+    private generateTestRecommendations;
 }
 export {};
 //# sourceMappingURL=mcp-router.d.ts.map

@@ -7,6 +7,7 @@ import fastifyCors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import { createTRPCContext, appRouter } from './trpc/router.js';
+import { TestEngine } from '../services/TestEngine.js';
 // Import route handlers
 import { registerDesignRoutes } from './routes/design.js';
 import { registerTestRoutes } from './routes/tests.js';
@@ -27,16 +28,20 @@ export class APIGateway {
     dbService;
     fileWatcher;
     astParser;
+    docParser;
     app;
     config;
     mcpRouter;
     wsRouter;
+    testEngine;
+    securityScanner;
     syncServices;
-    constructor(kgService, dbService, fileWatcher, astParser, config = {}, syncServices) {
+    constructor(kgService, dbService, fileWatcher, astParser, docParser, securityScanner, config = {}, syncServices) {
         this.kgService = kgService;
         this.dbService = dbService;
         this.fileWatcher = fileWatcher;
         this.astParser = astParser;
+        this.docParser = docParser;
         this.config = {
             port: config.port || 3000,
             host: config.host || '0.0.0.0',
@@ -57,8 +62,12 @@ export class APIGateway {
             disableRequestLogging: false,
             ignoreTrailingSlash: true,
         });
+        // Initialize TestEngine
+        this.testEngine = new TestEngine(this.kgService, this.dbService);
+        // Use the provided SecurityScanner
+        this.securityScanner = securityScanner;
         // Initialize MCP Router
-        this.mcpRouter = new MCPRouter(this.kgService, this.dbService, this.astParser);
+        this.mcpRouter = new MCPRouter(this.kgService, this.dbService, this.astParser, this.testEngine, this.securityScanner);
         // Initialize WebSocket Router
         this.wsRouter = new WebSocketRouter(this.kgService, this.dbService, this.fileWatcher);
         this.setupMiddleware();
@@ -150,14 +159,14 @@ export class APIGateway {
             try {
                 // Register all route modules
                 registerDesignRoutes(app, this.kgService, this.dbService);
-                registerTestRoutes(app, this.kgService, this.dbService);
+                registerTestRoutes(app, this.kgService, this.dbService, this.testEngine);
                 registerGraphRoutes(app, this.kgService, this.dbService);
                 registerCodeRoutes(app, this.kgService, this.dbService, this.astParser);
                 registerImpactRoutes(app, this.kgService, this.dbService);
                 // registerVDBRoutes(app, this.kgService, this.dbService); // Commented out - file removed
                 registerSCMRoutes(app, this.kgService, this.dbService);
-                registerDocsRoutes(app, this.kgService, this.dbService);
-                registerSecurityRoutes(app, this.kgService, this.dbService);
+                registerDocsRoutes(app, this.kgService, this.dbService, this.docParser);
+                registerSecurityRoutes(app, this.kgService, this.dbService, this.securityScanner);
                 registerAdminRoutes(app, this.kgService, this.dbService, this.fileWatcher, this.syncServices?.syncCoordinator, this.syncServices?.syncMonitor, this.syncServices?.conflictResolver, this.syncServices?.rollbackCapabilities);
                 console.log('✅ All route modules registered successfully');
             }

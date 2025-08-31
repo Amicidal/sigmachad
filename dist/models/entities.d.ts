@@ -83,12 +83,58 @@ export interface Test extends CodebaseEntity {
     targetSymbol: string;
     framework: string;
     coverage: CoverageMetrics;
+    status: 'passing' | 'failing' | 'skipped' | 'unknown';
+    flakyScore: number;
+    lastRunAt?: Date;
+    lastDuration?: number;
+    executionHistory: TestExecution[];
+    performanceMetrics: TestPerformanceMetrics;
+    dependencies: string[];
+    tags: string[];
 }
 export interface CoverageMetrics {
     lines: number;
     branches: number;
     functions: number;
     statements: number;
+}
+export interface TestExecution {
+    id: string;
+    timestamp: Date;
+    status: 'passed' | 'failed' | 'skipped' | 'error';
+    duration: number;
+    errorMessage?: string;
+    stackTrace?: string;
+    coverage?: CoverageMetrics;
+    performance?: TestPerformanceData;
+    environment?: Record<string, any>;
+}
+export interface TestPerformanceData {
+    memoryUsage?: number;
+    cpuUsage?: number;
+    networkRequests?: number;
+    databaseQueries?: number;
+    fileOperations?: number;
+}
+export interface TestPerformanceMetrics {
+    averageExecutionTime: number;
+    p95ExecutionTime: number;
+    successRate: number;
+    trend: 'improving' | 'stable' | 'degrading';
+    benchmarkComparisons: TestBenchmark[];
+    historicalData: TestHistoricalData[];
+}
+export interface TestBenchmark {
+    benchmark: string;
+    value: number;
+    status: 'above' | 'below' | 'at';
+    threshold: number;
+}
+export interface TestHistoricalData {
+    timestamp: Date;
+    executionTime: number;
+    successRate: number;
+    coveragePercentage: number;
 }
 export interface Spec extends CodebaseEntity {
     type: 'spec';

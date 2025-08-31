@@ -5,5 +5,6 @@
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../../services/DatabaseService.js';
-export declare function registerDocsRoutes(app: FastifyInstance, kgService: KnowledgeGraphService, dbService: DatabaseService): Promise<void>;
+import { DocumentationParser } from '../../services/DocumentationParser.js';
+export declare function registerDocsRoutes(app: FastifyInstance, kgService: KnowledgeGraphService, dbService: DatabaseService, docParser: DocumentationParser): Promise<void>;
 //# sourceMappingURL=docs.d.ts.map

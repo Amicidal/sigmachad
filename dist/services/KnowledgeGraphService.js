@@ -227,6 +227,17 @@ export class KnowledgeGraphService extends EventEmitter {
         // For structural search, use graph traversal
         return this.structuralSearch(request);
     }
+    /**
+     * Find entities by type
+     */
+    async findEntitiesByType(entityType) {
+        const request = {
+            query: '',
+            searchType: 'structural',
+            entityTypes: [entityType]
+        };
+        return this.structuralSearch(request);
+    }
     async semanticSearch(request) {
         // Get vector embeddings for the query
         const embeddings = await this.generateEmbedding({

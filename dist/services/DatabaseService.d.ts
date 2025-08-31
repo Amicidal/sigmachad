@@ -49,6 +49,26 @@ export declare class DatabaseService {
     }>;
     setupDatabase(): Promise<void>;
     isInitialized(): boolean;
+    /**
+     * Store test suite execution results
+     */
+    storeTestSuiteResult(suiteResult: any): Promise<void>;
+    /**
+     * Store flaky test analyses
+     */
+    storeFlakyTestAnalyses(analyses: any[]): Promise<void>;
+    /**
+     * Get test execution history for an entity
+     */
+    getTestExecutionHistory(entityId: string, limit?: number): Promise<any[]>;
+    /**
+     * Get performance metrics history
+     */
+    getPerformanceMetricsHistory(entityId: string, days?: number): Promise<any[]>;
+    /**
+     * Get coverage history
+     */
+    getCoverageHistory(entityId: string, days?: number): Promise<any[]>;
 }
 export declare function getDatabaseService(config?: DatabaseConfig): DatabaseService;
 export declare function createDatabaseConfig(): DatabaseConfig;

@@ -17,6 +17,8 @@ import {
 import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../services/DatabaseService.js';
 import { ASTParser } from '../services/ASTParser.js';
+import { TestEngine } from '../services/TestEngine.js';
+import { SecurityScanner } from '../services/SecurityScanner.js';
 
 // MCP Tool definitions
 interface MCPToolDefinition {
@@ -59,7 +61,9 @@ export class MCPRouter {
   constructor(
     private kgService: KnowledgeGraphService,
     private dbService: DatabaseService,
-    private astParser: ASTParser
+    private astParser: ASTParser,
+    private testEngine: TestEngine,
+    private securityScanner: SecurityScanner
   ) {
     this.server = new Server(
       {
@@ -265,6 +269,96 @@ export class MCPRouter {
         required: ['specId'],
       },
       handler: this.handlePlanTests.bind(this),
+    });
+
+    // Additional test analysis tools
+    this.registerTool({
+      name: 'tests.analyze_results',
+      description: 'Analyze test execution results and provide insights',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          testIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Test IDs to analyze (optional - analyzes all if empty)',
+          },
+          includeFlakyAnalysis: {
+            type: 'boolean',
+            description: 'Whether to include flaky test detection',
+            default: true,
+          },
+          includePerformanceAnalysis: {
+            type: 'boolean',
+            description: 'Whether to include performance analysis',
+            default: true,
+          },
+        },
+      },
+      handler: this.handleAnalyzeTestResults.bind(this),
+    });
+
+    this.registerTool({
+      name: 'tests.get_coverage',
+      description: 'Get test coverage analysis for entities',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          entityId: {
+            type: 'string',
+            description: 'Entity ID to get coverage for',
+          },
+          includeHistorical: {
+            type: 'boolean',
+            description: 'Whether to include historical coverage data',
+            default: false,
+          },
+        },
+        required: ['entityId'],
+      },
+      handler: this.handleGetCoverage.bind(this),
+    });
+
+    this.registerTool({
+      name: 'tests.get_performance',
+      description: 'Get performance metrics for tests',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          testId: {
+            type: 'string',
+            description: 'Test ID to get performance metrics for',
+          },
+          days: {
+            type: 'number',
+            description: 'Number of days of historical data to include',
+            default: 30,
+          },
+        },
+        required: ['testId'],
+      },
+      handler: this.handleGetPerformance.bind(this),
+    });
+
+    this.registerTool({
+      name: 'tests.parse_results',
+      description: 'Parse test results from various formats and store them',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filePath: {
+            type: 'string',
+            description: 'Path to test results file',
+          },
+          format: {
+            type: 'string',
+            enum: ['junit', 'jest', 'mocha', 'vitest', 'cypress', 'playwright'],
+            description: 'Format of the test results file',
+          },
+        },
+        required: ['filePath', 'format'],
+      },
+      handler: this.handleParseTestResults.bind(this),
     });
 
     // Security tools
@@ -838,53 +932,24 @@ export class MCPRouter {
     console.log('MCP Tool called: security.scan', params);
 
     try {
-      const issues: any[] = [];
-      const vulnerabilities: any[] = [];
-      const summary = {
-        totalIssues: 0,
-        bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
-        byType: { sast: 0, sca: 0, secrets: 0, dependency: 0 }
+      // Convert MCP params to SecurityScanRequest format
+      const scanRequest = {
+        entityIds: params.entityIds,
+        scanTypes: params.scanTypes,
+        severity: params.severity
       };
 
-      // Perform different types of security scans based on params
-      if (params.scanTypes?.includes('sast') || !params.scanTypes) {
-        const sastResults = await this.performStaticAnalysisScan(params.entityIds, params.severity);
-        issues.push(...sastResults.issues);
-        summary.byType.sast = sastResults.issues.length;
-        this.updateSeverityCounts(summary, sastResults.issues);
-      }
-
-      if (params.scanTypes?.includes('sca') || !params.scanTypes) {
-        const scaResults = await this.performDependencyScan(params.entityIds, params.severity);
-        vulnerabilities.push(...scaResults.vulnerabilities);
-        summary.byType.sca = scaResults.vulnerabilities.length;
-        this.updateSeverityCounts(summary, scaResults.vulnerabilities);
-      }
-
-      if (params.scanTypes?.includes('secrets') || !params.scanTypes) {
-        const secretsResults = await this.performSecretsScan(params.entityIds, params.severity);
-        issues.push(...secretsResults.issues);
-        summary.byType.secrets = secretsResults.issues.length;
-        this.updateSeverityCounts(summary, secretsResults.issues);
-      }
-
-      if (params.scanTypes?.includes('dependency') || !params.scanTypes) {
-        const dependencyResults = await this.performDependencyAnalysis(params.entityIds, params.severity);
-        issues.push(...dependencyResults.issues);
-        summary.byType.dependency = dependencyResults.issues.length;
-        this.updateSeverityCounts(summary, dependencyResults.issues);
-      }
-
-      summary.totalIssues = issues.length + vulnerabilities.length;
+      // Use the SecurityScanner service
+      const result = await this.securityScanner.performScan(scanRequest);
 
       return {
         scan: {
-          issues,
-          vulnerabilities,
-          summary
+          issues: result.issues,
+          vulnerabilities: result.vulnerabilities,
+          summary: result.summary
         },
-        summary,
-        message: `Security scan completed. Found ${summary.totalIssues} issues across ${params.entityIds?.length || 'all'} entities`,
+        summary: result.summary,
+        message: `Security scan completed. Found ${result.summary.totalIssues} issues across ${params.entityIds?.length || 'all'} entities`,
       };
     } catch (error) {
       console.error('Error in handleSecurityScan:', error);
@@ -2040,5 +2105,190 @@ export class MCPRouter {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
     console.log('MCP server started with stdio transport');
+  }
+
+  // New test tool handlers
+
+  private async handleAnalyzeTestResults(params: any): Promise<any> {
+    console.log('MCP Tool called: tests.analyze_results', params);
+
+    try {
+      const testIds = params.testIds || [];
+      const includeFlakyAnalysis = params.includeFlakyAnalysis !== false;
+      const includePerformanceAnalysis = params.includePerformanceAnalysis !== false;
+
+      // Get test results from database
+      let testResults: any[] = [];
+
+      if (testIds.length > 0) {
+        // Get results for specific tests
+        for (const testId of testIds) {
+          const results = await this.dbService.getTestExecutionHistory(testId, 50);
+          testResults.push(...results);
+        }
+      } else {
+        // Get all recent test results
+        // This would need a method to get all test results
+        testResults = [];
+      }
+
+      const analysis = {
+        totalTests: testResults.length,
+        passedTests: testResults.filter(r => r.status === 'passed').length,
+        failedTests: testResults.filter(r => r.status === 'failed').length,
+        skippedTests: testResults.filter(r => r.status === 'skipped').length,
+        successRate: testResults.length > 0 ?
+          (testResults.filter(r => r.status === 'passed').length / testResults.length) * 100 : 0,
+        flakyTests: includeFlakyAnalysis ? await this.testEngine.analyzeFlakyTests(testResults) : [],
+        performanceInsights: includePerformanceAnalysis ? await this.analyzePerformanceTrends(testResults) : null,
+        recommendations: this.generateTestRecommendations(testResults, includeFlakyAnalysis)
+      };
+
+      return {
+        analysis,
+        message: `Analyzed ${testResults.length} test executions with ${analysis.flakyTests.length} potential flaky tests identified`
+      };
+    } catch (error) {
+      console.error('Error in handleAnalyzeTestResults:', error);
+      throw new Error(`Failed to analyze test results: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async handleGetCoverage(params: any): Promise<any> {
+    console.log('MCP Tool called: tests.get_coverage', params);
+
+    try {
+      const { entityId, includeHistorical } = params;
+
+      const coverage = await this.testEngine.getCoverageAnalysis(entityId);
+
+      let historicalData = null;
+      if (includeHistorical) {
+        historicalData = await this.dbService.getCoverageHistory(entityId, 30);
+      }
+
+      return {
+        coverage,
+        historicalData,
+        message: `Coverage analysis for entity ${entityId}: ${coverage.overallCoverage.lines}% line coverage`
+      };
+    } catch (error) {
+      console.error('Error in handleGetCoverage:', error);
+      throw new Error(`Failed to get coverage: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async handleGetPerformance(params: any): Promise<any> {
+    console.log('MCP Tool called: tests.get_performance', params);
+
+    try {
+      const { testId, days = 30 } = params;
+
+      const metrics = await this.testEngine.getPerformanceMetrics(testId);
+      const historicalData = await this.dbService.getPerformanceMetricsHistory(testId, days);
+
+      return {
+        metrics,
+        historicalData,
+        message: `Performance metrics for test ${testId}: avg ${metrics.averageExecutionTime}ms, ${metrics.successRate * 100}% success rate`
+      };
+    } catch (error) {
+      console.error('Error in handleGetPerformance:', error);
+      throw new Error(`Failed to get performance metrics: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async handleParseTestResults(params: any): Promise<any> {
+    console.log('MCP Tool called: tests.parse_results', params);
+
+    try {
+      const { filePath, format } = params;
+
+      await this.testEngine.parseAndRecordTestResults(filePath, format);
+
+      return {
+        success: true,
+        message: `Successfully parsed and recorded test results from ${filePath} (${format} format)`
+      };
+    } catch (error) {
+      console.error('Error in handleParseTestResults:', error);
+      throw new Error(`Failed to parse test results: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Helper methods for analysis
+
+  private async analyzePerformanceTrends(testResults: any[]): Promise<any> {
+    if (testResults.length === 0) return null;
+
+    const durations = testResults.map(r => r.duration).filter(d => d != null);
+    const avgDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+
+    // Group by date for trend analysis
+    const dailyStats = new Map<string, { count: number; avgDuration: number; successRate: number }>();
+
+    for (const result of testResults) {
+      const date = new Date(result.timestamp).toDateString();
+      if (!dailyStats.has(date)) {
+        dailyStats.set(date, { count: 0, avgDuration: 0, successRate: 0 });
+      }
+      const stats = dailyStats.get(date)!;
+      stats.count++;
+      stats.avgDuration = (stats.avgDuration * (stats.count - 1) + result.duration) / stats.count;
+      stats.successRate = (stats.successRate * (stats.count - 1) + (result.status === 'passed' ? 1 : 0)) / stats.count;
+    }
+
+    return {
+      averageDuration: avgDuration,
+      trend: this.calculatePerformanceTrend(Array.from(dailyStats.values())),
+      dailyStats: Object.fromEntries(dailyStats)
+    };
+  }
+
+  private calculatePerformanceTrend(dailyStats: Array<{ count: number; avgDuration: number; successRate: number }>): string {
+    if (dailyStats.length < 2) return 'insufficient_data';
+
+    const recent = dailyStats.slice(-3);
+    const older = dailyStats.slice(-7, -3);
+
+    if (older.length === 0) return 'insufficient_data';
+
+    const recentAvg = recent.reduce((sum, stat) => sum + stat.avgDuration, 0) / recent.length;
+    const olderAvg = older.reduce((sum, stat) => sum + stat.avgDuration, 0) / older.length;
+
+    const improvement = ((olderAvg - recentAvg) / olderAvg) * 100;
+
+    if (improvement > 5) return 'improving';
+    if (improvement < -5) return 'degrading';
+    return 'stable';
+  }
+
+  private generateTestRecommendations(testResults: any[], includeFlakyAnalysis: boolean): string[] {
+    const recommendations: string[] = [];
+
+    const totalTests = testResults.length;
+    const failedTests = testResults.filter(r => r.status === 'failed').length;
+    const failureRate = totalTests > 0 ? (failedTests / totalTests) * 100 : 0;
+
+    if (failureRate > 20) {
+      recommendations.push('High failure rate detected. Consider reviewing test stability and dependencies.');
+    }
+
+    if (failureRate > 50) {
+      recommendations.push('Critical: Over 50% of tests are failing. Immediate attention required.');
+    }
+
+    if (includeFlakyAnalysis) {
+      const flakyTests = testResults.filter(r => r.status === 'failed');
+      if (flakyTests.length > totalTests * 0.1) {
+        recommendations.push('Multiple tests showing inconsistent results. Check for race conditions or environmental dependencies.');
+      }
+    }
+
+    if (recommendations.length === 0) {
+      recommendations.push('Test suite appears healthy. Continue monitoring for any emerging issues.');
+    }
+
+    return recommendations;
   }
 }

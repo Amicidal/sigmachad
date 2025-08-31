@@ -9,6 +9,8 @@ import { KnowledgeGraphService } from '../src/services/KnowledgeGraphService.js'
 import { DatabaseService, createDatabaseConfig } from '../src/services/DatabaseService.js';
 import { FileWatcher } from '../src/services/FileWatcher.js';
 import { ASTParser } from '../src/services/ASTParser.js';
+import { DocumentationParser } from '../src/services/DocumentationParser.js';
+import { SecurityScanner } from '../src/services/SecurityScanner.js';
 
 describe('Health Check API', () => {
   let apiGateway: APIGateway;
@@ -25,9 +27,11 @@ describe('Health Check API', () => {
 
     const fileWatcher = new FileWatcher();
     const astParser = new ASTParser();
+    const docParser = new DocumentationParser(kgService, dbService);
+    const securityScanner = new SecurityScanner(dbService, kgService);
 
     // Initialize API Gateway
-    apiGateway = new APIGateway(kgService, dbService, fileWatcher, astParser, {
+    apiGateway = new APIGateway(kgService, dbService, fileWatcher, astParser, docParser, securityScanner, {
       port: 3001, // Use different port for tests
       host: 'localhost',
     });
