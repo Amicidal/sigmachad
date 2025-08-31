@@ -23,6 +23,7 @@ import {
   TraversalQuery
 } from '../models/relationships.js';
 import { GraphSearchRequest, GraphExamples, DependencyAnalysis } from '../models/types.js';
+import { embeddingService } from '../utils/embedding.js';
 
 export class KnowledgeGraphService {
   constructor(private db: DatabaseService) {}
@@ -60,10 +61,11 @@ export class KnowledgeGraphService {
     const labels = this.getEntityLabels(entity);
     const properties = this.sanitizeProperties(entity);
 
-    // Create node in FalkorDB
+    // Create node in FalkorDB with type as both label and property
     const createQuery = `
-      CREATE (n${labels.join(':')} {
+      CREATE (n${labels.join(':')}:${entity.type} {
         id: $id,
+        type: $type,
         path: $path,
         hash: $hash,
         language: $language,
@@ -76,15 +78,20 @@ export class KnowledgeGraphService {
     // Only include path/hash/language if the entity has them (codebase entities)
     const hasCodebaseProps = this.hasCodebaseProperties(entity);
 
-    await this.db.falkordbQuery(createQuery, {
+    const queryParams = {
       id: nodeId,
+      type: entity.type,
       path: hasCodebaseProps ? (entity as any).path : '',
       hash: hasCodebaseProps ? (entity as any).hash : '',
       language: hasCodebaseProps ? (entity as any).language : '',
       lastModified: hasCodebaseProps ? (entity as any).lastModified.toISOString() : new Date().toISOString(),
       created: hasCodebaseProps ? (entity as any).created.toISOString() : new Date().toISOString(),
       metadata: JSON.stringify((entity as any).metadata || {}),
-    });
+    };
+
+
+
+    await this.db.falkordbQuery(createQuery, queryParams);
 
     // Create vector embedding for semantic search
     await this.createEmbedding(entity);
@@ -108,7 +115,16 @@ export class KnowledgeGraphService {
   }
 
   async updateEntity(entityId: string, updates: Partial<Entity>): Promise<void> {
-    const setClause = Object.keys(updates)
+    // Convert dates to ISO strings for FalkorDB
+    const sanitizedUpdates = { ...updates };
+    if (sanitizedUpdates.lastModified instanceof Date) {
+      sanitizedUpdates.lastModified = sanitizedUpdates.lastModified.toISOString() as any;
+    }
+    if (sanitizedUpdates.created instanceof Date) {
+      sanitizedUpdates.created = sanitizedUpdates.created.toISOString() as any;
+    }
+
+    const setClause = Object.keys(sanitizedUpdates)
       .map(key => `n.${key} = $${key}`)
       .join(', ');
 
@@ -118,7 +134,7 @@ export class KnowledgeGraphService {
       RETURN n
     `;
 
-    const params = { id: entityId, ...updates };
+    const params = { id: entityId, ...sanitizedUpdates };
     await this.db.falkordbQuery(query, params);
 
     // Update vector embedding
@@ -455,6 +471,50 @@ export class KnowledgeGraphService {
   }
 
   // Vector embedding operations
+  async createEmbeddingsBatch(entities: Entity[]): Promise<void> {
+    try {
+      const inputs = entities.map(entity => ({
+        content: this.getEntityContentForEmbedding(entity),
+        entityId: entity.id,
+      }));
+
+      const batchResult = await embeddingService.generateEmbeddingsBatch(inputs);
+
+      // Store embeddings in Qdrant
+      for (let i = 0; i < entities.length; i++) {
+        const entity = entities[i];
+        const embedding = batchResult.results[i].embedding;
+        const collection = this.getEmbeddingCollection(entity);
+        const hasCodebaseProps = this.hasCodebaseProperties(entity);
+
+        // Convert string ID to numeric ID for Qdrant
+        const numericId = this.stringToNumericId(entity.id);
+
+        await this.db.qdrant.upsert(collection, {
+          points: [{
+            id: numericId,
+            vector: embedding,
+            payload: {
+              entityId: entity.id,
+              type: entity.type,
+              path: hasCodebaseProps ? (entity as any).path : '',
+              language: hasCodebaseProps ? (entity as any).language : '',
+              lastModified: hasCodebaseProps ? (entity as any).lastModified.toISOString() : new Date().toISOString(),
+            },
+          }],
+        });
+      }
+
+      console.log(`✅ Created embeddings for ${entities.length} entities (${batchResult.totalTokens} tokens, $${batchResult.totalCost.toFixed(4)})`);
+    } catch (error) {
+      console.error('Failed to create batch embeddings:', error);
+      // Fallback to individual processing
+      for (const entity of entities) {
+        await this.createEmbedding(entity);
+      }
+    }
+  }
+
   private async createEmbedding(entity: Entity): Promise<void> {
     const content = this.getEntityContentForEmbedding(entity);
     const embedding = await this.generateEmbedding(content);
@@ -512,9 +572,14 @@ export class KnowledgeGraphService {
   }
 
   private async generateEmbedding(content: string): Promise<number[]> {
-    // For now, return a mock embedding
-    // In production, this would use OpenAI Ada or similar
-    return Array.from({ length: 1536 }, () => Math.random() - 0.5);
+    try {
+      const result = await embeddingService.generateEmbedding(content);
+      return result.embedding;
+    } catch (error) {
+      console.error('Failed to generate embedding:', error);
+      // Fallback to mock embedding
+      return Array.from({ length: 1536 }, () => Math.random() - 0.5);
+    }
   }
 
   // Helper methods
@@ -542,33 +607,116 @@ export class KnowledgeGraphService {
 
   private parseEntityFromGraph(graphNode: any): Entity {
     // Parse entity from FalkorDB result format
-    // This would need to be adapted based on actual FalkorDB response format
+    // FalkorDB returns data in this format: { n: [ [key1, value1], [key2, value2], ... ] }
+
+
+    if (graphNode && graphNode.n) {
+      const properties: any = {};
+
+      // Convert FalkorDB array format to object
+      for (const [key, value] of graphNode.n) {
+        if (key === 'properties') {
+          // Parse nested properties which contain the actual entity data
+          if (Array.isArray(value)) {
+            const nestedProps: any = {};
+            for (const [propKey, propValue] of value) {
+              nestedProps[propKey] = propValue;
+            }
+
+            // The actual entity properties are stored in the nested properties
+            Object.assign(properties, nestedProps);
+          }
+        } else if (key === 'labels') {
+          // Extract type from labels (first label is usually the type)
+          if (Array.isArray(value) && value.length > 0) {
+            properties.type = value[0];
+          }
+        } else {
+          // Store other direct node properties
+          properties[key] = value;
+        }
+      }
+
+      // Convert date strings back to Date objects
+      if (properties.lastModified && typeof properties.lastModified === 'string') {
+        properties.lastModified = new Date(properties.lastModified);
+      }
+      if (properties.created && typeof properties.created === 'string') {
+        properties.created = new Date(properties.created);
+      }
+
+      // Parse metadata if it's a JSON string
+      if (properties.metadata && typeof properties.metadata === 'string') {
+        try {
+          properties.metadata = JSON.parse(properties.metadata);
+        } catch (e) {
+          // If parsing fails, keep as string
+        }
+      }
+
+
+      return properties as Entity;
+    }
+
+    // Fallback for other formats
     return graphNode as Entity;
   }
 
   private parseRelationshipFromGraph(graphResult: any): GraphRelationship {
     // Parse relationship from FalkorDB result format
+    // FalkorDB returns: { r: [...relationship data...], fromId: "string", toId: "string" }
+
+    if (graphResult && graphResult.r) {
+      const relData = graphResult.r;
+
+      // If it's an array format, parse it
+      if (Array.isArray(relData)) {
+        const properties: any = {};
+
+        for (const [key, value] of relData) {
+          if (key === 'properties' && Array.isArray(value)) {
+            // Parse nested properties
+            const nestedProps: any = {};
+            for (const [propKey, propValue] of value) {
+              nestedProps[propKey] = propValue;
+            }
+            Object.assign(properties, nestedProps);
+          } else if (key === 'type') {
+            // Store the relationship type
+            properties.type = value;
+          }
+          // Skip src_node and dest_node as we use fromId/toId from top level
+        }
+
+        // Use the string IDs from the top level instead of numeric node IDs
+        properties.fromEntityId = graphResult.fromId;
+        properties.toEntityId = graphResult.toId;
+
+        // Parse dates and metadata
+        if (properties.created && typeof properties.created === 'string') {
+          properties.created = new Date(properties.created);
+        }
+        if (properties.lastModified && typeof properties.lastModified === 'string') {
+          properties.lastModified = new Date(properties.lastModified);
+        }
+        if (properties.metadata && typeof properties.metadata === 'string') {
+          try {
+            properties.metadata = JSON.parse(properties.metadata);
+          } catch (e) {
+            // Keep as string if parsing fails
+          }
+        }
+
+        return properties as GraphRelationship;
+      }
+    }
+
+    // Fallback to original format
     return graphResult.r as GraphRelationship;
   }
 
   private getEntityContentForEmbedding(entity: Entity): string {
-    const hasCodebaseProps = this.hasCodebaseProperties(entity);
-    const path = hasCodebaseProps ? (entity as any).path : entity.id;
-
-    switch (entity.type) {
-      case 'symbol':
-        const symbolEntity = entity as any;
-        if (symbolEntity.kind === 'function') {
-          return `${path} ${symbolEntity.signature}`;
-        } else if (symbolEntity.kind === 'class') {
-          return `${path} ${symbolEntity.name}`;
-        }
-        return `${path} ${symbolEntity.signature}`;
-      case 'file':
-        return `${path} ${(entity as File).extension}`;
-      default:
-        return `${path} ${entity.type}`;
-    }
+    return embeddingService.generateEntityContent(entity);
   }
 
   private getEmbeddingCollection(entity: Entity): string {
@@ -590,6 +738,138 @@ export class KnowledgeGraphService {
     }
   }
   
+  async listEntities(options: {
+    type?: string;
+    language?: string;
+    path?: string;
+    tags?: string[];
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ entities: Entity[]; total: number }> {
+    const { type, language, path, tags, limit = 50, offset = 0 } = options;
+
+    let query = 'MATCH (n)';
+    const whereClause = [];
+    const params: any = {};
+
+    // Add type filter
+    if (type) {
+      whereClause.push('n.type = $type');
+      params.type = type;
+    }
+
+    // Add language filter
+    if (language) {
+      whereClause.push('n.language = $language');
+      params.language = language;
+    }
+
+    // Add path filter
+    if (path) {
+      whereClause.push('n.path CONTAINS $path');
+      params.path = path;
+    }
+
+    // Add tags filter (if metadata contains tags)
+    if (tags && tags.length > 0) {
+      whereClause.push('ANY(tag IN $tags WHERE n.metadata CONTAINS tag)');
+      params.tags = tags;
+    }
+
+    const fullQuery = `
+      ${query}
+      ${whereClause.length > 0 ? 'WHERE ' + whereClause.join(' AND ') : ''}
+      RETURN n
+      ORDER BY n.lastModified DESC
+      SKIP $offset
+      LIMIT $limit
+    `;
+
+    params.offset = offset;
+    params.limit = limit;
+
+    const result = await this.db.falkordbQuery(fullQuery, params);
+    const entities = result.map((row: any) => this.parseEntityFromGraph(row));
+
+    // Get total count
+    const countQuery = `
+      ${query}
+      ${whereClause.length > 0 ? 'WHERE ' + whereClause.join(' AND ') : ''}
+      RETURN count(n) as total
+    `;
+
+    const countResult = await this.db.falkordbQuery(countQuery, params);
+    const total = countResult[0]?.total || 0;
+
+    return { entities, total };
+  }
+
+  async listRelationships(options: {
+    fromEntity?: string;
+    toEntity?: string;
+    type?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ relationships: GraphRelationship[]; total: number }> {
+    const { fromEntity, toEntity, type, limit = 50, offset = 0 } = options;
+
+    let query = 'MATCH (from)-[r]->(to)';
+    const whereClause = [];
+    const params: any = {};
+
+    // Add from entity filter
+    if (fromEntity) {
+      whereClause.push('from.id = $fromEntity');
+      params.fromEntity = fromEntity;
+    }
+
+    // Add to entity filter
+    if (toEntity) {
+      whereClause.push('to.id = $toEntity');
+      params.toEntity = toEntity;
+    }
+
+    // Add relationship type filter
+    if (type) {
+      whereClause.push('type(r) = $type');
+      params.type = type;
+    }
+
+    const fullQuery = `
+      ${query}
+      ${whereClause.length > 0 ? 'WHERE ' + whereClause.join(' AND ') : ''}
+      RETURN r, from.id as fromId, to.id as toId
+      ORDER BY r.created DESC
+      SKIP $offset
+      LIMIT $limit
+    `;
+
+    params.offset = offset;
+    params.limit = limit;
+
+    const result = await this.db.falkordbQuery(fullQuery, params);
+    const relationships = result.map((row: any) => {
+      const relationship = this.parseRelationshipFromGraph(row);
+      return {
+        ...relationship,
+        fromEntityId: row.fromId,
+        toEntityId: row.toId
+      };
+    });
+
+    // Get total count
+    const countQuery = `
+      ${query}
+      ${whereClause.length > 0 ? 'WHERE ' + whereClause.join(' AND ') : ''}
+      RETURN count(r) as total
+    `;
+
+    const countResult = await this.db.falkordbQuery(countQuery, params);
+    const total = countResult[0]?.total || 0;
+
+    return { relationships, total };
+  }
+
   private stringToNumericId(stringId: string): number {
     // Create a numeric hash from string ID for Qdrant compatibility
     let hash = 0;

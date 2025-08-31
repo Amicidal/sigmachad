@@ -168,7 +168,7 @@ describe('Qdrant Vector Database Operations', () => {
 
       expect(result.length).toBe(1);
       expect(result[0].id).toBe(1);
-      expect(result[0].payload.name).toBe('calculateTotal');
+      expect(result[0].payload?.name).toBe('calculateTotal');
     });
 
     it('should perform similarity search', async () => {
@@ -229,7 +229,7 @@ describe('Qdrant Vector Database Operations', () => {
       // Should only return functions, not classes
       expect(searchResult.length).toBeGreaterThan(0);
       searchResult.forEach(result => {
-        expect(result.payload.type).toBe('function');
+        expect(result.payload?.type).toBe('function');
       });
     });
 
@@ -260,7 +260,7 @@ describe('Qdrant Vector Database Operations', () => {
         ids: [1]
       });
 
-      expect(result[0].payload.name).toBe('updatedCalculateTotal');
+      expect(result[0].payload?.name).toBe('updatedCalculateTotal');
     });
 
     it('should delete vectors', async () => {
@@ -400,8 +400,8 @@ describe('Qdrant Vector Database Operations', () => {
       });
 
       retrieved.forEach(point => {
-        expect(point.payload.type).toBe('updated_test_item');
-        expect(point.payload.updated).toBe(true);
+        expect(point.payload?.type).toBe('updated_test_item');
+        expect(point.payload?.updated).toBe(true);
       });
     });
   });
@@ -499,8 +499,8 @@ describe('Qdrant Vector Database Operations', () => {
       });
 
       searchResult.forEach(result => {
-        expect(result.payload.language).toBe('typescript');
-        expect(result.payload.type).toBe('function');
+        expect(result.payload?.language).toBe('typescript');
+        expect(result.payload?.type).toBe('function');
       });
     });
   });
@@ -573,7 +573,7 @@ describe('Qdrant Vector Database Operations', () => {
       });
 
       searchResult.forEach(result => {
-        expect(result.payload.category).toBe('setup');
+        expect(result.payload?.category).toBe('setup');
       });
     });
 
@@ -596,7 +596,7 @@ describe('Qdrant Vector Database Operations', () => {
       });
 
       searchResult.forEach(result => {
-        expect(result.payload.tags).toContain('api');
+        expect(result.payload?.tags).toContain('api');
       });
     });
   });

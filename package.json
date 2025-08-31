@@ -44,6 +44,7 @@
     "dotenv": "^16.4.5",
     "fastify": "^5.5.0",
     "marked": "^16.2.1",
+    "openai": "^5.16.0",
     "pg": "^8.13.0",
     "redis": "^4.7.0",
     "superjson": "^2.2.1",
@@ -71,7 +72,7 @@
     "typescript": "^5.7.2"
   },
   "jest": {
-    "preset": "ts-jest",
+    "preset": "ts-jest/presets/default-esm",
     "testEnvironment": "node",
     "roots": [
       "<rootDir>/src",
@@ -91,7 +92,13 @@
       "text",
       "lcov",
       "html"
-    ]
+    ],
+    "extensionsToTreatAsEsm": [
+      ".ts"
+    ],
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    }
   },
   "pnpm": {
     "onlyBuiltDependencies": [

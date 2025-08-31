@@ -12,6 +12,10 @@ import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../services/DatabaseService.js';
 import { FileWatcher } from '../services/FileWatcher.js';
 import { ASTParser } from '../services/ASTParser.js';
+import { SynchronizationCoordinator } from '../services/SynchronizationCoordinator.js';
+import { ConflictResolution } from '../services/ConflictResolution.js';
+import { SynchronizationMonitoring } from '../services/SynchronizationMonitoring.js';
+import { RollbackCapabilities } from '../services/RollbackCapabilities.js';
 
 // Import route handlers
 import { registerDesignRoutes } from './routes/design.js';
@@ -25,6 +29,8 @@ import { registerDocsRoutes } from './routes/docs.js';
 import { registerSecurityRoutes } from './routes/security.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { MCPRouter } from './mcp-router.js';
+import { sanitizeInput } from './middleware/validation.js';
+import { defaultRateLimit, searchRateLimit, adminRateLimit, startCleanupInterval } from './middleware/rate-limiting.js';
 
 export interface APIGatewayConfig {
   port: number;
@@ -39,17 +45,26 @@ export interface APIGatewayConfig {
   };
 }
 
+export interface SynchronizationServices {
+  syncCoordinator?: SynchronizationCoordinator;
+  syncMonitor?: SynchronizationMonitoring;
+  conflictResolver?: ConflictResolution;
+  rollbackCapabilities?: RollbackCapabilities;
+}
+
 export class APIGateway {
   private app: FastifyInstance;
   private config: APIGatewayConfig;
   private mcpRouter: MCPRouter;
+  private syncServices?: SynchronizationServices;
 
   constructor(
     private kgService: KnowledgeGraphService,
     private dbService: DatabaseService,
     private fileWatcher: FileWatcher,
     private astParser: ASTParser,
-    config: Partial<APIGatewayConfig> = {}
+    config: Partial<APIGatewayConfig> = {},
+    syncServices?: SynchronizationServices
   ) {
     this.config = {
       port: config.port || 3000,
@@ -63,6 +78,8 @@ export class APIGateway {
         timeWindow: config.rateLimit?.timeWindow || '1 minute',
       },
     };
+
+    this.syncServices = syncServices;
 
     this.app = Fastify({
       logger: {
@@ -86,6 +103,30 @@ export class APIGateway {
 
     // WebSocket support
     this.app.register(fastifyWebsocket);
+
+    // Global input sanitization
+    this.app.addHook('onRequest', async (request, reply) => {
+      await sanitizeInput()(request, reply);
+    });
+
+    // Global rate limiting
+    this.app.addHook('onRequest', async (request, reply) => {
+      await defaultRateLimit(request, reply);
+    });
+
+    // Specific rate limiting for search endpoints
+    this.app.addHook('onRequest', async (request, reply) => {
+      if (request.url.includes('/search')) {
+        await searchRateLimit(request, reply);
+      }
+    });
+
+    // Specific rate limiting for admin endpoints
+    this.app.addHook('onRequest', async (request, reply) => {
+      if (request.url.includes('/admin')) {
+        await adminRateLimit(request, reply);
+      }
+    });
 
     // Request ID middleware
     this.app.addHook('onRequest', (request, reply, done) => {
@@ -165,7 +206,16 @@ export class APIGateway {
           registerSCMRoutes(app, this.kgService, this.dbService);
           registerDocsRoutes(app, this.kgService, this.dbService);
           registerSecurityRoutes(app, this.kgService, this.dbService);
-          registerAdminRoutes(app, this.kgService, this.dbService, this.fileWatcher);
+          registerAdminRoutes(
+            app,
+            this.kgService,
+            this.dbService,
+            this.fileWatcher,
+            this.syncServices?.syncCoordinator,
+            this.syncServices?.syncMonitor,
+            this.syncServices?.conflictResolver,
+            this.syncServices?.rollbackCapabilities
+          );
           console.log('✅ All route modules registered successfully');
         } catch (error) {
           console.error('❌ Error registering routes:', error);
@@ -362,6 +412,9 @@ export class APIGateway {
 
   async start(): Promise<void> {
     try {
+      // Start rate limiting cleanup interval
+      startCleanupInterval();
+
       // Validate MCP server before starting
       await this.validateMCPServer();
 
@@ -375,6 +428,7 @@ export class APIGateway {
       console.log(`🔌 WebSocket available at ws://${this.config.host}:${this.config.port}/ws`);
       console.log(`🤖 MCP server available at http://${this.config.host}:${this.config.port}/mcp`);
       console.log(`📋 MCP tools: ${this.mcpRouter.getToolCount()} registered`);
+      console.log(`🛡️  Rate limiting and validation middleware active`);
     } catch (error) {
       console.error('Failed to start API Gateway:', error);
       throw error;

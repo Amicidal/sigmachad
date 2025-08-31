@@ -24,6 +24,7 @@ export declare class KnowledgeGraphService {
     getEntityDependencies(entityId: string): Promise<DependencyAnalysis>;
     findPaths(query: PathQuery): Promise<any[]>;
     traverseGraph(query: TraversalQuery): Promise<Entity[]>;
+    createEmbeddingsBatch(entities: Entity[]): Promise<void>;
     private createEmbedding;
     private updateEmbedding;
     private deleteEmbedding;
