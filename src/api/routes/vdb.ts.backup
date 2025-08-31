@@ -1,0 +1,317 @@
+/**
+ * Vector Database Operations Routes
+ * Handles semantic search and vector similarity operations
+ */
+
+import { FastifyInstance } from 'fastify';
+import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
+import { DatabaseService } from '../../services/DatabaseService.js';
+
+interface VectorSearchRequest {
+  query: string;
+  entityTypes?: string[];
+  similarity?: number;
+  limit?: number;
+  includeMetadata?: boolean;
+  filters?: {
+    language?: string;
+    lastModified?: {
+      since?: Date;
+      until?: Date;
+    };
+    tags?: string[];
+  };
+}
+
+interface VectorSearchResult {
+  results: {
+    entity: any;
+    similarity: number;
+    context: string;
+    highlights: string[];
+  }[];
+  metadata: {
+    totalResults: number;
+    searchTime: number;
+    indexSize: number;
+  };
+}
+
+export async function registerVDBRoutes(
+  app: FastifyInstance,
+  kgService: KnowledgeGraphService,
+  dbService: DatabaseService
+): Promise<void> {
+
+  // POST /api/vdb/vdb-search - Perform semantic search
+  app.post('/vdb-search', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          entityTypes: { type: 'array', items: { type: 'string' } },
+          similarity: { type: 'number', minimum: 0, maximum: 1 },
+          limit: { type: 'number', default: 10 },
+          includeMetadata: { type: 'boolean', default: true },
+          filters: {
+            type: 'object',
+            properties: {
+              language: { type: 'string' },
+              lastModified: {
+                type: 'object',
+                properties: {
+                  since: { type: 'string', format: 'date-time' },
+                  until: { type: 'string', format: 'date-time' }
+                }
+              },
+              tags: { type: 'array', items: { type: 'string' } }
+            }
+          }
+        },
+        required: ['query']
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const params: VectorSearchRequest = request.body as VectorSearchRequest;
+
+      // TODO: Implement vector similarity search
+      const results: VectorSearchResult = {
+        results: [],
+        metadata: {
+          totalResults: 0,
+          searchTime: 0,
+          indexSize: 0
+        }
+      };
+
+      reply.send({
+        success: true,
+        data: results
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'VECTOR_SEARCH_FAILED',
+          message: 'Failed to perform semantic search'
+        }
+      });
+    }
+  });
+
+  // POST /api/vdb/embed - Generate embeddings for text
+  app.post('/embed', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          texts: {
+            type: 'array',
+            items: { type: 'string' }
+          },
+          model: { type: 'string', default: 'text-embedding-ada-002' },
+          metadata: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: true
+            }
+          }
+        },
+        required: ['texts']
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { texts, model, metadata } = request.body as {
+        texts: string[];
+        model?: string;
+        metadata?: any[];
+      };
+
+      // TODO: Generate embeddings using vector service
+      const embeddings = texts.map((text, index) => ({
+        text,
+        embedding: [], // Would be a float array
+        model: model || 'text-embedding-ada-002',
+        metadata: metadata?.[index] || {}
+      }));
+
+      reply.send({
+        success: true,
+        data: {
+          embeddings,
+          model: model || 'text-embedding-ada-002',
+          totalTokens: 0
+        }
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'EMBEDDING_FAILED',
+          message: 'Failed to generate embeddings'
+        }
+      });
+    }
+  });
+
+  // POST /api/vdb/index - Index entities with embeddings
+  app.post('/index', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          entities: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                content: { type: 'string' },
+                type: { type: 'string' },
+                metadata: { type: 'object' }
+              },
+              required: ['id', 'content', 'type']
+            }
+          },
+          generateEmbeddings: { type: 'boolean', default: true }
+        },
+        required: ['entities']
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { entities, generateEmbeddings } = request.body as {
+        entities: any[];
+        generateEmbeddings?: boolean;
+      };
+
+      // TODO: Index entities in vector database
+      const result = {
+        indexed: entities.length,
+        failed: 0,
+        indexTime: 0
+      };
+
+      reply.send({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'INDEXING_FAILED',
+          message: 'Failed to index entities'
+        }
+      });
+    }
+  });
+
+  // DELETE /api/vdb/entities/{entityId} - Remove entity from vector index
+  app.delete('/entities/:entityId', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          entityId: { type: 'string' }
+        },
+        required: ['entityId']
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { entityId } = request.params as { entityId: string };
+
+      // TODO: Remove entity from vector database
+      reply.send({
+        success: true,
+        data: { removed: entityId }
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'REMOVAL_FAILED',
+          message: 'Failed to remove entity from index'
+        }
+      });
+    }
+  });
+
+  // GET /api/vdb/stats - Get vector database statistics
+  app.get('/stats', async (request, reply) => {
+    try {
+      // TODO: Retrieve vector database statistics
+      const stats = {
+        totalVectors: 0,
+        totalEntities: 0,
+        indexSize: 0,
+        lastUpdated: new Date().toISOString(),
+        searchStats: {
+          totalSearches: 0,
+          averageResponseTime: 0
+        }
+      };
+
+      reply.send({
+        success: true,
+        data: stats
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'STATS_FAILED',
+          message: 'Failed to retrieve vector database statistics'
+        }
+      });
+    }
+  });
+
+  // POST /api/vdb/similarity - Find similar entities
+  app.post('/similarity', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          entityId: { type: 'string' },
+          limit: { type: 'number', default: 10 },
+          threshold: { type: 'number', minimum: 0, maximum: 1, default: 0.7 }
+        },
+        required: ['entityId']
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { entityId, limit, threshold } = request.body as {
+        entityId: string;
+        limit?: number;
+        threshold?: number;
+      };
+
+      // TODO: Find similar entities using vector similarity
+      const similar = {
+        entityId,
+        similarEntities: [],
+        threshold: threshold || 0.7
+      };
+
+      reply.send({
+        success: true,
+        data: similar
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'SIMILARITY_FAILED',
+          message: 'Failed to find similar entities'
+        }
+      });
+    }
+  });
+}

@@ -1,0 +1,104 @@
+{
+  "name": "memento",
+  "version": "0.1.0",
+  "description": "AI coding assistant with comprehensive codebase awareness through knowledge graphs",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "docker:build": "docker build -t memento-local .",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "sync": "tsx scripts/sync-knowledge-graph.ts",
+    "health": "tsx scripts/health-check.ts"
+  },
+  "keywords": [
+    "ai",
+    "coding-assistant",
+    "knowledge-graph",
+    "typescript",
+    "mcp",
+    "claude"
+  ],
+  "author": "Memento Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/websocket": "^11.2.0",
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "@qdrant/js-client-rest": "^1.9.0",
+    "@trpc/client": "^10.45.2",
+    "@trpc/server": "^10.45.2",
+    "chokidar": "^4.0.3",
+    "fastify": "^5.5.0",
+    "marked": "^16.2.1",
+    "pg": "^8.13.0",
+    "redis": "^4.7.0",
+    "superjson": "^2.2.1",
+    "tree-sitter": "^0.25.0",
+    "tree-sitter-javascript": "^0.23.0",
+    "tree-sitter-typescript": "^0.23.2",
+    "trpc-openapi": "^1.2.0",
+    "ts-morph": "^26.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/chokidar": "^2.1.7",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.10.1",
+    "@types/pg": "^8.11.10",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.17.0",
+    "eslint-plugin-security": "^3.0.1",
+    "jest": "^30.1.1",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/tests"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.ts",
+      "**/?(*.)+(spec|test).ts"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.d.ts",
+      "!src/index.ts"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "html"
+    ]
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "tree-sitter",
+      "tree-sitter-javascript",
+      "tree-sitter-typescript"
+    ],
+    "overrides": {
+      "tree-sitter": "0.25.0",
+      "tree-sitter-javascript": "0.23.1",
+      "tree-sitter-typescript": "0.23.2"
+    }
+  }
+}
