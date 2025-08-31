@@ -26,6 +26,7 @@ export declare class APIGateway {
     private astParser;
     private app;
     private config;
+    private mcpRouter;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher: FileWatcher, astParser: ASTParser, config?: Partial<APIGatewayConfig>);
     private setupMiddleware;
     private setupRoutes;
@@ -35,6 +36,7 @@ export declare class APIGateway {
     private matchesFilter;
     private getErrorCode;
     private generateRequestId;
+    private validateMCPServer;
     start(): Promise<void>;
     stop(): Promise<void>;
     getApp(): FastifyInstance;

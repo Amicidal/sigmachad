@@ -18,6 +18,7 @@ import { registerSCMRoutes } from './routes/scm.js';
 import { registerDocsRoutes } from './routes/docs.js';
 import { registerSecurityRoutes } from './routes/security.js';
 import { registerAdminRoutes } from './routes/admin.js';
+import { MCPRouter } from './mcp-router.js';
 export class APIGateway {
     kgService;
     dbService;
@@ -25,6 +26,7 @@ export class APIGateway {
     astParser;
     app;
     config;
+    mcpRouter;
     constructor(kgService, dbService, fileWatcher, astParser, config = {}) {
         this.kgService = kgService;
         this.dbService = dbService;
@@ -49,6 +51,8 @@ export class APIGateway {
             disableRequestLogging: false,
             ignoreTrailingSlash: true,
         });
+        // Initialize MCP Router
+        this.mcpRouter = new MCPRouter(this.kgService, this.dbService, this.astParser);
         this.setupMiddleware();
         this.setupRoutes();
         this.setupErrorHandling();
@@ -86,13 +90,22 @@ export class APIGateway {
     setupRoutes() {
         // Health check endpoint
         this.app.get('/health', async (request, reply) => {
-            const health = await this.dbService.healthCheck();
-            const isHealthy = Object.values(health).every(status => status !== false);
+            const dbHealth = await this.dbService.healthCheck();
+            const mcpValidation = await this.mcpRouter.validateServer();
+            const services = {
+                ...dbHealth,
+                mcp: mcpValidation.isValid,
+            };
+            const isHealthy = Object.values(services).every(status => status !== false);
             reply.status(isHealthy ? 200 : 503).send({
                 status: isHealthy ? 'healthy' : 'unhealthy',
                 timestamp: new Date().toISOString(),
-                services: health,
+                services,
                 uptime: process.uptime(),
+                mcp: {
+                    tools: this.mcpRouter.getToolCount(),
+                    validation: mcpValidation,
+                },
             });
         });
         // OpenAPI documentation endpoint
@@ -172,13 +185,8 @@ export class APIGateway {
                 status: 'coming_soon',
             });
         });
-        // MCP endpoint (for Claude integration)
-        this.app.register(async (app) => {
-            app.post('/mcp', async (request, reply) => {
-                // This will be handled by the MCP server
-                reply.send({ message: 'MCP endpoint' });
-            });
-        }, { prefix: '/mcp' });
+        // Register MCP routes (for Claude integration)
+        this.mcpRouter.registerRoutes(this.app);
         // 404 handler
         this.app.setNotFoundHandler((request, reply) => {
             reply.status(404).send({
@@ -284,8 +292,20 @@ export class APIGateway {
     generateRequestId() {
         return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
+    async validateMCPServer() {
+        console.log('🔍 Validating MCP server configuration...');
+        const validation = await this.mcpRouter.validateServer();
+        if (!validation.isValid) {
+            console.error('❌ MCP server validation failed:');
+            validation.errors.forEach(error => console.error(`   - ${error}`));
+            throw new Error('MCP server validation failed');
+        }
+        console.log('✅ MCP server validation passed');
+    }
     async start() {
         try {
+            // Validate MCP server before starting
+            await this.validateMCPServer();
             await this.app.listen({
                 port: this.config.port,
                 host: this.config.host,
@@ -293,6 +313,8 @@ export class APIGateway {
             console.log(`🚀 Memento API Gateway listening on http://${this.config.host}:${this.config.port}`);
             console.log(`📊 Health check available at http://${this.config.host}:${this.config.port}/health`);
             console.log(`🔌 WebSocket available at ws://${this.config.host}:${this.config.port}/ws`);
+            console.log(`🤖 MCP server available at http://${this.config.host}:${this.config.port}/mcp`);
+            console.log(`📋 MCP tools: ${this.mcpRouter.getToolCount()} registered`);
         }
         catch (error) {
             console.error('Failed to start API Gateway:', error);

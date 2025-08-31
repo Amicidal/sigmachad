@@ -37,8 +37,8 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
             column?: number | undefined;
             rule?: string | undefined;
         }[];
-        suggestions: string[];
         isValid: boolean;
+        suggestions: string[];
     }>;
     getTestCoverage: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{

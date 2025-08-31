@@ -152,7 +152,7 @@ export async function registerAdminRoutes(
   });
 
   // POST /api/admin/sync - Trigger full synchronization
-  app.post('/sync', {
+  app.post('/admin/sync', {
     schema: {
       body: {
         type: 'object',

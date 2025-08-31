@@ -21,7 +21,7 @@ export async function registerDocsRoutes(
 ): Promise<void> {
 
   // POST /api/docs/sync - Synchronize documentation with knowledge graph
-  app.post('/sync', async (request, reply) => {
+  app.post('/docs/sync', async (request, reply) => {
     try {
       // TODO: Implement documentation synchronization
       const result: SyncDocumentationResponse = {
