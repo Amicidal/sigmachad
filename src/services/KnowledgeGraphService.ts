@@ -24,9 +24,13 @@ import {
 } from '../models/relationships.js';
 import { GraphSearchRequest, GraphExamples, DependencyAnalysis } from '../models/types.js';
 import { embeddingService } from '../utils/embedding.js';
+import { EventEmitter } from 'events';
 
-export class KnowledgeGraphService {
-  constructor(private db: DatabaseService) {}
+export class KnowledgeGraphService extends EventEmitter {
+  constructor(private db: DatabaseService) {
+    super();
+    this.setMaxListeners(100); // Allow more listeners for WebSocket connections
+  }
 
   async initialize(): Promise<void> {
     // Ensure database is ready
@@ -96,6 +100,14 @@ export class KnowledgeGraphService {
     // Create vector embedding for semantic search
     await this.createEmbedding(entity);
 
+    // Emit event for real-time updates
+    this.emit('entityCreated', {
+      id: entity.id,
+      type: entity.type,
+      path: hasCodebaseProps ? (entity as any).path : undefined,
+      timestamp: new Date().toISOString()
+    });
+
     console.log(`✅ Created entity: ${hasCodebaseProps ? (entity as any).path : entity.id} (${entity.type})`);
   }
 
@@ -141,15 +153,32 @@ export class KnowledgeGraphService {
     const updatedEntity = await this.getEntity(entityId);
     if (updatedEntity) {
       await this.updateEmbedding(updatedEntity);
+
+      // Emit event for real-time updates
+      this.emit('entityUpdated', {
+        id: entityId,
+        updates: sanitizedUpdates,
+        timestamp: new Date().toISOString()
+      });
     }
   }
 
   async deleteEntity(entityId: string): Promise<void> {
+    // Get relationships before deleting them for event emission
+    const relationships = await this.getRelationships({
+      fromEntityId: entityId,
+    });
+
     // Delete relationships first
     await this.db.falkordbQuery(`
       MATCH (n {id: $id})-[r]-()
       DELETE r
     `, { id: entityId });
+
+    // Emit events for deleted relationships
+    for (const relationship of relationships) {
+      this.emit('relationshipDeleted', relationship.id);
+    }
 
     // Delete node
     await this.db.falkordbQuery(`
@@ -159,6 +188,20 @@ export class KnowledgeGraphService {
 
     // Delete vector embedding
     await this.deleteEmbedding(entityId);
+
+    // Emit event for real-time updates
+    this.emit('entityDeleted', entityId);
+  }
+
+  async deleteRelationship(relationshipId: string): Promise<void> {
+    // Delete relationship by ID
+    await this.db.falkordbQuery(`
+      MATCH ()-[r {id: $id}]-()
+      DELETE r
+    `, { id: relationshipId });
+
+    // Emit event for real-time updates
+    this.emit('relationshipDeleted', relationshipId);
   }
 
   // Relationship operations
@@ -182,6 +225,15 @@ export class KnowledgeGraphService {
       lastModified: relationship.lastModified.toISOString(),
       version: relationship.version,
       metadata: JSON.stringify(relationship.metadata || {}),
+    });
+
+    // Emit event for real-time updates
+    this.emit('relationshipCreated', {
+      id: relationship.id,
+      type: relationship.type,
+      fromEntityId: relationship.fromEntityId,
+      toEntityId: relationship.toEntityId,
+      timestamp: new Date().toISOString()
     });
   }
 

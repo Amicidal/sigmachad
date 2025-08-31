@@ -7,12 +7,25 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../services/DatabaseService.js';
 import { ASTParser } from '../services/ASTParser.js';
+interface ToolExecutionMetrics {
+    toolName: string;
+    executionCount: number;
+    totalExecutionTime: number;
+    averageExecutionTime: number;
+    errorCount: number;
+    successCount: number;
+    lastExecutionTime?: Date;
+    lastErrorTime?: Date;
+    lastErrorMessage?: string;
+}
 export declare class MCPRouter {
     private kgService;
     private dbService;
     private astParser;
     private server;
     private tools;
+    private metrics;
+    private executionHistory;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, astParser: ASTParser);
     private registerTools;
     private registerTool;
@@ -23,12 +36,40 @@ export declare class MCPRouter {
     private handleProposeDiff;
     private handleValidateCode;
     private handlePlanTests;
+    private generateTestPlan;
+    private estimateTestCoverage;
     private handleSecurityScan;
+    private performStaticAnalysisScan;
+    private performDependencyScan;
+    private performSecretsScan;
+    private performDependencyAnalysis;
+    private updateSeverityCounts;
+    private getCWEMapping;
+    private getMockCVSSScore;
     private handleImpactAnalysis;
+    private analyzeDirectImpact;
+    private analyzeCascadingImpact;
+    private analyzeTestImpact;
+    private analyzeDocumentationImpact;
+    private generateImpactRecommendations;
+    private calculateRiskLevel;
+    private estimateEffort;
     private handleSyncDocs;
+    private extractBusinessDomains;
+    private updateSemanticClusters;
+    private syncDocumentationRelationships;
     registerRoutes(app: FastifyInstance): void;
     getServer(): Server;
     getToolCount(): number;
+    private recordExecution;
+    getMetrics(): {
+        tools: ToolExecutionMetrics[];
+        summary: any;
+    };
+    getExecutionHistory(limit?: number): any[];
+    getPerformanceReport(): any;
+    private generatePerformanceRecommendations;
+    private determineHealthStatus;
     private processMCPRequest;
     validateServer(): Promise<{
         isValid: boolean;
@@ -36,4 +77,5 @@ export declare class MCPRouter {
     }>;
     startStdio(): Promise<void>;
 }
+export {};
 //# sourceMappingURL=mcp-router.d.ts.map

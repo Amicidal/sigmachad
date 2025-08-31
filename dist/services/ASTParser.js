@@ -737,5 +737,259 @@ export class ASTParser {
             errors: allErrors,
         };
     }
+    /**
+     * Apply partial updates to a file based on specific changes
+     */
+    async applyPartialUpdate(filePath, changes, originalContent) {
+        try {
+            const cachedInfo = this.fileCache.get(path.resolve(filePath));
+            if (!cachedInfo) {
+                // Fall back to full parsing if no cache exists
+                return await this.parseFileIncremental(filePath);
+            }
+            const updates = [];
+            const addedEntities = [];
+            const removedEntities = [];
+            const updatedEntities = [];
+            const addedRelationships = [];
+            const removedRelationships = [];
+            // Analyze changes to determine what needs to be updated
+            for (const change of changes) {
+                const affectedSymbols = this.findAffectedSymbols(cachedInfo, change);
+                for (const symbolId of affectedSymbols) {
+                    const cachedSymbol = cachedInfo.symbolMap.get(symbolId);
+                    if (cachedSymbol) {
+                        // Check if symbol was modified, added, or removed
+                        const update = this.analyzeSymbolChange(cachedSymbol, change, originalContent);
+                        if (update) {
+                            updates.push(update);
+                            switch (update.type) {
+                                case 'add':
+                                    // Re-parse the affected section to get the new entity
+                                    const newEntity = await this.parseSymbolFromRange(filePath, change);
+                                    if (newEntity) {
+                                        addedEntities.push(newEntity);
+                                    }
+                                    break;
+                                case 'remove':
+                                    removedEntities.push(cachedSymbol);
+                                    break;
+                                case 'update':
+                                    const updatedEntity = { ...cachedSymbol, ...update.changes };
+                                    updatedEntities.push(updatedEntity);
+                                    break;
+                            }
+                        }
+                    }
+                }
+            }
+            // Update cache with the changes
+            this.updateCacheAfterPartialUpdate(filePath, updates, originalContent);
+            return {
+                entities: [...addedEntities, ...updatedEntities],
+                relationships: [...addedRelationships],
+                errors: [],
+                isIncremental: true,
+                addedEntities,
+                removedEntities,
+                updatedEntities,
+                addedRelationships,
+                removedRelationships,
+            };
+        }
+        catch (error) {
+            console.error(`Error applying partial update to ${filePath}:`, error);
+            // Fall back to full parsing
+            return await this.parseFileIncremental(filePath);
+        }
+    }
+    /**
+     * Find symbols that are affected by a change range
+     */
+    findAffectedSymbols(cachedInfo, change) {
+        const affectedSymbols = [];
+        for (const [symbolId, symbol] of cachedInfo.symbolMap) {
+            // This is a simplified check - in a real implementation,
+            // you'd need to map line/column positions to the change range
+            if (this.isSymbolInRange(symbol, change)) {
+                affectedSymbols.push(symbolId);
+            }
+        }
+        return affectedSymbols;
+    }
+    /**
+     * Check if a symbol is within the change range
+     */
+    isSymbolInRange(symbol, change) {
+        // Check if symbol's position overlaps with the change range
+        // We'll use a conservative approach - if we don't have position info, assume affected
+        if (!symbol.location || typeof symbol.location !== 'object') {
+            return true; // Conservative: assume affected if no location info
+        }
+        const loc = symbol.location;
+        // If we have line/column info
+        if (loc.line && loc.column) {
+            // Convert line/column to approximate character position
+            // This is a simplified check - in production you'd need exact mapping
+            const estimatedPos = (loc.line - 1) * 100 + loc.column; // Rough estimate
+            // Check if the estimated position falls within the change range
+            return estimatedPos >= change.start && estimatedPos <= change.end;
+        }
+        // If we have start/end positions
+        if (loc.start !== undefined && loc.end !== undefined) {
+            // Check for overlap between symbol range and change range
+            return !(loc.end < change.start || loc.start > change.end);
+        }
+        // Default to conservative approach
+        return true;
+    }
+    /**
+     * Analyze what type of change occurred to a symbol
+     */
+    analyzeSymbolChange(symbol, change, originalContent) {
+        // This is a simplified analysis
+        // In a real implementation, you'd analyze the AST diff
+        const contentSnippet = originalContent.substring(change.start, change.end);
+        if (contentSnippet.trim() === '') {
+            // Empty change might be a deletion
+            return {
+                type: 'remove',
+                entityType: symbol.kind,
+                entityId: symbol.id,
+            };
+        }
+        // Check if this looks like a new symbol declaration
+        if (this.looksLikeNewSymbol(contentSnippet)) {
+            return {
+                type: 'add',
+                entityType: this.detectSymbolType(contentSnippet),
+                entityId: `new_symbol_${Date.now()}`,
+            };
+        }
+        // Assume it's an update
+        return {
+            type: 'update',
+            entityType: symbol.kind,
+            entityId: symbol.id,
+            changes: {
+                lastModified: new Date(),
+            },
+        };
+    }
+    /**
+     * Parse a symbol from a specific range in the file
+     */
+    async parseSymbolFromRange(filePath, change) {
+        try {
+            const fullContent = await fs.readFile(filePath, 'utf-8');
+            const contentSnippet = fullContent.substring(change.start, change.end);
+            // Extract basic information from the code snippet
+            const lines = contentSnippet.split('\n');
+            const firstNonEmptyLine = lines.find(line => line.trim().length > 0);
+            if (!firstNonEmptyLine) {
+                return null;
+            }
+            // Try to identify the symbol type and name
+            const symbolMatch = firstNonEmptyLine.match(/^\s*(?:export\s+)?(?:async\s+)?(?:function|class|interface|type|const|let|var)\s+(\w+)/);
+            if (!symbolMatch) {
+                return null;
+            }
+            const symbolName = symbolMatch[1];
+            const symbolType = this.detectSymbolType(contentSnippet);
+            // Create a basic entity for the new symbol
+            const entity = {
+                id: `${filePath}:${symbolName}`,
+                type: 'symbol',
+                kind: symbolType === 'function' ? 'function' :
+                    symbolType === 'class' ? 'class' :
+                        symbolType === 'interface' ? 'interface' :
+                            symbolType === 'typeAlias' ? 'typeAlias' : 'variable',
+                name: symbolName,
+                path: filePath,
+                hash: crypto.createHash('sha256').update(contentSnippet).digest('hex').substring(0, 16),
+                language: path.extname(filePath).replace('.', '') || 'unknown',
+                visibility: firstNonEmptyLine.includes('export') ? 'public' : 'private',
+                signature: contentSnippet.substring(0, Math.min(200, contentSnippet.length)),
+                docstring: '',
+                isExported: firstNonEmptyLine.includes('export'),
+                isDeprecated: false,
+                metadata: {
+                    parsed: new Date().toISOString(),
+                    partial: true,
+                    location: {
+                        start: change.start,
+                        end: change.end
+                    }
+                },
+                created: new Date(),
+                lastModified: new Date()
+            };
+            return entity;
+        }
+        catch (error) {
+            console.error(`Error parsing symbol from range:`, error);
+            return null;
+        }
+    }
+    /**
+     * Update the cache after applying partial updates
+     */
+    updateCacheAfterPartialUpdate(filePath, updates, newContent) {
+        const resolvedPath = path.resolve(filePath);
+        const cachedInfo = this.fileCache.get(resolvedPath);
+        if (!cachedInfo)
+            return;
+        // Update the cache based on the partial updates
+        for (const update of updates) {
+            switch (update.type) {
+                case 'add':
+                    // Add new symbols to cache
+                    break;
+                case 'remove':
+                    cachedInfo.symbolMap.delete(update.entityId);
+                    break;
+                case 'update':
+                    const symbol = cachedInfo.symbolMap.get(update.entityId);
+                    if (symbol && update.changes) {
+                        Object.assign(symbol, update.changes);
+                    }
+                    break;
+            }
+        }
+        // Update file hash
+        cachedInfo.hash = crypto.createHash('sha256').update(newContent).digest('hex');
+        cachedInfo.lastModified = new Date();
+    }
+    /**
+     * Helper methods for change analysis
+     */
+    looksLikeNewSymbol(content) {
+        const trimmed = content.trim();
+        return /^\s*(function|class|interface|type|const|let|var)\s+\w+/.test(trimmed);
+    }
+    detectSymbolType(content) {
+        const trimmed = content.trim();
+        if (/^\s*function\s+/.test(trimmed))
+            return 'function';
+        if (/^\s*class\s+/.test(trimmed))
+            return 'class';
+        if (/^\s*interface\s+/.test(trimmed))
+            return 'interface';
+        if (/^\s*type\s+/.test(trimmed))
+            return 'typeAlias';
+        return 'symbol';
+    }
+    /**
+     * Get statistics about cached files
+     */
+    getPartialUpdateStats() {
+        const cachedFiles = Array.from(this.fileCache.values());
+        const totalSymbols = cachedFiles.reduce((sum, file) => sum + file.symbolMap.size, 0);
+        return {
+            cachedFiles: cachedFiles.length,
+            totalSymbols,
+            averageSymbolsPerFile: cachedFiles.length > 0 ? totalSymbols / cachedFiles.length : 0,
+        };
+    }
 }
 //# sourceMappingURL=ASTParser.js.map

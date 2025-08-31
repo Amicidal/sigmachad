@@ -20,13 +20,13 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _input_in: {
             limit?: number | undefined;
             since?: string | undefined;
-            level?: "info" | "error" | "warn" | "debug" | undefined;
+            level?: "info" | "error" | "debug" | "warn" | undefined;
             component?: string | undefined;
         };
         _input_out: {
             limit: number;
             since?: string | undefined;
-            level?: "info" | "error" | "warn" | "debug" | undefined;
+            level?: "info" | "error" | "debug" | "warn" | undefined;
             component?: string | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
@@ -89,16 +89,16 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
-            type?: "search" | "all" | "entities" | "relationships" | undefined;
+            type?: "search" | "entities" | "relationships" | "all" | undefined;
         };
         _input_out: {
-            type: "search" | "all" | "entities" | "relationships";
+            type: "search" | "entities" | "relationships" | "all";
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
         success: boolean;
-        clearedType: "search" | "all" | "entities" | "relationships";
+        clearedType: "search" | "entities" | "relationships" | "all";
         timestamp: string;
     }>;
     getConfig: import("@trpc/server").BuildProcedure<"query", {

@@ -19,6 +19,9 @@ import { registerDocsRoutes } from './routes/docs.js';
 import { registerSecurityRoutes } from './routes/security.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { MCPRouter } from './mcp-router.js';
+import { WebSocketRouter } from './websocket-router.js';
+import { sanitizeInput } from './middleware/validation.js';
+import { defaultRateLimit, searchRateLimit, adminRateLimit, startCleanupInterval } from './middleware/rate-limiting.js';
 export class APIGateway {
     kgService;
     dbService;
@@ -27,7 +30,9 @@ export class APIGateway {
     app;
     config;
     mcpRouter;
-    constructor(kgService, dbService, fileWatcher, astParser, config = {}) {
+    wsRouter;
+    syncServices;
+    constructor(kgService, dbService, fileWatcher, astParser, config = {}, syncServices) {
         this.kgService = kgService;
         this.dbService = dbService;
         this.fileWatcher = fileWatcher;
@@ -44,6 +49,7 @@ export class APIGateway {
                 timeWindow: config.rateLimit?.timeWindow || '1 minute',
             },
         };
+        this.syncServices = syncServices;
         this.app = Fastify({
             logger: {
                 level: process.env.LOG_LEVEL || 'info',
@@ -53,6 +59,8 @@ export class APIGateway {
         });
         // Initialize MCP Router
         this.mcpRouter = new MCPRouter(this.kgService, this.dbService, this.astParser);
+        // Initialize WebSocket Router
+        this.wsRouter = new WebSocketRouter(this.kgService, this.dbService, this.fileWatcher);
         this.setupMiddleware();
         this.setupRoutes();
         this.setupErrorHandling();
@@ -60,8 +68,28 @@ export class APIGateway {
     setupMiddleware() {
         // CORS
         this.app.register(fastifyCors, this.config.cors);
-        // WebSocket support
+        // WebSocket support (handled by WebSocketRouter)
         this.app.register(fastifyWebsocket);
+        // Global input sanitization
+        this.app.addHook('onRequest', async (request, reply) => {
+            await sanitizeInput()(request, reply);
+        });
+        // Global rate limiting
+        this.app.addHook('onRequest', async (request, reply) => {
+            await defaultRateLimit(request, reply);
+        });
+        // Specific rate limiting for search endpoints
+        this.app.addHook('onRequest', async (request, reply) => {
+            if (request.url.includes('/search')) {
+                await searchRateLimit(request, reply);
+            }
+        });
+        // Specific rate limiting for admin endpoints
+        this.app.addHook('onRequest', async (request, reply) => {
+            if (request.url.includes('/admin')) {
+                await adminRateLimit(request, reply);
+            }
+        });
         // Request ID middleware
         this.app.addHook('onRequest', (request, reply, done) => {
             request.id = request.headers['x-request-id'] || this.generateRequestId();
@@ -130,7 +158,7 @@ export class APIGateway {
                 registerSCMRoutes(app, this.kgService, this.dbService);
                 registerDocsRoutes(app, this.kgService, this.dbService);
                 registerSecurityRoutes(app, this.kgService, this.dbService);
-                registerAdminRoutes(app, this.kgService, this.dbService, this.fileWatcher);
+                registerAdminRoutes(app, this.kgService, this.dbService, this.fileWatcher, this.syncServices?.syncCoordinator, this.syncServices?.syncMonitor, this.syncServices?.conflictResolver, this.syncServices?.rollbackCapabilities);
                 console.log('✅ All route modules registered successfully');
             }
             catch (error) {
@@ -150,34 +178,8 @@ export class APIGateway {
                 }),
             },
         });
-        // WebSocket support for real-time updates
-        this.app.register(async (app) => {
-            app.get('/ws', { websocket: true }, (connection, request) => {
-                console.log('WebSocket connection established');
-                // Send initial connection message
-                connection.socket.send(JSON.stringify({
-                    type: 'connected',
-                    timestamp: new Date().toISOString(),
-                }));
-                // Handle incoming messages
-                connection.socket.on('message', (message, isBinary) => {
-                    try {
-                        const data = JSON.parse(message.toString());
-                        this.handleWebSocketMessage(connection, data);
-                    }
-                    catch (error) {
-                        connection.socket.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Invalid message format',
-                        }));
-                    }
-                });
-                // Handle disconnection
-                connection.socket.on('close', () => {
-                    console.log('WebSocket connection closed');
-                });
-            });
-        });
+        // Register WebSocket routes
+        this.wsRouter.registerRoutes(this.app);
         // GraphQL endpoint (placeholder for future implementation)
         this.app.get('/graphql', async (request, reply) => {
             reply.send({
@@ -228,58 +230,6 @@ export class APIGateway {
             process.exit(1);
         });
     }
-    handleWebSocketMessage(connection, data) {
-        switch (data.type) {
-            case 'subscribe':
-                // Handle subscription to real-time updates
-                this.handleSubscription(connection, data);
-                break;
-            case 'ping':
-                connection.socket.send(JSON.stringify({
-                    type: 'pong',
-                    timestamp: new Date().toISOString(),
-                }));
-                break;
-            default:
-                connection.socket.send(JSON.stringify({
-                    type: 'error',
-                    message: `Unknown message type: ${data.type}`,
-                }));
-        }
-    }
-    handleSubscription(connection, data) {
-        const { event, filter } = data;
-        // Subscribe to file watcher events
-        const eventHandler = (change) => {
-            if (this.matchesFilter(change, filter)) {
-                connection.socket.send(JSON.stringify({
-                    type: 'event',
-                    event: 'file_change',
-                    data: change,
-                    timestamp: new Date().toISOString(),
-                }));
-            }
-        };
-        this.fileWatcher.on('change', eventHandler);
-        // Handle unsubscribe when connection closes
-        connection.socket.on('close', () => {
-            this.fileWatcher.off('change', eventHandler);
-        });
-        connection.socket.send(JSON.stringify({
-            type: 'subscribed',
-            event,
-            timestamp: new Date().toISOString(),
-        }));
-    }
-    matchesFilter(change, filter) {
-        if (!filter)
-            return true;
-        if (filter.path && !change.path.includes(filter.path))
-            return false;
-        if (filter.type && change.type !== filter.type)
-            return false;
-        return true;
-    }
     getErrorCode(error) {
         if (error.code)
             return error.code;
@@ -304,8 +254,12 @@ export class APIGateway {
     }
     async start() {
         try {
+            // Start rate limiting cleanup interval
+            startCleanupInterval();
             // Validate MCP server before starting
             await this.validateMCPServer();
+            // Start WebSocket connection management
+            this.wsRouter.startConnectionManagement();
             await this.app.listen({
                 port: this.config.port,
                 host: this.config.host,
@@ -315,6 +269,7 @@ export class APIGateway {
             console.log(`🔌 WebSocket available at ws://${this.config.host}:${this.config.port}/ws`);
             console.log(`🤖 MCP server available at http://${this.config.host}:${this.config.port}/mcp`);
             console.log(`📋 MCP tools: ${this.mcpRouter.getToolCount()} registered`);
+            console.log(`🛡️  Rate limiting and validation middleware active`);
         }
         catch (error) {
             console.error('Failed to start API Gateway:', error);
@@ -322,6 +277,8 @@ export class APIGateway {
         }
     }
     async stop() {
+        // Stop WebSocket router first
+        await this.wsRouter.shutdown();
         await this.app.close();
         console.log('🛑 API Gateway stopped');
     }

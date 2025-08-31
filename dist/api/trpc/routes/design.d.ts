@@ -106,7 +106,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
         _meta: object;
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
-            type: "feature" | "component" | "page" | "system";
+            type: "feature" | "system" | "component" | "page";
             name: string;
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
@@ -120,7 +120,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
             reviewers: string[];
         };
         _input_out: {
-            type: "feature" | "component" | "page" | "system";
+            type: "feature" | "system" | "component" | "page";
             name: string;
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
@@ -138,7 +138,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
     }, {
         success: boolean;
         data: {
-            type: "feature" | "component" | "page" | "system";
+            type: "feature" | "system" | "component" | "page";
             name: string;
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
@@ -180,7 +180,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
         _meta: object;
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
-            type?: "feature" | "component" | "page" | "system" | undefined;
+            type?: "feature" | "system" | "component" | "page" | undefined;
             status?: "draft" | "approved" | "implemented" | "deprecated" | "review" | undefined;
             limit?: number | undefined;
             offset?: number | undefined;
@@ -188,7 +188,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
         _input_out: {
             limit: number;
             offset: number;
-            type?: "feature" | "component" | "page" | "system" | undefined;
+            type?: "feature" | "system" | "component" | "page" | undefined;
             status?: "draft" | "approved" | "implemented" | "deprecated" | "review" | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;

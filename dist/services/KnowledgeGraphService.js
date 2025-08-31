@@ -4,10 +4,13 @@
  */
 import { RelationshipType } from '../models/relationships.js';
 import { embeddingService } from '../utils/embedding.js';
-export class KnowledgeGraphService {
+import { EventEmitter } from 'events';
+export class KnowledgeGraphService extends EventEmitter {
     db;
     constructor(db) {
+        super();
         this.db = db;
+        this.setMaxListeners(100); // Allow more listeners for WebSocket connections
     }
     async initialize() {
         // Ensure database is ready
@@ -64,6 +67,13 @@ export class KnowledgeGraphService {
         await this.db.falkordbQuery(createQuery, queryParams);
         // Create vector embedding for semantic search
         await this.createEmbedding(entity);
+        // Emit event for real-time updates
+        this.emit('entityCreated', {
+            id: entity.id,
+            type: entity.type,
+            path: hasCodebaseProps ? entity.path : undefined,
+            timestamp: new Date().toISOString()
+        });
         console.log(`✅ Created entity: ${hasCodebaseProps ? entity.path : entity.id} (${entity.type})`);
     }
     async getEntity(entityId) {
@@ -78,7 +88,15 @@ export class KnowledgeGraphService {
         return this.parseEntityFromGraph(result[0]);
     }
     async updateEntity(entityId, updates) {
-        const setClause = Object.keys(updates)
+        // Convert dates to ISO strings for FalkorDB
+        const sanitizedUpdates = { ...updates };
+        if (sanitizedUpdates.lastModified instanceof Date) {
+            sanitizedUpdates.lastModified = sanitizedUpdates.lastModified.toISOString();
+        }
+        if (sanitizedUpdates.created instanceof Date) {
+            sanitizedUpdates.created = sanitizedUpdates.created.toISOString();
+        }
+        const setClause = Object.keys(sanitizedUpdates)
             .map(key => `n.${key} = $${key}`)
             .join(', ');
         const query = `
@@ -86,20 +104,34 @@ export class KnowledgeGraphService {
       SET ${setClause}
       RETURN n
     `;
-        const params = { id: entityId, ...updates };
+        const params = { id: entityId, ...sanitizedUpdates };
         await this.db.falkordbQuery(query, params);
         // Update vector embedding
         const updatedEntity = await this.getEntity(entityId);
         if (updatedEntity) {
             await this.updateEmbedding(updatedEntity);
+            // Emit event for real-time updates
+            this.emit('entityUpdated', {
+                id: entityId,
+                updates: sanitizedUpdates,
+                timestamp: new Date().toISOString()
+            });
         }
     }
     async deleteEntity(entityId) {
+        // Get relationships before deleting them for event emission
+        const relationships = await this.getRelationships({
+            fromEntityId: entityId,
+        });
         // Delete relationships first
         await this.db.falkordbQuery(`
       MATCH (n {id: $id})-[r]-()
       DELETE r
     `, { id: entityId });
+        // Emit events for deleted relationships
+        for (const relationship of relationships) {
+            this.emit('relationshipDeleted', relationship.id);
+        }
         // Delete node
         await this.db.falkordbQuery(`
       MATCH (n {id: $id})
@@ -107,6 +139,17 @@ export class KnowledgeGraphService {
     `, { id: entityId });
         // Delete vector embedding
         await this.deleteEmbedding(entityId);
+        // Emit event for real-time updates
+        this.emit('entityDeleted', entityId);
+    }
+    async deleteRelationship(relationshipId) {
+        // Delete relationship by ID
+        await this.db.falkordbQuery(`
+      MATCH ()-[r {id: $id}]-()
+      DELETE r
+    `, { id: relationshipId });
+        // Emit event for real-time updates
+        this.emit('relationshipDeleted', relationshipId);
     }
     // Relationship operations
     async createRelationship(relationship) {
@@ -128,6 +171,14 @@ export class KnowledgeGraphService {
             lastModified: relationship.lastModified.toISOString(),
             version: relationship.version,
             metadata: JSON.stringify(relationship.metadata || {}),
+        });
+        // Emit event for real-time updates
+        this.emit('relationshipCreated', {
+            id: relationship.id,
+            type: relationship.type,
+            fromEntityId: relationship.fromEntityId,
+            toEntityId: relationship.toEntityId,
+            timestamp: new Date().toISOString()
         });
     }
     async getRelationships(query) {
@@ -614,6 +665,102 @@ export class KnowledgeGraphService {
             default:
                 return this.hasCodebaseProperties(entity) ? entity.path : entity.id;
         }
+    }
+    async listEntities(options = {}) {
+        const { type, language, path, tags, limit = 50, offset = 0 } = options;
+        let query = 'MATCH (n)';
+        const whereClause = [];
+        const params = {};
+        // Add type filter
+        if (type) {
+            whereClause.push('n.type = $type');
+            params.type = type;
+        }
+        // Add language filter
+        if (language) {
+            whereClause.push('n.language = $language');
+            params.language = language;
+        }
+        // Add path filter
+        if (path) {
+            whereClause.push('n.path CONTAINS $path');
+            params.path = path;
+        }
+        // Add tags filter (if metadata contains tags)
+        if (tags && tags.length > 0) {
+            whereClause.push('ANY(tag IN $tags WHERE n.metadata CONTAINS tag)');
+            params.tags = tags;
+        }
+        const fullQuery = `
+      ${query}
+      ${whereClause.length > 0 ? 'WHERE ' + whereClause.join(' AND ') : ''}
+      RETURN n
+      ORDER BY n.lastModified DESC
+      SKIP $offset
+      LIMIT $limit
+    `;
+        params.offset = offset;
+        params.limit = limit;
+        const result = await this.db.falkordbQuery(fullQuery, params);
+        const entities = result.map((row) => this.parseEntityFromGraph(row));
+        // Get total count
+        const countQuery = `
+      ${query}
+      ${whereClause.length > 0 ? 'WHERE ' + whereClause.join(' AND ') : ''}
+      RETURN count(n) as total
+    `;
+        const countResult = await this.db.falkordbQuery(countQuery, params);
+        const total = countResult[0]?.total || 0;
+        return { entities, total };
+    }
+    async listRelationships(options = {}) {
+        const { fromEntity, toEntity, type, limit = 50, offset = 0 } = options;
+        let query = 'MATCH (from)-[r]->(to)';
+        const whereClause = [];
+        const params = {};
+        // Add from entity filter
+        if (fromEntity) {
+            whereClause.push('from.id = $fromEntity');
+            params.fromEntity = fromEntity;
+        }
+        // Add to entity filter
+        if (toEntity) {
+            whereClause.push('to.id = $toEntity');
+            params.toEntity = toEntity;
+        }
+        // Add relationship type filter
+        if (type) {
+            whereClause.push('type(r) = $type');
+            params.type = type;
+        }
+        const fullQuery = `
+      ${query}
+      ${whereClause.length > 0 ? 'WHERE ' + whereClause.join(' AND ') : ''}
+      RETURN r, from.id as fromId, to.id as toId
+      ORDER BY r.created DESC
+      SKIP $offset
+      LIMIT $limit
+    `;
+        params.offset = offset;
+        params.limit = limit;
+        const result = await this.db.falkordbQuery(fullQuery, params);
+        const relationships = result.map((row) => {
+            const relationship = this.parseRelationshipFromGraph(row);
+            return {
+                ...relationship,
+                fromEntityId: row.fromId,
+                toEntityId: row.toId
+            };
+        });
+        // Get total count
+        const countQuery = `
+      ${query}
+      ${whereClause.length > 0 ? 'WHERE ' + whereClause.join(' AND ') : ''}
+      RETURN count(r) as total
+    `;
+        const countResult = await this.db.falkordbQuery(countQuery, params);
+        const total = countResult[0]?.total || 0;
+        return { relationships, total };
     }
     stringToNumericId(stringId) {
         // Create a numeric hash from string ID for Qdrant compatibility

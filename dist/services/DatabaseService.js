@@ -1,6 +1,7 @@
 /**
  * Database Service for Memento
  * Manages connections to FalkorDB, Qdrant, and PostgreSQL
+ *
  */
 import { createClient as createRedisClient } from 'redis';
 import { QdrantClient } from '@qdrant/js-client-rest';

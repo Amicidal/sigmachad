@@ -45,12 +45,32 @@ export async function registerGraphRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const params = request.body;
-            // TODO: Implement graph search logic
+            // Perform the search using KnowledgeGraphService
+            const entities = await kgService.search(params);
+            // Get relationships if includeRelated is true
+            let relationships = [];
+            let clusters = [];
+            let relevanceScore = 0;
+            if (params.includeRelated && entities.length > 0) {
+                // Get relationships for the top entities
+                const topEntities = entities.slice(0, 5);
+                for (const entity of topEntities) {
+                    const entityRelationships = await kgService.getRelationships({
+                        fromEntityId: entity.id,
+                        limit: 10
+                    });
+                    relationships.push(...entityRelationships);
+                }
+                // Remove duplicates
+                relationships = relationships.filter((rel, index, self) => index === self.findIndex(r => r.id === rel.id));
+            }
+            // Calculate relevance score based on number of results and relationships
+            relevanceScore = Math.min((entities.length * 0.3 + relationships.length * 0.2), 1.0);
             const results = {
-                entities: [],
-                relationships: [],
-                clusters: [],
-                relevanceScore: 0
+                entities,
+                relationships,
+                clusters,
+                relevanceScore
             };
             reply.send({
                 success: true,
@@ -62,7 +82,8 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                 success: false,
                 error: {
                     code: 'GRAPH_SEARCH_FAILED',
-                    message: 'Failed to perform graph search'
+                    message: 'Failed to perform graph search',
+                    details: error instanceof Error ? error.message : 'Unknown error'
                 }
             });
         }
@@ -81,14 +102,8 @@ export async function registerGraphRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const { entityId } = request.params;
-            // TODO: Retrieve examples from knowledge graph
-            const examples = {
-                entityId,
-                signature: '',
-                usageExamples: [],
-                testExamples: [],
-                relatedPatterns: []
-            };
+            // Retrieve examples from knowledge graph
+            const examples = await kgService.getEntityExamples(entityId);
             reply.send({
                 success: true,
                 data: examples
@@ -99,7 +114,8 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                 success: false,
                 error: {
                     code: 'EXAMPLES_RETRIEVAL_FAILED',
-                    message: 'Failed to retrieve usage examples'
+                    message: 'Failed to retrieve usage examples',
+                    details: error instanceof Error ? error.message : 'Unknown error'
                 }
             });
         }
@@ -118,14 +134,8 @@ export async function registerGraphRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const { entityId } = request.params;
-            // TODO: Analyze dependencies using graph queries
-            const analysis = {
-                entityId,
-                directDependencies: [],
-                indirectDependencies: [],
-                reverseDependencies: [],
-                circularDependencies: []
-            };
+            // Analyze dependencies using graph queries
+            const analysis = await kgService.getEntityDependencies(entityId);
             reply.send({
                 success: true,
                 data: analysis
@@ -136,7 +146,8 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                 success: false,
                 error: {
                     code: 'DEPENDENCY_ANALYSIS_FAILED',
-                    message: 'Failed to analyze dependencies'
+                    message: 'Failed to analyze dependencies',
+                    details: error instanceof Error ? error.message : 'Unknown error'
                 }
             });
         }
@@ -159,9 +170,17 @@ export async function registerGraphRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const query = request.query;
-            // TODO: Query entities from knowledge graph
-            const entities = [];
-            const total = 0;
+            // Parse tags if provided
+            const tags = query.tags ? query.tags.split(',').map(t => t.trim()) : undefined;
+            // Query entities from knowledge graph
+            const { entities, total } = await kgService.listEntities({
+                type: query.type,
+                language: query.language,
+                path: query.path,
+                tags,
+                limit: query.limit,
+                offset: query.offset
+            });
             reply.send({
                 success: true,
                 data: entities,
@@ -178,7 +197,8 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                 success: false,
                 error: {
                     code: 'ENTITIES_LIST_FAILED',
-                    message: 'Failed to list entities'
+                    message: 'Failed to list entities',
+                    details: error instanceof Error ? error.message : 'Unknown error'
                 }
             });
         }
@@ -200,9 +220,14 @@ export async function registerGraphRoutes(app, kgService, dbService) {
     }, async (request, reply) => {
         try {
             const query = request.query;
-            // TODO: Query relationships from knowledge graph
-            const relationships = [];
-            const total = 0;
+            // Query relationships from knowledge graph
+            const { relationships, total } = await kgService.listRelationships({
+                fromEntity: query.fromEntity,
+                toEntity: query.toEntity,
+                type: query.type,
+                limit: query.limit,
+                offset: query.offset
+            });
             reply.send({
                 success: true,
                 data: relationships,
@@ -219,7 +244,8 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                 success: false,
                 error: {
                     code: 'RELATIONSHIPS_LIST_FAILED',
-                    message: 'Failed to list relationships'
+                    message: 'Failed to list relationships',
+                    details: error instanceof Error ? error.message : 'Unknown error'
                 }
             });
         }

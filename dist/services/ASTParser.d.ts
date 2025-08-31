@@ -31,6 +31,19 @@ export interface IncrementalParseResult extends ParseResult {
     addedRelationships: GraphRelationship[];
     removedRelationships: GraphRelationship[];
 }
+export interface PartialUpdate {
+    type: 'add' | 'remove' | 'update';
+    entityType: 'file' | 'symbol' | 'function' | 'class' | 'interface' | 'typeAlias';
+    entityId: string;
+    changes?: Record<string, any>;
+    oldValue?: any;
+    newValue?: any;
+}
+export interface ChangeRange {
+    start: number;
+    end: number;
+    content: string;
+}
 export declare class ASTParser {
     private tsProject;
     private jsParser;
@@ -80,5 +93,42 @@ export declare class ASTParser {
     private detectLanguage;
     private extractDependencies;
     parseMultipleFiles(filePaths: string[]): Promise<ParseResult>;
+    /**
+     * Apply partial updates to a file based on specific changes
+     */
+    applyPartialUpdate(filePath: string, changes: ChangeRange[], originalContent: string): Promise<IncrementalParseResult>;
+    /**
+     * Find symbols that are affected by a change range
+     */
+    private findAffectedSymbols;
+    /**
+     * Check if a symbol is within the change range
+     */
+    private isSymbolInRange;
+    /**
+     * Analyze what type of change occurred to a symbol
+     */
+    private analyzeSymbolChange;
+    /**
+     * Parse a symbol from a specific range in the file
+     */
+    private parseSymbolFromRange;
+    /**
+     * Update the cache after applying partial updates
+     */
+    private updateCacheAfterPartialUpdate;
+    /**
+     * Helper methods for change analysis
+     */
+    private looksLikeNewSymbol;
+    private detectSymbolType;
+    /**
+     * Get statistics about cached files
+     */
+    getPartialUpdateStats(): {
+        cachedFiles: number;
+        totalSymbols: number;
+        averageSymbolsPerFile: number;
+    };
 }
 //# sourceMappingURL=ASTParser.d.ts.map

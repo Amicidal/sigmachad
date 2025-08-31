@@ -9,6 +9,10 @@ import { KnowledgeGraphService } from './services/KnowledgeGraphService.js';
 import { FileWatcher } from './services/FileWatcher.js';
 import { ASTParser } from './services/ASTParser.js';
 import { APIGateway } from './api/APIGateway.js';
+import { SynchronizationCoordinator } from './services/SynchronizationCoordinator.js';
+import { ConflictResolution } from './services/ConflictResolution.js';
+import { SynchronizationMonitoring } from './services/SynchronizationMonitoring.js';
+import { RollbackCapabilities } from './services/RollbackCapabilities.js';
 async function main() {
     console.log('🚀 Starting Memento...');
     try {
@@ -29,6 +33,25 @@ async function main() {
         if ('initialize' in astParser && typeof astParser.initialize === 'function') {
             await astParser.initialize();
         }
+        // Initialize synchronization services
+        console.log('🔄 Initializing synchronization services...');
+        const syncMonitor = new SynchronizationMonitoring();
+        const conflictResolver = new ConflictResolution(kgService);
+        const rollbackCapabilities = new RollbackCapabilities(kgService, dbService);
+        const syncCoordinator = new SynchronizationCoordinator(kgService, astParser, dbService);
+        // Wire up event handlers for monitoring
+        syncCoordinator.on('operationStarted', (operation) => {
+            syncMonitor.recordOperationStart(operation);
+        });
+        syncCoordinator.on('operationCompleted', (operation) => {
+            syncMonitor.recordOperationComplete(operation);
+        });
+        syncCoordinator.on('operationFailed', (operation, error) => {
+            syncMonitor.recordOperationFailed(operation, error);
+        });
+        conflictResolver.addConflictListener((conflict) => {
+            syncMonitor.recordConflict(conflict);
+        });
         // Initialize file watcher
         console.log('👀 Initializing file watcher...');
         const fileWatcher = new FileWatcher({
@@ -36,35 +59,69 @@ async function main() {
             debounceMs: 500,
             maxConcurrent: 10,
         });
-        // Set up file change handlers
+        // Set up file change handlers with new synchronization system
+        let pendingChanges = [];
+        let syncTimeout = null;
         fileWatcher.on('change', async (change) => {
-            console.log(`📡 Processing file change: ${change.path}`);
-            try {
-                // Parse the changed file
-                const parseResult = await astParser.parseFile(change.absolutePath);
-                if (parseResult.errors.length > 0) {
-                    console.warn(`⚠️ Parse errors in ${change.path}:`, parseResult.errors);
-                }
-                // Update knowledge graph with new entities and relationships
-                for (const entity of parseResult.entities) {
-                    await kgService.createEntity(entity);
-                }
-                for (const relationship of parseResult.relationships) {
-                    await kgService.createRelationship(relationship);
-                }
-                console.log(`✅ Processed ${parseResult.entities.length} entities and ${parseResult.relationships.length} relationships`);
+            console.log(`📡 File change detected: ${change.path} (${change.type})`);
+            // Add change to pending batch
+            pendingChanges.push(change);
+            // Debounce sync operations
+            if (syncTimeout) {
+                clearTimeout(syncTimeout);
             }
-            catch (error) {
-                console.error(`❌ Error processing file change ${change.path}:`, error);
-            }
+            syncTimeout = setTimeout(async () => {
+                if (pendingChanges.length > 0) {
+                    try {
+                        console.log(`🔄 Processing batch of ${pendingChanges.length} file changes`);
+                        // Create rollback point for safety
+                        const rollbackId = await rollbackCapabilities.createRollbackPoint(`batch_sync_${Date.now()}`, `Batch sync for ${pendingChanges.length} file changes`);
+                        // Start synchronization operation
+                        const operationId = await syncCoordinator.synchronizeFileChanges(pendingChanges);
+                        // Wait for operation to complete
+                        const checkCompletion = () => {
+                            const operation = syncCoordinator.getOperationStatus(operationId);
+                            if (operation && (operation.status === 'completed' || operation.status === 'failed')) {
+                                if (operation.status === 'failed') {
+                                    console.error(`❌ Sync operation failed, attempting rollback...`);
+                                    rollbackCapabilities.rollbackToPoint(rollbackId).catch(rollbackError => {
+                                        console.error('❌ Rollback also failed:', rollbackError);
+                                    });
+                                }
+                                else {
+                                    console.log(`✅ Sync operation completed successfully`);
+                                    // Clean up rollback point on success
+                                    rollbackCapabilities.deleteRollbackPoint(rollbackId);
+                                }
+                            }
+                            else {
+                                // Check again in 1 second
+                                setTimeout(checkCompletion, 1000);
+                            }
+                        };
+                        setTimeout(checkCompletion, 1000);
+                        // Clear pending changes
+                        pendingChanges = [];
+                    }
+                    catch (error) {
+                        console.error(`❌ Error in batch sync:`, error);
+                        pendingChanges = []; // Clear on error to prevent infinite retries
+                    }
+                }
+            }, 1000); // 1 second debounce
         });
         // Start file watcher
         await fileWatcher.start();
-        // Initialize API Gateway
+        // Initialize API Gateway with enhanced services
         console.log('🌐 Initializing API Gateway...');
         const apiGateway = new APIGateway(kgService, dbService, fileWatcher, astParser, {
             port: parseInt(process.env.PORT || '3000'),
             host: process.env.HOST || '0.0.0.0',
+        }, {
+            syncCoordinator,
+            syncMonitor,
+            conflictResolver,
+            rollbackCapabilities,
         });
         // Start API Gateway
         await apiGateway.start();
@@ -72,8 +129,13 @@ async function main() {
         const shutdown = async (signal) => {
             console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
             try {
+                // Stop monitoring first
+                syncMonitor.stopHealthMonitoring();
+                // Stop API Gateway
                 await apiGateway.stop();
+                // Stop file watcher
                 await fileWatcher.stop();
+                // Close database connections
                 await dbService.close();
                 console.log('✅ Shutdown complete');
                 process.exit(0);
