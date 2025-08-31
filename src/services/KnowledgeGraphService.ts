@@ -30,6 +30,23 @@ export class KnowledgeGraphService {
   async initialize(): Promise<void> {
     // Ensure database is ready
     await this.db.initialize();
+    
+    // Verify graph indexes exist
+    try {
+      const indexCheck = await this.db.falkordbQuery(
+        'CALL db.indexes()',
+        {}
+      );
+      
+      if (indexCheck && indexCheck.length > 0) {
+        console.log(`✅ Graph indexes verified: ${indexCheck.length} indexes found`);
+      } else {
+        console.log('⚠️ No graph indexes found, they will be created on next setupDatabase call');
+      }
+    } catch (error) {
+      // Indexes might not be queryable yet, this is okay
+      console.log('📊 Graph indexes will be verified on first query');
+    }
   }
 
   private hasCodebaseProperties(entity: Entity): boolean {
@@ -223,13 +240,17 @@ export class KnowledgeGraphService {
 
     // Get entities from graph database
     const searchResultData = searchResult as any;
-    const entityIds = (searchResultData.points || searchResultData.results || []).map((point: any) => point.id as string);
+    const points = searchResultData.points || searchResultData.results || [];
     const entities: Entity[] = [];
 
-    for (const entityId of entityIds) {
-      const entity = await this.getEntity(entityId);
-      if (entity) {
-        entities.push(entity);
+    for (const point of points) {
+      // Get the actual entity ID from the payload, not the numeric ID
+      const entityId = point.payload?.entityId;
+      if (entityId) {
+        const entity = await this.getEntity(entityId);
+        if (entity) {
+          entities.push(entity);
+        }
       }
     }
 
@@ -381,22 +402,29 @@ export class KnowledgeGraphService {
 
   // Path finding and traversal
   async findPaths(query: PathQuery): Promise<any[]> {
-    let cypherQuery = `
-      MATCH path = (start {id: $startId})-[*${query.maxDepth || 5}]-(end ${query.endEntityId ? '{id: $endId}' : ''})
-      RETURN path
-      LIMIT 10
-    `;
-
+    let cypherQuery: string;
     const params: any = { startId: query.startEntityId };
-    if (query.endEntityId) {
-      params.endId = query.endEntityId;
+    
+    // Build the query based on whether relationship types are specified
+    if (query.relationshipTypes && query.relationshipTypes.length > 0) {
+      // FalkorDB syntax for relationship types with depth
+      const relTypes = query.relationshipTypes.join('|');
+      cypherQuery = `
+        MATCH path = (start {id: $startId})-[:${relTypes}*1..${query.maxDepth || 5}]-(end ${query.endEntityId ? '{id: $endId}' : ''})
+        RETURN path
+        LIMIT 10
+      `;
+    } else {
+      // No specific relationship types
+      cypherQuery = `
+        MATCH path = (start {id: $startId})-[*1..${query.maxDepth || 5}]-(end ${query.endEntityId ? '{id: $endId}' : ''})
+        RETURN path
+        LIMIT 10
+      `;
     }
 
-    if (query.relationshipTypes && query.relationshipTypes.length > 0) {
-      cypherQuery = cypherQuery.replace(
-        '-[*',
-        `-[r:${query.relationshipTypes.join('|')}|*`
-      );
+    if (query.endEntityId) {
+      params.endId = query.endEntityId;
     }
 
     const result = await this.db.falkordbQuery(cypherQuery, params);
@@ -404,19 +432,22 @@ export class KnowledgeGraphService {
   }
 
   async traverseGraph(query: TraversalQuery): Promise<Entity[]> {
-    let cypherQuery = `
-      MATCH (start {id: $startId})-[*${query.maxDepth || 3}]-(connected)
-      RETURN DISTINCT connected
-      LIMIT ${query.limit || 50}
-    `;
-
+    let cypherQuery: string;
     const params: any = { startId: query.startEntityId };
-
+    
     if (query.relationshipTypes && query.relationshipTypes.length > 0) {
-      cypherQuery = cypherQuery.replace(
-        '-[*',
-        `-[r:${query.relationshipTypes.join('|')}|*`
-      );
+      const relTypes = query.relationshipTypes.join('|');
+      cypherQuery = `
+        MATCH (start {id: $startId})-[:${relTypes}*1..${query.maxDepth || 3}]-(connected)
+        RETURN DISTINCT connected
+        LIMIT ${query.limit || 50}
+      `;
+    } else {
+      cypherQuery = `
+        MATCH (start {id: $startId})-[*1..${query.maxDepth || 3}]-(connected)
+        RETURN DISTINCT connected
+        LIMIT ${query.limit || 50}
+      `;
     }
 
     const result = await this.db.falkordbQuery(cypherQuery, params);
@@ -430,17 +461,21 @@ export class KnowledgeGraphService {
 
     const collection = this.getEmbeddingCollection(entity);
     const hasCodebaseProps = this.hasCodebaseProperties(entity);
+    
+    // Convert string ID to numeric ID for Qdrant
+    const numericId = this.stringToNumericId(entity.id);
+    
     await this.db.qdrant.upsert(collection, {
       points: [{
-        id: entity.id,
+        id: numericId,
         vector: embedding,
-              payload: {
-        entityId: entity.id,
-        type: entity.type,
-        path: hasCodebaseProps ? (entity as any).path : '',
-        language: hasCodebaseProps ? (entity as any).language : '',
-        lastModified: hasCodebaseProps ? (entity as any).lastModified.toISOString() : new Date().toISOString(),
-      },
+        payload: {
+          entityId: entity.id,
+          type: entity.type,
+          path: hasCodebaseProps ? (entity as any).path : '',
+          language: hasCodebaseProps ? (entity as any).language : '',
+          lastModified: hasCodebaseProps ? (entity as any).lastModified.toISOString() : new Date().toISOString(),
+        },
       }],
     });
   }
@@ -451,7 +486,8 @@ export class KnowledgeGraphService {
   }
 
   private async deleteEmbedding(entityId: string): Promise<void> {
-    await this.db.qdrant.delete('code_embeddings', {
+    // Use the same filter for both collections to delete by entityId in payload
+    const filter = {
       filter: {
         must: [
           {
@@ -460,18 +496,19 @@ export class KnowledgeGraphService {
           },
         ],
       },
-    });
-
-    await this.db.qdrant.delete('documentation_embeddings', {
-      filter: {
-        must: [
-          {
-            key: 'entityId',
-            match: { value: entityId },
-          },
-        ],
-      },
-    });
+    };
+    
+    try {
+      await this.db.qdrant.delete('code_embeddings', filter);
+    } catch (error) {
+      // Collection might not exist or no matching points
+    }
+    
+    try {
+      await this.db.qdrant.delete('documentation_embeddings', filter);
+    } catch (error) {
+      // Collection might not exist or no matching points
+    }
   }
 
   private async generateEmbedding(content: string): Promise<number[]> {
@@ -551,5 +588,17 @@ export class KnowledgeGraphService {
       default:
         return this.hasCodebaseProperties(entity) ? (entity as any).path : entity.id;
     }
+  }
+  
+  private stringToNumericId(stringId: string): number {
+    // Create a numeric hash from string ID for Qdrant compatibility
+    let hash = 0;
+    for (let i = 0; i < stringId.length; i++) {
+      const char = stringId.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    // Ensure positive number
+    return Math.abs(hash);
   }
 }

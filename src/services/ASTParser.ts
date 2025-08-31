@@ -32,9 +32,27 @@ export interface ParseError {
   severity: 'error' | 'warning';
 }
 
+export interface CachedFileInfo {
+  hash: string;
+  entities: Entity[];
+  relationships: GraphRelationship[];
+  lastModified: Date;
+  symbolMap: Map<string, SymbolEntity>;
+}
+
+export interface IncrementalParseResult extends ParseResult {
+  isIncremental: boolean;
+  addedEntities: Entity[];
+  removedEntities: Entity[];
+  updatedEntities: Entity[];
+  addedRelationships: GraphRelationship[];
+  removedRelationships: GraphRelationship[];
+}
+
 export class ASTParser {
   private tsProject: Project;
   private jsParser: any | null = null;
+  private fileCache: Map<string, CachedFileInfo> = new Map();
 
   constructor() {
     // Initialize TypeScript project
@@ -92,6 +110,169 @@ export class ASTParser {
         }],
       };
     }
+  }
+
+  async parseFileIncremental(filePath: string): Promise<IncrementalParseResult> {
+    try {
+      const absolutePath = path.resolve(filePath);
+      const content = await fs.readFile(absolutePath, 'utf-8');
+      const currentHash = crypto.createHash('sha256').update(content).digest('hex');
+      const cachedInfo = this.fileCache.get(absolutePath);
+
+      // If file hasn't changed, return empty incremental result
+      if (cachedInfo && cachedInfo.hash === currentHash) {
+        return {
+          entities: cachedInfo.entities,
+          relationships: cachedInfo.relationships,
+          errors: [],
+          isIncremental: true,
+          addedEntities: [],
+          removedEntities: [],
+          updatedEntities: [],
+          addedRelationships: [],
+          removedRelationships: [],
+        };
+      }
+
+      // Parse the file completely
+      const fullResult = await this.parseFile(filePath);
+
+      if (!cachedInfo) {
+        // First time parsing this file
+        const symbolMap = this.createSymbolMap(fullResult.entities);
+        this.fileCache.set(absolutePath, {
+          hash: currentHash,
+          entities: fullResult.entities,
+          relationships: fullResult.relationships,
+          lastModified: new Date(),
+          symbolMap,
+        });
+
+        return {
+          ...fullResult,
+          isIncremental: false,
+          addedEntities: fullResult.entities,
+          removedEntities: [],
+          updatedEntities: [],
+          addedRelationships: fullResult.relationships,
+          removedRelationships: [],
+        };
+      }
+
+      // Compute incremental changes
+      const incrementalResult = this.computeIncrementalChanges(
+        cachedInfo,
+        fullResult,
+        currentHash,
+        absolutePath
+      );
+
+      return incrementalResult;
+    } catch (error) {
+      console.error(`Error incremental parsing file ${filePath}:`, error);
+      return {
+        entities: [],
+        relationships: [],
+        errors: [{
+          file: filePath,
+          line: 0,
+          column: 0,
+          message: `Incremental parse error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          severity: 'error',
+        }],
+        isIncremental: false,
+        addedEntities: [],
+        removedEntities: [],
+        updatedEntities: [],
+        addedRelationships: [],
+        removedRelationships: [],
+      };
+    }
+  }
+
+  private createSymbolMap(entities: Entity[]): Map<string, SymbolEntity> {
+    const symbolMap = new Map<string, SymbolEntity>();
+    for (const entity of entities) {
+      if (entity.type === 'symbol') {
+        const symbolEntity = entity as SymbolEntity;
+        symbolMap.set(`${symbolEntity.path}:${symbolEntity.name}`, symbolEntity);
+      }
+    }
+    return symbolMap;
+  }
+
+  private computeIncrementalChanges(
+    cachedInfo: CachedFileInfo,
+    newResult: ParseResult,
+    newHash: string,
+    filePath: string
+  ): IncrementalParseResult {
+    const addedEntities: Entity[] = [];
+    const removedEntities: Entity[] = [];
+    const updatedEntities: Entity[] = [];
+    const addedRelationships: GraphRelationship[] = [];
+    const removedRelationships: GraphRelationship[] = [];
+
+    // Create maps for efficient lookups
+    const newSymbolMap = this.createSymbolMap(newResult.entities);
+    const oldSymbolMap = cachedInfo.symbolMap;
+
+    // Find added and updated symbols
+    for (const [key, newSymbol] of newSymbolMap) {
+      const oldSymbol = oldSymbolMap.get(key);
+      if (!oldSymbol) {
+        addedEntities.push(newSymbol);
+      } else if (oldSymbol.hash !== newSymbol.hash) {
+        updatedEntities.push(newSymbol);
+      }
+    }
+
+    // Find removed symbols
+    for (const [key, oldSymbol] of oldSymbolMap) {
+      if (!newSymbolMap.has(key)) {
+        removedEntities.push(oldSymbol);
+      }
+    }
+
+    // For relationships, we do a simpler diff since they're more dynamic
+    // In a full implementation, you'd want more sophisticated relationship diffing
+    addedRelationships.push(...newResult.relationships);
+
+    // Update cache
+    this.fileCache.set(filePath, {
+      hash: newHash,
+      entities: newResult.entities,
+      relationships: newResult.relationships,
+      lastModified: new Date(),
+      symbolMap: newSymbolMap,
+    });
+
+    return {
+      entities: newResult.entities,
+      relationships: newResult.relationships,
+      errors: newResult.errors,
+      isIncremental: true,
+      addedEntities,
+      removedEntities,
+      updatedEntities,
+      addedRelationships,
+      removedRelationships,
+    };
+  }
+
+  clearCache(): void {
+    this.fileCache.clear();
+  }
+
+  getCacheStats(): { files: number; totalEntities: number } {
+    let totalEntities = 0;
+    for (const cached of this.fileCache.values()) {
+      totalEntities += cached.entities.length;
+    }
+    return {
+      files: this.fileCache.size,
+      totalEntities,
+    };
   }
 
   private async parseTypeScriptFile(filePath: string, content: string): Promise<ParseResult> {

@@ -411,9 +411,38 @@ export class DatabaseService {
     try {
       // Create graph if it doesn't exist
       await this.falkordbCommand('GRAPH.QUERY', 'memento', 'MATCH (n) RETURN count(n) LIMIT 1');
+      
+      console.log('📊 Setting up FalkorDB graph indexes...');
+      
+      // Create indexes for better query performance
+      // Index on node ID for fast lookups
+      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
+        'CREATE INDEX FOR (n:Entity) ON (n.id)');
+      
+      // Index on node type for filtering
+      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
+        'CREATE INDEX FOR (n:Entity) ON (n.type)');
+      
+      // Index on node path for file-based queries
+      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
+        'CREATE INDEX FOR (n:Entity) ON (n.path)');
+      
+      // Index on node language for language-specific queries
+      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
+        'CREATE INDEX FOR (n:Entity) ON (n.language)');
+      
+      // Index on lastModified for temporal queries
+      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
+        'CREATE INDEX FOR (n:Entity) ON (n.lastModified)');
+      
+      // Composite index for common query patterns
+      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
+        'CREATE INDEX FOR (n:Entity) ON (n.type, n.path)');
+      
+      console.log('✅ FalkorDB graph indexes created');
     } catch (error) {
       // Graph doesn't exist, it will be created on first write
-      console.log('📊 FalkorDB graph will be created on first write operation');
+      console.log('📊 FalkorDB graph will be created on first write operation with indexes');
     }
 
     // Qdrant setup

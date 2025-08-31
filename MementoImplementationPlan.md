@@ -150,7 +150,7 @@ This implementation plan provides a structured approach to building the Memento 
 ## Phase 2: Knowledge Graph Foundation
 
 ### 2.1 Graph Schema Implementation
-**Status:** Ready
+**Status:** Completed
 **Priority:** High
 
 **Prerequisites:**
@@ -166,10 +166,10 @@ This implementation plan provides a structured approach to building the Memento 
 6. Set up graph indexing
 
 **Validation Criteria:**
-- [ ] All entity types can be created in graph
-- [ ] Relationships can be established correctly
-- [ ] Graph queries return expected results
-- [ ] Schema validation works properly
+- [x] All entity types can be created in graph
+- [x] Relationships can be established correctly
+- [x] Graph queries return expected results
+- [x] Schema validation works properly
 
 **Cleanup Steps:**
 - Remove any test nodes/relationships
@@ -177,7 +177,7 @@ This implementation plan provides a structured approach to building the Memento 
 - Verify no orphaned nodes exist
 
 ### 2.2 File System Watcher
-**Status:** Ready
+**Status:** Completed
 **Priority:** High
 
 **Prerequisites:**
@@ -193,10 +193,10 @@ This implementation plan provides a structured approach to building the Memento 
 6. Add change debouncing (500ms)
 
 **Validation Criteria:**
-- [ ] File changes are detected correctly
-- [ ] Ignored files/patterns are properly filtered
-- [ ] Change events are queued appropriately
-- [ ] Debouncing prevents excessive events
+- [x] File changes are detected correctly
+- [x] Ignored files/patterns are properly filtered
+- [x] Change events are queued appropriately
+- [x] Debouncing prevents excessive events
 
 **Cleanup Steps:**
 - Clear change event queue
@@ -204,7 +204,7 @@ This implementation plan provides a structured approach to building the Memento 
 - Verify watcher shuts down cleanly
 
 ### 2.3 Code Parser Implementation
-**Status:** Ready
+**Status:** Completed
 **Priority:** High
 
 **Prerequisites:**
@@ -220,10 +220,10 @@ This implementation plan provides a structured approach to building the Memento 
 6. Implement incremental parsing
 
 **Validation Criteria:**
-- [ ] TypeScript files parse without errors
-- [ ] Symbol extraction works correctly
-- [ ] Dependencies are identified properly
-- [ ] Incremental parsing updates work
+- [x] TypeScript files parse without errors
+- [x] Symbol extraction works correctly
+- [x] Dependencies are identified properly
+- [x] Incremental parsing updates work
 
 **Cleanup Steps:**
 - Clear any cached AST data

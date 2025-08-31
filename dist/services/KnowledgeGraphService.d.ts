@@ -35,5 +35,6 @@ export declare class KnowledgeGraphService {
     private getEntityContentForEmbedding;
     private getEmbeddingCollection;
     private getEntitySignature;
+    private stringToNumericId;
 }
 //# sourceMappingURL=KnowledgeGraphService.d.ts.map

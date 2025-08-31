@@ -4,7 +4,7 @@
  */
 export async function registerDocsRoutes(app, kgService, dbService) {
     // POST /api/docs/sync - Synchronize documentation with knowledge graph
-    app.post('/sync', async (request, reply) => {
+    app.post('/docs/sync', async (request, reply) => {
         try {
             // TODO: Implement documentation synchronization
             const result = {

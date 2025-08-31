@@ -74,7 +74,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
         }
     });
     // POST /api/admin/sync - Trigger full synchronization
-    app.post('/sync', {
+    app.post('/admin/sync', {
         schema: {
             body: {
                 type: 'object',
