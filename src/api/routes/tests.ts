@@ -22,10 +22,50 @@ interface TestPlanRequest {
 
 interface TestPlanResponse {
   testPlan: {
-    unitTests: any[];
-    integrationTests: any[];
-    e2eTests: any[];
-    performanceTests: any[];
+    unitTests: {
+      name: string;
+      description: string;
+      testCode: string;
+      estimatedCoverage: {
+        lines: number;
+        branches: number;
+        functions: number;
+        statements: number;
+      };
+    }[];
+    integrationTests: {
+      name: string;
+      description: string;
+      testCode: string;
+      estimatedCoverage: {
+        lines: number;
+        branches: number;
+        functions: number;
+        statements: number;
+      };
+    }[];
+    e2eTests: {
+      name: string;
+      description: string;
+      testCode: string;
+      estimatedCoverage: {
+        lines: number;
+        branches: number;
+        functions: number;
+        statements: number;
+      };
+    }[];
+    performanceTests: {
+      name: string;
+      description: string;
+      testCode: string;
+      estimatedCoverage: {
+        lines: number;
+        branches: number;
+        functions: number;
+        statements: number;
+      };
+    }[];
   };
   estimatedCoverage: any;
   changedFiles: string[];
@@ -95,7 +135,7 @@ export async function registerTestRoutes(
 ): Promise<void> {
 
   // POST /api/tests/plan-and-generate - Plan and generate tests
-  app.post('/plan-and-generate', {
+  app.post('/tests/plan-and-generate', {
     schema: {
       body: {
         type: 'object',
@@ -136,7 +176,7 @@ export async function registerTestRoutes(
       }
 
       // Generate test plan based on specification
-      const testPlan = {
+      const testPlan: TestPlanResponse['testPlan'] = {
         unitTests: [],
         integrationTests: [],
         e2eTests: [],
@@ -237,7 +277,7 @@ export async function registerTestRoutes(
   });
 
   // POST /api/tests/record-execution - Record test execution results
-  app.post('/record-execution', {
+  app.post('/tests/record-execution', {
     schema: {
       body: {
         type: 'object',
@@ -318,7 +358,7 @@ export async function registerTestRoutes(
   });
 
   // POST /api/tests/parse-results - Parse and record test results from file
-  app.post('/parse-results', {
+  app.post('/tests/parse-results', {
     schema: {
       body: {
         type: 'object',
@@ -355,7 +395,7 @@ export async function registerTestRoutes(
   });
 
   // GET /api/tests/performance/{entityId} - Get performance metrics
-  app.get('/performance/:entityId', {
+  app.get('/tests/performance/:entityId', {
     schema: {
       params: {
         type: 'object',
@@ -388,7 +428,7 @@ export async function registerTestRoutes(
   });
 
   // GET /api/tests/coverage/{entityId} - Get test coverage
-  app.get('/coverage/:entityId', {
+  app.get('/tests/coverage/:entityId', {
     schema: {
       params: {
         type: 'object',
@@ -421,7 +461,7 @@ export async function registerTestRoutes(
   });
 
   // GET /api/tests/flaky-analysis/{entityId} - Get flaky test analysis
-  app.get('/flaky-analysis/:entityId', {
+  app.get('/tests/flaky-analysis/:entityId', {
     schema: {
       params: {
         type: 'object',

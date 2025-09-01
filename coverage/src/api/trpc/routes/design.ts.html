@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">58.33% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/10</span>
+                <span class='fraction'>7/12</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">58.33% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/10</span>
+                <span class='fraction'>7/12</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line low'></div>
+    <div class='status-line medium'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -243,11 +243,13 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -255,15 +257,15 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -299,9 +301,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -314,9 +316,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -422,7 +422,7 @@ import { z } from 'zod';
 import { router, publicProcedure } from '../base.js';
 &nbsp;
 // Validation schemas
-const ValidationIssueSchema = <span class="cstat-no" title="statement not covered" >z.object({</span>
+const ValidationIssueSchema = z.object({
   field: z.string(),
   message: z.string(),
   severity: z.enum(['error', 'warning']),
@@ -432,13 +432,13 @@ const ValidationIssueSchema = <span class="cstat-no" title="statement not covere
   rule: z.string().optional(),
 });
 &nbsp;
-const ValidationResultSchema = <span class="cstat-no" title="statement not covered" >z.object({</span>
+const ValidationResultSchema = z.object({
   isValid: z.boolean(),
   issues: z.array(ValidationIssueSchema),
   suggestions: z.array(z.string()),
 });
 &nbsp;
-const TestCoverageSchema = <span class="cstat-no" title="statement not covered" >z.object({</span>
+const TestCoverageSchema = z.object({
   entityId: z.string(),
   overallCoverage: z.object({
     lines: z.number(),
@@ -476,7 +476,7 @@ const TestCoverageSchema = <span class="cstat-no" title="statement not covered" 
   })),
 });
 &nbsp;
-const SpecSchema = <span class="cstat-no" title="statement not covered" >z.object({</span>
+const SpecSchema = z.object({
   id: z.string(),
   name: z.string(),
   type: z.enum(['component', 'page', 'feature', 'system']),
@@ -491,7 +491,7 @@ const SpecSchema = <span class="cstat-no" title="statement not covered" >z.objec
   tags: z.array(z.string()),
 });
 &nbsp;
-export const designRouter = <span class="cstat-no" title="statement not covered" >router({</span>
+export const designRouter = router({
   // Validate design specification
   validateSpec: publicProcedure
     .input(z.object({
@@ -595,7 +595,7 @@ export const designRouter = <span class="cstat-no" title="statement not covered"
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-08-31T20:44:18.886Z
+                at 2025-09-01T03:03:17.177Z
             </div>
         <script src="../../../../prettify.js"></script>
         <script>

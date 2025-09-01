@@ -24,10 +24,7 @@ export function registerDesignRoutes(
 ): void {
 
   // Create specification
-  app.post<{
-    Body: CreateSpecRequest;
-    Reply: APIResponse<CreateSpecResponse>;
-  }>('/design/create-spec', {
+  app.post('/design/create-spec', {
     schema: {
       body: {
         type: 'object',
@@ -62,7 +59,7 @@ export function registerDesignRoutes(
     },
   }, async (request, reply) => {
     try {
-      const result = await createSpec(request.body, kgService, dbService);
+      const result = await createSpec(request.body as CreateSpecRequest, kgService, dbService);
       reply.send({
         success: true,
         data: result,
@@ -73,7 +70,8 @@ export function registerDesignRoutes(
         },
       });
     } catch (error) {
-      reply.status(400).send({
+      (reply as any).status(400);
+      reply.send({
         success: false,
         error: {
           code: 'VALIDATION_ERROR',
@@ -84,12 +82,9 @@ export function registerDesignRoutes(
   });
 
   // Get specification
-  app.get<{
-    Params: { specId: string };
-    Reply: APIResponse<GetSpecResponse>;
-  }>('/design/specs/:specId', async (request, reply) => {
+  app.get('/design/specs/:specId', async (request, reply) => {
     try {
-      const { specId } = request.params;
+      const { specId } = request.params as { specId: string };
       const result = await getSpec(specId, kgService, dbService);
 
       reply.send({
@@ -113,14 +108,10 @@ export function registerDesignRoutes(
   });
 
   // Update specification
-  app.put<{
-    Params: { specId: string };
-    Body: UpdateSpecRequest;
-    Reply: APIResponse<Spec>;
-  }>('/design/specs/:specId', async (request, reply) => {
+  app.put('/design/specs/:specId', async (request, reply) => {
     try {
-      const { specId } = request.params;
-      const result = await updateSpec(specId, request.body, kgService, dbService);
+      const { specId } = request.params as { specId: string };
+      const result = await updateSpec(specId, request.body as UpdateSpecRequest, kgService, dbService);
 
       reply.send({
         success: true,
@@ -132,7 +123,8 @@ export function registerDesignRoutes(
         },
       });
     } catch (error) {
-      reply.status(400).send({
+      (reply as any).status(400);
+      reply.send({
         success: false,
         error: {
           code: 'VALIDATION_ERROR',
@@ -143,12 +135,9 @@ export function registerDesignRoutes(
   });
 
   // List specifications
-  app.get<{
-    Querystring: ListSpecsParams;
-    Reply: PaginatedResponse<Spec>;
-  }>('/design/specs', async (request, reply) => {
+  app.get('/design/specs', async (request, reply) => {
     try {
-      const params = request.query;
+      const params = request.query as ListSpecsParams;
       const result = await listSpecs(params, kgService, dbService);
 
       reply.send({
@@ -163,12 +152,13 @@ export function registerDesignRoutes(
       });
     } catch (error) {
       const requestParams = request.query;
-      reply.status(400).send({
+      (reply as any).status(400);
+      reply.send({
         success: false,
         data: [],
         pagination: {
           page: 1,
-          pageSize: requestParams.limit || 20,
+          pageSize: (request.query as ListSpecsParams).limit || 20,
           total: 0,
           hasMore: false,
         },

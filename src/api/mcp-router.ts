@@ -1832,9 +1832,9 @@ export class MCPRouter {
       successRate: tools.length > 0 ?
         (tools.reduce((sum, m) => sum + m.successCount, 0) /
          tools.reduce((sum, m) => sum + m.executionCount, 0) * 100).toFixed(1) + '%' : '0%',
-      mostUsedTool: tools.reduce((prev, current) =>
+      mostUsedTool: tools.length > 0 ? tools.reduce((prev, current) =>
         prev.executionCount > current.executionCount ? prev : current
-      )?.toolName || 'none',
+      )?.toolName || 'none' : 'none',
       toolsWithErrors: tools.filter(m => m.errorCount > 0).map(m => m.toolName)
     };
 

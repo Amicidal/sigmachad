@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/16</span>
+                <span class='fraction'>24/24</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/6</span>
+                <span class='fraction'>6/6</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/8</span>
+                <span class='fraction'>8/8</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/11</span>
+                <span class='fraction'>11/11</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line low'></div>
+    <div class='status-line high'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -367,7 +367,13 @@
 <a name='L302'></a><a href='#L302'>302</a>
 <a name='L303'></a><a href='#L303'>303</a>
 <a name='L304'></a><a href='#L304'>304</a>
-<a name='L305'></a><a href='#L305'>305</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L305'></a><a href='#L305'>305</a>
+<a name='L306'></a><a href='#L306'>306</a>
+<a name='L307'></a><a href='#L307'>307</a>
+<a name='L308'></a><a href='#L308'>308</a>
+<a name='L309'></a><a href='#L309'>309</a>
+<a name='L310'></a><a href='#L310'>310</a>
+<a name='L311'></a><a href='#L311'>311</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -660,17 +666,23 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
  * Knowledge Graph Entity Types for Memento
  * Based on the comprehensive knowledge graph design
@@ -719,6 +731,12 @@ export interface Symbol extends CodebaseEntity {
   visibility: 'public' | 'private' | 'protected';
   isExported: boolean;
   isDeprecated: boolean;
+  location?: {
+    line: number;
+    column: number;
+    start: number;
+    end: number;
+  };
 }
 &nbsp;
 export interface FunctionSymbol extends Symbol {
@@ -964,17 +982,17 @@ export type Entity =
   | Vulnerability;
 &nbsp;
 // Type guards for entity discrimination
-export const isFile = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(e</span>ntity: Entity): entity is File =&gt; <span class="cstat-no" title="statement not covered" >entity.type === 'file';</span></span>
-export const isDirectory = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(e</span>ntity: Entity): entity is Directory =&gt; <span class="cstat-no" title="statement not covered" >entity.type === 'directory';</span></span>
-export const isSymbol = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(e</span>ntity: Entity): entity is Symbol =&gt; <span class="cstat-no" title="statement not covered" >entity.type === 'symbol';</span></span>
-export const isFunction = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(e</span>ntity: Entity): entity is FunctionSymbol =&gt;</span>
-<span class="cstat-no" title="statement not covered" >  isSymbol(entity) &amp;&amp; entity.kind === 'function';</span>
-export const isClass = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(e</span>ntity: Entity): entity is ClassSymbol =&gt;</span>
-<span class="cstat-no" title="statement not covered" >  isSymbol(entity) &amp;&amp; entity.kind === 'class';</span>
-export const isInterface = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(e</span>ntity: Entity): entity is InterfaceSymbol =&gt;</span>
-<span class="cstat-no" title="statement not covered" >  isSymbol(entity) &amp;&amp; entity.kind === 'interface';</span>
-export const isTest = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(e</span>ntity: Entity): entity is Test =&gt; <span class="cstat-no" title="statement not covered" >entity.type === 'test';</span></span>
-export const isSpec = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(e</span>ntity: Entity): entity is Spec =&gt; <span class="cstat-no" title="statement not covered" >entity.type === 'spec';</span></span>
+export const isFile = (entity: Entity): entity is File =&gt; entity.type === 'file';
+export const isDirectory = (entity: Entity): entity is Directory =&gt; entity.type === 'directory';
+export const isSymbol = (entity: Entity): entity is Symbol =&gt; entity.type === 'symbol';
+export const isFunction = (entity: Entity): entity is FunctionSymbol =&gt;
+  isSymbol(entity) &amp;&amp; entity.kind === 'function';
+export const isClass = (entity: Entity): entity is ClassSymbol =&gt;
+  isSymbol(entity) &amp;&amp; entity.kind === 'class';
+export const isInterface = (entity: Entity): entity is InterfaceSymbol =&gt;
+  isSymbol(entity) &amp;&amp; entity.kind === 'interface';
+export const isTest = (entity: Entity): entity is Test =&gt; entity.type === 'test';
+export const isSpec = (entity: Entity): entity is Spec =&gt; entity.type === 'spec';
 &nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->
@@ -982,7 +1000,7 @@ export const isSpec = <span class="cstat-no" title="statement not covered" ><spa
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-08-31T20:44:18.886Z
+                at 2025-09-01T03:03:17.177Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -584,3 +584,4 @@ export interface MCPResponse {
   };
   id?: string;
 }
+

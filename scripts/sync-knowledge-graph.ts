@@ -198,3 +198,4 @@ syncKnowledgeGraph().catch((error) => {
   console.error('💥 Fatal error during sync:', error);
   process.exit(1);
 });
+

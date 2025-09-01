@@ -90,10 +90,10 @@ export class KnowledgeGraphService extends EventEmitter {
     async updateEntity(entityId, updates) {
         // Convert dates to ISO strings for FalkorDB
         const sanitizedUpdates = { ...updates };
-        if (sanitizedUpdates.lastModified instanceof Date) {
+        if ('lastModified' in sanitizedUpdates && sanitizedUpdates.lastModified instanceof Date) {
             sanitizedUpdates.lastModified = sanitizedUpdates.lastModified.toISOString();
         }
-        if (sanitizedUpdates.created instanceof Date) {
+        if ('created' in sanitizedUpdates && sanitizedUpdates.created instanceof Date) {
             sanitizedUpdates.created = sanitizedUpdates.created.toISOString();
         }
         const setClause = Object.keys(sanitizedUpdates)
@@ -116,6 +116,15 @@ export class KnowledgeGraphService extends EventEmitter {
                 updates: sanitizedUpdates,
                 timestamp: new Date().toISOString()
             });
+        }
+    }
+    async createOrUpdateEntity(entity) {
+        const existing = await this.getEntity(entity.id);
+        if (existing) {
+            await this.updateEntity(entity.id, entity);
+        }
+        else {
+            await this.createEntity(entity);
         }
     }
     async deleteEntity(entityId) {
@@ -217,6 +226,9 @@ export class KnowledgeGraphService extends EventEmitter {
             params.offset = query.offset;
         const result = await this.db.falkordbQuery(fullQuery, params);
         return result.map((row) => this.parseRelationshipFromGraph(row));
+    }
+    async queryRelationships(query) {
+        return this.getRelationships(query);
     }
     // Graph search operations
     async search(request) {

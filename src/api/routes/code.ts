@@ -7,6 +7,9 @@ import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../../services/DatabaseService.js';
 import { ASTParser, ParseResult } from '../../services/ASTParser.js';
+import { RelationshipType } from '../../models/relationships.js';
+import { ValidationResult, ValidationIssue } from '../../models/types.js';
+import { SecurityIssue } from '../../models/entities.js';
 import fs from 'fs/promises';
 
 interface CodeChangeProposal {
@@ -48,40 +51,8 @@ interface ValidationRequest {
   failOnWarnings?: boolean;
 }
 
-interface ValidationResult {
-  overall: {
-    passed: boolean;
-    score: number;
-    duration: number;
-  };
-  typescript: {
-    errors: number;
-    warnings: number;
-    issues: any[];
-  };
-  eslint: {
-    errors: number;
-    warnings: number;
-    issues: any[];
-  };
-  security: {
-    critical: number;
-    high: number;
-    medium: number;
-    low: number;
-    issues: any[];
-  };
-  tests: {
-    passed: number;
-    failed: number;
-    skipped: number;
-    coverage: any;
-  };
-  architecture: {
-    violations: number;
-    issues: any[];
-  };
-}
+// Type definitions for validation issues
+// Using ValidationResult, ValidationIssue, and SecurityIssue from types.ts
 
 export async function registerCodeRoutes(
   app: FastifyInstance,
@@ -91,7 +62,7 @@ export async function registerCodeRoutes(
 ): Promise<void> {
 
   // POST /api/code/propose-diff - Propose code changes and analyze impact
-  app.post('/propose-diff', {
+  app.post('/code/propose-diff', {
     schema: {
       body: {
         type: 'object',
@@ -140,7 +111,7 @@ export async function registerCodeRoutes(
   });
 
   // POST /api/code/validate - Run comprehensive code validation
-  app.post('/validate', {
+  app.post('/code/validate', {
     schema: {
       body: {
         type: 'object',
@@ -282,7 +253,7 @@ export async function registerCodeRoutes(
   });
 
   // POST /api/code/analyze - Analyze code for patterns and issues
-  app.post('/analyze', {
+  app.post('/code/analyze', {
     schema: {
       body: {
         type: 'object',
@@ -347,7 +318,7 @@ export async function registerCodeRoutes(
   });
 
   // GET /api/code/suggestions/{file} - Get code improvement suggestions
-  app.get('/suggestions/:file', {
+  app.get('/code/suggestions/:file', {
     schema: {
       params: {
         type: 'object',
@@ -403,7 +374,7 @@ export async function registerCodeRoutes(
   });
 
   // POST /api/code/refactor - Suggest refactoring opportunities
-  app.post('/refactor', {
+  app.post('/code/refactor', {
     schema: {
       body: {
         type: 'object',
@@ -766,10 +737,10 @@ function generateRecommendations(
 // Helper functions for validation
 async function runTypeScriptValidation(files: string[]): Promise<ValidationResult['typescript']> {
   // Basic TypeScript validation - in a real implementation, this would run tsc
-  const result = {
+  const result: ValidationResult['typescript'] = {
     errors: 0,
     warnings: 0,
-    issues: []
+    issues: [] as ValidationIssue[]
   };
 
   // Mock validation - check for common TypeScript issues
@@ -782,6 +753,7 @@ async function runTypeScriptValidation(files: string[]): Promise<ValidationResul
           file,
           line: Math.floor(Math.random() * 100),
           column: Math.floor(Math.random() * 50),
+          rule: 'no-implicit-any',
           message: 'Implicit any type',
           severity: 'warning'
         });
@@ -794,10 +766,10 @@ async function runTypeScriptValidation(files: string[]): Promise<ValidationResul
 
 async function runESLintValidation(files: string[]): Promise<ValidationResult['eslint']> {
   // Basic ESLint validation - in a real implementation, this would run eslint
-  const result = {
+  const result: ValidationResult['eslint'] = {
     errors: 0,
     warnings: 0,
-    issues: []
+    issues: [] as ValidationIssue[]
   };
 
   // Mock validation - check for common ESLint issues
@@ -823,12 +795,12 @@ async function runESLintValidation(files: string[]): Promise<ValidationResult['e
 
 async function runSecurityValidation(files: string[]): Promise<ValidationResult['security']> {
   // Basic security validation - in a real implementation, this would use security scanning tools
-  const result = {
+  const result: ValidationResult['security'] = {
     critical: 0,
     high: 0,
     medium: 0,
     low: 0,
-    issues: []
+    issues: [] as SecurityIssue[]
   };
 
   // Mock security scan - look for common security issues
@@ -837,11 +809,21 @@ async function runSecurityValidation(files: string[]): Promise<ValidationResult[
     if (Math.random() > 0.95) {
       result.medium++;
       result.issues.push({
-        file,
-        line: Math.floor(Math.random() * 100),
+        id: `sec_${Date.now()}_${Math.random()}`,
+        type: 'securityIssue',
+        tool: 'mock-scanner',
+        ruleId: 'sql-injection',
         severity: 'medium',
-        type: 'sql-injection',
-        message: 'Potential SQL injection vulnerability'
+        title: 'Potential SQL Injection',
+        description: 'Potential SQL injection vulnerability detected',
+        affectedEntityId: file,
+        lineNumber: Math.floor(Math.random() * 100),
+        codeSnippet: 'SELECT * FROM users WHERE id = \' + userInput',
+        remediation: 'Use parameterized queries or prepared statements',
+        status: 'open',
+        discoveredAt: new Date(),
+        lastScanned: new Date(),
+        confidence: 0.8
       });
     }
 
@@ -849,11 +831,21 @@ async function runSecurityValidation(files: string[]): Promise<ValidationResult[
     if (Math.random() > 0.97) {
       result.high++;
       result.issues.push({
-        file,
-        line: Math.floor(Math.random() * 100),
+        id: `sec_${Date.now()}_${Math.random()}`,
+        type: 'securityIssue',
+        tool: 'mock-scanner',
+        ruleId: 'hardcoded-secret',
         severity: 'high',
-        type: 'hardcoded-secret',
-        message: 'Hardcoded API key detected'
+        title: 'Hardcoded Secret',
+        description: 'Hardcoded API key or secret detected',
+        affectedEntityId: file,
+        lineNumber: Math.floor(Math.random() * 100),
+        codeSnippet: 'const API_KEY = "sk-1234567890abcdef";',
+        remediation: 'Use environment variables or secure credential storage',
+        status: 'open',
+        discoveredAt: new Date(),
+        lastScanned: new Date(),
+        confidence: 0.9
       });
     }
   }
@@ -880,9 +872,9 @@ async function runTestValidation(): Promise<ValidationResult['tests']> {
 
 async function runArchitectureValidation(files: string[]): Promise<ValidationResult['architecture']> {
   // Basic architecture validation - check for common architectural issues
-  const result = {
+  const result: ValidationResult['architecture'] = {
     violations: 0,
-    issues: []
+    issues: [] as ValidationIssue[]
   };
 
   // Mock architecture validation
@@ -892,7 +884,9 @@ async function runArchitectureValidation(files: string[]): Promise<ValidationRes
       result.violations++;
       result.issues.push({
         file,
-        type: 'circular-dependency',
+        line: 1,
+        column: 1,
+        rule: 'circular-dependency',
         severity: 'warning',
         message: 'Circular dependency detected'
       });
@@ -903,7 +897,9 @@ async function runArchitectureValidation(files: string[]): Promise<ValidationRes
       result.violations++;
       result.issues.push({
         file,
-        type: 'large-file',
+        line: 1,
+        column: 1,
+        rule: 'large-file',
         severity: 'info',
         message: 'File exceeds recommended size limit'
       });
@@ -1031,7 +1027,7 @@ async function analyzeCodeDependencies(files: string[], kgService: KnowledgeGrap
         if (entity.type === 'symbol') {
           const deps = await kgService.getRelationships({
             fromEntityId: entity.id,
-            type: ['CALLS', 'USES', 'IMPORTS']
+            type: [RelationshipType.CALLS, RelationshipType.USES, RelationshipType.IMPORTS]
           });
 
           const depNames = deps.map(d => d.toEntityId);

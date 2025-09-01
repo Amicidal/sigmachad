@@ -223,3 +223,4 @@ export interface ImpactResult {
   totalAffectedEntities: number;
   riskLevel: 'critical' | 'high' | 'medium' | 'low';
 }
+

@@ -65,35 +65,42 @@ export class KnowledgeGraphService extends EventEmitter {
     const labels = this.getEntityLabels(entity);
     const properties = this.sanitizeProperties(entity);
 
-    // Create node in FalkorDB with type as both label and property
-    const createQuery = `
-      CREATE (n${labels.join(':')}:${entity.type} {
-        id: $id,
-        type: $type,
-        path: $path,
-        hash: $hash,
-        language: $language,
-        lastModified: $lastModified,
-        created: $created,
-        metadata: $metadata
-      })
-    `;
-
-    // Only include path/hash/language if the entity has them (codebase entities)
-    const hasCodebaseProps = this.hasCodebaseProperties(entity);
-
-    const queryParams = {
+    // Prepare all properties for storage
+    const queryParams: any = {
       id: nodeId,
       type: entity.type,
-      path: hasCodebaseProps ? (entity as any).path : '',
-      hash: hasCodebaseProps ? (entity as any).hash : '',
-      language: hasCodebaseProps ? (entity as any).language : '',
-      lastModified: hasCodebaseProps ? (entity as any).lastModified.toISOString() : new Date().toISOString(),
-      created: hasCodebaseProps ? (entity as any).created.toISOString() : new Date().toISOString(),
-      metadata: JSON.stringify((entity as any).metadata || {}),
     };
 
+    // Build dynamic property list for the query
+    const propertyKeys: string[] = ['id', 'type'];
 
+    // Add all properties from the sanitized entity
+    for (const [key, value] of Object.entries(properties)) {
+      if (key === 'id' || key === 'type') continue; // Already included
+
+      let processedValue = value;
+
+      // Convert dates to ISO strings for FalkorDB storage
+      if (value instanceof Date) {
+        processedValue = value.toISOString();
+      }
+      // Convert arrays and objects to JSON strings
+      else if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+        processedValue = JSON.stringify(value);
+      }
+
+      queryParams[key] = processedValue;
+      propertyKeys.push(key);
+    }
+
+    // Build dynamic Cypher query with all properties
+    const propertyAssignments = propertyKeys.map(key => `${key}: $${key}`).join(', ');
+
+    const createQuery = `
+      CREATE (n${labels.join(':')}:${entity.type} {
+        ${propertyAssignments}
+      })
+    `;
 
     await this.db.falkordbQuery(createQuery, queryParams);
 
@@ -101,6 +108,7 @@ export class KnowledgeGraphService extends EventEmitter {
     await this.createEmbedding(entity);
 
     // Emit event for real-time updates
+    const hasCodebaseProps = this.hasCodebaseProperties(entity);
     this.emit('entityCreated', {
       id: entity.id,
       type: entity.type,
@@ -129,14 +137,29 @@ export class KnowledgeGraphService extends EventEmitter {
   async updateEntity(entityId: string, updates: Partial<Entity>): Promise<void> {
     // Convert dates to ISO strings for FalkorDB
     const sanitizedUpdates = { ...updates };
-    if (sanitizedUpdates.lastModified instanceof Date) {
+    if ('lastModified' in sanitizedUpdates && sanitizedUpdates.lastModified instanceof Date) {
       sanitizedUpdates.lastModified = sanitizedUpdates.lastModified.toISOString() as any;
     }
-    if (sanitizedUpdates.created instanceof Date) {
+    if ('created' in sanitizedUpdates && sanitizedUpdates.created instanceof Date) {
       sanitizedUpdates.created = sanitizedUpdates.created.toISOString() as any;
     }
 
-    const setClause = Object.keys(sanitizedUpdates)
+    // Filter out complex properties that FalkorDB can't handle
+    const falkorCompatibleUpdates: any = {};
+    for (const [key, value] of Object.entries(sanitizedUpdates)) {
+      // Skip arrays and objects (FalkorDB only supports primitive types)
+      if (!Array.isArray(value) && typeof value !== 'object') {
+        falkorCompatibleUpdates[key] = value;
+      }
+    }
+
+    // If no compatible updates, skip the database update
+    if (Object.keys(falkorCompatibleUpdates).length === 0) {
+      console.warn(`No FalkorDB-compatible updates for entity ${entityId}`);
+      return;
+    }
+
+    const setClause = Object.keys(falkorCompatibleUpdates)
       .map(key => `n.${key} = $${key}`)
       .join(', ');
 
@@ -146,7 +169,7 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN n
     `;
 
-    const params = { id: entityId, ...sanitizedUpdates };
+    const params = { id: entityId, ...falkorCompatibleUpdates };
     await this.db.falkordbQuery(query, params);
 
     // Update vector embedding
@@ -160,6 +183,15 @@ export class KnowledgeGraphService extends EventEmitter {
         updates: sanitizedUpdates,
         timestamp: new Date().toISOString()
       });
+    }
+  }
+
+  async createOrUpdateEntity(entity: Entity): Promise<void> {
+    const existing = await this.getEntity(entity.id);
+    if (existing) {
+      await this.updateEntity(entity.id, entity);
+    } else {
+      await this.createEntity(entity);
     }
   }
 
@@ -278,6 +310,10 @@ export class KnowledgeGraphService extends EventEmitter {
 
     const result = await this.db.falkordbQuery(fullQuery, params);
     return result.map((row: any) => this.parseRelationshipFromGraph(row));
+  }
+
+  async queryRelationships(query: RelationshipQuery): Promise<GraphRelationship[]> {
+    return this.getRelationships(query);
   }
 
   // Graph search operations
@@ -673,7 +709,6 @@ export class KnowledgeGraphService extends EventEmitter {
     // Parse entity from FalkorDB result format
     // FalkorDB returns data in this format: { n: [ [key1, value1], [key2, value2], ... ] }
 
-
     if (graphNode && graphNode.n) {
       const properties: any = {};
 
@@ -696,8 +731,10 @@ export class KnowledgeGraphService extends EventEmitter {
             properties.type = value[0];
           }
         } else {
-          // Store other direct node properties
-          properties[key] = value;
+          // Store other direct node properties (but don't overwrite properties from nested props)
+          if (!properties[key]) {
+            properties[key] = value;
+          }
         }
       }
 
@@ -709,12 +746,15 @@ export class KnowledgeGraphService extends EventEmitter {
         properties.created = new Date(properties.created);
       }
 
-      // Parse metadata if it's a JSON string
-      if (properties.metadata && typeof properties.metadata === 'string') {
-        try {
-          properties.metadata = JSON.parse(properties.metadata);
-        } catch (e) {
-          // If parsing fails, keep as string
+      // Parse JSON strings back to their original types
+      const jsonFields = ['metadata', 'dependencies'];
+      for (const field of jsonFields) {
+        if (properties[field] && typeof properties[field] === 'string') {
+          try {
+            properties[field] = JSON.parse(properties[field]);
+          } catch (e) {
+            // If parsing fails, keep as string
+          }
         }
       }
 

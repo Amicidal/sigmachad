@@ -88,3 +88,4 @@ echo "📊 Health check: http://localhost:3000/health"
 echo "🔌 WebSocket: ws://localhost:3000/ws"
 echo ""
 echo "📖 For more information, see README.md"
+

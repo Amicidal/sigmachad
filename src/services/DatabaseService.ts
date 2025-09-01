@@ -131,7 +131,7 @@ export class DatabaseService {
           replacementValue = String(value);
         }
         
-        processedQuery = processedQuery.replace(new RegExp(`\\${placeholder}`, 'g'), replacementValue);
+        processedQuery = processedQuery.replace(new RegExp(placeholder.replace('$', '\\$'), 'g'), replacementValue);
       }
 
       const result = await this.falkordbClient.sendCommand(['GRAPH.QUERY', 'memento', processedQuery]);
@@ -184,10 +184,25 @@ export class DatabaseService {
       .map(([key, value]) => {
         if (typeof value === 'string') {
           return `${key}: '${value.replace(/'/g, "\\'")}'`;
+        } else if (Array.isArray(value)) {
+          // Handle arrays properly for Cypher
+          const arrayElements = value.map(item => {
+            if (typeof item === 'string') {
+              return `'${item.replace(/'/g, "\\'")}'`;
+            } else if (item === null || item === undefined) {
+              return 'null';
+            } else {
+              return String(item);
+            }
+          });
+          return `${key}: [${arrayElements.join(', ')}]`;
         } else if (value === null || value === undefined) {
           return `${key}: null`;
-        } else {
+        } else if (typeof value === 'boolean' || typeof value === 'number') {
           return `${key}: ${value}`;
+        } else {
+          // For other types, convert to string and quote
+          return `${key}: '${String(value).replace(/'/g, "\\'")}'`;
         }
       })
       .join(', ');
@@ -526,13 +541,40 @@ export class DatabaseService {
         });
       }
 
+      // Create documentation_embeddings collection
       if (!existingCollections.includes('documentation_embeddings')) {
-        await this.qdrantClient.createCollection('documentation_embeddings', {
-          vectors: {
-            size: 1536,
-            distance: 'Cosine',
-          },
-        });
+        try {
+          await this.qdrantClient.createCollection('documentation_embeddings', {
+            vectors: {
+              size: 1536,
+              distance: 'Cosine',
+            },
+          });
+        } catch (error: any) {
+          if (error.status === 409 || error.message?.includes('already exists')) {
+            console.log('📊 documentation_embeddings collection already exists, skipping creation');
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      // Create integration_test collection
+      if (!existingCollections.includes('integration_test')) {
+        try {
+          await this.qdrantClient.createCollection('integration_test', {
+            vectors: {
+              size: 1536,
+              distance: 'Cosine',
+            },
+          });
+        } catch (error: any) {
+          if (error.status === 409 || error.message?.includes('already exists')) {
+            console.log('📊 integration_test collection already exists, skipping creation');
+          } else {
+            throw error;
+          }
+        }
       }
 
       console.log('✅ Database schema setup complete');
@@ -775,22 +817,48 @@ export function getDatabaseService(config?: DatabaseConfig): DatabaseService {
 }
 
 export function createDatabaseConfig(): DatabaseConfig {
+  // Check if we're in test environment
+  const isTest = process.env.NODE_ENV === 'test';
+
   return {
     falkordb: {
-      url: process.env.FALKORDB_URL || 'redis://localhost:6379',
-      database: 0,
+      url: process.env.FALKORDB_URL || (isTest ? 'redis://localhost:6380' : 'redis://localhost:6379'),
+      database: isTest ? 1 : 0, // Use different database for tests
     },
     qdrant: {
-      url: process.env.QDRANT_URL || 'http://localhost:6333',
+      url: process.env.QDRANT_URL || (isTest ? 'http://localhost:6335' : 'http://localhost:6333'),
       apiKey: process.env.QDRANT_API_KEY,
     },
     postgresql: {
-      connectionString: process.env.DATABASE_URL || 'postgresql://memento:memento@localhost:5432/memento',
-      max: parseInt(process.env.DB_MAX_CONNECTIONS || '20'),
+      connectionString: process.env.DATABASE_URL ||
+        (isTest ? 'postgresql://memento_test:memento_test@localhost:5433/memento_test'
+                : 'postgresql://memento:memento@localhost:5432/memento'),
+      max: parseInt(process.env.DB_MAX_CONNECTIONS || (isTest ? '5' : '20')), // Fewer connections for tests
       idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '30000'),
     },
     redis: process.env.REDIS_URL ? {
       url: process.env.REDIS_URL,
-    } : undefined,
+    } : (isTest ? { url: 'redis://localhost:6381' } : undefined),
+  };
+}
+
+export function createTestDatabaseConfig(): DatabaseConfig {
+  return {
+    falkordb: {
+      url: 'redis://localhost:6380',
+      database: 1,
+    },
+    qdrant: {
+      url: 'http://localhost:6335',
+      apiKey: undefined,
+    },
+    postgresql: {
+      connectionString: 'postgresql://memento_test:memento_test@localhost:5433/memento_test',
+      max: 5,
+      idleTimeoutMillis: 30000,
+    },
+    redis: {
+      url: 'redis://localhost:6381',
+    },
   };
 }

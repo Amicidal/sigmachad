@@ -46,6 +46,12 @@ export interface Symbol extends CodebaseEntity {
   visibility: 'public' | 'private' | 'protected';
   isExported: boolean;
   isDeprecated: boolean;
+  location?: {
+    line: number;
+    column: number;
+    start: number;
+    end: number;
+  };
 }
 
 export interface FunctionSymbol extends Symbol {

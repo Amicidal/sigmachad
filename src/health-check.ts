@@ -7,7 +7,16 @@
 
 import { DatabaseService, createDatabaseConfig } from './services/DatabaseService.js';
 
-async function healthCheck(): Promise<void> {
+export interface HealthCheckResult {
+  healthy: boolean;
+  databases: Record<string, boolean | undefined>;
+  error?: string;
+}
+
+/**
+ * Perform health check on all system components
+ */
+export async function performHealthCheck(): Promise<HealthCheckResult> {
   try {
     const dbConfig = createDatabaseConfig();
     const dbService = new DatabaseService(dbConfig);
@@ -26,21 +35,42 @@ async function healthCheck(): Promise<void> {
       status === true || status === undefined
     );
 
-    if (allHealthy) {
-      console.log('✅ All systems healthy');
-      process.exit(0);
-    } else {
-      console.log('❌ System health check failed:', health);
-      process.exit(1);
-    }
+    return {
+      healthy: allHealthy,
+      databases: health,
+    };
   } catch (error) {
-    console.error('❌ Health check failed:', error);
+    return {
+      healthy: false,
+      databases: {},
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * CLI health check function
+ */
+export async function healthCheck(): Promise<void> {
+  const result = await performHealthCheck();
+
+  if (result.healthy) {
+    console.log('✅ All systems healthy');
+    process.exit(0);
+  } else {
+    console.log('❌ System health check failed:', result.databases);
+    if (result.error) {
+      console.error('Error:', result.error);
+    }
     process.exit(1);
   }
 }
 
-// Run health check
-healthCheck().catch((error) => {
-  console.error('💥 Health check error:', error);
-  process.exit(1);
-});
+// Run health check if this file is executed directly
+if (require.main === module) {
+  healthCheck().catch((error) => {
+    console.error('💥 Health check error:', error);
+    process.exit(1);
+  });
+}
+

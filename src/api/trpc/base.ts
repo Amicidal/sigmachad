@@ -32,4 +32,17 @@ export const t = initTRPC.context<TRPCContext>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
+// Create context helper for testing
+export const createTestContext = (opts: Partial<TRPCContext> = {}): TRPCContext => {
+  // This will be overridden by tests with real services
+  const defaultContext: TRPCContext = {
+    kgService: {} as any,
+    dbService: {} as any,
+    astParser: {} as any,
+    fileWatcher: {} as any,
+    ...opts,
+  };
+  return defaultContext;
+};
+
 

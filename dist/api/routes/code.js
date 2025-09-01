@@ -2,6 +2,7 @@
  * Code Operations Routes
  * Handles code change proposals, validation, and analysis
  */
+import { RelationshipType } from '../../models/relationships.js';
 import fs from 'fs/promises';
 export async function registerCodeRoutes(app, kgService, dbService, astParser) {
     // POST /api/code/propose-diff - Propose code changes and analyze impact
@@ -839,7 +840,7 @@ async function analyzeCodeDependencies(files, kgService) {
                 if (entity.type === 'symbol') {
                     const deps = await kgService.getRelationships({
                         fromEntityId: entity.id,
-                        type: ['CALLS', 'USES', 'IMPORTS']
+                        type: [RelationshipType.CALLS, RelationshipType.USES, RelationshipType.IMPORTS]
                     });
                     const depNames = deps.map(d => d.toEntityId);
                     dependencies.set(entity.id, new Set(depNames));

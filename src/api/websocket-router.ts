@@ -54,7 +54,7 @@ export class WebSocketRouter extends EventEmitter {
   constructor(
     private kgService: KnowledgeGraphService,
     private dbService: DatabaseService,
-    private fileWatcher: FileWatcher
+    private fileWatcher?: FileWatcher
   ) {
     super();
 
@@ -66,15 +66,17 @@ export class WebSocketRouter extends EventEmitter {
   }
 
   private bindEventHandlers(): void {
-    // File watcher events
-    this.fileWatcher.on('change', (change: FileChange) => {
-      this.broadcastEvent({
-        type: 'file_change',
-        timestamp: new Date().toISOString(),
-        data: change,
-        source: 'file_watcher'
+    // File watcher events (only if fileWatcher is available)
+    if (this.fileWatcher) {
+      this.fileWatcher.on('change', (change: FileChange) => {
+        this.broadcastEvent({
+          type: 'file_change',
+          timestamp: new Date().toISOString(),
+          data: change,
+          source: 'file_watcher'
+        });
       });
-    });
+    }
 
     // Graph service events (we'll add these to the service)
     this.kgService.on('entityCreated', (entity: any) => {

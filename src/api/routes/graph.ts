@@ -84,7 +84,7 @@ export async function registerGraphRoutes(
 ): Promise<void> {
 
   // POST /api/graph/search - Perform semantic and structural searches
-  app.post('/search', {
+  app.post('/graph/search', {
     schema: {
       body: {
         type: 'object',
@@ -178,7 +178,7 @@ export async function registerGraphRoutes(
   });
 
   // GET /api/graph/examples/{entityId} - Get usage examples and tests
-  app.get('/examples/:entityId', {
+  app.get('/graph/examples/:entityId', {
     schema: {
       params: {
         type: 'object',
@@ -212,7 +212,7 @@ export async function registerGraphRoutes(
   });
 
   // GET /api/graph/dependencies/{entityId} - Analyze dependency relationships
-  app.get('/dependencies/:entityId', {
+  app.get('/graph/dependencies/:entityId', {
     schema: {
       params: {
         type: 'object',
@@ -246,7 +246,7 @@ export async function registerGraphRoutes(
   });
 
   // GET /api/graph/entities - List all entities with filtering
-  app.get('/entities', {
+  app.get('/graph/entities', {
     schema: {
       querystring: {
         type: 'object',
@@ -307,7 +307,7 @@ export async function registerGraphRoutes(
   });
 
   // GET /api/graph/relationships - List relationships with filtering
-  app.get('/relationships', {
+  app.get('/graph/relationships', {
     schema: {
       querystring: {
         type: 'object',

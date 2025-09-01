@@ -91,36 +91,50 @@ export function validateSchema<T>(schema: ZodSchema<T>) {
 
 // Helper function to extract query schema from a Zod schema
 function extractQuerySchema(schema: ZodSchema<any>): ZodSchema<any> | null {
-  if (schema._def.typeName === 'ZodObject') {
-    const shape = schema._def.shape();
-    const queryFields: Record<string, any> = {};
+  try {
+    // In Zod v3, we need to check if it's an object schema differently
+    if (schema.constructor.name === 'ZodObject') {
+      const zodObjectSchema = schema as any;
+      const shape = zodObjectSchema._def.shape();
+      const queryFields: Record<string, any> = {};
 
-    for (const [key, fieldSchema] of Object.entries(shape)) {
-      if (key.includes('query') || key.includes('limit') || key.includes('offset') ||
-          key.includes('filter') || key.includes('sort') || key.includes('page')) {
-        queryFields[key] = fieldSchema;
+      for (const [key, fieldSchema] of Object.entries(shape)) {
+        if (key.includes('query') || key.includes('limit') || key.includes('offset') ||
+            key.includes('filter') || key.includes('sort') || key.includes('page')) {
+          queryFields[key] = fieldSchema;
+        }
       }
-    }
 
-    return Object.keys(queryFields).length > 0 ? z.object(queryFields) : null;
+      return Object.keys(queryFields).length > 0 ? z.object(queryFields) : null;
+    }
+  } catch (error) {
+    // If schema introspection fails, return null
+    console.warn('Could not extract query schema:', error);
   }
   return null;
 }
 
 // Helper function to extract params schema from a Zod schema
 function extractParamsSchema(schema: ZodSchema<any>): ZodSchema<any> | null {
-  if (schema._def.typeName === 'ZodObject') {
-    const shape = schema._def.shape();
-    const paramFields: Record<string, any> = {};
+  try {
+    // In Zod v3, we need to check if it's an object schema differently
+    if (schema.constructor.name === 'ZodObject') {
+      const zodObjectSchema = schema as any;
+      const shape = zodObjectSchema._def.shape();
+      const paramFields: Record<string, any> = {};
 
-    for (const [key, fieldSchema] of Object.entries(shape)) {
-      if (key.includes('Id') || key.includes('id') || key === 'entityId' ||
-          key === 'file' || key === 'name') {
-        paramFields[key] = fieldSchema;
+      for (const [key, fieldSchema] of Object.entries(shape)) {
+        if (key.includes('Id') || key.includes('id') || key === 'entityId' ||
+            key === 'file' || key === 'name') {
+          paramFields[key] = fieldSchema;
+        }
       }
-    }
 
-    return Object.keys(paramFields).length > 0 ? z.object(paramFields) : null;
+      return Object.keys(paramFields).length > 0 ? z.object(paramFields) : null;
+    }
+  } catch (error) {
+    // If schema introspection fails, return null
+    console.warn('Could not extract params schema:', error);
   }
   return null;
 }

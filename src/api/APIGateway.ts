@@ -63,15 +63,18 @@ export class APIGateway {
   private wsRouter: WebSocketRouter;
   private testEngine: TestEngine;
   private securityScanner: SecurityScanner;
+  private astParser: ASTParser;
+  private docParser: DocumentationParser;
+  private fileWatcher?: FileWatcher;
   private syncServices?: SynchronizationServices;
 
   constructor(
     private kgService: KnowledgeGraphService,
     private dbService: DatabaseService,
-    private fileWatcher: FileWatcher,
-    private astParser: ASTParser,
-    private docParser: DocumentationParser,
-    securityScanner: SecurityScanner,
+    fileWatcher?: FileWatcher,
+    astParser?: ASTParser,
+    docParser?: DocumentationParser,
+    securityScanner?: SecurityScanner,
     config: Partial<APIGatewayConfig> = {},
     syncServices?: SynchronizationServices
   ) {
@@ -101,8 +104,15 @@ export class APIGateway {
     // Initialize TestEngine
     this.testEngine = new TestEngine(this.kgService, this.dbService);
 
-    // Use the provided SecurityScanner
-    this.securityScanner = securityScanner;
+    // Use the provided SecurityScanner or create a basic one
+    this.securityScanner = securityScanner || new SecurityScanner(this.dbService, this.kgService);
+
+    // Assign fileWatcher to class property
+    this.fileWatcher = fileWatcher;
+
+    // Create default instances if not provided
+    this.astParser = astParser || new ASTParser();
+    this.docParser = docParser || new DocumentationParser(this.kgService, this.dbService);
 
     // Initialize MCP Router
     this.mcpRouter = new MCPRouter(this.kgService, this.dbService, this.astParser, this.testEngine, this.securityScanner);
@@ -228,7 +238,7 @@ export class APIGateway {
             app,
             this.kgService,
             this.dbService,
-            this.fileWatcher,
+            this.fileWatcher || new FileWatcher(),
             this.syncServices?.syncCoordinator,
             this.syncServices?.syncMonitor,
             this.syncServices?.conflictResolver,
@@ -251,7 +261,7 @@ export class APIGateway {
           kgService: this.kgService,
           dbService: this.dbService,
           astParser: this.astParser,
-          fileWatcher: this.fileWatcher,
+          fileWatcher: this.fileWatcher || new FileWatcher(),
         }),
       },
     });
@@ -370,6 +380,10 @@ export class APIGateway {
       console.error('Failed to start API Gateway:', error);
       throw error;
     }
+  }
+
+  getServer(): FastifyInstance {
+    return this.app;
   }
 
   async stop(): Promise<void> {

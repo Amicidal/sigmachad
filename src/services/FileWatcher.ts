@@ -5,9 +5,9 @@
 
 import chokidar, { FSWatcher } from 'chokidar';
 import { EventEmitter } from 'events';
-import path from 'path';
-import fs from 'fs/promises';
-import crypto from 'crypto';
+import * as path from 'path';
+import { promises as fs } from 'fs';
+import * as crypto from 'crypto';
 
 export interface FileChange {
   path: string;

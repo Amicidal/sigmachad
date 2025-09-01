@@ -341,6 +341,202 @@ export class TestEngine {
     }
   }
 
+  // Private parsing methods
+  private parseJUnitXML(content: string): TestSuiteResult {
+    // Basic JUnit XML parsing (simplified implementation)
+    // In a real implementation, this would use a proper XML parser
+    const results: TestResult[] = [];
+
+    // Extract test cases from XML-like structure
+    const testCaseRegex = /<testcase[^>]*classname="([^"]*)"[^>]*name="([^"]*)"[^>]*time="([^"]*)"[^>]*>/g;
+    let match;
+
+    while ((match = testCaseRegex.exec(content)) !== null) {
+      const [, className, testName, time] = match;
+
+      results.push({
+        testId: `${className}.${testName}`,
+        testSuite: className,
+        testName: testName,
+        status: 'passed',
+        duration: parseFloat(time) * 1000, // Convert to milliseconds
+        coverage: {
+          statements: 0,
+          branches: 0,
+          functions: 0,
+          lines: 0
+        }
+      });
+    }
+
+    return {
+      suiteName: 'JUnit Test Suite',
+      timestamp: new Date(),
+      results: results,
+      framework: 'junit',
+      totalTests: results.length,
+      passedTests: results.filter(r => r.status === 'passed').length,
+      failedTests: results.filter(r => r.status === 'failed').length,
+      skippedTests: results.filter(r => r.status === 'skipped').length,
+      duration: results.reduce((sum, r) => sum + r.duration, 0)
+    };
+  }
+
+  private parseJestJSON(content: string): TestSuiteResult {
+    try {
+      const data = JSON.parse(content);
+      const results: TestResult[] = [];
+
+      if (data.testResults) {
+        data.testResults.forEach((suite: any) => {
+          suite.testResults.forEach((test: any) => {
+            results.push({
+              testId: `${suite.testFilePath}:${test.title}`,
+              testSuite: suite.testFilePath,
+              testName: test.title,
+              status: test.status === 'passed' ? 'passed' : 'failed',
+              duration: test.duration || 0,
+              errorMessage: test.failureMessages ? test.failureMessages.join('\n') : undefined,
+              coverage: {
+                statements: 0,
+                branches: 0,
+                functions: 0,
+                lines: 0
+              }
+            });
+          });
+        });
+      }
+
+      return {
+        suiteName: 'Jest Test Suite',
+        timestamp: new Date(),
+        results: results,
+        framework: 'jest',
+        totalTests: results.length,
+        passedTests: results.filter(r => r.status === 'passed').length,
+        failedTests: results.filter(r => r.status === 'failed').length,
+        skippedTests: results.filter(r => r.status === 'skipped').length,
+        duration: results.reduce((sum, r) => sum + r.duration, 0)
+      };
+    } catch (error) {
+      console.error('Failed to parse Jest JSON:', error);
+      return {
+        suiteName: 'Jest Test Suite',
+        timestamp: new Date(),
+        results: [],
+        framework: 'jest',
+        totalTests: 0,
+        passedTests: 0,
+        failedTests: 0,
+        skippedTests: 0,
+        duration: 0
+      };
+    }
+  }
+
+  private parseMochaJSON(content: string): TestSuiteResult {
+    try {
+      const data = JSON.parse(content);
+      const results: TestResult[] = [];
+
+      if (data.stats && data.tests) {
+        data.tests.forEach((test: any) => {
+          results.push({
+            testId: test.fullTitle,
+            testSuite: test.parent || 'Mocha Suite',
+            testName: test.title,
+            status: test.state === 'passed' ? 'passed' : 'failed',
+            duration: test.duration || 0,
+            errorMessage: test.err ? test.err.message : undefined,
+            stackTrace: test.err ? test.err.stack : undefined,
+            coverage: {
+              statements: 0,
+              branches: 0,
+              functions: 0,
+              lines: 0
+            }
+          });
+        });
+      }
+
+      return {
+        suiteName: 'Mocha Test Suite',
+        timestamp: new Date(),
+        results: results,
+        framework: 'mocha',
+        totalTests: results.length,
+        passedTests: results.filter(r => r.status === 'passed').length,
+        failedTests: results.filter(r => r.status === 'failed').length,
+        skippedTests: results.filter(r => r.status === 'skipped').length,
+        duration: results.reduce((sum, r) => sum + r.duration, 0)
+      };
+    } catch (error) {
+      console.error('Failed to parse Mocha JSON:', error);
+      return {
+        suiteName: 'Mocha Test Suite',
+        timestamp: new Date(),
+        results: [],
+        framework: 'mocha',
+        totalTests: 0,
+        passedTests: 0,
+        failedTests: 0,
+        skippedTests: 0,
+        duration: 0
+      };
+    }
+  }
+
+  private parseVitestJSON(content: string): TestSuiteResult {
+    try {
+      const data = JSON.parse(content);
+      const results: TestResult[] = [];
+
+      if (data.testResults) {
+        data.testResults.forEach((result: any) => {
+          results.push({
+            testId: result.name,
+            testSuite: result.filepath || 'Vitest Suite',
+            testName: result.name,
+            status: result.status === 'pass' ? 'passed' : 'failed',
+            duration: result.duration || 0,
+            coverage: {
+              statements: 0,
+              branches: 0,
+              functions: 0,
+              lines: 0
+            }
+          });
+        });
+      }
+
+      return {
+        suiteName: 'Vitest Test Suite',
+        timestamp: new Date(),
+        results: results,
+        framework: 'vitest',
+        totalTests: results.length,
+        passedTests: results.filter(r => r.status === 'passed').length,
+        failedTests: results.filter(r => r.status === 'failed').length,
+        skippedTests: results.filter(r => r.status === 'skipped').length,
+        duration: results.reduce((sum, r) => sum + r.duration, 0)
+      };
+    } catch (error) {
+      console.error('Failed to parse Vitest JSON:', error);
+      return {
+        suiteName: 'Vitest Test Suite',
+        timestamp: new Date(),
+        results: [],
+        framework: 'vitest',
+        totalTests: 0,
+        passedTests: 0,
+        failedTests: 0,
+        skippedTests: 0,
+        duration: 0
+      };
+    }
+  }
+
   // Private helper methods
 
   private async findTestEntity(testId: string): Promise<Test | null> {

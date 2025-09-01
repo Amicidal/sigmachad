@@ -147,11 +147,30 @@ export class DatabaseService {
             if (typeof value === 'string') {
                 return `${key}: '${value.replace(/'/g, "\\'")}'`;
             }
+            else if (Array.isArray(value)) {
+                // Handle arrays properly for Cypher
+                const arrayElements = value.map(item => {
+                    if (typeof item === 'string') {
+                        return `'${item.replace(/'/g, "\\'")}'`;
+                    }
+                    else if (item === null || item === undefined) {
+                        return 'null';
+                    }
+                    else {
+                        return String(item);
+                    }
+                });
+                return `${key}: [${arrayElements.join(', ')}]`;
+            }
             else if (value === null || value === undefined) {
                 return `${key}: null`;
             }
-            else {
+            else if (typeof value === 'boolean' || typeof value === 'number') {
                 return `${key}: ${value}`;
+            }
+            else {
+                // For other types, convert to string and quote
+                return `${key}: '${String(value).replace(/'/g, "\\'")}'`;
             }
         })
             .join(', ');
