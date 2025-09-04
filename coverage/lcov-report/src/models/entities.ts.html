@@ -25,14 +25,14 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>24/24</span>
+                <span class='fraction'>16/16</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>6/6</span>
+                <span class='fraction'>16/16</span>
             </div>
         
             
@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>11/11</span>
+                <span class='fraction'>16/16</span>
             </div>
         
             
@@ -373,7 +373,12 @@
 <a name='L308'></a><a href='#L308'>308</a>
 <a name='L309'></a><a href='#L309'>309</a>
 <a name='L310'></a><a href='#L310'>310</a>
-<a name='L311'></a><a href='#L311'>311</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L311'></a><a href='#L311'>311</a>
+<a name='L312'></a><a href='#L312'>312</a>
+<a name='L313'></a><a href='#L313'>313</a>
+<a name='L314'></a><a href='#L314'>314</a>
+<a name='L315'></a><a href='#L315'>315</a>
+<a name='L316'></a><a href='#L316'>316</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -672,17 +677,22 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">9x</span>
 <span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">41x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">7x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
  * Knowledge Graph Entity Types for Memento
  * Based on the comprehensive knowledge graph design
@@ -982,17 +992,22 @@ export type Entity =
   | Vulnerability;
 &nbsp;
 // Type guards for entity discrimination
-export const isFile = (entity: Entity): entity is File =&gt; entity.type === 'file';
-export const isDirectory = (entity: Entity): entity is Directory =&gt; entity.type === 'directory';
-export const isSymbol = (entity: Entity): entity is Symbol =&gt; entity.type === 'symbol';
-export const isFunction = (entity: Entity): entity is FunctionSymbol =&gt;
+export const isFile = (entity: Entity | null | undefined): entity is File =&gt;
+  entity != null &amp;&amp; entity.type === 'file';
+export const isDirectory = (entity: Entity | null | undefined): entity is Directory =&gt;
+  entity != null &amp;&amp; entity.type === 'directory';
+export const isSymbol = (entity: Entity | null | undefined): entity is Symbol =&gt;
+  entity != null &amp;&amp; entity.type === 'symbol';
+export const isFunction = (entity: Entity | null | undefined): entity is FunctionSymbol =&gt;
   isSymbol(entity) &amp;&amp; entity.kind === 'function';
-export const isClass = (entity: Entity): entity is ClassSymbol =&gt;
+export const isClass = (entity: Entity | null | undefined): entity is ClassSymbol =&gt;
   isSymbol(entity) &amp;&amp; entity.kind === 'class';
-export const isInterface = (entity: Entity): entity is InterfaceSymbol =&gt;
+export const isInterface = (entity: Entity | null | undefined): entity is InterfaceSymbol =&gt;
   isSymbol(entity) &amp;&amp; entity.kind === 'interface';
-export const isTest = (entity: Entity): entity is Test =&gt; entity.type === 'test';
-export const isSpec = (entity: Entity): entity is Spec =&gt; entity.type === 'spec';
+export const isTest = (entity: Entity | null | undefined): entity is Test =&gt;
+  entity != null &amp;&amp; entity.type === 'test';
+export const isSpec = (entity: Entity | null | undefined): entity is Spec =&gt;
+  entity != null &amp;&amp; entity.type === 'spec';
 &nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->
@@ -1000,7 +1015,7 @@ export const isSpec = (entity: Entity): entity is Spec =&gt; entity.type === 'sp
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-09-01T03:03:17.040Z
+                at 2025-09-04T00:53:04.902Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

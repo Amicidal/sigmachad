@@ -91,4 +91,5 @@ export declare const publicProcedure: import("@trpc/server").ProcedureBuilder<{
     _output_out: typeof import("@trpc/server").unsetMarker;
     _meta: object;
 }>;
+export declare const createTestContext: (opts?: Partial<TRPCContext>) => TRPCContext;
 //# sourceMappingURL=base.d.ts.map

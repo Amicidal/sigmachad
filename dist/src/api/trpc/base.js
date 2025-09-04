@@ -17,4 +17,16 @@ export const t = initTRPC.context().create({
 // Export router and publicProcedure for use in route files
 export const router = t.router;
 export const publicProcedure = t.procedure;
+// Create context helper for testing
+export const createTestContext = (opts = {}) => {
+    // This will be overridden by tests with real services
+    const defaultContext = {
+        kgService: {},
+        dbService: {},
+        astParser: {},
+        fileWatcher: {},
+        ...opts,
+    };
+    return defaultContext;
+};
 //# sourceMappingURL=base.js.map

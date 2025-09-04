@@ -499,7 +499,7 @@ This implementation plan provides a structured approach to building the Memento 
 - Core services implemented
 
 **Implementation Steps:**
-1. Set up Jest testing framework
+1. Set up Vitest testing framework
 2. Create unit tests for all services
 3. Implement mock services for testing
 4. Add test utilities and helpers
@@ -507,7 +507,7 @@ This implementation plan provides a structured approach to building the Memento 
 
 
 **Validation Criteria:**
-- [ ] Jest testing framework set up 
+- [ ] Vitest testing framework set up 
 - [ ] Unit tests created for all services 
 - [ ] Mock services implemented 
 - [ ] All unit tests pass 

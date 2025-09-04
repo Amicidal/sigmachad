@@ -3,9 +3,10 @@
  * Health Check Script for Memento
  * Used by Docker health checks and monitoring systems
  */
+import { IDatabaseHealthCheck } from './services/database/interfaces.js';
 export interface HealthCheckResult {
     healthy: boolean;
-    databases: Record<string, boolean | undefined>;
+    databases: IDatabaseHealthCheck;
     error?: string;
 }
 /**

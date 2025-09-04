@@ -666,6 +666,10 @@ export class KnowledgeGraphService extends EventEmitter {
                         // Store the relationship type
                         properties.type = value;
                     }
+                    else if (key !== 'src_node' && key !== 'dest_node') {
+                        // Store other direct properties (like id, created, etc.)
+                        properties[key] = value;
+                    }
                     // Skip src_node and dest_node as we use fromId/toId from top level
                 }
                 // Use the string IDs from the top level instead of numeric node IDs

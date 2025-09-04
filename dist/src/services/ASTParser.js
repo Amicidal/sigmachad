@@ -70,11 +70,11 @@ export class ASTParser {
         }
     }
     async parseFileIncremental(filePath) {
+        const absolutePath = path.resolve(filePath);
+        const cachedInfo = this.fileCache.get(absolutePath);
         try {
-            const absolutePath = path.resolve(filePath);
             const content = await fs.readFile(absolutePath, 'utf-8');
             const currentHash = crypto.createHash('sha256').update(content).digest('hex');
-            const cachedInfo = this.fileCache.get(absolutePath);
             // If file hasn't changed, return empty incremental result
             if (cachedInfo && cachedInfo.hash === currentHash) {
                 return {
@@ -116,6 +116,28 @@ export class ASTParser {
             return incrementalResult;
         }
         catch (error) {
+            // Handle file deletion or other file access errors
+            if (cachedInfo && error.code === 'ENOENT') {
+                // File has been deleted, return incremental result with removed entities
+                this.fileCache.delete(absolutePath);
+                return {
+                    entities: [],
+                    relationships: [],
+                    errors: [{
+                            file: filePath,
+                            line: 0,
+                            column: 0,
+                            message: 'File has been deleted',
+                            severity: 'warning',
+                        }],
+                    isIncremental: true,
+                    addedEntities: [],
+                    removedEntities: cachedInfo.entities,
+                    updatedEntities: [],
+                    addedRelationships: [],
+                    removedRelationships: cachedInfo.relationships,
+                };
+            }
             console.error(`Error incremental parsing file ${filePath}:`, error);
             return {
                 entities: [],

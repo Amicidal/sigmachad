@@ -777,20 +777,23 @@ export class KnowledgeGraphService extends EventEmitter {
       if (Array.isArray(relData)) {
         const properties: any = {};
 
-        for (const [key, value] of relData) {
-          if (key === 'properties' && Array.isArray(value)) {
-            // Parse nested properties
-            const nestedProps: any = {};
-            for (const [propKey, propValue] of value) {
-              nestedProps[propKey] = propValue;
-            }
-            Object.assign(properties, nestedProps);
-          } else if (key === 'type') {
-            // Store the relationship type
-            properties.type = value;
+              for (const [key, value] of relData) {
+        if (key === 'properties' && Array.isArray(value)) {
+          // Parse nested properties
+          const nestedProps: any = {};
+          for (const [propKey, propValue] of value) {
+            nestedProps[propKey] = propValue;
           }
-          // Skip src_node and dest_node as we use fromId/toId from top level
+          Object.assign(properties, nestedProps);
+        } else if (key === 'type') {
+          // Store the relationship type
+          properties.type = value;
+        } else if (key !== 'src_node' && key !== 'dest_node') {
+          // Store other direct properties (like id, created, etc.)
+          properties[key] = value;
         }
+        // Skip src_node and dest_node as we use fromId/toId from top level
+      }
 
         // Use the string IDs from the top level instead of numeric node IDs
         properties.fromEntityId = graphResult.fromId;

@@ -22,15 +22,17 @@ export class WebSocketRouter extends EventEmitter {
         this.bindEventHandlers();
     }
     bindEventHandlers() {
-        // File watcher events
-        this.fileWatcher.on('change', (change) => {
-            this.broadcastEvent({
-                type: 'file_change',
-                timestamp: new Date().toISOString(),
-                data: change,
-                source: 'file_watcher'
+        // File watcher events (only if fileWatcher is available)
+        if (this.fileWatcher) {
+            this.fileWatcher.on('change', (change) => {
+                this.broadcastEvent({
+                    type: 'file_change',
+                    timestamp: new Date().toISOString(),
+                    data: change,
+                    source: 'file_watcher'
+                });
             });
-        });
+        }
         // Graph service events (we'll add these to the service)
         this.kgService.on('entityCreated', (entity) => {
             this.broadcastEvent({

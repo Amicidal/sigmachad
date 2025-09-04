@@ -5,20 +5,28 @@
 
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
+
+// Global declarations for Node.js environment
+const process = globalThis.process;
+const console = globalThis.console;
 import { DatabaseService } from '../../services/DatabaseService.js';
 import { FileWatcher } from '../../services/FileWatcher.js';
 import { SynchronizationCoordinator } from '../../services/SynchronizationCoordinator.js';
 import { SynchronizationMonitoring } from '../../services/SynchronizationMonitoring.js';
 import { ConflictResolution } from '../../services/ConflictResolution.js';
 import { RollbackCapabilities } from '../../services/RollbackCapabilities.js';
+import { BackupService } from '../../services/BackupService.js';
+import { LoggingService } from '../../services/LoggingService.js';
+import { MaintenanceService } from '../../services/MaintenanceService.js';
+import { ConfigurationService } from '../../services/ConfigurationService.js';
 
 interface SystemHealth {
   overall: 'healthy' | 'degraded' | 'unhealthy';
   components: {
-    graphDatabase: any;
-    vectorDatabase: any;
-    fileWatcher: any;
-    apiServer: any;
+    graphDatabase: unknown;
+    vectorDatabase: unknown;
+    fileWatcher: { status: string };
+    apiServer: { status: string };
   };
   metrics: {
     uptime: number;
@@ -83,7 +91,11 @@ export async function registerAdminRoutes(
   syncCoordinator?: SynchronizationCoordinator,
   syncMonitor?: SynchronizationMonitoring,
   conflictResolver?: ConflictResolution,
-  rollbackCapabilities?: RollbackCapabilities
+  rollbackCapabilities?: RollbackCapabilities,
+  backupService?: BackupService,
+  loggingService?: LoggingService,
+  maintenanceService?: MaintenanceService,
+  configurationService?: ConfigurationService
 ): Promise<void> {
 
   // GET /api/v1/admin-health - Get system health (also available at root level)
@@ -95,8 +107,8 @@ export async function registerAdminRoutes(
       const systemHealth: SystemHealth = {
         overall: isHealthy ? 'healthy' : 'unhealthy',
         components: {
-          graphDatabase: health.falkordb || { status: 'unknown' },
-          vectorDatabase: health.qdrant || { status: 'unknown' },
+          graphDatabase: health.falkordb || { status: 'unknown', details: {} },
+          vectorDatabase: health.qdrant || { status: 'unknown', details: {} },
           fileWatcher: { status: 'unknown' },
           apiServer: { status: 'healthy' }
         },
@@ -128,7 +140,7 @@ export async function registerAdminRoutes(
         } else {
           systemHealth.components.fileWatcher.status = 'stopped';
         }
-      } catch (error) {
+      } catch {
         systemHealth.components.fileWatcher.status = 'error';
       }
 
@@ -149,7 +161,7 @@ export async function registerAdminRoutes(
         success: true,
         data: systemHealth
       });
-    } catch (error) {
+    } catch {
       reply.status(503).send({
         success: false,
         error: {
@@ -239,7 +251,7 @@ export async function registerAdminRoutes(
       const options: SyncOptions = request.body as SyncOptions;
 
       if (!syncCoordinator) {
-        reply.status(503).send({
+        reply.status(404).send({
           success: false,
           error: {
             code: 'SYNC_UNAVAILABLE',
@@ -264,7 +276,7 @@ export async function registerAdminRoutes(
         success: true,
         data: result
       });
-    } catch (error) {
+    } catch {
       reply.status(500).send({
         success: false,
         error: {
@@ -306,8 +318,8 @@ export async function registerAdminRoutes(
       // Find most active domains (simplified - based on file paths)
       const domainCounts = new Map<string, number>();
       for (const entity of entitiesResult.entities) {
-        if (entity.type === 'file' && (entity as any).path) {
-          const path = (entity as any).path;
+        if (entity.type === 'file' && 'path' in entity && typeof entity.path === 'string') {
+          const path = entity.path;
           const domain = path.split('/')[1] || 'root'; // Extract first directory
           domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
         }
@@ -388,38 +400,50 @@ export async function registerAdminRoutes(
           type: { type: 'string', enum: ['full', 'incremental'], default: 'full' },
           includeData: { type: 'boolean', default: true },
           includeConfig: { type: 'boolean', default: true },
-          compression: { type: 'boolean', default: true }
+          compression: { type: 'boolean', default: true },
+          destination: { type: 'string' }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { type, includeData, includeConfig, compression } = request.body as {
-        type?: string;
+      if (!backupService) {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Backup service not available'
+          }
+        });
+        return;
+      }
+
+      const options = request.body as {
+        type?: 'full' | 'incremental';
         includeData?: boolean;
         includeConfig?: boolean;
         compression?: boolean;
+        destination?: string;
       };
 
-      // TODO: Create system backup
-      const backup = {
-        backupId: `backup_${Date.now()}`,
-        type: type || 'full',
-        status: 'in_progress',
-        size: 0,
-        created: new Date().toISOString()
-      };
+      const result = await backupService.createBackup({
+        type: options.type || 'full',
+        includeData: options.includeData ?? true,
+        includeConfig: options.includeConfig ?? true,
+        compression: options.compression ?? true,
+        destination: options.destination
+      });
 
       reply.send({
         success: true,
-        data: backup
+        data: result
       });
     } catch (error) {
       reply.status(500).send({
         success: false,
         error: {
           code: 'BACKUP_FAILED',
-          message: 'Failed to create backup'
+          message: error instanceof Error ? error.message : 'Failed to create backup'
         }
       });
     }
@@ -439,29 +463,36 @@ export async function registerAdminRoutes(
     }
   }, async (request, reply) => {
     try {
+      if (!backupService) {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Backup service not available'
+          }
+        });
+        return;
+      }
+
       const { backupId, dryRun } = request.body as {
         backupId: string;
         dryRun?: boolean;
       };
 
-      // TODO: Restore from backup
-      const restore = {
-        backupId,
-        status: dryRun ? 'dry_run_completed' : 'in_progress',
-        changes: [],
-        estimatedDuration: '10-15 minutes'
-      };
+      const result = await backupService.restoreBackup(backupId, {
+        dryRun: dryRun ?? true
+      });
 
       reply.send({
         success: true,
-        data: restore
+        data: result
       });
     } catch (error) {
       reply.status(500).send({
         success: false,
         error: {
           code: 'RESTORE_FAILED',
-          message: 'Failed to restore from backup'
+          message: error instanceof Error ? error.message : 'Failed to restore from backup'
         }
       });
     }
@@ -475,33 +506,60 @@ export async function registerAdminRoutes(
         properties: {
           level: { type: 'string', enum: ['error', 'warn', 'info', 'debug'] },
           since: { type: 'string', format: 'date-time' },
+          until: { type: 'string', format: 'date-time' },
           limit: { type: 'number', default: 100 },
-          component: { type: 'string' }
+          component: { type: 'string' },
+          search: { type: 'string' }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { level, since, limit, component } = request.query as {
+      if (!loggingService) {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Logging service not available'
+          }
+        });
+        return;
+      }
+
+      const { level, since, until, limit, component, search } = request.query as {
         level?: string;
         since?: string;
+        until?: string;
         limit?: number;
         component?: string;
+        search?: string;
       };
 
-      // TODO: Retrieve system logs
-      const logs: any[] = [];
+      const query = {
+        level,
+        component,
+        since: since ? new Date(since) : undefined,
+        until: until ? new Date(until) : undefined,
+        limit,
+        search
+      };
+
+      const logs = await loggingService.queryLogs(query);
 
       reply.send({
         success: true,
-        data: logs
+        data: logs,
+        metadata: {
+          count: logs.length,
+          query
+        }
       });
     } catch (error) {
       reply.status(500).send({
         success: false,
         error: {
           code: 'LOGS_FAILED',
-          message: 'Failed to retrieve system logs'
+          message: error instanceof Error ? error.message : 'Failed to retrieve system logs'
         }
       });
     }
@@ -527,30 +585,52 @@ export async function registerAdminRoutes(
     }
   }, async (request, reply) => {
     try {
+      if (!maintenanceService) {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Maintenance service not available'
+          }
+        });
+        return;
+      }
+
       const { tasks, schedule } = request.body as {
         tasks: string[];
         schedule?: string;
       };
 
-      // TODO: Run maintenance tasks
-      const maintenance = {
-        tasks,
-        schedule: schedule || 'immediate',
-        status: 'running',
-        progress: 0,
-        started: new Date().toISOString()
-      };
+      const results = [];
+
+      for (const taskType of tasks) {
+        try {
+          const result = await maintenanceService.runMaintenanceTask(taskType);
+          results.push(result);
+        } catch (error) {
+          results.push({
+            taskId: `${taskType}_${Date.now()}`,
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
 
       reply.send({
         success: true,
-        data: maintenance
+        data: {
+          tasks: results,
+          schedule: schedule || 'immediate',
+          status: 'completed',
+          completedAt: new Date().toISOString()
+        }
       });
     } catch (error) {
       reply.status(500).send({
         success: false,
         error: {
           code: 'MAINTENANCE_FAILED',
-          message: 'Failed to run maintenance tasks'
+          message: error instanceof Error ? error.message : 'Failed to run maintenance tasks'
         }
       });
     }
@@ -559,22 +639,18 @@ export async function registerAdminRoutes(
   // GET /api/admin/config - Get system configuration
   app.get('/config', async (request, reply) => {
     try {
-      // TODO: Get system configuration (without sensitive data)
-      const config = {
-        version: '0.1.0',
-        environment: process.env.NODE_ENV || 'development',
-        databases: {
-          falkordb: 'configured',
-          qdrant: 'configured',
-          postgres: 'configured'
-        },
-        features: {
-          websocket: true,
-          graphSearch: true,
-          vectorSearch: true,
-          securityScanning: false
-        }
-      };
+      if (!configurationService) {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Configuration service not available'
+          }
+        });
+        return;
+      }
+
+      const config = await configurationService.getSystemConfiguration();
 
       reply.send({
         success: true,
@@ -585,7 +661,62 @@ export async function registerAdminRoutes(
         success: false,
         error: {
           code: 'CONFIG_FAILED',
-          message: 'Failed to retrieve system configuration'
+          message: error instanceof Error ? error.message : 'Failed to retrieve system configuration'
+        }
+      });
+    }
+  });
+
+  // PUT /api/admin/config - Update system configuration
+  app.put('/config', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          performance: {
+            type: 'object',
+            properties: {
+              maxConcurrentSync: { type: 'number' },
+              cacheSize: { type: 'number' },
+              requestTimeout: { type: 'number' }
+            }
+          },
+          security: {
+            type: 'object',
+            properties: {
+              rateLimiting: { type: 'boolean' }
+            }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      if (!configurationService) {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Configuration service not available'
+          }
+        });
+        return;
+      }
+
+      const updates = request.body as Record<string, unknown>;
+
+      await configurationService.updateConfiguration(updates);
+
+      reply.send({
+        success: true,
+        message: 'Configuration updated successfully'
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'CONFIG_UPDATE_FAILED',
+          message: error instanceof Error ? error.message : 'Failed to update system configuration'
         }
       });
     }

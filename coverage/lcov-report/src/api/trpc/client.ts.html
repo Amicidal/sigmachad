@@ -25,28 +25,28 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/3</span>
+                <span class='fraction'>0/15</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/0</span>
+                <span class='fraction'>1/1</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/2</span>
+                <span class='fraction'>1/1</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/3</span>
+                <span class='fraction'>0/15</span>
             </div>
         
             
@@ -106,24 +106,24 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -144,24 +144,24 @@
  * Type-safe client for interacting with the tRPC API
  */
 &nbsp;
-import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';
-import superjson from 'superjson';
+<span class="cstat-no" title="statement not covered" >import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';</span>
+<span class="cstat-no" title="statement not covered" >import superjson from 'superjson';</span>
 import type { AppRouter } from './router.js';
 &nbsp;
-export const createTRPCClient = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(b</span>aseUrl: string) =&gt; {</span>
+<span class="cstat-no" title="statement not covered" >export const createTRPCClient = (baseUrl: string) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  return createTRPCProxyClient&lt;AppRouter&gt;({</span>
-    transformer: superjson,
-    links: [
-      httpBatchLink({
-        url: `${baseUrl}/api/trpc`,
+<span class="cstat-no" title="statement not covered" >    transformer: superjson,</span>
+<span class="cstat-no" title="statement not covered" >    links: [</span>
+<span class="cstat-no" title="statement not covered" >      httpBatchLink({</span>
+<span class="cstat-no" title="statement not covered" >        url: `${baseUrl}/api/trpc`,</span>
         // You can add authentication headers here
-        headers: <span class="fstat-no" title="function not covered" >() =</span>&gt; (<span class="cstat-no" title="statement not covered" >{</span>
-          'Content-Type': 'application/json',
-        }),
-      }),
-    ],
-  });
-};
+<span class="cstat-no" title="statement not covered" >        headers: () =&gt; ({</span>
+<span class="cstat-no" title="statement not covered" >          'Content-Type': 'application/json',</span>
+<span class="cstat-no" title="statement not covered" >        }),</span>
+<span class="cstat-no" title="statement not covered" >      }),</span>
+<span class="cstat-no" title="statement not covered" >    ],</span>
+<span class="cstat-no" title="statement not covered" >  });</span>
+<span class="cstat-no" title="statement not covered" >};</span>
 &nbsp;
 // Usage example:
 /*
@@ -184,7 +184,7 @@ const suggestions = await client.code.analyze.query({
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-09-01T03:03:17.040Z
+                at 2025-09-04T00:53:04.902Z
             </div>
         <script src="../../../prettify.js"></script>
         <script>

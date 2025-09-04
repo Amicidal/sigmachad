@@ -41,6 +41,7 @@ export declare class FileWatcher extends EventEmitter {
     private initializeFileHashes;
     private scanDirectory;
     private shouldIgnore;
+    private escapeRegex;
     getWatchedPaths(): string[];
     getQueueLength(): number;
     isProcessing(): boolean;

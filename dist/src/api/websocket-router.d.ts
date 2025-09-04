@@ -41,12 +41,12 @@ export interface WebSocketEvent {
 export declare class WebSocketRouter extends EventEmitter {
     private kgService;
     private dbService;
-    private fileWatcher;
+    private fileWatcher?;
     private connections;
     private subscriptions;
     private heartbeatInterval?;
     private cleanupInterval?;
-    constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher: FileWatcher);
+    constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher?: FileWatcher | undefined);
     private bindEventHandlers;
     registerRoutes(app: FastifyInstance): void;
     private handleConnection;

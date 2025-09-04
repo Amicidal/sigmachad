@@ -1,9 +1,9 @@
 /**
  * API Gateway for Memento
- * Main entry point for all API interactions (REST, WebSocket, GraphQL)
+ * Main entry point for all API interactions (REST, WebSocket, MCP)
  */
 
-import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import Fastify, { FastifyInstance } from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
@@ -19,6 +19,10 @@ import { SynchronizationMonitoring } from '../services/SynchronizationMonitoring
 import { RollbackCapabilities } from '../services/RollbackCapabilities.js';
 import { TestEngine } from '../services/TestEngine.js';
 import { SecurityScanner } from '../services/SecurityScanner.js';
+import { BackupService } from '../services/BackupService.js';
+import { LoggingService } from '../services/LoggingService.js';
+import { MaintenanceService } from '../services/MaintenanceService.js';
+import { ConfigurationService } from '../services/ConfigurationService.js';
 
 // Import route handlers
 import { registerDesignRoutes } from './routes/design.js';
@@ -67,6 +71,10 @@ export class APIGateway {
   private docParser: DocumentationParser;
   private fileWatcher?: FileWatcher;
   private syncServices?: SynchronizationServices;
+  private backupService?: BackupService;
+  private loggingService?: LoggingService;
+  private maintenanceService?: MaintenanceService;
+  private configurationService?: ConfigurationService;
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -79,7 +87,7 @@ export class APIGateway {
     syncServices?: SynchronizationServices
   ) {
     this.config = {
-      port: config.port || 3000,
+      port: config.port !== undefined ? config.port : 3000,
       host: config.host || '0.0.0.0',
       cors: {
         origin: config.cors?.origin || ['http://localhost:3000', 'http://localhost:5173'],
@@ -119,6 +127,12 @@ export class APIGateway {
 
     // Initialize WebSocket Router
     this.wsRouter = new WebSocketRouter(this.kgService, this.dbService, this.fileWatcher);
+
+    // Initialize Admin Services
+    this.backupService = new BackupService(this.dbService, this.dbService.getConfig());
+    this.loggingService = new LoggingService('./logs/memento.log');
+    this.maintenanceService = new MaintenanceService(this.dbService, this.kgService);
+    this.configurationService = new ConfigurationService(this.dbService, this.syncServices?.syncCoordinator);
 
     this.setupMiddleware();
     this.setupRoutes();
@@ -242,7 +256,11 @@ export class APIGateway {
             this.syncServices?.syncCoordinator,
             this.syncServices?.syncMonitor,
             this.syncServices?.conflictResolver,
-            this.syncServices?.rollbackCapabilities
+            this.syncServices?.rollbackCapabilities,
+            this.backupService,
+            this.loggingService,
+            this.maintenanceService,
+            this.configurationService
           );
           console.log('✅ All route modules registered successfully');
         } catch (error) {
@@ -268,14 +286,6 @@ export class APIGateway {
 
     // Register WebSocket routes
     this.wsRouter.registerRoutes(this.app);
-
-    // GraphQL endpoint (placeholder for future implementation)
-    this.app.get('/graphql', async (request, reply) => {
-      reply.send({
-        message: 'GraphQL endpoint not yet implemented',
-        status: 'coming_soon',
-      });
-    });
 
     // Register MCP routes (for Claude integration)
     this.mcpRouter.registerRoutes(this.app);
@@ -369,6 +379,12 @@ export class APIGateway {
         port: this.config.port,
         host: this.config.host,
       });
+
+      // Update config with the actual assigned port (important when port was 0)
+      const address = this.app.server?.address();
+      if (address && typeof address === 'object' && address.port) {
+        this.config.port = address.port;
+      }
 
       console.log(`🚀 Memento API Gateway listening on http://${this.config.host}:${this.config.port}`);
       console.log(`📊 Health check available at http://${this.config.host}:${this.config.port}/health`);

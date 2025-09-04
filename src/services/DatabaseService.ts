@@ -1,106 +1,284 @@
 /**
  * Database Service for Memento
- * Manages connections to FalkorDB, Qdrant, and PostgreSQL
- * 
+ * Orchestrates specialized database services for FalkorDB, Qdrant, PostgreSQL, and Redis
  */
 
-import { createClient as createRedisClient, RedisClientType } from 'redis';
 import { QdrantClient } from '@qdrant/js-client-rest';
-import { Pool } from 'pg';
+import {
+  DatabaseConfig,
+  IFalkorDBService,
+  IQdrantService,
+  IPostgreSQLService,
+  IRedisService,
+  IDatabaseHealthCheck
+} from './database';
+import { FalkorDBService } from './database/FalkorDBService';
+import { QdrantService } from './database/QdrantService';
+import { PostgreSQLService } from './database/PostgreSQLService';
+import { RedisService } from './database/RedisService';
 
-export interface DatabaseConfig {
-  falkordb: {
-    url: string;
-    database?: number;
-  };
-  qdrant: {
-    url: string;
-    apiKey?: string;
-  };
-  postgresql: {
-    connectionString: string;
-    max?: number;
-    idleTimeoutMillis?: number;
-  };
-  redis?: {
-    url: string;
-  };
+// Type definitions for better type safety
+export interface DatabaseQueryResult {
+  rows?: any[];
+  rowCount?: number;
+  fields?: any[];
 }
 
-export class DatabaseService {
-  private falkordbClient!: RedisClientType;
-  private qdrantClient!: QdrantClient;
-  private postgresPool!: Pool;
-  private redisClient?: RedisClientType;
-  private initialized = false;
+export interface FalkorDBQueryResult {
+  headers?: any[];
+  data?: any[];
+  statistics?: any;
+}
 
-  constructor(private config: DatabaseConfig) {}
+export interface TestSuiteResult {
+  id?: string;
+  name: string;
+  status: 'passed' | 'failed' | 'skipped';
+  duration: number;
+  timestamp: Date;
+  testResults: TestResult[];
+}
+
+export interface TestResult {
+  id?: string;
+  name: string;
+  status: 'passed' | 'failed' | 'skipped';
+  duration: number;
+  error?: string;
+}
+
+export interface FlakyTestAnalysis {
+  testId: string;
+  testName: string;
+  failureCount: number;
+  totalRuns: number;
+  lastFailure: Date;
+  failurePatterns: string[];
+}
+
+export type DatabaseServiceDeps = {
+  falkorFactory?: (cfg: DatabaseConfig['falkordb']) => IFalkorDBService;
+  qdrantFactory?: (cfg: DatabaseConfig['qdrant']) => IQdrantService;
+  postgresFactory?: (cfg: DatabaseConfig['postgresql']) => IPostgreSQLService;
+  redisFactory?: (cfg: NonNullable<DatabaseConfig['redis']>) => IRedisService;
+};
+
+export class DatabaseService {
+  private falkorDBService!: IFalkorDBService;
+  private qdrantService!: IQdrantService;
+  private postgresqlService!: IPostgreSQLService;
+  private redisService?: IRedisService;
+  private initialized = false;
+  private initializing = false;
+  private initializationPromise?: Promise<void>;
+
+  // Optional factories for dependency injection (testing and customization)
+  private readonly falkorFactory?: DatabaseServiceDeps['falkorFactory'];
+  private readonly qdrantFactory?: DatabaseServiceDeps['qdrantFactory'];
+  private readonly postgresFactory?: DatabaseServiceDeps['postgresFactory'];
+  private readonly redisFactory?: DatabaseServiceDeps['redisFactory'];
+
+  constructor(private config: DatabaseConfig, deps: DatabaseServiceDeps = {}) {
+    this.falkorFactory = deps.falkorFactory;
+    this.qdrantFactory = deps.qdrantFactory;
+    this.postgresFactory = deps.postgresFactory;
+    this.redisFactory = deps.redisFactory;
+  }
+
+  getConfig(): DatabaseConfig {
+    return this.config;
+  }
+
+  getFalkorDBService(): IFalkorDBService {
+    if (!this.initialized) {
+      throw new Error('Database not initialized');
+    }
+    return this.falkorDBService;
+  }
+
+  getQdrantService(): IQdrantService {
+    if (!this.initialized) {
+      throw new Error('Database not initialized');
+    }
+    return this.qdrantService;
+  }
+
+  getPostgreSQLService(): IPostgreSQLService {
+    if (!this.initialized) {
+      throw new Error('Database not initialized');
+    }
+    return this.postgresqlService;
+  }
+
+  getRedisService(): IRedisService | undefined {
+    if (!this.initialized) {
+      throw new Error('Database not initialized');
+    }
+    return this.redisService;
+  }
+
+  // Direct client/pool getters for convenience
+  getFalkorDBClient(): any {
+    if (!this.initialized) {
+      return undefined;
+    }
+    return this.falkorDBService.getClient();
+  }
+
+  getQdrantClient(): QdrantClient {
+    if (!this.initialized) {
+      return undefined as any;
+    }
+    return this.qdrantService.getClient();
+  }
+
+  getPostgresPool(): any {
+    if (!this.initialized) {
+      return undefined;
+    }
+    return this.postgresqlService.getPool();
+  }
 
   async initialize(): Promise<void> {
     if (this.initialized) {
       return;
     }
 
+    // Prevent concurrent initialization
+    if (this.initializing) {
+      if (this.initializationPromise) {
+        return this.initializationPromise;
+      }
+      throw new Error('Initialization already in progress');
+    }
+
+    // Create the promise first, then set the flag
+    this.initializationPromise = this._initialize();
+    this.initializing = true;
+
     try {
-      // Initialize FalkorDB (Redis-based)
-      this.falkordbClient = createRedisClient({
-        url: this.config.falkordb.url,
-        database: this.config.falkordb.database || 0,
-      });
+      await this.initializationPromise;
+    } finally {
+      this.initializing = false;
+      this.initializationPromise = undefined;
+    }
+  }
 
-      await this.falkordbClient.connect();
+  private async _initialize(): Promise<void> {
+    // Track initialized services for cleanup on failure
+    const initializedServices: Array<{ service: IFalkorDBService | IQdrantService | IPostgreSQLService | IRedisService; close: () => Promise<void> }> = [];
 
-      // Initialize Qdrant
-      this.qdrantClient = new QdrantClient({
-        url: this.config.qdrant.url,
-        apiKey: this.config.qdrant.apiKey,
-      });
+    try {
+      // Initialize specialized services
+      this.falkorDBService = this.falkorFactory
+        ? this.falkorFactory(this.config.falkordb)
+        : new FalkorDBService(this.config.falkordb);
+      this.qdrantService = this.qdrantFactory
+        ? this.qdrantFactory(this.config.qdrant)
+        : new QdrantService(this.config.qdrant);
+      this.postgresqlService = this.postgresFactory
+        ? this.postgresFactory(this.config.postgresql)
+        : new PostgreSQLService(this.config.postgresql);
 
-      // Test Qdrant connection
-      await this.qdrantClient.getCollections();
+      // Initialize each service and track successful initializations
+      await this.falkorDBService.initialize();
+      initializedServices.push({ service: this.falkorDBService, close: () => this.falkorDBService.close() });
 
-      // Initialize PostgreSQL
-      this.postgresPool = new Pool({
-        connectionString: this.config.postgresql.connectionString,
-        max: this.config.postgresql.max || 20,
-        idleTimeoutMillis: this.config.postgresql.idleTimeoutMillis || 30000,
-      });
+      await this.qdrantService.initialize();
+      initializedServices.push({ service: this.qdrantService, close: () => this.qdrantService.close() });
 
-      // Test PostgreSQL connection
-      const client = await this.postgresPool.connect();
-      await client.query('SELECT NOW()');
-      client.release();
+      await this.postgresqlService.initialize();
+      initializedServices.push({ service: this.postgresqlService, close: () => this.postgresqlService.close() });
 
       // Initialize Redis (optional, for caching)
       if (this.config.redis) {
-        this.redisClient = createRedisClient({
-          url: this.config.redis.url,
-        });
-        await this.redisClient.connect();
+        this.redisService = this.redisFactory
+          ? this.redisFactory(this.config.redis)
+          : new RedisService(this.config.redis);
+        await this.redisService.initialize();
+        initializedServices.push({ service: this.redisService, close: () => this.redisService.close() });
       }
 
       this.initialized = true;
       console.log('✅ All database connections established');
     } catch (error) {
       console.error('❌ Database initialization failed:', error);
+
+      // Cleanup already initialized services
+      const cleanupPromises = initializedServices.map(({ close }) =>
+        close().catch(cleanupError =>
+          console.error('❌ Error during cleanup:', cleanupError)
+        )
+      );
+
+      await Promise.allSettled(cleanupPromises);
+
+      // Reset service references
+      this.falkorDBService = undefined as any;
+      this.qdrantService = undefined as any;
+      this.postgresqlService = undefined as any;
+      this.redisService = undefined;
+
       throw error;
     }
   }
 
   async close(): Promise<void> {
-    if (this.falkordbClient) {
-      await this.falkordbClient.disconnect();
+    if (!this.initialized) {
+      return;
     }
 
-    if (this.postgresPool) {
-      await this.postgresPool.end();
+    // Collect all close operations
+    const closePromises: Promise<void>[] = [];
+
+    if (this.falkorDBService && this.falkorDBService.isInitialized()) {
+      closePromises.push(
+        this.falkorDBService.close().catch(error =>
+          console.error('❌ Error closing FalkorDB service:', error)
+        )
+      );
     }
 
-    if (this.redisClient) {
-      await this.redisClient.disconnect();
+    if (this.qdrantService && this.qdrantService.isInitialized()) {
+      closePromises.push(
+        this.qdrantService.close().catch(error =>
+          console.error('❌ Error closing Qdrant service:', error)
+        )
+      );
     }
 
+    if (this.postgresqlService && this.postgresqlService.isInitialized()) {
+      closePromises.push(
+        this.postgresqlService.close().catch(error =>
+          console.error('❌ Error closing PostgreSQL service:', error)
+        )
+      );
+    }
+
+    if (this.redisService && this.redisService.isInitialized()) {
+      closePromises.push(
+        this.redisService.close().catch(error =>
+          console.error('❌ Error closing Redis service:', error)
+        )
+      );
+    }
+
+    // Wait for all close operations to complete (or fail)
+    await Promise.allSettled(closePromises);
+
+    // Reset state
     this.initialized = false;
+    this.falkorDBService = undefined as any;
+    this.qdrantService = undefined as any;
+    this.postgresqlService = undefined as any;
+    this.redisService = undefined;
+
+    // Clear singleton instance if this is the singleton
+    if (typeof databaseService !== 'undefined' && databaseService === this) {
+      databaseService = null as any;
+    }
+
+    console.log('✅ All database connections closed');
   }
 
   // FalkorDB operations
@@ -108,113 +286,14 @@ export class DatabaseService {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
-
-    try {
-      // FalkorDB doesn't support parameterized queries like traditional databases
-      // We need to substitute parameters directly in the query string
-      let processedQuery = query;
-      
-      // Replace $param placeholders with actual values
-      for (const [key, value] of Object.entries(params)) {
-        const placeholder = `$${key}`;
-        let replacementValue: string;
-        
-        if (typeof value === 'string') {
-          // Escape single quotes in strings and wrap in quotes
-          replacementValue = `'${value.replace(/'/g, "\\'")}'`;
-        } else if (typeof value === 'object' && value !== null) {
-          // For objects, convert to property format for Cypher
-          replacementValue = this.objectToCypherProperties(value);
-        } else if (value === null || value === undefined) {
-          replacementValue = 'null';
-        } else {
-          replacementValue = String(value);
-        }
-        
-        processedQuery = processedQuery.replace(new RegExp(placeholder.replace('$', '\\$'), 'g'), replacementValue);
-      }
-
-      const result = await this.falkordbClient.sendCommand(['GRAPH.QUERY', 'memento', processedQuery]);
-
-      // FalkorDB returns results in a specific format:
-      // [headers, data, statistics]
-      if (result && Array.isArray(result)) {
-        if (result.length === 3) {
-          // Standard query result format
-          const headers = result[0] as any;
-          const data = result[1] as any;
-          
-          // If there's no data, return empty array
-          if (!data || (Array.isArray(data) && data.length === 0)) {
-            return [];
-          }
-          
-          // Parse the data into objects using headers
-          if (Array.isArray(headers) && Array.isArray(data)) {
-            return data.map((row: any) => {
-              const obj: Record<string, any> = {};
-              if (Array.isArray(row)) {
-                headers.forEach((header: any, index: number) => {
-                  const headerName = String(header);
-                  obj[headerName] = row[index];
-                });
-              }
-              return obj;
-            });
-          }
-          
-          return data;
-        } else if (result.length === 1) {
-          // Write operation result (CREATE, SET, DELETE)
-          return result[0];
-        }
-      }
-
-      return result;
-    } catch (error) {
-      console.error('FalkorDB query error:', error);
-      console.error('Query was:', query);
-      console.error('Params were:', params);
-      throw error;
-    }
+    return this.falkorDBService.query(query, params);
   }
 
-  private objectToCypherProperties(obj: Record<string, any>): string {
-    const props = Object.entries(obj)
-      .map(([key, value]) => {
-        if (typeof value === 'string') {
-          return `${key}: '${value.replace(/'/g, "\\'")}'`;
-        } else if (Array.isArray(value)) {
-          // Handle arrays properly for Cypher
-          const arrayElements = value.map(item => {
-            if (typeof item === 'string') {
-              return `'${item.replace(/'/g, "\\'")}'`;
-            } else if (item === null || item === undefined) {
-              return 'null';
-            } else {
-              return String(item);
-            }
-          });
-          return `${key}: [${arrayElements.join(', ')}]`;
-        } else if (value === null || value === undefined) {
-          return `${key}: null`;
-        } else if (typeof value === 'boolean' || typeof value === 'number') {
-          return `${key}: ${value}`;
-        } else {
-          // For other types, convert to string and quote
-          return `${key}: '${String(value).replace(/'/g, "\\'")}'`;
-        }
-      })
-      .join(', ');
-    return `{${props}}`;
-  }
-
-  async falkordbCommand(...args: any[]): Promise<any> {
+  async falkordbCommand(...args: any[]): Promise<FalkorDBQueryResult> {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
-
-    return this.falkordbClient.sendCommand(args);
+    return this.falkorDBService.command(...args);
   }
 
   // Qdrant operations
@@ -222,119 +301,77 @@ export class DatabaseService {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
-    return this.qdrantClient;
+    return this.qdrantService.getClient();
   }
 
   // PostgreSQL operations
-  async postgresQuery(query: string, params: any[] = []): Promise<any> {
+  async postgresQuery(query: string, params: any[] = [], options: { timeout?: number } = {}): Promise<DatabaseQueryResult> {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
-
-    const client = await this.postgresPool.connect();
-    try {
-      const result = await client.query(query, params);
-      return result;
-    } finally {
-      client.release();
-    }
+    return this.postgresqlService.query(query, params, options);
   }
 
-  async postgresTransaction<T>(callback: (client: any) => Promise<T>): Promise<T> {
+  async postgresTransaction<T>(
+    callback: (client: any) => Promise<T>,
+    options: { timeout?: number; isolationLevel?: string } = {}
+  ): Promise<T> {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
-
-    const client = await this.postgresPool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await callback(client);
-      await client.query('COMMIT');
-      return result;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    return this.postgresqlService.transaction(callback, options);
   }
 
   // Redis operations (optional caching)
   async redisGet(key: string): Promise<string | null> {
-    if (!this.redisClient) {
+    if (!this.redisService) {
       throw new Error('Redis not configured');
     }
-    return this.redisClient.get(key);
+    return this.redisService.get(key);
   }
 
   async redisSet(key: string, value: string, ttl?: number): Promise<void> {
-    if (!this.redisClient) {
+    if (!this.redisService) {
       throw new Error('Redis not configured');
     }
-
-    if (ttl) {
-      await this.redisClient.setEx(key, ttl, value);
-    } else {
-      await this.redisClient.set(key, value);
-    }
+    return this.redisService.set(key, value, ttl);
   }
 
   async redisDel(key: string): Promise<number> {
-    if (!this.redisClient) {
+    if (!this.redisService) {
       throw new Error('Redis not configured');
     }
-    return this.redisClient.del(key);
+    return this.redisService.del(key);
   }
 
   // Health checks
-  async healthCheck(): Promise<{
-    falkordb: boolean;
-    qdrant: boolean;
-    postgresql: boolean;
-    redis?: boolean;
-  }> {
-    const results = {
-      falkordb: false,
-      qdrant: false,
-      postgresql: false,
-      redis: undefined as boolean | undefined,
+  async healthCheck(): Promise<IDatabaseHealthCheck> {
+    // Return early if not initialized
+    if (!this.initialized) {
+      return {
+        falkordb: false,
+        qdrant: false,
+        postgresql: false,
+        redis: undefined,
+      };
+    }
+
+    // Run all health checks in parallel for better performance
+    const healthCheckPromises = [
+      this.falkorDBService.healthCheck().catch(() => false),
+      this.qdrantService.healthCheck().catch(() => false),
+      this.postgresqlService.healthCheck().catch(() => false),
+      this.redisService?.healthCheck().catch(() => undefined) ?? Promise.resolve(undefined),
+    ];
+
+    const settledResults = await Promise.allSettled(healthCheckPromises);
+
+    return {
+      falkordb: settledResults[0].status === 'fulfilled' ? settledResults[0].value : false,
+      qdrant: settledResults[1].status === 'fulfilled' ? settledResults[1].value : false,
+      postgresql: settledResults[2].status === 'fulfilled' ? settledResults[2].value : false,
+      redis: settledResults[3].status === 'fulfilled' ? settledResults[3].value : undefined,
     };
-
-    try {
-      await this.falkordbClient.ping();
-      results.falkordb = true;
-    } catch (error) {
-      console.error('FalkorDB health check failed:', error);
-    }
-
-    try {
-      // Check if Qdrant is accessible by attempting to get collection info
-      await this.qdrantClient.getCollections();
-      results.qdrant = true;
-    } catch (error) {
-      console.error('Qdrant health check failed:', error);
-    }
-
-    try {
-      const client = await this.postgresPool.connect();
-      await client.query('SELECT 1');
-      client.release();
-      results.postgresql = true;
-    } catch (error) {
-      console.error('PostgreSQL health check failed:', error);
-    }
-
-    if (this.redisClient) {
-      try {
-        await this.redisClient.ping();
-        results.redis = true;
-      } catch (error) {
-        console.error('Redis health check failed:', error);
-        results.redis = false;
-      }
-    }
-
-    return results;
   }
 
   // Database setup and migrations
@@ -345,243 +382,14 @@ export class DatabaseService {
 
     console.log('🔧 Setting up database schema...');
 
-    // PostgreSQL schema setup
-    const postgresSchema = `
-      -- Create extensions
-      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-      CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+    // Setup each database service
+    await Promise.all([
+      this.postgresqlService.setupSchema(),
+      this.falkorDBService.setupGraph(),
+      this.qdrantService.setupCollections(),
+    ]);
 
-      -- Documents table for storing various document types
-      CREATE TABLE IF NOT EXISTS documents (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        type VARCHAR(50) NOT NULL,
-        content JSONB,
-        metadata JSONB,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      -- Indexes for documents
-      CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type);
-      CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at);
-      CREATE INDEX IF NOT EXISTS idx_documents_content_gin ON documents USING GIN(content);
-
-      -- Sessions table for tracking AI agent sessions
-      CREATE TABLE IF NOT EXISTS sessions (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        agent_type VARCHAR(50) NOT NULL,
-        user_id VARCHAR(255),
-        start_time TIMESTAMP WITH TIME ZONE NOT NULL,
-        end_time TIMESTAMP WITH TIME ZONE,
-        status VARCHAR(20) DEFAULT 'active',
-        metadata JSONB,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      -- Changes table for tracking codebase changes
-      CREATE TABLE IF NOT EXISTS changes (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        change_type VARCHAR(20) NOT NULL,
-        entity_type VARCHAR(50) NOT NULL,
-        entity_id VARCHAR(255) NOT NULL,
-        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-        author VARCHAR(255),
-        commit_hash VARCHAR(255),
-        diff TEXT,
-        previous_state JSONB,
-        new_state JSONB,
-        session_id UUID REFERENCES sessions(id),
-        spec_id UUID,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      -- Indexes for changes
-      CREATE INDEX IF NOT EXISTS idx_changes_entity_id ON changes(entity_id);
-      CREATE INDEX IF NOT EXISTS idx_changes_timestamp ON changes(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_changes_session_id ON changes(session_id);
-
-      -- Test results table
-      CREATE TABLE IF NOT EXISTS test_results (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        test_id VARCHAR(255) NOT NULL,
-        test_suite VARCHAR(255),
-        test_name VARCHAR(255) NOT NULL,
-        status VARCHAR(20) NOT NULL,
-        duration INTEGER,
-        error_message TEXT,
-        stack_trace TEXT,
-        coverage JSONB,
-        performance JSONB,
-        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      -- Indexes for test results
-      CREATE INDEX IF NOT EXISTS idx_test_results_test_id ON test_results(test_id);
-      CREATE INDEX IF NOT EXISTS idx_test_results_timestamp ON test_results(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_test_results_status ON test_results(status);
-
-      -- Test suites table
-      CREATE TABLE IF NOT EXISTS test_suites (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        suite_name VARCHAR(255) NOT NULL,
-        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-        framework VARCHAR(50),
-        total_tests INTEGER DEFAULT 0,
-        passed_tests INTEGER DEFAULT 0,
-        failed_tests INTEGER DEFAULT 0,
-        skipped_tests INTEGER DEFAULT 0,
-        duration INTEGER DEFAULT 0,
-        coverage JSONB,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        UNIQUE(suite_name, timestamp)
-      );
-
-      -- Test coverage table
-      CREATE TABLE IF NOT EXISTS test_coverage (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        test_id VARCHAR(255) NOT NULL,
-        suite_id UUID REFERENCES test_suites(id),
-        lines DECIMAL(5,2) DEFAULT 0,
-        branches DECIMAL(5,2) DEFAULT 0,
-        functions DECIMAL(5,2) DEFAULT 0,
-        statements DECIMAL(5,2) DEFAULT 0,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      -- Test performance table
-      CREATE TABLE IF NOT EXISTS test_performance (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        test_id VARCHAR(255) NOT NULL,
-        suite_id UUID REFERENCES test_suites(id),
-        memory_usage BIGINT,
-        cpu_usage DECIMAL(5,2),
-        network_requests INTEGER,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      -- Flaky test analyses table
-      CREATE TABLE IF NOT EXISTS flaky_test_analyses (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        test_id VARCHAR(255) NOT NULL UNIQUE,
-        test_name VARCHAR(255) NOT NULL,
-        flaky_score DECIMAL(3,2) DEFAULT 0,
-        total_runs INTEGER DEFAULT 0,
-        failure_rate DECIMAL(5,4) DEFAULT 0,
-        success_rate DECIMAL(5,4) DEFAULT 0,
-        recent_failures INTEGER DEFAULT 0,
-        patterns JSONB,
-        recommendations JSONB,
-        analyzed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      -- Indexes for test tables
-      CREATE INDEX IF NOT EXISTS idx_test_suites_timestamp ON test_suites(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_test_suites_framework ON test_suites(framework);
-      CREATE INDEX IF NOT EXISTS idx_test_coverage_test_id ON test_coverage(test_id);
-      CREATE INDEX IF NOT EXISTS idx_test_coverage_suite_id ON test_coverage(suite_id);
-      CREATE INDEX IF NOT EXISTS idx_test_performance_test_id ON test_performance(test_id);
-      CREATE INDEX IF NOT EXISTS idx_test_performance_suite_id ON test_performance(suite_id);
-      CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_test_id ON flaky_test_analyses(test_id);
-      CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_flaky_score ON flaky_test_analyses(flaky_score);
-    `;
-
-    await this.postgresQuery(postgresSchema);
-
-    // FalkorDB graph setup
-    try {
-      // Create graph if it doesn't exist
-      await this.falkordbCommand('GRAPH.QUERY', 'memento', 'MATCH (n) RETURN count(n) LIMIT 1');
-      
-      console.log('📊 Setting up FalkorDB graph indexes...');
-      
-      // Create indexes for better query performance
-      // Index on node ID for fast lookups
-      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
-        'CREATE INDEX FOR (n:Entity) ON (n.id)');
-      
-      // Index on node type for filtering
-      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
-        'CREATE INDEX FOR (n:Entity) ON (n.type)');
-      
-      // Index on node path for file-based queries
-      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
-        'CREATE INDEX FOR (n:Entity) ON (n.path)');
-      
-      // Index on node language for language-specific queries
-      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
-        'CREATE INDEX FOR (n:Entity) ON (n.language)');
-      
-      // Index on lastModified for temporal queries
-      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
-        'CREATE INDEX FOR (n:Entity) ON (n.lastModified)');
-      
-      // Composite index for common query patterns
-      await this.falkordbCommand('GRAPH.QUERY', 'memento', 
-        'CREATE INDEX FOR (n:Entity) ON (n.type, n.path)');
-      
-      console.log('✅ FalkorDB graph indexes created');
-    } catch (error) {
-      // Graph doesn't exist, it will be created on first write
-      console.log('📊 FalkorDB graph will be created on first write operation with indexes');
-    }
-
-    // Qdrant setup
-    try {
-      // Create collections if they don't exist
-      const collections = await this.qdrantClient.getCollections();
-
-      const existingCollections = collections.collections.map(c => c.name);
-
-      if (!existingCollections.includes('code_embeddings')) {
-        await this.qdrantClient.createCollection('code_embeddings', {
-          vectors: {
-            size: 1536, // OpenAI Ada-002 dimensions
-            distance: 'Cosine',
-          },
-        });
-      }
-
-      // Create documentation_embeddings collection
-      if (!existingCollections.includes('documentation_embeddings')) {
-        try {
-          await this.qdrantClient.createCollection('documentation_embeddings', {
-            vectors: {
-              size: 1536,
-              distance: 'Cosine',
-            },
-          });
-        } catch (error: any) {
-          if (error.status === 409 || error.message?.includes('already exists')) {
-            console.log('📊 documentation_embeddings collection already exists, skipping creation');
-          } else {
-            throw error;
-          }
-        }
-      }
-
-      // Create integration_test collection
-      if (!existingCollections.includes('integration_test')) {
-        try {
-          await this.qdrantClient.createCollection('integration_test', {
-            vectors: {
-              size: 1536,
-              distance: 'Cosine',
-            },
-          });
-        } catch (error: any) {
-          if (error.status === 409 || error.message?.includes('already exists')) {
-            console.log('📊 integration_test collection already exists, skipping creation');
-          } else {
-            throw error;
-          }
-        }
-      }
-
-      console.log('✅ Database schema setup complete');
-    } catch (error) {
-      console.error('❌ Database setup failed:', error);
-      throw error;
-    }
+    console.log('✅ Database schema setup complete');
   }
 
   isInitialized(): boolean {
@@ -591,142 +399,31 @@ export class DatabaseService {
   /**
    * Store test suite execution results
    */
-  async storeTestSuiteResult(suiteResult: any): Promise<void> {
+  async storeTestSuiteResult(suiteResult: TestSuiteResult): Promise<void> {
     if (!this.initialized) {
       throw new Error('Database service not initialized');
     }
-
-    const client = await this.postgresPool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // Insert test suite result
-      const suiteQuery = `
-        INSERT INTO test_suites (suite_name, timestamp, framework, total_tests, passed_tests, failed_tests, skipped_tests, duration)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (suite_name, timestamp) DO NOTHING
-        RETURNING id
-      `;
-      const suiteValues = [
-        suiteResult.suiteName,
-        suiteResult.timestamp,
-        suiteResult.framework,
-        suiteResult.totalTests,
-        suiteResult.passedTests,
-        suiteResult.failedTests,
-        suiteResult.skippedTests,
-        suiteResult.duration
-      ];
-
-      const suiteResultQuery = await client.query(suiteQuery, suiteValues);
-      const suiteId = suiteResultQuery.rows[0]?.id;
-
-      if (suiteId) {
-        // Insert individual test results
-        for (const result of suiteResult.results) {
-          const testQuery = `
-            INSERT INTO test_results (suite_id, test_id, test_name, status, duration, error_message, stack_trace)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-          `;
-          await client.query(testQuery, [
-            suiteId,
-            result.testId,
-            result.testName,
-            result.status,
-            result.duration,
-            result.errorMessage,
-            result.stackTrace
-          ]);
-
-          // Insert coverage data if available
-          if (result.coverage) {
-            const coverageQuery = `
-              INSERT INTO test_coverage (test_id, suite_id, lines, branches, functions, statements)
-              VALUES ($1, $2, $3, $4, $5, $6)
-            `;
-            await client.query(coverageQuery, [
-              result.testId,
-              suiteId,
-              result.coverage.lines,
-              result.coverage.branches,
-              result.coverage.functions,
-              result.coverage.statements
-            ]);
-          }
-
-          // Insert performance data if available
-          if (result.performance) {
-            const perfQuery = `
-              INSERT INTO test_performance (test_id, suite_id, memory_usage, cpu_usage, network_requests)
-              VALUES ($1, $2, $3, $4, $5)
-            `;
-            await client.query(perfQuery, [
-              result.testId,
-              suiteId,
-              result.performance.memoryUsage,
-              result.performance.cpuUsage,
-              result.performance.networkRequests
-            ]);
-          }
-        }
-      }
-
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    return this.postgresqlService.storeTestSuiteResult(suiteResult);
   }
 
   /**
    * Store flaky test analyses
    */
-  async storeFlakyTestAnalyses(analyses: any[]): Promise<void> {
+  async storeFlakyTestAnalyses(analyses: FlakyTestAnalysis[]): Promise<void> {
     if (!this.initialized) {
       throw new Error('Database service not initialized');
     }
+    return this.postgresqlService.storeFlakyTestAnalyses(analyses);
+  }
 
-    const client = await this.postgresPool.connect();
-    try {
-      await client.query('BEGIN');
-
-      for (const analysis of analyses) {
-        const query = `
-          INSERT INTO flaky_test_analyses (test_id, test_name, flaky_score, total_runs, failure_rate, success_rate, recent_failures, patterns, recommendations, analyzed_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-          ON CONFLICT (test_id) DO UPDATE SET
-            flaky_score = EXCLUDED.flaky_score,
-            total_runs = EXCLUDED.total_runs,
-            failure_rate = EXCLUDED.failure_rate,
-            success_rate = EXCLUDED.success_rate,
-            recent_failures = EXCLUDED.recent_failures,
-            patterns = EXCLUDED.patterns,
-            recommendations = EXCLUDED.recommendations,
-            analyzed_at = EXCLUDED.analyzed_at
-        `;
-        await client.query(query, [
-          analysis.testId,
-          analysis.testName,
-          analysis.flakyScore,
-          analysis.totalRuns,
-          analysis.failureRate,
-          analysis.successRate,
-          analysis.recentFailures,
-          JSON.stringify(analysis.patterns),
-          JSON.stringify(analysis.recommendations),
-          new Date()
-        ]);
-      }
-
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+  /**
+   * Execute bulk PostgreSQL operations efficiently
+   */
+  async postgresBulkQuery(queries: Array<{ query: string; params: any[] }>, options: { continueOnError?: boolean } = {}): Promise<DatabaseQueryResult[]> {
+    if (!this.initialized) {
+      throw new Error('Database not initialized');
     }
+    return this.postgresqlService.bulkQuery(queries, options);
   }
 
   /**
@@ -736,22 +433,7 @@ export class DatabaseService {
     if (!this.initialized) {
       throw new Error('Database service not initialized');
     }
-
-    const client = await this.postgresPool.connect();
-    try {
-      const query = `
-        SELECT tr.*, ts.suite_name, ts.framework, ts.timestamp as suite_timestamp
-        FROM test_results tr
-        JOIN test_suites ts ON tr.suite_id = ts.id
-        WHERE tr.test_id = $1
-        ORDER BY ts.timestamp DESC
-        LIMIT $2
-      `;
-      const result = await client.query(query, [entityId, limit]);
-      return result.rows;
-    } finally {
-      client.release();
-    }
+    return this.postgresqlService.getTestExecutionHistory(entityId, limit);
   }
 
   /**
@@ -761,21 +443,7 @@ export class DatabaseService {
     if (!this.initialized) {
       throw new Error('Database service not initialized');
     }
-
-    const client = await this.postgresPool.connect();
-    try {
-      const query = `
-        SELECT tp.*, ts.timestamp
-        FROM test_performance tp
-        JOIN test_suites ts ON tp.suite_id = ts.id
-        WHERE tp.test_id = $1 AND ts.timestamp >= NOW() - INTERVAL '${days} days'
-        ORDER BY ts.timestamp DESC
-      `;
-      const result = await client.query(query, [entityId]);
-      return result.rows;
-    } finally {
-      client.release();
-    }
+    return this.postgresqlService.getPerformanceMetricsHistory(entityId, days);
   }
 
   /**
@@ -785,23 +453,12 @@ export class DatabaseService {
     if (!this.initialized) {
       throw new Error('Database service not initialized');
     }
-
-    const client = await this.postgresPool.connect();
-    try {
-      const query = `
-        SELECT tc.*, ts.timestamp
-        FROM test_coverage tc
-        JOIN test_suites ts ON tc.suite_id = ts.id
-        WHERE tc.test_id = $1 AND ts.timestamp >= NOW() - INTERVAL '${days} days'
-        ORDER BY ts.timestamp DESC
-      `;
-      const result = await client.query(query, [entityId]);
-      return result.rows;
-    } finally {
-      client.release();
-    }
+    return this.postgresqlService.getCoverageHistory(entityId, days);
   }
 }
+
+// Re-export the DatabaseConfig from interfaces for backward compatibility
+export { DatabaseConfig } from './database';
 
 // Singleton instance
 let databaseService: DatabaseService | null = null;
@@ -855,7 +512,8 @@ export function createTestDatabaseConfig(): DatabaseConfig {
     postgresql: {
       connectionString: 'postgresql://memento_test:memento_test@localhost:5433/memento_test',
       max: 5,
-      idleTimeoutMillis: 30000,
+      idleTimeoutMillis: 5000, // Reduced for tests
+      connectionTimeoutMillis: 5000, // Add connection timeout
     },
     redis: {
       url: 'redis://localhost:6381',

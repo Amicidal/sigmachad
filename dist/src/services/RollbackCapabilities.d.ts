@@ -2,10 +2,10 @@
  * Rollback Capabilities Service
  * Handles reverting changes when synchronization operations fail
  */
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { DatabaseService } from './DatabaseService.js';
-import { Entity } from '../models/entities.js';
-import { GraphRelationship } from '../models/relationships.js';
+import { KnowledgeGraphService } from './KnowledgeGraphService.ts';
+import { DatabaseService } from './DatabaseService.ts';
+import { Entity } from '../models/entities.ts';
+import { GraphRelationship } from '../models/relationships.ts';
 export interface RollbackPoint {
     id: string;
     operationId: string;
@@ -50,6 +50,10 @@ export declare class RollbackCapabilities {
      * Create a rollback point before making changes
      */
     createRollbackPoint(operationId: string, description: string): Promise<string>;
+    /**
+     * List all rollback points for a given entity
+     */
+    listRollbackPoints(entityId: string): Promise<RollbackPoint[]>;
     /**
      * Capture all current entities in the graph
      */

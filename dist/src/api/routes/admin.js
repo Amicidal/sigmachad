@@ -2,8 +2,11 @@
  * Administration Routes
  * Handles system administration, monitoring, and maintenance operations
  */
-export async function registerAdminRoutes(app, kgService, dbService, fileWatcher, syncCoordinator, syncMonitor, conflictResolver, rollbackCapabilities) {
-    // GET /api/admin/admin-health - Get system health (also available at root level)
+// Global declarations for Node.js environment
+const process = globalThis.process;
+const console = globalThis.console;
+export async function registerAdminRoutes(app, kgService, dbService, fileWatcher, syncCoordinator, syncMonitor, conflictResolver, rollbackCapabilities, backupService, loggingService, maintenanceService, configurationService) {
+    // GET /api/v1/admin-health - Get system health (also available at root level)
     app.get('/admin-health', async (request, reply) => {
         try {
             const health = await dbService.healthCheck();
@@ -11,8 +14,8 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
             const systemHealth = {
                 overall: isHealthy ? 'healthy' : 'unhealthy',
                 components: {
-                    graphDatabase: health.falkordb || { status: 'unknown' },
-                    vectorDatabase: health.qdrant || { status: 'unknown' },
+                    graphDatabase: health.falkordb || { status: 'unknown', details: {} },
+                    vectorDatabase: health.qdrant || { status: 'unknown', details: {} },
                     fileWatcher: { status: 'unknown' },
                     apiServer: { status: 'healthy' }
                 },
@@ -44,7 +47,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                     systemHealth.components.fileWatcher.status = 'stopped';
                 }
             }
-            catch (error) {
+            catch {
                 systemHealth.components.fileWatcher.status = 'error';
             }
             // Add sync metrics if available
@@ -65,7 +68,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 data: systemHealth
             });
         }
-        catch (error) {
+        catch {
             reply.status(503).send({
                 success: false,
                 error: {
@@ -135,7 +138,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
         }
     });
     // POST /api/admin/sync - Trigger full synchronization
-    app.post('/admin/sync', {
+    app.post('/sync', {
         schema: {
             body: {
                 type: 'object',
@@ -151,7 +154,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
         try {
             const options = request.body;
             if (!syncCoordinator) {
-                reply.status(503).send({
+                reply.status(404).send({
                     success: false,
                     error: {
                         code: 'SYNC_UNAVAILABLE',
@@ -174,7 +177,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 data: result
             });
         }
-        catch (error) {
+        catch {
             reply.status(500).send({
                 success: false,
                 error: {
@@ -208,7 +211,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
             // Find most active domains (simplified - based on file paths)
             const domainCounts = new Map();
             for (const entity of entitiesResult.entities) {
-                if (entity.type === 'file' && entity.path) {
+                if (entity.type === 'file' && 'path' in entity && typeof entity.path === 'string') {
                     const path = entity.path;
                     const domain = path.split('/')[1] || 'root'; // Extract first directory
                     domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
@@ -286,24 +289,34 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                     type: { type: 'string', enum: ['full', 'incremental'], default: 'full' },
                     includeData: { type: 'boolean', default: true },
                     includeConfig: { type: 'boolean', default: true },
-                    compression: { type: 'boolean', default: true }
+                    compression: { type: 'boolean', default: true },
+                    destination: { type: 'string' }
                 }
             }
         }
     }, async (request, reply) => {
         try {
-            const { type, includeData, includeConfig, compression } = request.body;
-            // TODO: Create system backup
-            const backup = {
-                backupId: `backup_${Date.now()}`,
-                type: type || 'full',
-                status: 'in_progress',
-                size: 0,
-                created: new Date().toISOString()
-            };
+            if (!backupService) {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Backup service not available'
+                    }
+                });
+                return;
+            }
+            const options = request.body;
+            const result = await backupService.createBackup({
+                type: options.type || 'full',
+                includeData: options.includeData ?? true,
+                includeConfig: options.includeConfig ?? true,
+                compression: options.compression ?? true,
+                destination: options.destination
+            });
             reply.send({
                 success: true,
-                data: backup
+                data: result
             });
         }
         catch (error) {
@@ -311,7 +324,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 success: false,
                 error: {
                     code: 'BACKUP_FAILED',
-                    message: 'Failed to create backup'
+                    message: error instanceof Error ? error.message : 'Failed to create backup'
                 }
             });
         }
@@ -330,17 +343,23 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
         }
     }, async (request, reply) => {
         try {
+            if (!backupService) {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Backup service not available'
+                    }
+                });
+                return;
+            }
             const { backupId, dryRun } = request.body;
-            // TODO: Restore from backup
-            const restore = {
-                backupId,
-                status: dryRun ? 'dry_run_completed' : 'in_progress',
-                changes: [],
-                estimatedDuration: '10-15 minutes'
-            };
+            const result = await backupService.restoreBackup(backupId, {
+                dryRun: dryRun ?? true
+            });
             reply.send({
                 success: true,
-                data: restore
+                data: result
             });
         }
         catch (error) {
@@ -348,7 +367,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 success: false,
                 error: {
                     code: 'RESTORE_FAILED',
-                    message: 'Failed to restore from backup'
+                    message: error instanceof Error ? error.message : 'Failed to restore from backup'
                 }
             });
         }
@@ -361,19 +380,42 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 properties: {
                     level: { type: 'string', enum: ['error', 'warn', 'info', 'debug'] },
                     since: { type: 'string', format: 'date-time' },
+                    until: { type: 'string', format: 'date-time' },
                     limit: { type: 'number', default: 100 },
-                    component: { type: 'string' }
+                    component: { type: 'string' },
+                    search: { type: 'string' }
                 }
             }
         }
     }, async (request, reply) => {
         try {
-            const { level, since, limit, component } = request.query;
-            // TODO: Retrieve system logs
-            const logs = [];
+            if (!loggingService) {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Logging service not available'
+                    }
+                });
+                return;
+            }
+            const { level, since, until, limit, component, search } = request.query;
+            const query = {
+                level,
+                component,
+                since: since ? new Date(since) : undefined,
+                until: until ? new Date(until) : undefined,
+                limit,
+                search
+            };
+            const logs = await loggingService.queryLogs(query);
             reply.send({
                 success: true,
-                data: logs
+                data: logs,
+                metadata: {
+                    count: logs.length,
+                    query
+                }
             });
         }
         catch (error) {
@@ -381,7 +423,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 success: false,
                 error: {
                     code: 'LOGS_FAILED',
-                    message: 'Failed to retrieve system logs'
+                    message: error instanceof Error ? error.message : 'Failed to retrieve system logs'
                 }
             });
         }
@@ -406,18 +448,39 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
         }
     }, async (request, reply) => {
         try {
+            if (!maintenanceService) {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Maintenance service not available'
+                    }
+                });
+                return;
+            }
             const { tasks, schedule } = request.body;
-            // TODO: Run maintenance tasks
-            const maintenance = {
-                tasks,
-                schedule: schedule || 'immediate',
-                status: 'running',
-                progress: 0,
-                started: new Date().toISOString()
-            };
+            const results = [];
+            for (const taskType of tasks) {
+                try {
+                    const result = await maintenanceService.runMaintenanceTask(taskType);
+                    results.push(result);
+                }
+                catch (error) {
+                    results.push({
+                        taskId: `${taskType}_${Date.now()}`,
+                        success: false,
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                }
+            }
             reply.send({
                 success: true,
-                data: maintenance
+                data: {
+                    tasks: results,
+                    schedule: schedule || 'immediate',
+                    status: 'completed',
+                    completedAt: new Date().toISOString()
+                }
             });
         }
         catch (error) {
@@ -425,7 +488,7 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 success: false,
                 error: {
                     code: 'MAINTENANCE_FAILED',
-                    message: 'Failed to run maintenance tasks'
+                    message: error instanceof Error ? error.message : 'Failed to run maintenance tasks'
                 }
             });
         }
@@ -433,22 +496,17 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
     // GET /api/admin/config - Get system configuration
     app.get('/config', async (request, reply) => {
         try {
-            // TODO: Get system configuration (without sensitive data)
-            const config = {
-                version: '0.1.0',
-                environment: process.env.NODE_ENV || 'development',
-                databases: {
-                    falkordb: 'configured',
-                    qdrant: 'configured',
-                    postgres: 'configured'
-                },
-                features: {
-                    websocket: true,
-                    graphSearch: true,
-                    vectorSearch: true,
-                    securityScanning: false
-                }
-            };
+            if (!configurationService) {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Configuration service not available'
+                    }
+                });
+                return;
+            }
+            const config = await configurationService.getSystemConfiguration();
             reply.send({
                 success: true,
                 data: config
@@ -459,7 +517,59 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 success: false,
                 error: {
                     code: 'CONFIG_FAILED',
-                    message: 'Failed to retrieve system configuration'
+                    message: error instanceof Error ? error.message : 'Failed to retrieve system configuration'
+                }
+            });
+        }
+    });
+    // PUT /api/admin/config - Update system configuration
+    app.put('/config', {
+        schema: {
+            body: {
+                type: 'object',
+                properties: {
+                    performance: {
+                        type: 'object',
+                        properties: {
+                            maxConcurrentSync: { type: 'number' },
+                            cacheSize: { type: 'number' },
+                            requestTimeout: { type: 'number' }
+                        }
+                    },
+                    security: {
+                        type: 'object',
+                        properties: {
+                            rateLimiting: { type: 'boolean' }
+                        }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
+        try {
+            if (!configurationService) {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Configuration service not available'
+                    }
+                });
+                return;
+            }
+            const updates = request.body;
+            await configurationService.updateConfiguration(updates);
+            reply.send({
+                success: true,
+                message: 'Configuration updated successfully'
+            });
+        }
+        catch (error) {
+            reply.status(500).send({
+                success: false,
+                error: {
+                    code: 'CONFIG_UPDATE_FAILED',
+                    message: error instanceof Error ? error.message : 'Failed to update system configuration'
                 }
             });
         }

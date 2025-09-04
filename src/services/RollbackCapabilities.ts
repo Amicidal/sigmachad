@@ -3,10 +3,10 @@
  * Handles reverting changes when synchronization operations fail
  */
 
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { DatabaseService } from './DatabaseService.js';
-import { Entity } from '../models/entities.js';
-import { GraphRelationship } from '../models/relationships.js';
+import { KnowledgeGraphService } from './KnowledgeGraphService.ts';
+import { DatabaseService } from './DatabaseService.ts';
+import { Entity } from '../models/entities.ts';
+import { GraphRelationship } from '../models/relationships.ts';
 
 export interface RollbackPoint {
   id: string;
@@ -81,6 +81,30 @@ export class RollbackCapabilities {
     this.cleanupOldRollbackPoints();
 
     return rollbackId;
+  }
+
+  /**
+   * List all rollback points for a given entity
+   */
+  async listRollbackPoints(entityId: string): Promise<RollbackPoint[]> {
+    const entityRollbackPoints: RollbackPoint[] = [];
+
+    for (const [rollbackId, rollbackPoint] of this.rollbackPoints.entries()) {
+      // Check if this rollback point contains the specified entity
+      const hasEntity = rollbackPoint.entities.some(entity => entity.id === entityId) ||
+                       rollbackPoint.relationships.some(rel =>
+                         rel.fromEntityId === entityId || rel.toEntityId === entityId
+                       );
+
+      if (hasEntity) {
+        entityRollbackPoints.push(rollbackPoint);
+      }
+    }
+
+    // Sort by timestamp (most recent first)
+    return entityRollbackPoints.sort((a, b) =>
+      b.timestamp.getTime() - a.timestamp.getTime()
+    );
   }
 
   /**

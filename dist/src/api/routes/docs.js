@@ -4,7 +4,7 @@
  */
 export async function registerDocsRoutes(app, kgService, dbService, docParser) {
     // POST /api/docs/sync - Synchronize documentation with knowledge graph
-    app.post('/docs/sync', {
+    app.post('/docs/docs/sync', {
         schema: {
             body: {
                 type: 'object',
@@ -35,7 +35,7 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         }
     });
     // GET /api/domains - Get all business domains
-    app.get('/domains', async (request, reply) => {
+    app.get('/docs/domains', async (request, reply) => {
         try {
             const domains = await kgService.search({
                 query: '',
@@ -59,7 +59,7 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         }
     });
     // GET /api/domains/{domainName}/entities - Get entities by domain
-    app.get('/domains/:domainName/entities', {
+    app.get('/docs/domains/:domainName/entities', {
         schema: {
             params: {
                 type: 'object',
@@ -96,7 +96,7 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         }
     });
     // GET /api/clusters - Get semantic clusters
-    app.get('/clusters', async (request, reply) => {
+    app.get('/docs/clusters', async (request, reply) => {
         try {
             const clusters = await kgService.search({
                 query: '',
@@ -120,7 +120,7 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         }
     });
     // GET /api/business/impact/{domainName} - Get business impact
-    app.get('/business/impact/:domainName', {
+    app.get('/docs/business/impact/:domainName', {
         schema: {
             params: {
                 type: 'object',
@@ -180,7 +180,7 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         }
     });
     // POST /api/docs/parse - Parse documentation file
-    app.post('/parse', {
+    app.post('/docs/parse', {
         schema: {
             body: {
                 type: 'object',
@@ -236,7 +236,7 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         }
     });
     // GET /api/docs/search - Search documentation
-    app.get('/search', {
+    app.get('/docs/search', {
         schema: {
             querystring: {
                 type: 'object',
@@ -279,7 +279,7 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         }
     });
     // POST /api/docs/validate - Validate documentation
-    app.post('/docs-validate', {
+    app.post('/docs/docs-validate', {
         schema: {
             body: {
                 type: 'object',

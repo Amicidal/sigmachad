@@ -44,7 +44,15 @@ export default [
     },
   },
   {
-    files: ['**/*.test.ts', '**/*.spec.ts', '**/__tests__/**/*.ts'],
+    files: ['**/*.test.ts', '**/*.spec.ts', '**/__tests__/**/*.ts', 'tests/**/*.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        project: './tsconfig.test.json',
+      },
+    },
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       'security/detect-object-injection': 'off', // Common in tests
@@ -57,6 +65,7 @@ export default [
       'coverage/',
       '**/*.d.ts',
       'eslint.config.js',
+      'tests/setup.ts',
     ],
   },
 ];

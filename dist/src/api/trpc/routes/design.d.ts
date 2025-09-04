@@ -37,8 +37,8 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
             column?: number | undefined;
             rule?: string | undefined;
         }[];
-        isValid: boolean;
         suggestions: string[];
+        isValid: boolean;
     }>;
     getTestCoverage: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
@@ -106,7 +106,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
         _meta: object;
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
-            type: "feature" | "system" | "component" | "page";
+            type: "feature" | "component" | "page" | "system";
             name: string;
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
@@ -120,7 +120,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
             reviewers: string[];
         };
         _input_out: {
-            type: "feature" | "system" | "component" | "page";
+            type: "feature" | "component" | "page" | "system";
             name: string;
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
@@ -138,7 +138,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
     }, {
         success: boolean;
         data: {
-            type: "feature" | "system" | "component" | "page";
+            type: "feature" | "component" | "page" | "system";
             name: string;
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
@@ -180,7 +180,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
         _meta: object;
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
-            type?: "feature" | "system" | "component" | "page" | undefined;
+            type?: "feature" | "component" | "page" | "system" | undefined;
             status?: "draft" | "approved" | "implemented" | "deprecated" | "review" | undefined;
             limit?: number | undefined;
             offset?: number | undefined;
@@ -188,7 +188,7 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
         _input_out: {
             limit: number;
             offset: number;
-            type?: "feature" | "system" | "component" | "page" | undefined;
+            type?: "feature" | "component" | "page" | "system" | undefined;
             status?: "draft" | "approved" | "implemented" | "deprecated" | "review" | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;

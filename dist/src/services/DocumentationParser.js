@@ -220,7 +220,7 @@ export class DocumentationParser {
             /\b(?:node\.js|express|fastify|django|flask|spring)\b/gi,
             /\b(?:postgresql|mysql|mongodb|redis|elasticsearch)\b/gi,
             /\b(?:docker|kubernetes|aws|gcp|azure)\b/gi,
-            /\b(?:graphql|rest|grpc|websocket)\b/gi
+            /\b(?:rest|grpc|websocket)\b/gi
         ];
         const technologies = new Set();
         for (const pattern of techPatterns) {

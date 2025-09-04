@@ -4,7 +4,7 @@
  */
 export async function registerSecurityRoutes(app, kgService, dbService, securityScanner) {
     // POST /api/security/scan - Scan for security issues
-    app.post('/scan', {
+    app.post('/security/scan', {
         schema: {
             body: {
                 type: 'object',
@@ -48,7 +48,7 @@ export async function registerSecurityRoutes(app, kgService, dbService, security
         }
     });
     // GET /api/security/vulnerabilities - Get vulnerability report
-    app.get('/vulnerabilities', async (request, reply) => {
+    app.get('/security/vulnerabilities', async (request, reply) => {
         try {
             const report = await securityScanner.getVulnerabilityReport();
             reply.send({
@@ -68,7 +68,7 @@ export async function registerSecurityRoutes(app, kgService, dbService, security
         }
     });
     // POST /api/security/audit - Perform security audit
-    app.post('/audit', {
+    app.post('/security/audit', {
         schema: {
             body: {
                 type: 'object',
@@ -105,7 +105,7 @@ export async function registerSecurityRoutes(app, kgService, dbService, security
         }
     });
     // GET /api/security/issues - Get security issues with filtering
-    app.get('/issues', {
+    app.get('/security/issues', {
         schema: {
             querystring: {
                 type: 'object',
@@ -157,7 +157,7 @@ export async function registerSecurityRoutes(app, kgService, dbService, security
         }
     });
     // POST /api/security/fix - Generate security fix suggestions
-    app.post('/fix', {
+    app.post('/security/fix', {
         schema: {
             body: {
                 type: 'object',
@@ -199,7 +199,7 @@ export async function registerSecurityRoutes(app, kgService, dbService, security
         }
     });
     // GET /api/security/compliance - Get compliance status
-    app.get('/compliance', {
+    app.get('/security/compliance', {
         schema: {
             querystring: {
                 type: 'object',
@@ -235,7 +235,7 @@ export async function registerSecurityRoutes(app, kgService, dbService, security
         }
     });
     // POST /api/security/monitor - Set up security monitoring
-    app.post('/monitor', {
+    app.post('/security/monitor', {
         schema: {
             body: {
                 type: 'object',

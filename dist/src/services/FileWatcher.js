@@ -4,9 +4,9 @@
  */
 import chokidar from 'chokidar';
 import { EventEmitter } from 'events';
-import path from 'path';
-import fs from 'fs/promises';
-import crypto from 'crypto';
+import * as path from 'path';
+import { promises as fs } from 'fs';
+import * as crypto from 'crypto';
 export class FileWatcher extends EventEmitter {
     watcher = null;
     config;
@@ -195,6 +195,11 @@ export class FileWatcher extends EventEmitter {
     }
     getChangePriority(change) {
         const path = change.path.toLowerCase();
+        // Low priority: Generated files, build artifacts, logs
+        if (path.includes('dist/') || path.includes('build/') || path.includes('coverage/') ||
+            path.includes('logs/') || path.includes('.log') || path.includes('node_modules/')) {
+            return 'low';
+        }
         // High priority: Core source files
         if (/\.(ts|tsx|js|jsx)$/.test(path) && !path.includes('test') && !path.includes('spec')) {
             return 'high';
@@ -203,7 +208,7 @@ export class FileWatcher extends EventEmitter {
         if (/\.(json|yaml|yml|md|config)$/.test(path) || path.includes('readme')) {
             return 'medium';
         }
-        // Low priority: Generated files, logs
+        // Low priority: Everything else
         return 'low';
     }
     getChangeIcon(type) {
@@ -264,9 +269,29 @@ export class FileWatcher extends EventEmitter {
     }
     shouldIgnore(filePath) {
         return this.config.ignorePatterns.some(pattern => {
-            const regex = new RegExp(pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
-            return regex.test(filePath);
+            // Simple glob matching for common patterns
+            if (pattern.includes('**')) {
+                // Handle ** patterns
+                const parts = pattern.split('**');
+                if (parts.length === 2) {
+                    const before = this.escapeRegex(parts[0]);
+                    const after = this.escapeRegex(parts[1]);
+                    const regex = new RegExp(`^${before}.*${after}$`);
+                    return regex.test(filePath);
+                }
+            }
+            else {
+                // Handle simple * patterns
+                const escaped = this.escapeRegex(pattern);
+                const regexPattern = escaped.replace(/\\\*/g, '[^/]*');
+                const regex = new RegExp(`^${regexPattern}$`);
+                return regex.test(filePath);
+            }
+            return false;
         });
+    }
+    escapeRegex(string) {
+        return string.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     }
     // Public API methods
     getWatchedPaths() {

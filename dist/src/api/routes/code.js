@@ -4,11 +4,12 @@
  */
 import { RelationshipType } from '../../models/relationships.js';
 import fs from 'fs/promises';
+import console from 'console';
 // Type definitions for validation issues
 // Using ValidationResult, ValidationIssue, and SecurityIssue from types.ts
 export async function registerCodeRoutes(app, kgService, dbService, astParser) {
     // POST /api/code/propose-diff - Propose code changes and analyze impact
-    app.post('/propose-diff', {
+    app.post('/code/propose-diff', {
         schema: {
             body: {
                 type: 'object',
@@ -44,7 +45,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                 data: analysis
             });
         }
-        catch (error) {
+        catch {
             reply.status(500).send({
                 success: false,
                 error: {
@@ -55,7 +56,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
         }
     });
     // POST /api/code/validate - Run comprehensive code validation
-    app.post('/validate', {
+    app.post('/code/validate', {
         schema: {
             body: {
                 type: 'object',
@@ -122,8 +123,8 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                     const tsValidation = await runTypeScriptValidation(params.files || []);
                     result.typescript = tsValidation;
                 }
-                catch (error) {
-                    console.warn('TypeScript validation failed:', error);
+                catch {
+                    console.warn('TypeScript validation failed');
                 }
             }
             // ESLint validation
@@ -132,8 +133,8 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                     const eslintValidation = await runESLintValidation(params.files || []);
                     result.eslint = eslintValidation;
                 }
-                catch (error) {
-                    console.warn('ESLint validation failed:', error);
+                catch {
+                    console.warn('ESLint validation failed');
                 }
             }
             // Security validation
@@ -142,8 +143,8 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                     const securityValidation = await runSecurityValidation(params.files || []);
                     result.security = securityValidation;
                 }
-                catch (error) {
-                    console.warn('Security validation failed:', error);
+                catch {
+                    console.warn('Security validation failed');
                 }
             }
             // Test validation
@@ -152,8 +153,8 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                     const testValidation = await runTestValidation();
                     result.tests = testValidation;
                 }
-                catch (error) {
-                    console.warn('Test validation failed:', error);
+                catch {
+                    console.warn('Test validation failed');
                 }
             }
             // Architecture validation
@@ -162,8 +163,8 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                     const architectureValidation = await runArchitectureValidation(params.files || []);
                     result.architecture = architectureValidation;
                 }
-                catch (error) {
-                    console.warn('Architecture validation failed:', error);
+                catch {
+                    console.warn('Architecture validation failed');
                 }
             }
             // Calculate overall score
@@ -193,7 +194,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
         }
     });
     // POST /api/code/analyze - Analyze code for patterns and issues
-    app.post('/analyze', {
+    app.post('/code/analyze', {
         schema: {
             body: {
                 type: 'object',
@@ -210,13 +211,8 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
         }
     }, async (request, reply) => {
         try {
-            const { files, analysisType, options } = request.body;
-            let analysis = {
-                type: analysisType,
-                filesAnalyzed: files.length,
-                results: [],
-                summary: {}
-            };
+            const { files, analysisType } = request.body;
+            let analysis; // Keep as any for now since different analysis types return different structures
             // Perform analysis based on type
             switch (analysisType) {
                 case 'complexity':
@@ -251,7 +247,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
         }
     });
     // GET /api/code/suggestions/{file} - Get code improvement suggestions
-    app.get('/suggestions/:file', {
+    app.get('/code/suggestions/:file', {
         schema: {
             params: {
                 type: 'object',
@@ -278,7 +274,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
     }, async (request, reply) => {
         try {
             const { file } = request.params;
-            const { lineStart, lineEnd, types } = request.query;
+            const { lineStart, lineEnd } = request.query;
             // TODO: Generate code improvement suggestions
             const suggestions = [];
             reply.send({
@@ -290,7 +286,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                 }
             });
         }
-        catch (error) {
+        catch {
             reply.status(500).send({
                 success: false,
                 error: {
@@ -301,7 +297,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
         }
     });
     // POST /api/code/refactor - Suggest refactoring opportunities
-    app.post('/refactor', {
+    app.post('/code/refactor', {
         schema: {
             body: {
                 type: 'object',
@@ -318,7 +314,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
         }
     }, async (request, reply) => {
         try {
-            const { files, refactorType, options } = request.body;
+            const { files, refactorType } = request.body;
             // TODO: Analyze and suggest refactoring opportunities
             const refactorings = [];
             reply.send({
@@ -330,7 +326,7 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                 }
             });
         }
-        catch (error) {
+        catch {
             reply.status(500).send({
                 success: false,
                 error: {
@@ -383,10 +379,11 @@ async function analyzeCodeChanges(proposal, astParser, kgService) {
                 const newParseResult = await parseContentAsFile(change.file, change.newContent, astParser);
                 for (const entity of newParseResult.entities) {
                     if (entity.type === 'symbol') {
+                        const symbolEntity = entity;
                         affectedEntities.push({
-                            id: entity.id,
-                            name: entity.name,
-                            type: entity.kind,
+                            id: symbolEntity.id,
+                            name: symbolEntity.name,
+                            type: symbolEntity.kind,
                             file: change.file,
                             changeType: 'created'
                         });
@@ -397,18 +394,21 @@ async function analyzeCodeChanges(proposal, astParser, kgService) {
                 // For deletions, we need to get the current state from the knowledge graph
                 const currentEntities = await findEntitiesInFile(change.file, kgService);
                 for (const entity of currentEntities) {
-                    affectedEntities.push({
-                        id: entity.id,
-                        name: entity.name,
-                        type: entity.kind,
-                        file: change.file,
-                        changeType: 'deleted'
-                    });
-                    breakingChanges.push({
-                        severity: 'breaking',
-                        description: `Deleting ${entity.kind} ${entity.name} will break dependent code`,
-                        affectedEntities: [entity.id]
-                    });
+                    if (entity.type === 'symbol') {
+                        const symbolEntity = entity;
+                        affectedEntities.push({
+                            id: symbolEntity.id,
+                            name: symbolEntity.name,
+                            type: symbolEntity.kind,
+                            file: change.file,
+                            changeType: 'deleted'
+                        });
+                        breakingChanges.push({
+                            severity: 'breaking',
+                            description: `Deleting ${symbolEntity.kind} ${symbolEntity.name} will break dependent code`,
+                            affectedEntities: [symbolEntity.id]
+                        });
+                    }
                 }
             }
         }
@@ -452,7 +452,9 @@ async function parseContentAsFile(filePath, content, astParser) {
         try {
             await fs.unlink(tempPath);
         }
-        catch { }
+        catch {
+            // Ignore cleanup errors
+        }
         throw error;
     }
 }
@@ -494,10 +496,10 @@ function detectBreakingChange(symbol, oldResult, newResult) {
     // Simple breaking change detection - in a full implementation,
     // this would be much more sophisticated
     if (symbol.kind === 'function') {
-        // Check if function signature changed
-        const oldSignature = symbol.signature;
-        const newSignature = symbol.signature;
-        if (oldSignature !== newSignature) {
+        // Find the old and new versions of this symbol
+        const oldSymbol = oldResult.entities.find(e => e.type === 'symbol' && e.name === symbol.name);
+        const newSymbol = newResult.entities.find(e => e.type === 'symbol' && e.name === symbol.name);
+        if (oldSymbol && newSymbol && oldSymbol.signature !== newSymbol.signature) {
             return {
                 severity: 'potentially-breaking',
                 description: `Function ${symbol.name} signature changed`,
@@ -538,10 +540,10 @@ async function analyzeKnowledgeGraphImpact(symbolName, kgService) {
                     indirect.push(symbol);
                 }
             }
+            else if (entity.type === 'test') {
+                tests.push(entity);
+            }
         }
-        // Look for test entities that might be affected
-        const testEntities = searchResults.filter(e => e.type === 'test');
-        tests.push(...testEntities);
     }
     catch (error) {
         console.warn('Could not analyze knowledge graph impact:', error);
@@ -556,7 +558,7 @@ async function findEntitiesInFile(filePath, kgService) {
             searchType: 'structural',
             limit: 50
         });
-        return searchResults.filter(e => e.type === 'symbol');
+        return searchResults.filter(e => e.type === 'symbol').map(e => e);
     }
     catch (error) {
         console.warn('Could not find entities in file:', error);
@@ -776,10 +778,11 @@ async function analyzeCodeComplexity(files, astParser) {
             });
             totalComplexity += complexity.score;
         }
-        catch (error) {
+        catch {
             results.push({
                 file,
                 complexity: 0,
+                details: { functions: 0, classes: 0, nestedDepth: 0 },
                 error: 'Failed to analyze file'
             });
         }
@@ -789,9 +792,9 @@ async function analyzeCodeComplexity(files, astParser) {
         filesAnalyzed: files.length,
         results,
         summary: {
-            averageComplexity: totalComplexity / files.length,
-            maxComplexity: Math.max(...results.map(r => r.complexity)),
-            minComplexity: Math.min(...results.map(r => r.complexity))
+            averageComplexity: files.length > 0 ? totalComplexity / files.length : 0,
+            maxComplexity: results.length > 0 ? Math.max(...results.map(r => r.complexity)) : 0,
+            minComplexity: results.length > 0 ? Math.min(...results.map(r => r.complexity)) : 0
         }
     };
 }
@@ -805,7 +808,7 @@ async function analyzeCodePatterns(files, astParser) {
                 patterns.set(pattern, (patterns.get(pattern) || 0) + count);
             }
         }
-        catch (error) {
+        catch {
             // Skip files that can't be parsed
         }
     }
@@ -837,7 +840,7 @@ async function analyzeCodeDuplicates(files, astParser) {
                 codeBlocks.get(hash).push(`${file}:${block.line}`);
             }
         }
-        catch (error) {
+        catch {
             // Skip files that can't be parsed
         }
     }
@@ -874,7 +877,7 @@ async function analyzeCodeDependencies(files, kgService) {
                 }
             }
         }
-        catch (error) {
+        catch {
             // Skip files that can't be analyzed
         }
     }
@@ -935,9 +938,10 @@ function extractCodeBlocks(parseResult) {
     if (parseResult.entities) {
         for (const entity of parseResult.entities) {
             if (entity.type === 'symbol' && entity.kind === 'function') {
+                const symbolEntity = entity;
                 blocks.push({
-                    code: `function ${entity.name}`,
-                    line: entity.line || 0
+                    code: `function ${symbolEntity.name}`,
+                    line: symbolEntity.location?.line || 0
                 });
             }
         }

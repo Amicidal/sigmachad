@@ -1,9 +1,6 @@
 /**
- * Global test setup for Jest
- * Ensures proper test isolation and cleanup between test suites
+ * Test setup file for Vitest
+ * Configures global test environment
  */
-import { DatabaseService } from '../src/services/DatabaseService';
-declare let globalDbService: DatabaseService | null;
-export default function (): Promise<void>;
-export { globalDbService as dbService };
+export {};
 //# sourceMappingURL=setup.d.ts.map

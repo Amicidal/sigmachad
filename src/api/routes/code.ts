@@ -9,8 +9,9 @@ import { DatabaseService } from '../../services/DatabaseService.js';
 import { ASTParser, ParseResult } from '../../services/ASTParser.js';
 import { RelationshipType } from '../../models/relationships.js';
 import { ValidationResult, ValidationIssue } from '../../models/types.js';
-import { SecurityIssue } from '../../models/entities.js';
+import { SecurityIssue, Entity, Symbol as SymbolEntity, Test } from '../../models/entities.js';
 import fs from 'fs/promises';
+import console from 'console';
 
 interface CodeChangeProposal {
   changes: {
@@ -26,16 +27,16 @@ interface CodeChangeProposal {
 }
 
 interface CodeChangeAnalysis {
-  affectedEntities: any[];
+  affectedEntities: AffectedEntitySummary[];
   breakingChanges: {
     severity: 'breaking' | 'potentially-breaking' | 'safe';
     description: string;
     affectedEntities: string[];
   }[];
   impactAnalysis: {
-    directImpact: any[];
-    indirectImpact: any[];
-    testImpact: any[];
+    directImpact: Entity[];
+    indirectImpact: Entity[];
+    testImpact: Test[];
   };
   recommendations: {
     type: 'warning' | 'suggestion' | 'requirement';
@@ -49,6 +50,14 @@ interface ValidationRequest {
   specId?: string;
   includeTypes?: ('typescript' | 'eslint' | 'security' | 'tests' | 'coverage' | 'architecture')[];
   failOnWarnings?: boolean;
+}
+
+interface AffectedEntitySummary {
+  id: string;
+  name: string;
+  type: string;
+  file: string;
+  changeType: 'created' | 'modified' | 'deleted';
 }
 
 // Type definitions for validation issues
@@ -99,7 +108,7 @@ export async function registerCodeRoutes(
         success: true,
         data: analysis
       });
-    } catch (error) {
+    } catch {
       reply.status(500).send({
         success: false,
         error: {
@@ -179,8 +188,8 @@ export async function registerCodeRoutes(
         try {
           const tsValidation = await runTypeScriptValidation(params.files || []);
           result.typescript = tsValidation;
-        } catch (error) {
-          console.warn('TypeScript validation failed:', error);
+        } catch {
+          console.warn('TypeScript validation failed');
         }
       }
 
@@ -189,8 +198,8 @@ export async function registerCodeRoutes(
         try {
           const eslintValidation = await runESLintValidation(params.files || []);
           result.eslint = eslintValidation;
-        } catch (error) {
-          console.warn('ESLint validation failed:', error);
+        } catch {
+          console.warn('ESLint validation failed');
         }
       }
 
@@ -199,8 +208,8 @@ export async function registerCodeRoutes(
         try {
           const securityValidation = await runSecurityValidation(params.files || []);
           result.security = securityValidation;
-        } catch (error) {
-          console.warn('Security validation failed:', error);
+        } catch {
+          console.warn('Security validation failed');
         }
       }
 
@@ -209,8 +218,8 @@ export async function registerCodeRoutes(
         try {
           const testValidation = await runTestValidation();
           result.tests = testValidation;
-        } catch (error) {
-          console.warn('Test validation failed:', error);
+        } catch {
+          console.warn('Test validation failed');
         }
       }
 
@@ -219,8 +228,8 @@ export async function registerCodeRoutes(
         try {
           const architectureValidation = await runArchitectureValidation(params.files || []);
           result.architecture = architectureValidation;
-        } catch (error) {
-          console.warn('Architecture validation failed:', error);
+        } catch {
+          console.warn('Architecture validation failed');
         }
       }
 
@@ -270,18 +279,13 @@ export async function registerCodeRoutes(
     }
   }, async (request, reply) => {
     try {
-      const { files, analysisType, options } = request.body as {
+      const { files, analysisType } = request.body as {
         files: string[];
         analysisType: string;
         options?: any;
       };
 
-      let analysis: any = {
-        type: analysisType,
-        filesAnalyzed: files.length,
-        results: [],
-        summary: {}
-      };
+      let analysis: any; // Keep as any for now since different analysis types return different structures
 
       // Perform analysis based on type
       switch (analysisType) {
@@ -345,14 +349,14 @@ export async function registerCodeRoutes(
   }, async (request, reply) => {
     try {
       const { file } = request.params as { file: string };
-      const { lineStart, lineEnd, types } = request.query as {
+      const { lineStart, lineEnd } = request.query as {
         lineStart?: number;
         lineEnd?: number;
         types?: string[];
       };
 
       // TODO: Generate code improvement suggestions
-      const suggestions: any[] = [];
+      const suggestions: { type: string; message: string; line?: number; column?: number }[] = [];
 
       reply.send({
         success: true,
@@ -362,7 +366,7 @@ export async function registerCodeRoutes(
           suggestions
         }
       });
-    } catch (error) {
+    } catch {
       reply.status(500).send({
         success: false,
         error: {
@@ -391,14 +395,14 @@ export async function registerCodeRoutes(
     }
   }, async (request, reply) => {
     try {
-      const { files, refactorType, options } = request.body as {
+      const { files, refactorType } = request.body as {
         files: string[];
         refactorType: string;
         options?: any;
       };
 
       // TODO: Analyze and suggest refactoring opportunities
-      const refactorings: any[] = [];
+      const refactorings: { type: string; description: string; confidence: number; effort: string }[] = [];
 
       reply.send({
         success: true,
@@ -408,7 +412,7 @@ export async function registerCodeRoutes(
           suggestedRefactorings: refactorings
         }
       });
-    } catch (error) {
+    } catch {
       reply.status(500).send({
         success: false,
         error: {
@@ -426,12 +430,12 @@ async function analyzeCodeChanges(
   astParser: ASTParser,
   kgService: KnowledgeGraphService
 ): Promise<CodeChangeAnalysis> {
-  const affectedEntities: any[] = [];
-  const breakingChanges: any[] = [];
-  const directImpact: any[] = [];
-  const indirectImpact: any[] = [];
-  const testImpact: any[] = [];
-  const recommendations: any[] = [];
+  const affectedEntities: AffectedEntitySummary[] = [];
+  const breakingChanges: { severity: 'breaking' | 'potentially-breaking' | 'safe'; description: string; affectedEntities: string[] }[] = [];
+  const directImpact: Entity[] = [];
+  const indirectImpact: Entity[] = [];
+  const testImpact: Test[] = [];
+  const recommendations: { type: 'warning' | 'suggestion' | 'requirement'; message: string; actions: string[] }[] = [];
 
   try {
     // Analyze each proposed change
@@ -471,10 +475,11 @@ async function analyzeCodeChanges(
 
         for (const entity of newParseResult.entities) {
           if (entity.type === 'symbol') {
+            const symbolEntity = entity as SymbolEntity;
             affectedEntities.push({
-              id: entity.id,
-              name: (entity as any).name,
-              type: (entity as any).kind,
+              id: symbolEntity.id,
+              name: symbolEntity.name,
+              type: symbolEntity.kind,
               file: change.file,
               changeType: 'created'
             });
@@ -484,19 +489,22 @@ async function analyzeCodeChanges(
         // For deletions, we need to get the current state from the knowledge graph
         const currentEntities = await findEntitiesInFile(change.file, kgService);
         for (const entity of currentEntities) {
-          affectedEntities.push({
-            id: entity.id,
-            name: entity.name,
-            type: entity.kind,
-            file: change.file,
-            changeType: 'deleted'
-          });
+          if (entity.type === 'symbol') {
+            const symbolEntity = entity as SymbolEntity;
+            affectedEntities.push({
+              id: symbolEntity.id,
+              name: symbolEntity.name,
+              type: symbolEntity.kind,
+              file: change.file,
+              changeType: 'deleted'
+            });
 
-          breakingChanges.push({
-            severity: 'breaking',
-            description: `Deleting ${entity.kind} ${entity.name} will break dependent code`,
-            affectedEntities: [entity.id]
-          });
+            breakingChanges.push({
+              severity: 'breaking',
+              description: `Deleting ${symbolEntity.kind} ${symbolEntity.name} will break dependent code`,
+              affectedEntities: [symbolEntity.id]
+            });
+          }
         }
       }
     }
@@ -549,30 +557,32 @@ async function parseContentAsFile(
     // Clean up temporary file in case of error
     try {
       await fs.unlink(tempPath);
-    } catch {}
+    } catch {
+      // Ignore cleanup errors
+    }
 
     throw error;
   }
 }
 
 // Helper function to find affected symbols by comparing parse results
-function findAffectedSymbols(oldResult: ParseResult, newResult: ParseResult): any[] {
-  const affectedSymbols: any[] = [];
+function findAffectedSymbols(oldResult: ParseResult, newResult: ParseResult): SymbolEntity[] {
+  const affectedSymbols: SymbolEntity[] = [];
 
   // Create maps for efficient lookup
-  const oldSymbolMap = new Map<string, any>();
-  const newSymbolMap = new Map<string, any>();
+  const oldSymbolMap = new Map<string, SymbolEntity>();
+  const newSymbolMap = new Map<string, SymbolEntity>();
 
   for (const entity of oldResult.entities) {
     if (entity.type === 'symbol') {
-      const symbol = entity as any;
+      const symbol = entity as SymbolEntity;
       oldSymbolMap.set(`${symbol.name}:${symbol.kind}`, symbol);
     }
   }
 
   for (const entity of newResult.entities) {
     if (entity.type === 'symbol') {
-      const symbol = entity as any;
+      const symbol = entity as SymbolEntity;
       newSymbolMap.set(`${symbol.name}:${symbol.kind}`, symbol);
     }
   }
@@ -597,17 +607,18 @@ function findAffectedSymbols(oldResult: ParseResult, newResult: ParseResult): an
 
 // Helper function to detect breaking changes
 function detectBreakingChange(
-  symbol: any,
+  symbol: SymbolEntity,
   oldResult: ParseResult,
   newResult: ParseResult
-): any | null {
+): { severity: 'breaking' | 'potentially-breaking' | 'safe'; description: string; affectedEntities: string[] } | null {
   // Simple breaking change detection - in a full implementation,
   // this would be much more sophisticated
   if (symbol.kind === 'function') {
-    // Check if function signature changed
-    const oldSignature = symbol.signature;
-    const newSignature = symbol.signature;
-    if (oldSignature !== newSignature) {
+    // Find the old and new versions of this symbol
+    const oldSymbol = oldResult.entities.find(e => e.type === 'symbol' && (e as SymbolEntity).name === symbol.name) as SymbolEntity;
+    const newSymbol = newResult.entities.find(e => e.type === 'symbol' && (e as SymbolEntity).name === symbol.name) as SymbolEntity;
+
+    if (oldSymbol && newSymbol && oldSymbol.signature !== newSymbol.signature) {
       return {
         severity: 'potentially-breaking',
         description: `Function ${symbol.name} signature changed`,
@@ -633,10 +644,10 @@ function detectBreakingChange(
 async function analyzeKnowledgeGraphImpact(
   symbolName: string,
   kgService: KnowledgeGraphService
-): Promise<{ direct: any[]; indirect: any[]; tests: any[] }> {
-  const direct: any[] = [];
-  const indirect: any[] = [];
-  const tests: any[] = [];
+): Promise<{ direct: Entity[]; indirect: Entity[]; tests: Test[] }> {
+  const direct: Entity[] = [];
+  const indirect: Entity[] = [];
+  const tests: Test[] = [];
 
   try {
     // Search for entities with similar names
@@ -648,18 +659,16 @@ async function analyzeKnowledgeGraphImpact(
 
     for (const entity of searchResults) {
       if (entity.type === 'symbol') {
-        const symbol = entity as any;
+        const symbol = entity as SymbolEntity;
         if (symbol.name === symbolName) {
           direct.push(symbol);
         } else {
           indirect.push(symbol);
         }
+      } else if (entity.type === 'test') {
+        tests.push(entity as Test);
       }
     }
-
-    // Look for test entities that might be affected
-    const testEntities = searchResults.filter(e => e.type === 'test');
-    tests.push(...testEntities);
 
   } catch (error) {
     console.warn('Could not analyze knowledge graph impact:', error);
@@ -672,7 +681,7 @@ async function analyzeKnowledgeGraphImpact(
 async function findEntitiesInFile(
   filePath: string,
   kgService: KnowledgeGraphService
-): Promise<any[]> {
+): Promise<SymbolEntity[]> {
   try {
     const searchResults = await kgService.search({
       query: filePath,
@@ -680,7 +689,7 @@ async function findEntitiesInFile(
       limit: 50
     });
 
-    return searchResults.filter(e => e.type === 'symbol');
+    return searchResults.filter(e => e.type === 'symbol').map(e => e as SymbolEntity);
   } catch (error) {
     console.warn('Could not find entities in file:', error);
     return [];
@@ -689,10 +698,10 @@ async function findEntitiesInFile(
 
 // Helper function to generate recommendations
 function generateRecommendations(
-  affectedEntities: any[],
-  breakingChanges: any[]
-): any[] {
-  const recommendations: any[] = [];
+  affectedEntities: AffectedEntitySummary[],
+  breakingChanges: { severity: 'breaking' | 'potentially-breaking' | 'safe'; description: string; affectedEntities: string[] }[]
+): { type: 'warning' | 'suggestion' | 'requirement'; message: string; actions: string[] }[] {
+  const recommendations: { type: 'warning' | 'suggestion' | 'requirement'; message: string; actions: string[] }[] = [];
 
   if (breakingChanges.length > 0) {
     recommendations.push({
@@ -910,8 +919,17 @@ async function runArchitectureValidation(files: string[]): Promise<ValidationRes
 }
 
 // Helper functions for code analysis
-async function analyzeCodeComplexity(files: string[], astParser: ASTParser): Promise<any> {
-  const results = [];
+async function analyzeCodeComplexity(files: string[], astParser: ASTParser): Promise<{
+  type: 'complexity';
+  filesAnalyzed: number;
+  results: { file: string; complexity: number; details: { functions: number; classes: number; nestedDepth: number }; error?: string }[];
+  summary: {
+    averageComplexity: number;
+    maxComplexity: number;
+    minComplexity: number;
+  };
+}> {
+  const results: { file: string; complexity: number; details: { functions: number; classes: number; nestedDepth: number }; error?: string }[] = [];
   let totalComplexity = 0;
 
   for (const file of files) {
@@ -924,10 +942,11 @@ async function analyzeCodeComplexity(files: string[], astParser: ASTParser): Pro
         details: complexity.details
       });
       totalComplexity += complexity.score;
-    } catch (error) {
+    } catch {
       results.push({
         file,
         complexity: 0,
+        details: { functions: 0, classes: 0, nestedDepth: 0 },
         error: 'Failed to analyze file'
       });
     }
@@ -938,14 +957,23 @@ async function analyzeCodeComplexity(files: string[], astParser: ASTParser): Pro
     filesAnalyzed: files.length,
     results,
     summary: {
-      averageComplexity: totalComplexity / files.length,
-      maxComplexity: Math.max(...results.map(r => r.complexity)),
-      minComplexity: Math.min(...results.map(r => r.complexity))
+      averageComplexity: files.length > 0 ? totalComplexity / files.length : 0,
+      maxComplexity: results.length > 0 ? Math.max(...results.map(r => r.complexity)) : 0,
+      minComplexity: results.length > 0 ? Math.min(...results.map(r => r.complexity)) : 0
     }
   };
 }
 
-async function analyzeCodePatterns(files: string[], astParser: ASTParser): Promise<any> {
+async function analyzeCodePatterns(files: string[], astParser: ASTParser): Promise<{
+  type: 'patterns';
+  filesAnalyzed: number;
+  results: { pattern: string; frequency: number }[];
+  summary: {
+    totalPatterns: number;
+    mostCommon: { pattern: string; frequency: number }[];
+    leastCommon: { pattern: string; frequency: number }[];
+  };
+}> {
   const patterns = new Map<string, number>();
 
   for (const file of files) {
@@ -956,7 +984,7 @@ async function analyzeCodePatterns(files: string[], astParser: ASTParser): Promi
       for (const [pattern, count] of filePatterns) {
         patterns.set(pattern, (patterns.get(pattern) || 0) + count);
       }
-    } catch (error) {
+    } catch {
       // Skip files that can't be parsed
     }
   }
@@ -977,7 +1005,15 @@ async function analyzeCodePatterns(files: string[], astParser: ASTParser): Promi
   };
 }
 
-async function analyzeCodeDuplicates(files: string[], astParser: ASTParser): Promise<any> {
+async function analyzeCodeDuplicates(files: string[], astParser: ASTParser): Promise<{
+  type: 'duplicates';
+  filesAnalyzed: number;
+  results: { hash: string; locations: string[]; count: number }[];
+  summary: {
+    totalDuplicates: number;
+    totalDuplicatedBlocks: number;
+  };
+}> {
   const codeBlocks = new Map<string, string[]>();
 
   for (const file of files) {
@@ -992,7 +1028,7 @@ async function analyzeCodeDuplicates(files: string[], astParser: ASTParser): Pro
         }
         codeBlocks.get(hash)!.push(`${file}:${block.line}`);
       }
-    } catch (error) {
+    } catch {
       // Skip files that can't be parsed
     }
   }
@@ -1012,7 +1048,19 @@ async function analyzeCodeDuplicates(files: string[], astParser: ASTParser): Pro
   };
 }
 
-async function analyzeCodeDependencies(files: string[], kgService: KnowledgeGraphService): Promise<any> {
+async function analyzeCodeDependencies(files: string[], kgService: KnowledgeGraphService): Promise<{
+  type: 'dependencies';
+  filesAnalyzed: number;
+  results: {
+    entity: string;
+    dependencies: string[];
+    dependencyCount: number;
+  }[];
+  summary: {
+    totalEntities: number;
+    averageDependencies: number;
+  };
+}> {
   const dependencies = new Map<string, Set<string>>();
 
   for (const file of files) {
@@ -1034,7 +1082,7 @@ async function analyzeCodeDependencies(files: string[], kgService: KnowledgeGrap
           dependencies.set(entity.id, new Set(depNames));
         }
       }
-    } catch (error) {
+    } catch {
       // Skip files that can't be analyzed
     }
   }
@@ -1056,7 +1104,7 @@ async function analyzeCodeDependencies(files: string[], kgService: KnowledgeGrap
 }
 
 // Utility functions
-function calculateComplexity(parseResult: any): { score: number; details: any } {
+function calculateComplexity(parseResult: ParseResult): { score: number; details: { functions: number; classes: number; nestedDepth: number } } {
   let score = 0;
   const details = { functions: 0, classes: 0, nestedDepth: 0 };
 
@@ -1078,7 +1126,7 @@ function calculateComplexity(parseResult: any): { score: number; details: any } 
   return { score, details };
 }
 
-function extractPatterns(parseResult: any): Map<string, number> {
+function extractPatterns(parseResult: ParseResult): Map<string, number> {
   const patterns = new Map<string, number>();
 
   // Simple pattern extraction - look for common coding patterns
@@ -1096,16 +1144,17 @@ function extractPatterns(parseResult: any): Map<string, number> {
   return patterns;
 }
 
-function extractCodeBlocks(parseResult: any): Array<{ code: string; line: number }> {
+function extractCodeBlocks(parseResult: ParseResult): Array<{ code: string; line: number }> {
   // Simple code block extraction - in a real implementation, this would be more sophisticated
   const blocks: Array<{ code: string; line: number }> = [];
 
   if (parseResult.entities) {
     for (const entity of parseResult.entities) {
       if (entity.type === 'symbol' && entity.kind === 'function') {
+        const symbolEntity = entity as SymbolEntity;
         blocks.push({
-          code: `function ${entity.name}`,
-          line: entity.line || 0
+          code: `function ${symbolEntity.name}`,
+          line: symbolEntity.location?.line || 0
         });
       }
     }

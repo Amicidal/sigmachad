@@ -1,6 +1,6 @@
 /**
  * API Gateway for Memento
- * Main entry point for all API interactions (REST, WebSocket, GraphQL)
+ * Main entry point for all API interactions (REST, WebSocket, MCP)
  */
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
@@ -34,17 +34,21 @@ export interface SynchronizationServices {
 export declare class APIGateway {
     private kgService;
     private dbService;
-    private fileWatcher;
-    private astParser;
-    private docParser;
     private app;
     private config;
     private mcpRouter;
     private wsRouter;
     private testEngine;
     private securityScanner;
+    private astParser;
+    private docParser;
+    private fileWatcher?;
     private syncServices?;
-    constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher: FileWatcher, astParser: ASTParser, docParser: DocumentationParser, securityScanner: SecurityScanner, config?: Partial<APIGatewayConfig>, syncServices?: SynchronizationServices);
+    private backupService?;
+    private loggingService?;
+    private maintenanceService?;
+    private configurationService?;
+    constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher?: FileWatcher, astParser?: ASTParser, docParser?: DocumentationParser, securityScanner?: SecurityScanner, config?: Partial<APIGatewayConfig>, syncServices?: SynchronizationServices);
     private setupMiddleware;
     private setupRoutes;
     private setupErrorHandling;

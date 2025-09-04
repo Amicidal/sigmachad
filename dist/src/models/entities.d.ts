@@ -247,12 +247,12 @@ export interface Vulnerability {
     exploitability: 'high' | 'medium' | 'low';
 }
 export type Entity = File | Directory | Module | Symbol | FunctionSymbol | ClassSymbol | InterfaceSymbol | TypeAliasSymbol | Test | Spec | Change | Session | DocumentationNode | BusinessDomain | SemanticCluster | SecurityIssue | Vulnerability;
-export declare const isFile: (entity: Entity) => entity is File;
-export declare const isDirectory: (entity: Entity) => entity is Directory;
-export declare const isSymbol: (entity: Entity) => entity is Symbol;
-export declare const isFunction: (entity: Entity) => entity is FunctionSymbol;
-export declare const isClass: (entity: Entity) => entity is ClassSymbol;
-export declare const isInterface: (entity: Entity) => entity is InterfaceSymbol;
-export declare const isTest: (entity: Entity) => entity is Test;
-export declare const isSpec: (entity: Entity) => entity is Spec;
+export declare const isFile: (entity: Entity | null | undefined) => entity is File;
+export declare const isDirectory: (entity: Entity | null | undefined) => entity is Directory;
+export declare const isSymbol: (entity: Entity | null | undefined) => entity is Symbol;
+export declare const isFunction: (entity: Entity | null | undefined) => entity is FunctionSymbol;
+export declare const isClass: (entity: Entity | null | undefined) => entity is ClassSymbol;
+export declare const isInterface: (entity: Entity | null | undefined) => entity is InterfaceSymbol;
+export declare const isTest: (entity: Entity | null | undefined) => entity is Test;
+export declare const isSpec: (entity: Entity | null | undefined) => entity is Spec;
 //# sourceMappingURL=entities.d.ts.map

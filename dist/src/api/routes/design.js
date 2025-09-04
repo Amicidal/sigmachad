@@ -51,7 +51,8 @@ export function registerDesignRoutes(app, kgService, dbService) {
             });
         }
         catch (error) {
-            reply.status(400).send({
+            reply.status(400);
+            reply.send({
                 success: false,
                 error: {
                     code: 'VALIDATION_ERROR',
@@ -101,7 +102,8 @@ export function registerDesignRoutes(app, kgService, dbService) {
             });
         }
         catch (error) {
-            reply.status(400).send({
+            reply.status(400);
+            reply.send({
                 success: false,
                 error: {
                     code: 'VALIDATION_ERROR',
@@ -128,12 +130,13 @@ export function registerDesignRoutes(app, kgService, dbService) {
         }
         catch (error) {
             const requestParams = request.query;
-            reply.status(400).send({
+            reply.status(400);
+            reply.send({
                 success: false,
                 data: [],
                 pagination: {
                     page: 1,
-                    pageSize: requestParams.limit || 20,
+                    pageSize: request.query.limit || 20,
                     total: 0,
                     hasMore: false,
                 },

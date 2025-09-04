@@ -20,14 +20,14 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _input_in: {
             limit?: number | undefined;
             since?: string | undefined;
-            level?: "info" | "error" | "debug" | "warn" | undefined;
             component?: string | undefined;
+            level?: "info" | "error" | "warn" | "debug" | undefined;
         };
         _input_out: {
             limit: number;
             since?: string | undefined;
-            level?: "info" | "error" | "debug" | "warn" | undefined;
             component?: string | undefined;
+            level?: "info" | "error" | "warn" | "debug" | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
@@ -65,8 +65,8 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
-            force?: boolean | undefined;
             paths?: string[] | undefined;
+            force?: boolean | undefined;
         };
         _input_out: {
             force: boolean;

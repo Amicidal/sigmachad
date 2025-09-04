@@ -33,6 +33,22 @@ export class RollbackCapabilities {
         return rollbackId;
     }
     /**
+     * List all rollback points for a given entity
+     */
+    async listRollbackPoints(entityId) {
+        const entityRollbackPoints = [];
+        for (const [rollbackId, rollbackPoint] of this.rollbackPoints.entries()) {
+            // Check if this rollback point contains the specified entity
+            const hasEntity = rollbackPoint.entities.some(entity => entity.id === entityId) ||
+                rollbackPoint.relationships.some(rel => rel.fromEntityId === entityId || rel.toEntityId === entityId);
+            if (hasEntity) {
+                entityRollbackPoints.push(rollbackPoint);
+            }
+        }
+        // Sort by timestamp (most recent first)
+        return entityRollbackPoints.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    }
+    /**
      * Capture all current entities in the graph
      */
     async captureCurrentEntities() {

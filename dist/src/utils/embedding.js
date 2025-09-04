@@ -274,6 +274,9 @@ export class EmbeddingService {
      * Generate cache key for content
      */
     getCacheKey(content) {
+        if (!content) {
+            throw new Error('Content cannot be empty');
+        }
         return `${this.config.model}_${this.simpleHash(content)}`;
     }
     /**

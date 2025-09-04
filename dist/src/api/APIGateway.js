@@ -1,13 +1,21 @@
 /**
  * API Gateway for Memento
- * Main entry point for all API interactions (REST, WebSocket, GraphQL)
+ * Main entry point for all API interactions (REST, WebSocket, MCP)
  */
 import Fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import { createTRPCContext, appRouter } from './trpc/router.js';
+import { FileWatcher } from '../services/FileWatcher.js';
+import { ASTParser } from '../services/ASTParser.js';
+import { DocumentationParser } from '../services/DocumentationParser.js';
 import { TestEngine } from '../services/TestEngine.js';
+import { SecurityScanner } from '../services/SecurityScanner.js';
+import { BackupService } from '../services/BackupService.js';
+import { LoggingService } from '../services/LoggingService.js';
+import { MaintenanceService } from '../services/MaintenanceService.js';
+import { ConfigurationService } from '../services/ConfigurationService.js';
 // Import route handlers
 import { registerDesignRoutes } from './routes/design.js';
 import { registerTestRoutes } from './routes/tests.js';
@@ -26,24 +34,25 @@ import { defaultRateLimit, searchRateLimit, adminRateLimit, startCleanupInterval
 export class APIGateway {
     kgService;
     dbService;
-    fileWatcher;
-    astParser;
-    docParser;
     app;
     config;
     mcpRouter;
     wsRouter;
     testEngine;
     securityScanner;
+    astParser;
+    docParser;
+    fileWatcher;
     syncServices;
+    backupService;
+    loggingService;
+    maintenanceService;
+    configurationService;
     constructor(kgService, dbService, fileWatcher, astParser, docParser, securityScanner, config = {}, syncServices) {
         this.kgService = kgService;
         this.dbService = dbService;
-        this.fileWatcher = fileWatcher;
-        this.astParser = astParser;
-        this.docParser = docParser;
         this.config = {
-            port: config.port || 3000,
+            port: config.port !== undefined ? config.port : 3000,
             host: config.host || '0.0.0.0',
             cors: {
                 origin: config.cors?.origin || ['http://localhost:3000', 'http://localhost:5173'],
@@ -64,12 +73,22 @@ export class APIGateway {
         });
         // Initialize TestEngine
         this.testEngine = new TestEngine(this.kgService, this.dbService);
-        // Use the provided SecurityScanner
-        this.securityScanner = securityScanner;
+        // Use the provided SecurityScanner or create a basic one
+        this.securityScanner = securityScanner || new SecurityScanner(this.dbService, this.kgService);
+        // Assign fileWatcher to class property
+        this.fileWatcher = fileWatcher;
+        // Create default instances if not provided
+        this.astParser = astParser || new ASTParser();
+        this.docParser = docParser || new DocumentationParser(this.kgService, this.dbService);
         // Initialize MCP Router
         this.mcpRouter = new MCPRouter(this.kgService, this.dbService, this.astParser, this.testEngine, this.securityScanner);
         // Initialize WebSocket Router
         this.wsRouter = new WebSocketRouter(this.kgService, this.dbService, this.fileWatcher);
+        // Initialize Admin Services
+        this.backupService = new BackupService(this.dbService, this.dbService.getConfig());
+        this.loggingService = new LoggingService('./logs/memento.log');
+        this.maintenanceService = new MaintenanceService(this.dbService, this.kgService);
+        this.configurationService = new ConfigurationService(this.dbService, this.syncServices?.syncCoordinator);
         this.setupMiddleware();
         this.setupRoutes();
         this.setupErrorHandling();
@@ -167,7 +186,7 @@ export class APIGateway {
                 registerSCMRoutes(app, this.kgService, this.dbService);
                 registerDocsRoutes(app, this.kgService, this.dbService, this.docParser);
                 registerSecurityRoutes(app, this.kgService, this.dbService, this.securityScanner);
-                registerAdminRoutes(app, this.kgService, this.dbService, this.fileWatcher, this.syncServices?.syncCoordinator, this.syncServices?.syncMonitor, this.syncServices?.conflictResolver, this.syncServices?.rollbackCapabilities);
+                registerAdminRoutes(app, this.kgService, this.dbService, this.fileWatcher || new FileWatcher(), this.syncServices?.syncCoordinator, this.syncServices?.syncMonitor, this.syncServices?.conflictResolver, this.syncServices?.rollbackCapabilities, this.backupService, this.loggingService, this.maintenanceService, this.configurationService);
                 console.log('✅ All route modules registered successfully');
             }
             catch (error) {
@@ -183,19 +202,12 @@ export class APIGateway {
                     kgService: this.kgService,
                     dbService: this.dbService,
                     astParser: this.astParser,
-                    fileWatcher: this.fileWatcher,
+                    fileWatcher: this.fileWatcher || new FileWatcher(),
                 }),
             },
         });
         // Register WebSocket routes
         this.wsRouter.registerRoutes(this.app);
-        // GraphQL endpoint (placeholder for future implementation)
-        this.app.get('/graphql', async (request, reply) => {
-            reply.send({
-                message: 'GraphQL endpoint not yet implemented',
-                status: 'coming_soon',
-            });
-        });
         // Register MCP routes (for Claude integration)
         this.mcpRouter.registerRoutes(this.app);
         // 404 handler
@@ -273,6 +285,11 @@ export class APIGateway {
                 port: this.config.port,
                 host: this.config.host,
             });
+            // Update config with the actual assigned port (important when port was 0)
+            const address = this.app.server?.address();
+            if (address && typeof address === 'object' && address.port) {
+                this.config.port = address.port;
+            }
             console.log(`🚀 Memento API Gateway listening on http://${this.config.host}:${this.config.port}`);
             console.log(`📊 Health check available at http://${this.config.host}:${this.config.port}/health`);
             console.log(`🔌 WebSocket available at ws://${this.config.host}:${this.config.port}/ws`);

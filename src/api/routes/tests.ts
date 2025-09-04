@@ -475,8 +475,9 @@ export async function registerTestRoutes(
     try {
       const { entityId } = request.params as { entityId: string };
 
-      // Get flaky test analysis from TestEngine
-      const analyses = await testEngine.analyzeFlakyTests([]);
+      // Get flaky test analysis for the specific entity from TestEngine
+      // Prefer server-side filtering when supported
+      const analyses = await testEngine.analyzeFlakyTests([entityId]);
 
       // Find analysis for specific entity
       const analysis = analyses.find(a => a.testId === entityId);

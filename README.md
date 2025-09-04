@@ -8,7 +8,7 @@ Memento is an AI-first coding assistant that provides comprehensive codebase awa
 - 🤖 **AI-Native**: Designed specifically for AI coding assistants (Claude, GPT, etc.)
 - 🔍 **Real-time Monitoring**: File watching with automatic graph updates
 - 📊 **Multi-Database**: Graph (FalkorDB), Vector (Qdrant), and Relational (PostgreSQL)
-- 🌐 **Multiple APIs**: REST, WebSocket, MCP, and GraphQL support
+- 🌐 **Multiple APIs**: REST, WebSocket, and MCP support
 - 🐳 **Docker-Native**: Easy deployment with Docker Compose
 - ⚡ **High Performance**: Built with Fastify and optimized for speed
 
@@ -63,10 +63,10 @@ curl http://localhost:3000/health
          ▼                        ▼                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     API Gateway Layer                       │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ │
-│  │   MCP Server    │ │   REST API     │ │   GraphQL       │ │
-│  │   (Local)       │ │   (Local)      │ │   (Local)       │ │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘ │
+│  ┌─────────────────┐ ┌─────────────────┐ │
+│  │   MCP Server    │ │   REST API     │ │
+│  │   (Local)       │ │   (Local)      │ │
+│  └─────────────────┘ └─────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -311,7 +311,7 @@ MIT License - see LICENSE file for details.
 
 ## Roadmap
 
-- [ ] GraphQL API implementation
+
 - [ ] Advanced security scanning
 - [ ] Performance monitoring dashboard
 - [ ] Multi-language support expansion

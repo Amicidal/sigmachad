@@ -297,14 +297,19 @@ export type Entity =
   | Vulnerability;
 
 // Type guards for entity discrimination
-export const isFile = (entity: Entity): entity is File => entity.type === 'file';
-export const isDirectory = (entity: Entity): entity is Directory => entity.type === 'directory';
-export const isSymbol = (entity: Entity): entity is Symbol => entity.type === 'symbol';
-export const isFunction = (entity: Entity): entity is FunctionSymbol =>
+export const isFile = (entity: Entity | null | undefined): entity is File =>
+  entity != null && entity.type === 'file';
+export const isDirectory = (entity: Entity | null | undefined): entity is Directory =>
+  entity != null && entity.type === 'directory';
+export const isSymbol = (entity: Entity | null | undefined): entity is Symbol =>
+  entity != null && entity.type === 'symbol';
+export const isFunction = (entity: Entity | null | undefined): entity is FunctionSymbol =>
   isSymbol(entity) && entity.kind === 'function';
-export const isClass = (entity: Entity): entity is ClassSymbol =>
+export const isClass = (entity: Entity | null | undefined): entity is ClassSymbol =>
   isSymbol(entity) && entity.kind === 'class';
-export const isInterface = (entity: Entity): entity is InterfaceSymbol =>
+export const isInterface = (entity: Entity | null | undefined): entity is InterfaceSymbol =>
   isSymbol(entity) && entity.kind === 'interface';
-export const isTest = (entity: Entity): entity is Test => entity.type === 'test';
-export const isSpec = (entity: Entity): entity is Spec => entity.type === 'spec';
+export const isTest = (entity: Entity | null | undefined): entity is Test =>
+  entity != null && entity.type === 'test';
+export const isSpec = (entity: Entity | null | undefined): entity is Spec =>
+  entity != null && entity.type === 'spec';

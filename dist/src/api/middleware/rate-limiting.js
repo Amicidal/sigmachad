@@ -102,6 +102,6 @@ export function getRateLimitStats() {
 }
 // Start cleanup interval (should be called when app starts)
 export function startCleanupInterval(intervalMs = 300000) {
-    setInterval(cleanupBuckets, intervalMs);
+    globalThis.setInterval(cleanupBuckets, intervalMs);
 }
 //# sourceMappingURL=rate-limiting.js.map

@@ -7,7 +7,7 @@ The Memento API provides comprehensive access to the knowledge graph system, ena
 - **MCP Server** (Claude Code compatible)
 - **HTTP REST API** (OpenAI function-calling compatible)
 - **WebSocket API** (Real-time updates)
-- **GraphQL API** (Complex queries and subscriptions)
+- **MCP API** (Model Context Protocol for AI assistants)
 
 ## Core Concepts
 
@@ -969,7 +969,7 @@ Official client libraries available for:
 
 - **Interactive API Documentation**: Available at `/api/docs`
 - **OpenAPI Specification**: Available at `/api/openapi.json`
-- **GraphQL Schema**: Available at `/api/graphql/schema`
+
 - **Community Forums**: `https://community.memento.ai`
 - **Support**: `support@memento.ai`
 

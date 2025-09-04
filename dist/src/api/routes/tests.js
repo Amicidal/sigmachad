@@ -4,7 +4,7 @@
  */
 export async function registerTestRoutes(app, kgService, dbService, testEngine) {
     // POST /api/tests/plan-and-generate - Plan and generate tests
-    app.post('/plan-and-generate', {
+    app.post('/tests/plan-and-generate', {
         schema: {
             body: {
                 type: 'object',
@@ -137,7 +137,7 @@ export async function registerTestRoutes(app, kgService, dbService, testEngine) 
         }
     });
     // POST /api/tests/record-execution - Record test execution results
-    app.post('/record-execution', {
+    app.post('/tests/record-execution', {
         schema: {
             body: {
                 type: 'object',
@@ -215,7 +215,7 @@ export async function registerTestRoutes(app, kgService, dbService, testEngine) 
         }
     });
     // POST /api/tests/parse-results - Parse and record test results from file
-    app.post('/parse-results', {
+    app.post('/tests/parse-results', {
         schema: {
             body: {
                 type: 'object',
@@ -250,7 +250,7 @@ export async function registerTestRoutes(app, kgService, dbService, testEngine) 
         }
     });
     // GET /api/tests/performance/{entityId} - Get performance metrics
-    app.get('/performance/:entityId', {
+    app.get('/tests/performance/:entityId', {
         schema: {
             params: {
                 type: 'object',
@@ -281,7 +281,7 @@ export async function registerTestRoutes(app, kgService, dbService, testEngine) 
         }
     });
     // GET /api/tests/coverage/{entityId} - Get test coverage
-    app.get('/coverage/:entityId', {
+    app.get('/tests/coverage/:entityId', {
         schema: {
             params: {
                 type: 'object',
@@ -312,7 +312,7 @@ export async function registerTestRoutes(app, kgService, dbService, testEngine) 
         }
     });
     // GET /api/tests/flaky-analysis/{entityId} - Get flaky test analysis
-    app.get('/flaky-analysis/:entityId', {
+    app.get('/tests/flaky-analysis/:entityId', {
         schema: {
             params: {
                 type: 'object',
@@ -325,8 +325,9 @@ export async function registerTestRoutes(app, kgService, dbService, testEngine) 
     }, async (request, reply) => {
         try {
             const { entityId } = request.params;
-            // Get flaky test analysis from TestEngine
-            const analyses = await testEngine.analyzeFlakyTests([]);
+            // Get flaky test analysis for the specific entity from TestEngine
+            // Prefer server-side filtering when supported
+            const analyses = await testEngine.analyzeFlakyTests([entityId]);
             // Find analysis for specific entity
             const analysis = analyses.find(a => a.testId === entityId);
             if (!analysis) {

@@ -27,7 +27,12 @@ export async function performHealthCheck() {
     catch (error) {
         return {
             healthy: false,
-            databases: {},
+            databases: {
+                falkordb: false,
+                qdrant: false,
+                postgresql: false,
+                redis: false,
+            },
             error: error instanceof Error ? error.message : 'Unknown error',
         };
     }

@@ -136,5 +136,5 @@ export function getRateLimitStats() {
 
 // Start cleanup interval (should be called when app starts)
 export function startCleanupInterval(intervalMs: number = 300000) { // 5 minutes
-  setInterval(cleanupBuckets, intervalMs);
+  globalThis.setInterval(cleanupBuckets, intervalMs);
 }

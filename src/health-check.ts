@@ -6,10 +6,11 @@
  */
 
 import { DatabaseService, createDatabaseConfig } from './services/DatabaseService.js';
+import { IDatabaseHealthCheck } from './services/database/interfaces.js';
 
 export interface HealthCheckResult {
   healthy: boolean;
-  databases: Record<string, boolean | undefined>;
+  databases: IDatabaseHealthCheck;
   error?: string;
 }
 
@@ -42,7 +43,12 @@ export async function performHealthCheck(): Promise<HealthCheckResult> {
   } catch (error) {
     return {
       healthy: false,
-      databases: {},
+      databases: {
+        falkordb: false,
+        qdrant: false,
+        postgresql: false,
+        redis: false,
+      },
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }

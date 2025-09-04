@@ -8,7 +8,7 @@ Memento is a **local-first AI coding assistant** that provides comprehensive cod
 - **Local-First**: Runs entirely on developer machines using Docker
 - **AI-Native**: Built for AI coding assistants (Claude, GPT, etc.)
 - **Knowledge Graph**: Maintains comprehensive codebase understanding
-- **Multi-Protocol**: Supports MCP, REST, WebSocket, and GraphQL interfaces
+- **Multi-Protocol**: Supports MCP, REST, and WebSocket interfaces
 - **Developer-Centric**: Optimized for individual and small team workflows
 
 ### Why Local-First Architecture?
@@ -41,10 +41,10 @@ Memento is a **local-first AI coding assistant** that provides comprehensive cod
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         API Gateway Layer                           │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐         │
-│  │   MCP Server    │ │   REST API     │ │   GraphQL       │         │
-│  │   (Local)       │ │   (Local)      │ │   (Local)       │         │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘         │
+│  ┌─────────────────┐ ┌─────────────────┐         │
+│  │   MCP Server    │ │   REST API     │         │
+│  │   (Local)       │ │   (Local)      │         │
+│  └─────────────────┘ └─────────────────┘         │
 └─────────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
@@ -210,13 +210,11 @@ class KnowledgeGraphService {
 import Fastify from 'fastify';
 import { MCPRouter } from './mcp-router';
 import { RestRouter } from './rest-router';
-import { GraphQLRouter } from './graphql-router';
 
 class APIGateway {
   private app: FastifyInstance;
   private mcpRouter: MCPRouter;
   private restRouter: RestRouter;
-  private graphqlRouter: GraphQLRouter;
 
   async start(port: number): Promise<void> {
     // MCP endpoint
@@ -224,9 +222,6 @@ class APIGateway {
 
     // REST API
     this.app.register(this.restRouter.register, { prefix: '/api/v1' });
-
-    // GraphQL API
-    this.app.register(this.graphqlRouter.register, { prefix: '/graphql' });
 
     await this.app.listen({ port });
   }
