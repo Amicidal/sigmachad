@@ -37,6 +37,12 @@ export interface FlakyTestAnalysis {
     lastFailure: Date;
     failurePatterns: string[];
 }
+export type DatabaseServiceDeps = {
+    falkorFactory?: (cfg: DatabaseConfig['falkordb']) => IFalkorDBService;
+    qdrantFactory?: (cfg: DatabaseConfig['qdrant']) => IQdrantService;
+    postgresFactory?: (cfg: DatabaseConfig['postgresql']) => IPostgreSQLService;
+    redisFactory?: (cfg: NonNullable<DatabaseConfig['redis']>) => IRedisService;
+};
 export declare class DatabaseService {
     private config;
     private falkorDBService;
@@ -46,7 +52,11 @@ export declare class DatabaseService {
     private initialized;
     private initializing;
     private initializationPromise?;
-    constructor(config: DatabaseConfig);
+    private readonly falkorFactory?;
+    private readonly qdrantFactory?;
+    private readonly postgresFactory?;
+    private readonly redisFactory?;
+    constructor(config: DatabaseConfig, deps?: DatabaseServiceDeps);
     getConfig(): DatabaseConfig;
     getFalkorDBService(): IFalkorDBService;
     getQdrantService(): IQdrantService;

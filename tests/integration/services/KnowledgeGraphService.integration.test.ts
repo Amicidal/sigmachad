@@ -623,7 +623,7 @@ describe('KnowledgeGraphService Integration', () => {
       expect(examples.entityId).toBe(dependencyEntities[0].id);
       expect(examples.signature).toBeDefined();
       // Usage examples depend on relationships, may be empty in simple test
-      expect(Array.isArray(examples.usageExamples)).toBe(true);
+      expect(examples.usageExamples).toEqual(expect.any(Array));
     });
   });
 
@@ -727,7 +727,7 @@ describe('KnowledgeGraphService Integration', () => {
       };
 
       const results = await kgService.search(invalidSearch);
-      expect(Array.isArray(results)).toBe(true);
+      expect(results).toEqual(expect.any(Array));
       expect(results.length).toBe(0);
     });
 
@@ -738,7 +738,7 @@ describe('KnowledgeGraphService Integration', () => {
       };
 
       const results = await kgService.search(emptySearch);
-      expect(Array.isArray(results)).toBe(true);
+      expect(results).toEqual(expect.any(Array));
     });
 
     it('should handle concurrent entity updates', async () => {

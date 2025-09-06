@@ -331,30 +331,50 @@ export class FileWatcher extends EventEmitter {
   }
 
   private shouldIgnore(filePath: string): boolean {
-    return this.config.ignorePatterns.some(pattern => {
-      // Simple glob matching for common patterns
-      if (pattern.includes('**')) {
-        // Handle ** patterns
-        const parts = pattern.split('**');
-        if (parts.length === 2) {
-          const before = this.escapeRegex(parts[0]);
-          const after = this.escapeRegex(parts[1]);
-          const regex = new RegExp(`^${before}.*${after}$`);
-          return regex.test(filePath);
-        }
-      } else {
-        // Handle simple * patterns
-        const escaped = this.escapeRegex(pattern);
-        const regexPattern = escaped.replace(/\\\*/g, '[^/]*');
-        const regex = new RegExp(`^${regexPattern}$`);
-        return regex.test(filePath);
-      }
-      return false;
-    });
+    return this.config.ignorePatterns.some(pattern => this.globToRegex(pattern).test(filePath));
   }
 
-  private escapeRegex(string: string): string {
-    return string.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  // Convert a minimal glob to a RegExp supporting:
+  // - "**" for any number of path segments (including none)
+  // - "*" for any number of non-separator chars within a path segment
+  // Other characters are treated literally.
+  private globToRegex(pattern: string): RegExp {
+    let out = '';
+    for (let i = 0; i < pattern.length; ) {
+      // Handle **/
+      if (pattern.startsWith('**/', i)) {
+        out += '(?:.*/)?';
+        i += 3;
+        continue;
+      }
+      // Handle /**/
+      if (pattern.startsWith('/**/', i)) {
+        out += '(?:/.*/)?';
+        i += 4;
+        continue;
+      }
+      // Handle ** (any path including separators)
+      if (pattern.startsWith('**', i)) {
+        out += '.*';
+        i += 2;
+        continue;
+      }
+      const ch = pattern[i];
+      if (ch === '*') {
+        // Any chars except path separator
+        out += '[^/]*';
+        i += 1;
+        continue;
+      }
+      // Escape regex special characters
+      if (/[-/\\^$+?.()|[\]{}]/.test(ch)) {
+        out += `\\${ch}`;
+      } else {
+        out += ch;
+      }
+      i += 1;
+    }
+    return new RegExp(`^${out}$`);
   }
 
   // Public API methods

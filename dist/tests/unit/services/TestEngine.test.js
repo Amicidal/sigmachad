@@ -322,7 +322,7 @@ describe('TestEngine', () => {
             const results = Array.from({ length: 20 }, (_, i) => createMockTestResult({
                 testId: 'highly-flaky',
                 status: i % 2 === 0 ? 'failed' : 'passed', // Alternating pattern
-                duration: 100 + Math.random() * 200 // Variable duration
+                duration: 100 + (i % 10) * 10 // Deterministic variable duration
             }));
             const analyses = await testEngine.analyzeFlakyTests(results);
             expect(analyses.length).toBe(1);
@@ -754,7 +754,7 @@ describe('TestEngine', () => {
             const results = Array.from({ length: 15 }, (_, i) => createMockTestResult({
                 testId: 'flaky-test',
                 status: i < 10 ? 'passed' : 'failed', // 10 passes, 5 fails
-                duration: 100 + Math.random() * 50, // Variable duration
+                duration: 100 + (i % 5) * 5, // Deterministic variable duration
                 errorMessage: i >= 10 ? 'Intermittent failure' : undefined
             }));
             const suiteResult = createMockTestSuiteResult({

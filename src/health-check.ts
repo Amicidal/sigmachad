@@ -32,9 +32,7 @@ export async function performHealthCheck(): Promise<HealthCheckResult> {
     await dbService.close();
 
     // Check overall health
-    const allHealthy = Object.values(health).every(status =>
-      status === true || status === undefined
-    );
+    const allHealthy = Object.values(health).every((s: any) => s?.status !== 'unhealthy');
 
     return {
       healthy: allHealthy,
@@ -44,10 +42,10 @@ export async function performHealthCheck(): Promise<HealthCheckResult> {
     return {
       healthy: false,
       databases: {
-        falkordb: false,
-        qdrant: false,
-        postgresql: false,
-        redis: false,
+        falkordb: { status: 'unhealthy' },
+        qdrant: { status: 'unhealthy' },
+        postgresql: { status: 'unhealthy' },
+        redis: { status: 'unhealthy' },
       },
       error: error instanceof Error ? error.message : 'Unknown error',
     };
@@ -79,4 +77,3 @@ if (require.main === module) {
     process.exit(1);
   });
 }
-

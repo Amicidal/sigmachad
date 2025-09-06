@@ -409,13 +409,15 @@ export async function registerTestRoutes(
     try {
       const { entityId } = request.params as { entityId: string };
 
-      // Get performance metrics from TestEngine
+      // Return 404 if the entity doesn't exist in the KG
+      const entity = await kgService.getEntity(entityId);
+      if (!entity) {
+        return reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Entity not found' } });
+      }
+
       const metrics = await testEngine.getPerformanceMetrics(entityId);
 
-      reply.send({
-        success: true,
-        data: metrics
-      });
+      reply.send({ success: true, data: metrics });
     } catch (error) {
       reply.status(500).send({
         success: false,
@@ -442,13 +444,15 @@ export async function registerTestRoutes(
     try {
       const { entityId } = request.params as { entityId: string };
 
-      // Get coverage analysis from TestEngine
+      // Return 404 if the entity doesn't exist in the KG
+      const entity = await kgService.getEntity(entityId);
+      if (!entity) {
+        return reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Entity not found' } });
+      }
+
       const coverage = await testEngine.getCoverageAnalysis(entityId);
 
-      reply.send({
-        success: true,
-        data: coverage
-      });
+      reply.send({ success: true, data: coverage });
     } catch (error) {
       reply.status(500).send({
         success: false,

@@ -436,7 +436,7 @@ describe('API Performance Integration', () => {
       expect(duration).toBeLessThan(1000); // Should handle large dataset queries quickly
 
       const body = JSON.parse(response.payload);
-      expect(body.success).toBe(true);
+      expect(body).toEqual(expect.objectContaining({ success: true }));
       expect(body.data.entities.length).toBeGreaterThan(0);
     });
 
@@ -458,7 +458,7 @@ describe('API Performance Integration', () => {
         expect(duration).toBeLessThan(500); // Pagination should be fast regardless of page size
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(body.data.length).toBeLessThanOrEqual(pageSize);
       }
     });

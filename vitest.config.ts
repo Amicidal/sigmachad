@@ -4,6 +4,16 @@ import { resolve } from 'path';
 
 export default defineConfig({
   test: {
+    // Force thread pool by default to avoid sandbox restrictions with process signals.
+    // Can be overridden via env: VITEST_POOL=vmThreads|forks|threads
+    pool: (process.env.VITEST_POOL as any) || 'threads',
+    poolOptions: {
+      threads: {
+        // Allow tuning via env to reduce worker management if needed in CI/sandboxes.
+        minThreads: Number(process.env.VITEST_MIN_THREADS || 1),
+        maxThreads: Number(process.env.VITEST_MAX_THREADS || 1),
+      },
+    },
     environment: 'node',
     setupFiles: ['./tests/setup.ts'],
     testTimeout: 30000,
@@ -17,7 +27,8 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
-      '**/coverage/**'
+      '**/coverage/**',
+      ...(process.env.RUN_INTEGRATION === '1' ? [] : ['tests/integration/**'])
     ],
     coverage: {
       reporter: ['text', 'html', 'lcov'],

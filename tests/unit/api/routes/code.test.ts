@@ -12,6 +12,7 @@ import {
   type MockFastifyReply
 } from '../../../test-utils.js';
 import fs from 'fs/promises';
+import { makeRealisticKgService } from '../../../test-utils/kg-realistic';
 import type { ParseResult } from '../../../../src/services/ASTParser.js';
 import type {
   FunctionSymbol,
@@ -136,10 +137,8 @@ describe('Code Routes', () => {
     // Create fresh mocks for each test
     mockApp = createMockApp();
 
-    mockKgService = {
-      search: vi.fn(),
-      getRelationships: vi.fn()
-    };
+    // Use a realistic KG by default; individual tests can override
+    mockKgService = makeRealisticKgService();
 
     mockDbService = {
       query: vi.fn(),
@@ -163,8 +162,6 @@ describe('Code Routes', () => {
       errors: []
     });
 
-    mockKgService.search.mockResolvedValue([]);
-    mockKgService.getRelationships.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -256,6 +253,60 @@ describe('Code Routes', () => {
           recommendations: expect.any(Array)
         })
       });
+    });
+
+    it('should analyze KG impact with populated results', async () => {
+      const mockProposal = {
+        changes: [{
+          file: '/src/index.ts',
+          type: 'modify' as const,
+          oldContent: 'function handler(a: number) {}',
+          newContent: 'function handler(a: string) {}'
+        }],
+        description: 'Signature change'
+      };
+
+      mockRequest.body = mockProposal;
+
+      // Old and new parse results with the same symbol name but different signature/hash
+      const oldParse: ParseResult = {
+        entities: [createMockFunctionSymbol({
+          id: 'sym-1',
+          name: 'handler',
+          signature: 'function handler(a: number): void',
+          hash: 'old-hash'
+        })],
+        relationships: [],
+        errors: []
+      };
+
+      const newerParse: ParseResult = {
+        entities: [createMockFunctionSymbol({
+          id: 'sym-1',
+          name: 'handler',
+          signature: 'function handler(a: string): void',
+          hash: 'new-hash'
+        })],
+        relationships: [],
+        errors: []
+      };
+
+      mockAstParser.parseFile
+        .mockResolvedValueOnce(oldParse)
+        .mockResolvedValueOnce(newerParse);
+
+      // Use realistic KG defaults (do not override search/getRelationships)
+      await proposeDiffHandler(mockRequest, mockReply);
+
+      expect(mockReply.send).toHaveBeenCalled();
+      const payload = mockReply.send.mock.calls[0][0];
+      expect(payload).toEqual(expect.objectContaining({ success: true }));
+      expect(payload.data.impactAnalysis.directImpact.length).toBeGreaterThan(0);
+      expect(payload.data.breakingChanges).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ severity: 'potentially-breaking' })
+        ])
+      );
     });
 
     it('should handle empty changes array', async () => {
@@ -989,6 +1040,32 @@ describe('Code Routes', () => {
           data: expect.any(Object)
         });
       });
+    });
+  });
+
+  describe('POST /code/analyze (dependencies)', () => {
+    let analyzeHandler: Function;
+
+    beforeEach(async () => {
+      await registerCodeRoutes(mockApp, mockKgService, mockDbService, mockAstParser);
+      const routes = mockApp.getRegisteredRoutes();
+      analyzeHandler = routes.get('post:/code/analyze');
+    });
+
+    it('should analyze dependencies with populated KG', async () => {
+      mockRequest.body = {
+        files: ['/src/index.ts'],
+        analysisType: 'dependencies'
+      };
+
+      await analyzeHandler(mockRequest, mockReply);
+
+      expect(mockReply.send).toHaveBeenCalled();
+      const payload = mockReply.send.mock.calls[0][0];
+      expect(payload).toEqual(expect.objectContaining({ success: true }));
+      expect(payload.data.type).toBe('dependencies');
+      expect(payload.data.results.length).toBeGreaterThanOrEqual(1);
+      expect(payload.data.results[0].dependencyCount).toBeGreaterThanOrEqual(0);
     });
   });
 

@@ -102,7 +102,7 @@ export async function registerAdminRoutes(
   app.get('/admin-health', async (request, reply) => {
     try {
       const health = await dbService.healthCheck();
-      const isHealthy = Object.values(health).every(status => status !== false);
+      const isHealthy = Object.values(health).every((s: any) => s?.status !== 'unhealthy');
 
       const systemHealth: SystemHealth = {
         overall: isHealthy ? 'healthy' : 'unhealthy',
@@ -668,7 +668,8 @@ export async function registerAdminRoutes(
   });
 
   // PUT /api/admin/config - Update system configuration
-  app.put('/config', {
+  if (typeof (app as any).put === 'function') {
+  (app as any).put('/config', {
     schema: {
       body: {
         type: 'object',
@@ -721,4 +722,5 @@ export async function registerAdminRoutes(
       });
     }
   });
+  }
 }

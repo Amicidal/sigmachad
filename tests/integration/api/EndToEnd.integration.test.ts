@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { expectSuccess } from '../../test-utils/assertions';
 import { FastifyInstance } from 'fastify';
 import { APIGateway } from '../../../src/api/APIGateway.js';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
@@ -92,9 +93,7 @@ describe('API End-to-End Integration', () => {
 
       if (designResponse.statusCode === 200 || designResponse.statusCode === 201) {
         const designBody = JSON.parse(designResponse.payload);
-        expect(designBody.success).toBe(true);
-        expect(designBody.data).toBeDefined();
-        expect(designBody.data.specId).toBeDefined();
+        expectSuccess(designBody, { specId: expect.any(String) });
 
         const specId = designBody.data.specId;
 
@@ -118,8 +117,7 @@ describe('API End-to-End Integration', () => {
         expect(testPlanResponse.statusCode).toBe(200);
 
         const testPlanBody = JSON.parse(testPlanResponse.payload);
-        expect(testPlanBody.success).toBe(true);
-        expect(testPlanBody.data.testPlan).toBeDefined();
+        expectSuccess(testPlanBody, { testPlan: expect.anything() });
 
         // Step 3: Search for related entities in the knowledge graph
         const searchRequest = {
@@ -140,7 +138,7 @@ describe('API End-to-End Integration', () => {
         expect(searchResponse.statusCode).toBe(200);
 
         const searchBody = JSON.parse(searchResponse.payload);
-        expect(searchBody.success).toBe(true);
+        expectSuccess(searchBody);
 
         // Step 4: Get dependency analysis for the specification
         const dependencyResponse = await app.inject({
@@ -152,7 +150,7 @@ describe('API End-to-End Integration', () => {
 
         if (dependencyResponse.statusCode === 200) {
           const dependencyBody = JSON.parse(dependencyResponse.payload);
-          expect(dependencyBody.success).toBe(true);
+          expectSuccess(dependencyBody);
         }
 
         // Step 5: Record some test execution results
@@ -185,7 +183,7 @@ describe('API End-to-End Integration', () => {
         expect(recordResponse.statusCode).toBe(200);
 
         const recordBody = JSON.parse(recordResponse.payload);
-        expect(recordBody.success).toBe(true);
+        expectSuccess(recordBody, { recorded: expect.any(Number) });
         expect(recordBody.data.recorded).toBe(2);
 
         // Step 6: Get performance metrics
@@ -205,7 +203,7 @@ describe('API End-to-End Integration', () => {
         expect(healthResponse.statusCode).toBe(200);
 
         const healthBody = JSON.parse(healthResponse.payload);
-        expect(healthBody.status).toBe('healthy');
+        expect(healthBody).toEqual(expect.objectContaining({ status: 'healthy' }));
       }
     });
   });
@@ -264,8 +262,8 @@ describe('API End-to-End Integration', () => {
 
       expect(searchResponse.statusCode).toBe(200);
 
-      const searchBody = JSON.parse(searchResponse.payload);
-      expect(searchBody.success).toBe(true);
+        const searchBody = JSON.parse(searchResponse.payload);
+        expect(searchBody).toEqual(expect.objectContaining({ success: true }));
       expect(searchBody.data.entities.length).toBeGreaterThan(0);
 
       // Step 3: Get usage examples
@@ -441,9 +439,11 @@ describe('API End-to-End Integration', () => {
 
       // Verify all users could complete their workflows
       results.forEach(result => {
-        expect(result.specCreated).toBe(true);
-        expect(result.searchWorked).toBe(true);
-        expect(result.testsRecorded).toBe(true);
+        expect(result).toEqual(expect.objectContaining({
+          specCreated: true,
+          searchWorked: true,
+          testsRecorded: true,
+        }));
       });
     });
   });

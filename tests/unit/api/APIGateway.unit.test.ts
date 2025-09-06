@@ -20,10 +20,10 @@ vi.mock('../../../src/services/KnowledgeGraphService', () => ({
 vi.mock('../../../src/services/DatabaseService', () => ({
   DatabaseService: vi.fn().mockImplementation(() => ({
     healthCheck: vi.fn().mockResolvedValue({
-      falkordb: true,
-      qdrant: true,
-      postgresql: true,
-      redis: true,
+      falkordb: { status: 'healthy' },
+      qdrant: { status: 'healthy' },
+      postgresql: { status: 'healthy' },
+      redis: { status: 'healthy' },
     }),
     isInitialized: vi.fn().mockReturnValue(true),
     getConfig: vi.fn().mockReturnValue({

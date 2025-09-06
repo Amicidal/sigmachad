@@ -829,7 +829,7 @@ describe('DatabaseService Integration', () => {
 
       // Test basic connectivity first
       const healthBefore = await dbService.healthCheck();
-      expect(healthBefore.postgresql).toBe(true);
+      expect(healthBefore.postgresql).toEqual(expect.objectContaining({ status: 'healthy' }));
 
       // Perform operations that should work with healthy connection
       await dbService.postgresQuery(`
@@ -851,7 +851,7 @@ describe('DatabaseService Integration', () => {
 
       // Test health after operations
       const healthAfter = await dbService.healthCheck();
-      expect(healthAfter.postgresql).toBe(true);
+      expect(healthAfter.postgresql).toEqual(expect.objectContaining({ status: 'healthy' }));
 
       // Clean up
       await dbService.postgresQuery('DELETE FROM documents WHERE id = $1', [testId]);
@@ -1465,8 +1465,7 @@ describe('DatabaseService Integration', () => {
         });
 
         expect(result).toBeDefined();
-        expect(result.data).toBeDefined();
-        expect(Array.isArray(result.data)).toBe(true);
+        expect(result.data).toEqual(expect.any(Array));
         expect(result.data!.length).toBeGreaterThan(0);
 
         // Cleanup
@@ -1494,8 +1493,7 @@ describe('DatabaseService Integration', () => {
         );
 
         expect(result).toBeDefined();
-        expect(result.data).toBeDefined();
-        expect(Array.isArray(result.data)).toBe(true);
+        expect(result.data).toEqual(expect.any(Array));
         expect(result.data.length).toBe(2); // Should return index 2 and 3
 
         // Cleanup
@@ -1768,8 +1766,7 @@ describe('DatabaseService Integration', () => {
         // Test the method
         const history = await dbService.getPerformanceMetricsHistory(entityId, 7);
 
-        expect(history).toBeDefined();
-        expect(Array.isArray(history)).toBe(true);
+        expect(history).toEqual(expect.any(Array));
         expect(history.length).toBeGreaterThan(0);
 
         // Verify structure
@@ -1799,8 +1796,7 @@ describe('DatabaseService Integration', () => {
         // Test the method
         const history = await dbService.getCoverageHistory(entityId, 7);
 
-        expect(history).toBeDefined();
-        expect(Array.isArray(history)).toBe(true);
+        expect(history).toEqual(expect.any(Array));
         expect(history.length).toBeGreaterThan(0);
 
         // Verify structure
@@ -1860,8 +1856,7 @@ describe('DatabaseService Integration', () => {
         // Test the method - get execution history for the entity
         const history = await dbService.getTestExecutionHistory(entityId, 10);
 
-        expect(history).toBeDefined();
-        expect(Array.isArray(history)).toBe(true);
+        expect(history).toEqual(expect.any(Array));
         expect(history.length).toBeGreaterThan(0);
 
         // Verify structure of returned data
@@ -1887,8 +1882,7 @@ describe('DatabaseService Integration', () => {
 
         const history = await dbService.getTestExecutionHistory(nonExistentEntityId, 10);
 
-        expect(history).toBeDefined();
-        expect(Array.isArray(history)).toBe(true);
+        expect(history).toEqual(expect.any(Array));
         expect(history.length).toBe(0);
       });
     });
@@ -1913,8 +1907,7 @@ describe('DatabaseService Integration', () => {
 
         const results = await dbService.postgresBulkQuery(bulkQueries);
 
-        expect(results).toBeDefined();
-        expect(Array.isArray(results)).toBe(true);
+        expect(results).toEqual(expect.any(Array));
         expect(results.length).toBe(3);
 
         // Verify all queries executed successfully
@@ -1953,8 +1946,7 @@ describe('DatabaseService Integration', () => {
 
         const results = await dbService.postgresBulkQuery(bulkQueries, { continueOnError: true });
 
-        expect(results).toBeDefined();
-        expect(Array.isArray(results)).toBe(true);
+        expect(results).toEqual(expect.any(Array));
         expect(results.length).toBe(3);
 
         // First and third queries should succeed, second should fail

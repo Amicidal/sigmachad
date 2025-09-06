@@ -3,7 +3,7 @@
  * Tests comprehensive monitoring, metrics collection, and alerting functionality
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { SynchronizationMonitoring, SyncMetrics, PerformanceMetrics, HealthMetrics } from '../../../src/services/SynchronizationMonitoring';
 import { SyncOperation } from '../../../src/services/SynchronizationCoordinator';
 
@@ -11,11 +11,14 @@ describe('SynchronizationMonitoring Integration', () => {
   let monitoring: SynchronizationMonitoring;
 
   beforeAll(async () => {
+    // Use fake timers to avoid long real-time waits and reduce flakiness
+    vi.useFakeTimers();
     monitoring = new SynchronizationMonitoring();
   });
 
   afterAll(async () => {
     monitoring.stopHealthMonitoring();
+    vi.useRealTimers();
   });
 
   beforeEach(async () => {
@@ -49,8 +52,8 @@ describe('SynchronizationMonitoring Integration', () => {
       const activeOps = monitoring.getActiveOperations();
       expect(activeOps).toContain(operation);
 
-      // Simulate some processing time
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Simulate some processing time deterministically
+      vi.advanceTimersByTime(100);
 
       // Record operation completion
       operation.endTime = new Date();
@@ -135,7 +138,7 @@ describe('SynchronizationMonitoring Integration', () => {
 
       // Complete operations with some delay to simulate real processing
       for (const operation of operations) {
-        await new Promise(resolve => setTimeout(resolve, 50));
+        vi.advanceTimersByTime(50);
         operation.endTime = new Date();
         monitoring.recordOperationComplete(operation);
       }
@@ -173,7 +176,7 @@ describe('SynchronizationMonitoring Integration', () => {
 
       // Record operation and complete it
       monitoring.recordOperationStart(operation);
-      await new Promise(resolve => setTimeout(resolve, 200));
+      vi.advanceTimersByTime(200);
       operation.endTime = new Date();
       monitoring.recordOperationComplete(operation);
 
@@ -213,7 +216,7 @@ describe('SynchronizationMonitoring Integration', () => {
         };
 
         monitoring.recordOperationStart(operation);
-        await new Promise(resolve => setTimeout(resolve, 10));
+        vi.advanceTimersByTime(10);
         operation.endTime = new Date();
         monitoring.recordOperationComplete(operation);
       }
@@ -228,7 +231,7 @@ describe('SynchronizationMonitoring Integration', () => {
   describe('Health Monitoring Integration', () => {
     it('should perform health checks and update health metrics', async () => {
       // Wait for a health check cycle
-      await new Promise(resolve => setTimeout(resolve, 31000)); // Wait > 30 seconds
+      vi.advanceTimersByTime(31000); // Fast-forward > 30 seconds
 
       const healthMetrics = monitoring.getHealthMetrics();
       expect(healthMetrics).toBeDefined();
@@ -389,7 +392,7 @@ describe('SynchronizationMonitoring Integration', () => {
       }
 
       // Wait for health check to trigger alerts
-      await new Promise(resolve => setTimeout(resolve, 31000));
+      vi.advanceTimersByTime(31000);
 
       // Check for health-related alerts
       const allAlerts = monitoring.getAlerts();
@@ -562,7 +565,7 @@ describe('SynchronizationMonitoring Integration', () => {
       expect(['healthy', 'degraded', 'unhealthy']).toContain(report.health.overallHealth);
 
       // Verify recent operations
-      expect(Array.isArray(report.recentOperations)).toBe(true);
+      expect(report.recentOperations).toEqual(expect.any(Array));
       expect(report.recentOperations.length).toBeGreaterThan(0);
     });
   });
@@ -745,7 +748,7 @@ describe('SynchronizationMonitoring Integration', () => {
       monitoring.recordOperationFailed(operation, new Error('Event test error'));
 
       // Health check should trigger periodically
-      await new Promise(resolve => setTimeout(resolve, 31000));
+      vi.advanceTimersByTime(31000);
 
       // Verify events were emitted
       expect(events).toContain('alertTriggered');

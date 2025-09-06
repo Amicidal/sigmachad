@@ -58,11 +58,13 @@ export async function clearTestData(dbService: DatabaseService): Promise<void> {
   }
 
   // Clear PostgreSQL test data
-  await dbService.postgresQuery('DELETE FROM test_results');
-  await dbService.postgresQuery('DELETE FROM test_suites');
+  // Respect foreign key dependencies: coverage/performance/results -> suites
   await dbService.postgresQuery('DELETE FROM test_coverage');
   await dbService.postgresQuery('DELETE FROM test_performance');
+  await dbService.postgresQuery('DELETE FROM test_results');
+  await dbService.postgresQuery('DELETE FROM test_suites');
   await dbService.postgresQuery('DELETE FROM flaky_test_analyses');
+  // Respect FK from changes.session_id -> sessions.id
   await dbService.postgresQuery('DELETE FROM changes');
   await dbService.postgresQuery('DELETE FROM sessions');
   await dbService.postgresQuery('DELETE FROM documents');

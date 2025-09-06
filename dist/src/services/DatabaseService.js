@@ -15,8 +15,17 @@ export class DatabaseService {
     initialized = false;
     initializing = false;
     initializationPromise;
-    constructor(config) {
+    // Optional factories for dependency injection (testing and customization)
+    falkorFactory;
+    qdrantFactory;
+    postgresFactory;
+    redisFactory;
+    constructor(config, deps = {}) {
         this.config = config;
+        this.falkorFactory = deps.falkorFactory;
+        this.qdrantFactory = deps.qdrantFactory;
+        this.postgresFactory = deps.postgresFactory;
+        this.redisFactory = deps.redisFactory;
     }
     getConfig() {
         return this.config;
@@ -91,9 +100,15 @@ export class DatabaseService {
         const initializedServices = [];
         try {
             // Initialize specialized services
-            this.falkorDBService = new FalkorDBService(this.config.falkordb);
-            this.qdrantService = new QdrantService(this.config.qdrant);
-            this.postgresqlService = new PostgreSQLService(this.config.postgresql);
+            this.falkorDBService = this.falkorFactory
+                ? this.falkorFactory(this.config.falkordb)
+                : new FalkorDBService(this.config.falkordb);
+            this.qdrantService = this.qdrantFactory
+                ? this.qdrantFactory(this.config.qdrant)
+                : new QdrantService(this.config.qdrant);
+            this.postgresqlService = this.postgresFactory
+                ? this.postgresFactory(this.config.postgresql)
+                : new PostgreSQLService(this.config.postgresql);
             // Initialize each service and track successful initializations
             await this.falkorDBService.initialize();
             initializedServices.push({ service: this.falkorDBService, close: () => this.falkorDBService.close() });
@@ -103,7 +118,9 @@ export class DatabaseService {
             initializedServices.push({ service: this.postgresqlService, close: () => this.postgresqlService.close() });
             // Initialize Redis (optional, for caching)
             if (this.config.redis) {
-                this.redisService = new RedisService(this.config.redis);
+                this.redisService = this.redisFactory
+                    ? this.redisFactory(this.config.redis)
+                    : new RedisService(this.config.redis);
                 await this.redisService.initialize();
                 initializedServices.push({ service: this.redisService, close: () => this.redisService.close() });
             }

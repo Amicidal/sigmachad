@@ -417,9 +417,11 @@ GET /health
   "status": "healthy",
   "timestamp": "2024-01-15T10:30:00Z",
   "services": {
-    "falkordb": true,
-    "qdrant": true,
-    "mcp": true
+    "falkordb": { "status": "healthy" },
+    "qdrant": { "status": "healthy" },
+    "postgresql": { "status": "healthy" },
+    "redis": { "status": "unknown" },
+    "mcp": { "status": "healthy" }
   },
   "uptime": 3600,
   "mcp": {

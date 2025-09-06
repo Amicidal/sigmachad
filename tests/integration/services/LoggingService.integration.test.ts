@@ -416,7 +416,7 @@ describe('LoggingService Integration', () => {
 
       // Should be valid JSON
       const parsedJson = JSON.parse(jsonExport);
-      expect(Array.isArray(parsedJson)).toBe(true);
+      expect(parsedJson).toEqual(expect.any(Array));
 
       // Test CSV export
       const csvExport = loggingService.exportLogs('csv');

@@ -83,9 +83,15 @@ export class TestResultParser {
     // Simple XML parsing without external dependencies
     // In production, you'd want to use a proper XML parser like xml2js
 
+    // Empty content should be treated as an error
+    if (!content || content.trim().length === 0) {
+      throw new Error('Empty test result content');
+    }
+
     const testSuites: ParsedTestSuite[] = [];
     const suiteRegex = /<testsuite[^>]*>(.*?)<\/testsuite>/gs;
-    const testcaseRegex = /<testcase[^>]*>(.*?)<\/testcase>/gs;
+    const testcaseRegex = /<testcase\b[^>]*>(.*?)<\/testcase>/gs;
+    const selfClosingTestcaseRegex = /<testcase\b[^>]*\/>/gs;
 
     let suiteMatch;
     while ((suiteMatch = suiteRegex.exec(content)) !== null) {
@@ -96,7 +102,7 @@ export class TestResultParser {
         suiteName: suiteAttrs.name || 'Unknown Suite',
         timestamp: new Date(suiteAttrs.timestamp || Date.now()),
         framework: 'junit',
-        totalTests: parseInt(suiteAttrs.tests || '0'),
+        totalTests: 0,
         passedTests: 0,
         failedTests: 0,
         skippedTests: 0,
@@ -107,7 +113,7 @@ export class TestResultParser {
       let testMatch;
       while ((testMatch = testcaseRegex.exec(suiteContent)) !== null) {
         const testAttrs = this.parseXMLAttributes(testMatch[0]);
-        const testContent = testMatch[1];
+        const testContent = testMatch[1] || '';
 
         const testResult: ParsedTestResult = {
           testId: `${suite.suiteName}#${testAttrs.name}`,
@@ -118,7 +124,7 @@ export class TestResultParser {
         };
 
         // Check for failure
-        if (testContent.includes('<failure>')) {
+        if (/<failure\b/.test(testContent)) {
           testResult.status = 'failed';
           const failureMatch = testContent.match(/<failure[^>]*>(.*?)<\/failure>/s);
           if (failureMatch) {
@@ -127,7 +133,7 @@ export class TestResultParser {
         }
 
         // Check for error
-        if (testContent.includes('<error>')) {
+        if (/<error\b/.test(testContent)) {
           testResult.status = 'error';
           const errorMatch = testContent.match(/<error[^>]*>(.*?)<\/error>/s);
           if (errorMatch) {
@@ -136,7 +142,7 @@ export class TestResultParser {
         }
 
         // Check for skipped
-        if (testContent.includes('<skipped>')) {
+        if (/<skipped\b/.test(testContent)) {
           testResult.status = 'skipped';
         }
 
@@ -156,6 +162,24 @@ export class TestResultParser {
         }
       }
 
+      // Handle self-closing <testcase ... /> entries (no inner content)
+      let selfClosingMatch;
+      while ((selfClosingMatch = selfClosingTestcaseRegex.exec(suiteContent)) !== null) {
+        const testAttrs = this.parseXMLAttributes(selfClosingMatch[0]);
+        const testResult: ParsedTestResult = {
+          testId: `${suite.suiteName}#${testAttrs.name}`,
+          testSuite: suite.suiteName,
+          testName: testAttrs.name || 'Unknown Test',
+          duration: parseFloat(testAttrs.time || '0') * 1000,
+          status: 'passed'
+        };
+
+        suite.results.push(testResult);
+        suite.passedTests++;
+      }
+
+      // Ensure totalTests reflects parsed results if attribute missing or incorrect
+      suite.totalTests = suite.results.length;
       testSuites.push(suite);
     }
 
@@ -178,7 +202,7 @@ export class TestResultParser {
 
     if (data.testResults) {
       for (const testFile of data.testResults) {
-        const suiteName = testFile.name || 'Jest Suite';
+        const suiteName = testFile.testFilePath || testFile.name || 'Jest Suite';
 
         for (const test of testFile.testResults || []) {
           const testResult: ParsedTestResult = {
@@ -335,36 +359,40 @@ export class TestResultParser {
     let totalDuration = 0;
 
     const processRun = (run: any) => {
-      for (const spec of run.specs || []) {
-        for (const test of spec.tests || []) {
-          const testResult: ParsedTestResult = {
-            testId: `${spec.relative}#${test.title.join(' > ')}`,
-            testSuite: spec.relative,
-            testName: test.title.join(' > '),
-            status: test.state === 'passed' ? 'passed' : test.state === 'failed' ? 'failed' : 'skipped',
-            duration: test.duration || 0
-          };
+      // Cypress JSON reporter outputs one spec per run
+      const spec = run.spec || run.specs?.[0];
+      if (!spec) return;
+      for (const test of run.tests || spec.tests || []) {
+        const title = Array.isArray(test.title) ? test.title.join(' > ') : String(test.title ?? '');
+        const specPath = spec.relative || spec.file || 'unknown.spec';
 
-          if (test.err) {
-            testResult.errorMessage = test.err.message;
-            testResult.stackTrace = test.err.stack;
-          }
+        const testResult: ParsedTestResult = {
+          testId: `${specPath}#${title}`,
+          testSuite: specPath,
+          testName: title,
+          status: test.state === 'passed' ? 'passed' : test.state === 'failed' ? 'failed' : 'skipped',
+          duration: test.duration || 0
+        };
 
-          results.push(testResult);
-          totalTests++;
-          totalDuration += testResult.duration;
+        if (test.err) {
+          testResult.errorMessage = test.err.message;
+          testResult.stackTrace = test.err.stack;
+        }
 
-          switch (testResult.status) {
-            case 'passed':
-              passedTests++;
-              break;
-            case 'failed':
-              failedTests++;
-              break;
-            case 'skipped':
-              skippedTests++;
-              break;
-          }
+        results.push(testResult);
+        totalTests++;
+        totalDuration += testResult.duration;
+
+        switch (testResult.status) {
+          case 'passed':
+            passedTests++;
+            break;
+          case 'failed':
+            failedTests++;
+            break;
+          case 'skipped':
+            skippedTests++;
+            break;
         }
       }
     };
@@ -497,7 +525,17 @@ export class TestResultParser {
 
   private mergeTestSuites(suites: ParsedTestSuite[]): TestSuiteResult {
     if (suites.length === 0) {
-      throw new Error('No test suites found');
+      return {
+        suiteName: 'JUnit Test Suite',
+        timestamp: new Date(),
+        framework: 'junit',
+        totalTests: 0,
+        passedTests: 0,
+        failedTests: 0,
+        skippedTests: 0,
+        duration: 0,
+        results: []
+      };
     }
 
     if (suites.length === 1) {

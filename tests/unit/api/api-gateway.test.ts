@@ -28,20 +28,15 @@ vi.mock('../../../src/api/websocket-router.js');
 // Import types after mocking
 import type { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
 import type { DatabaseService } from '../../../src/services/DatabaseService.js';
+import { makeRealisticKgService } from '../../test-utils/kg-realistic';
 
 describe('APIGateway', () => {
   let mockKgService: KnowledgeGraphService;
   let mockDbService: DatabaseService;
 
   beforeEach(() => {
-    mockKgService = {
-      createEntity: vi.fn().mockResolvedValue(undefined),
-      updateEntity: vi.fn().mockResolvedValue(undefined),
-      search: vi.fn().mockResolvedValue([]),
-      getRelationships: vi.fn().mockResolvedValue([]),
-      getEntity: vi.fn().mockResolvedValue(null),
-      createRelationship: vi.fn().mockResolvedValue(undefined),
-    } as any;
+    // Use realistic defaults; individual tests can override as needed
+    mockKgService = makeRealisticKgService();
 
     mockDbService = {
       healthCheck: vi.fn().mockResolvedValue({

@@ -40,6 +40,13 @@ export class RedisService implements IRedisService {
     return this.initialized;
   }
 
+  getClient(): RedisClientType {
+    if (!this.initialized) {
+      throw new Error('Redis not configured');
+    }
+    return this.redisClient;
+  }
+
   async get(key: string): Promise<string | null> {
     if (!this.initialized) {
       throw new Error('Redis not configured');
@@ -76,4 +83,3 @@ export class RedisService implements IRedisService {
     }
   }
 }
-

@@ -106,8 +106,8 @@ describe('RollbackCapabilities Integration', () => {
 
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
       expect(rollbackPoint).toBeDefined();
-      expect(Array.isArray(rollbackPoint?.entities)).toBe(true);
-      expect(Array.isArray(rollbackPoint?.relationships)).toBe(true);
+      expect(rollbackPoint?.entities).toEqual(expect.any(Array));
+      expect(rollbackPoint?.relationships).toEqual(expect.any(Array));
 
       // Should have captured the entities and relationships
       expect(rollbackPoint?.entities.length).toBeGreaterThanOrEqual(2);
@@ -119,12 +119,8 @@ describe('RollbackCapabilities Integration', () => {
 
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
       expect(rollbackPoint).toBeDefined();
-      expect(rollbackPoint?.entities).toBeDefined();
-      expect(rollbackPoint?.relationships).toBeDefined();
-
-      // Should handle empty state gracefully
-      expect(Array.isArray(rollbackPoint?.entities)).toBe(true);
-      expect(Array.isArray(rollbackPoint?.relationships)).toBe(true);
+      expect(rollbackPoint?.entities).toEqual(expect.any(Array));
+      expect(rollbackPoint?.relationships).toEqual(expect.any(Array));
     });
   });
 
@@ -141,7 +137,7 @@ describe('RollbackCapabilities Integration', () => {
     it('should list rollback points for specific operation', async () => {
       const operationPoints = rollbackService.getRollbackPointsForOperation('management_test_1');
 
-      expect(Array.isArray(operationPoints)).toBe(true);
+      expect(operationPoints).toEqual(expect.any(Array));
       expect(operationPoints.length).toBeGreaterThanOrEqual(1);
 
       // All points should belong to the specified operation
@@ -153,14 +149,14 @@ describe('RollbackCapabilities Integration', () => {
     it('should return empty array for non-existent operation', async () => {
       const operationPoints = rollbackService.getRollbackPointsForOperation('non_existent_operation');
 
-      expect(Array.isArray(operationPoints)).toBe(true);
+      expect(operationPoints).toEqual(expect.any(Array));
       expect(operationPoints.length).toBe(0);
     });
 
     it('should retrieve all rollback points', async () => {
       const allPoints = rollbackService.getAllRollbackPoints();
 
-      expect(Array.isArray(allPoints)).toBe(true);
+      expect(allPoints).toEqual(expect.any(Array));
       expect(allPoints.length).toBeGreaterThanOrEqual(2);
 
       // Should be sorted by timestamp (most recent first)
@@ -190,7 +186,7 @@ describe('RollbackCapabilities Integration', () => {
 
       expect(validationResult).toBeDefined();
       expect(typeof validationResult.valid).toBe('boolean');
-      expect(Array.isArray(validationResult.issues)).toBe(true);
+      expect(validationResult.issues).toEqual(expect.any(Array));
     });
 
     it('should detect invalid rollback point', async () => {

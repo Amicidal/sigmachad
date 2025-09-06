@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { expectSuccess } from '../../test-utils/assertions';
 import { FastifyInstance } from 'fastify';
 import { APIGateway } from '../../../src/api/APIGateway.js';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
@@ -160,7 +161,7 @@ describe('API Middleware Integration', () => {
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expectSuccess(body);
         // The input should be sanitized and not contain script tags
         // (exact sanitization behavior depends on implementation)
       }

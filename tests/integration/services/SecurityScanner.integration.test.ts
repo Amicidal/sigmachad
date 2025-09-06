@@ -345,16 +345,16 @@ describe('SecurityScanner Integration', () => {
 
       expect(report.byPackage).toHaveProperty('lodash');
       expect(report.byPackage).toHaveProperty('express');
-      expect(Array.isArray(report.byPackage.lodash)).toBe(true);
-      expect(Array.isArray(report.byPackage.express)).toBe(true);
+      expect(report.byPackage.lodash).toEqual(expect.any(Array));
+      expect(report.byPackage.express).toEqual(expect.any(Array));
     });
 
     it('should provide remediation recommendations', async () => {
       const report = await securityScanner.getVulnerabilityReport();
 
-      expect(Array.isArray(report.remediation.immediate)).toBe(true);
-      expect(Array.isArray(report.remediation.planned)).toBe(true);
-      expect(Array.isArray(report.remediation.monitoring)).toBe(true);
+      expect(report.remediation.immediate).toEqual(expect.any(Array));
+      expect(report.remediation.planned).toEqual(expect.any(Array));
+      expect(report.remediation.monitoring).toEqual(expect.any(Array));
 
       // Should have immediate actions for critical/high severity issues
       expect(report.remediation.immediate.length + report.remediation.planned.length).toBeGreaterThan(0);
@@ -501,8 +501,8 @@ describe('SecurityScanner Integration', () => {
       expect(audit).toBeDefined();
       expect(audit.scope).toBe('full');
       expect(audit.startTime).toBeDefined();
-      expect(Array.isArray(audit.findings)).toBe(true);
-      expect(Array.isArray(audit.recommendations)).toBe(true);
+      expect(audit.findings).toEqual(expect.any(Array));
+      expect(audit.recommendations).toEqual(expect.any(Array));
       expect(typeof audit.score).toBe('number');
       expect(audit.score).toBeGreaterThanOrEqual(0);
       expect(audit.score).toBeLessThanOrEqual(100);
@@ -520,7 +520,7 @@ describe('SecurityScanner Integration', () => {
 
       expect(audit.scope).toBe('critical-only');
       // May have fewer findings depending on what's classified as critical
-      expect(Array.isArray(audit.findings)).toBe(true);
+      expect(audit.findings).toEqual(expect.any(Array));
     });
 
     it('should calculate security score correctly', async () => {
@@ -596,7 +596,7 @@ describe('SecurityScanner Integration', () => {
 
       expect(fix).toBeDefined();
       expect(fix.issueId).toBe(issueId);
-      expect(Array.isArray(fix.fixes)).toBe(true);
+      expect(fix.fixes).toEqual(expect.any(Array));
       expect(fix.fixes.length).toBeGreaterThan(0);
       expect(fix).toHaveProperty('priority');
       expect(fix).toHaveProperty('effort');
@@ -667,7 +667,7 @@ describe('SecurityScanner Integration', () => {
     it('should maintain scan history', async () => {
       const history = await securityScanner.getScanHistory();
 
-      expect(Array.isArray(history)).toBe(true);
+      expect(history).toEqual(expect.any(Array));
       expect(history.length).toBeGreaterThan(0);
 
       // History should be sorted by timestamp descending
@@ -723,9 +723,9 @@ describe('SecurityScanner Integration', () => {
       expect(compliance.framework).toBe('OWASP');
       expect(compliance.scope).toBe('full');
       expect(typeof compliance.overallScore).toBe('number');
-      expect(Array.isArray(compliance.requirements)).toBe(true);
-      expect(Array.isArray(compliance.gaps)).toBe(true);
-      expect(Array.isArray(compliance.recommendations)).toBe(true);
+      expect(compliance.requirements).toEqual(expect.any(Array));
+      expect(compliance.gaps).toEqual(expect.any(Array));
+      expect(compliance.recommendations).toEqual(expect.any(Array));
     });
 
     it('should provide compliance recommendations', async () => {

@@ -17,9 +17,8 @@ interface TokenBucket {
   tokens: number;
   lastRefill: number;
 }
-
-// In-memory store for rate limiting (in production, use Redis)
-const buckets = new Map<string, TokenBucket>();
+// Registry of all bucket stores for stats/cleanup
+const bucketStores = new Set<Map<string, TokenBucket>>();
 
 // Default rate limit configurations
 const DEFAULT_CONFIGS: Record<string, RateLimitConfig> = {
@@ -31,9 +30,18 @@ const DEFAULT_CONFIGS: Record<string, RateLimitConfig> = {
 // Rate limiting middleware factory
 export function createRateLimit(config: Partial<RateLimitConfig> = {}) {
   const finalConfig = { ...DEFAULT_CONFIGS.default, ...config };
+  // Each middleware instance gets its own store to avoid cross-test interference
+  const buckets = new Map<string, TokenBucket>();
+  bucketStores.add(buckets);
+  const requestKeyCache = new WeakMap<object, string>();
 
   return async (request: FastifyRequest, reply: FastifyReply) => {
-    const key = createRateLimitKey(request);
+    // Snapshot the derived key per request object to ensure stability under mutation in concurrent scenarios
+    let key = requestKeyCache.get(request as any);
+    if (!key) {
+      key = createRateLimitKey(request);
+      requestKeyCache.set(request as any, key);
+    }
     const now = Date.now();
 
     // Get or create token bucket
@@ -106,9 +114,11 @@ export function cleanupBuckets() {
   const now = Date.now();
   const maxAge = 3600000; // 1 hour
 
-  for (const [key, bucket] of buckets.entries()) {
-    if (now - bucket.lastRefill > maxAge) {
-      buckets.delete(key);
+  for (const store of bucketStores) {
+    for (const [key, bucket] of store.entries()) {
+      if (now - bucket.lastRefill > maxAge) {
+        store.delete(key);
+      }
     }
   }
 }
@@ -117,18 +127,21 @@ export function cleanupBuckets() {
 export function getRateLimitStats() {
   const now = Date.now();
   const stats = {
-    totalBuckets: buckets.size,
+    totalBuckets: 0,
     activeBuckets: 0,
     oldestBucket: now,
     newestBucket: 0,
   };
 
-  for (const bucket of buckets.values()) {
-    if (bucket.tokens < DEFAULT_CONFIGS.default.maxRequests) {
-      stats.activeBuckets++;
+  for (const store of bucketStores) {
+    stats.totalBuckets += store.size;
+    for (const bucket of store.values()) {
+      if (bucket.tokens < DEFAULT_CONFIGS.default.maxRequests) {
+        stats.activeBuckets++;
+      }
+      stats.oldestBucket = Math.min(stats.oldestBucket, bucket.lastRefill);
+      stats.newestBucket = Math.max(stats.newestBucket, bucket.lastRefill);
     }
-    stats.oldestBucket = Math.min(stats.oldestBucket, bucket.lastRefill);
-    stats.newestBucket = Math.max(stats.newestBucket, bucket.lastRefill);
   }
 
   return stats;

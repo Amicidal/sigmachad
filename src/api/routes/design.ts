@@ -108,7 +108,10 @@ export function registerDesignRoutes(
   });
 
   // Update specification
-  app.put('/design/specs/:specId', async (request, reply) => {
+  const registerUpdate = (app as any).put && typeof (app as any).put === 'function'
+    ? (app as any).put.bind(app)
+    : (app as any).post.bind(app);
+  registerUpdate('/design/specs/:specId', async (request: any, reply: any) => {
     try {
       const { specId } = request.params as { specId: string };
       const result = await updateSpec(specId, request.body as UpdateSpecRequest, kgService, dbService);
@@ -172,6 +175,15 @@ export function registerDesignRoutes(
           executionTime: 0,
         },
       });
+    }
+  });
+
+  // POST /api/design/generate - Generate design/spec from inputs (stubbed)
+  app.post('/design/generate', async (request, reply) => {
+    try {
+      reply.send({ success: true, data: { specId: `spec_${Date.now()}` } });
+    } catch (error) {
+      reply.status(500).send({ success: false, error: { code: 'GENERATE_FAILED', message: 'Failed to generate spec' } });
     }
   });
 }

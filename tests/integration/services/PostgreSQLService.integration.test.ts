@@ -222,8 +222,8 @@ describe('PostgreSQLService Integration', () => {
         SELECT *
         FROM documents
         WHERE id = $1
-          AND content->>'nested'->>'object'->>'key' = $2
-          AND metadata->>'flags'->>'indexed' = $3
+          AND content->'nested'->'object'->>'key' = $2
+          AND metadata->'flags'->>'indexed' = $3
       `, ['jsonb-test', 'value', 'true']);
 
       expect(result.rows).toHaveLength(1);

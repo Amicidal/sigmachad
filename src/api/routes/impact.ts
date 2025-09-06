@@ -53,8 +53,8 @@ export async function registerImpactRoutes(
   dbService: DatabaseService
 ): Promise<void> {
 
-  // POST /api/impact/impact-analyze - Analyze change impact
-  app.post('/impact-analyze', {
+  // POST /api/impact/analyze - Analyze change impact
+  app.post('/impact/analyze', {
     schema: {
       body: {
         type: 'object',
@@ -113,8 +113,13 @@ export async function registerImpactRoutes(
     }
   });
 
+  // Basic changes listing for impact module
+  app.get('/impact/changes', async (_request, reply) => {
+    reply.send({ success: true, data: [] });
+  });
+
   // GET /api/impact/entity/{entityId} - Get impact assessment for entity
-  app.get('/entity/:entityId', {
+  app.get('/impact/entity/:entityId', {
     schema: {
       params: {
         type: 'object',
@@ -163,8 +168,8 @@ export async function registerImpactRoutes(
     }
   });
 
-  // POST /api/impact/compare - Compare impact of different change scenarios
-  app.post('/compare', {
+  // POST /api/impact/simulate - Simulate impact of different change scenarios
+  app.post('/impact/simulate', {
     schema: {
       body: {
         type: 'object',
@@ -219,8 +224,8 @@ export async function registerImpactRoutes(
       reply.status(500).send({
         success: false,
         error: {
-          code: 'SCENARIO_COMPARISON_FAILED',
-          message: 'Failed to compare change scenarios'
+          code: 'SIMULATION_FAILED',
+          message: 'Failed to simulate change scenarios'
         }
       });
     }

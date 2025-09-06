@@ -6,27 +6,34 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { QdrantService } from '../../../src/services/database/QdrantService';
 
+// Gate running these integration tests via environment. When not enabled, the
+// whole suite is declared as skipped at definition time (no dummy assertions).
+const runQdrant = process.env.RUN_QDRANT_TESTS === '1';
+const describeIfRun = runQdrant ? describe : describe.skip;
+
 describe('QdrantService Integration', () => {
   let qdrantService: QdrantService;
   let isQdrantAvailable = false;
 
   beforeAll(async () => {
-    // Use test configuration - adjust these values based on your test environment
+    if (!runQdrant) {
+      // Not enabled; inner describes are skipped at definition time.
+      return;
+    }
+
     const testConfig = {
       url: process.env.QDRANT_URL || 'http://localhost:6333',
-      apiKey: process.env.QDRANT_API_KEY
+      apiKey: process.env.QDRANT_API_KEY,
     };
 
     qdrantService = new QdrantService(testConfig);
 
-    try {
-      await qdrantService.initialize();
-      isQdrantAvailable = qdrantService.isInitialized();
-      console.log('✅ Qdrant connection established for integration tests');
-    } catch (error) {
-      console.warn('⚠️ Qdrant not available for integration tests:', error instanceof Error ? error.message : 'Unknown error');
-      isQdrantAvailable = false;
+    await qdrantService.initialize();
+    isQdrantAvailable = qdrantService.isInitialized();
+    if (!isQdrantAvailable) {
+      throw new Error('Qdrant not available for integration tests');
     }
+    console.log('✅ Qdrant connection established for integration tests');
   }, 30000);
 
   afterAll(async () => {
@@ -36,11 +43,6 @@ describe('QdrantService Integration', () => {
   });
 
   beforeEach(async () => {
-    if (!isQdrantAvailable) {
-      console.warn('Skipping test - Qdrant not available');
-      return;
-    }
-
     try {
       // Clean up any existing test collections
       const client = qdrantService.getClient();
@@ -66,36 +68,18 @@ describe('QdrantService Integration', () => {
     }
   });
 
-  describe('Initialization and Connection', () => {
+  describeIfRun('Initialization and Connection', () => {
     it('should initialize Qdrant service successfully when available', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping initialization test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       expect(qdrantService.isInitialized()).toBe(true);
       expect(qdrantService.getClient()).toBeDefined();
     });
 
     it('should handle health checks', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping health check test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const isHealthy = await qdrantService.healthCheck();
       expect(isHealthy).toBe(true);
     });
 
     it('should handle connection closure', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping connection closure test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
       expect(client).toBeDefined();
 
@@ -107,14 +91,8 @@ describe('QdrantService Integration', () => {
     });
   });
 
-  describe('Collection Management', () => {
+  describeIfRun('Collection Management', () => {
     it('should create and manage collections', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping collection management test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
 
       // Create a test collection
@@ -146,12 +124,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle collection creation with different configurations', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping collection config test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
 
       // Create collection with different vector size
@@ -171,12 +143,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle duplicate collection creation gracefully', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping duplicate collection test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
       const collectionName = 'test_duplicate_creation';
 
@@ -208,14 +174,8 @@ describe('QdrantService Integration', () => {
     });
   });
 
-  describe('Vector Operations', () => {
+  describeIfRun('Vector Operations', () => {
     it('should perform basic vector upsert and search operations', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping vector operations test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
       const collectionName = 'test_vector_operations';
 
@@ -286,12 +246,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle vector search with filtering', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping vector search filtering test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
       const collectionName = 'test_vector_filtering';
 
@@ -404,14 +358,8 @@ describe('QdrantService Integration', () => {
     });
   });
 
-  describe('Setup Collections Integration', () => {
+  describeIfRun('Setup Collections Integration', () => {
     it('should setup standard collections correctly', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping setup collections test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       // Setup collections using the service method
       await qdrantService.setupCollections();
 
@@ -432,12 +380,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle setup collections when collections already exist', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping setup collections existing test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
 
       // Pre-create one of the collections
@@ -457,14 +399,8 @@ describe('QdrantService Integration', () => {
     });
   });
 
-  describe('Performance and Load Testing', () => {
+  describeIfRun('Performance and Load Testing', () => {
     it('should handle concurrent vector operations', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping concurrent operations test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
       const collectionName = 'test_concurrent_operations';
 
@@ -567,14 +503,8 @@ describe('QdrantService Integration', () => {
     });
   });
 
-  describe('Error Handling and Edge Cases', () => {
+  describeIfRun('Error Handling and Edge Cases', () => {
     it('should handle invalid collection names', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping invalid collection test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
 
       // Try to create collection with invalid name
@@ -594,12 +524,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle operations on non-existent collections', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping non-existent collection test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
 
       try {
@@ -618,12 +542,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle malformed vectors', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping malformed vector test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
       const collectionName = 'test_malformed_vector';
 
@@ -656,12 +574,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle network timeouts and reconnections', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping network timeout test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       // Test basic connectivity
       const isHealthyBefore = await qdrantService.healthCheck();
       expect(isHealthyBefore).toBe(true);
@@ -698,14 +610,8 @@ describe('QdrantService Integration', () => {
     });
   });
 
-  describe('Real-world Usage Scenarios', () => {
+  describeIfRun('Real-world Usage Scenarios', () => {
     it('should handle code embedding workflow', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping code embedding workflow test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
       const collectionName = 'test_code_embeddings';
 
@@ -782,12 +688,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle semantic search with metadata filtering', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping semantic search test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
-
       const client = qdrantService.getClient();
       const collectionName = 'test_semantic_search';
 

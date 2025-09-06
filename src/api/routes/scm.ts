@@ -37,7 +37,7 @@ export async function registerSCMRoutes(
 ): Promise<void> {
 
   // POST /api/scm/commit-pr - Create commit and/or pull request
-  app.post('/commit-pr', {
+  app.post('/scm/commit-pr', {
     schema: {
       body: {
         type: 'object',
@@ -83,7 +83,7 @@ export async function registerSCMRoutes(
   });
 
   // GET /api/scm/status - Get Git repository status
-  app.get('/status', async (request, reply) => {
+  app.get('/scm/status', async (request, reply) => {
     try {
       // TODO: Get Git status
       const status = {
@@ -117,7 +117,7 @@ export async function registerSCMRoutes(
   });
 
   // POST /api/scm/commit - Create a commit
-  app.post('/commit', {
+  app.post('/scm/commit', {
     schema: {
       body: {
         type: 'object',
@@ -162,7 +162,7 @@ export async function registerSCMRoutes(
   });
 
   // POST /api/scm/push - Push commits to remote
-  app.post('/push', {
+  app.post('/scm/push', {
     schema: {
       body: {
         type: 'object',
@@ -205,7 +205,7 @@ export async function registerSCMRoutes(
   });
 
   // GET /api/scm/branches - List branches
-  app.get('/branches', async (request, reply) => {
+  app.get('/scm/branches', async (request, reply) => {
     try {
       // TODO: List Git branches
       const branches = [
@@ -229,7 +229,7 @@ export async function registerSCMRoutes(
   });
 
   // POST /api/scm/branch - Create new branch
-  app.post('/branch', {
+  app.post('/scm/branch', {
     schema: {
       body: {
         type: 'object',
@@ -267,6 +267,12 @@ export async function registerSCMRoutes(
         }
       });
     }
+  });
+
+  // GET /api/scm/changes - List recent changes
+  app.get('/scm/changes', async (_request, reply) => {
+    // Placeholder for recent changes listing
+    reply.send({ success: true, data: [] });
   });
 
   // GET /api/scm/diff - Get diff between commits/branches

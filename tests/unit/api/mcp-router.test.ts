@@ -25,6 +25,7 @@ import type { DatabaseService } from '../../../src/services/DatabaseService.js';
 import type { ASTParser } from '../../../src/services/ASTParser.js';
 import type { TestEngine } from '../../../src/services/TestEngine.js';
 import type { SecurityScanner } from '../../../src/services/SecurityScanner.js';
+import { makeRealisticKgService } from '../../test-utils/kg-realistic';
 
 describe('MCPRouter', () => {
   let mockKgService: KnowledgeGraphService;
@@ -71,18 +72,7 @@ describe('MCPRouter', () => {
 
   beforeEach(() => {
     // Create fresh mocks for each test
-    mockKgService = {
-      createEntity: vi.fn().mockResolvedValue(undefined),
-      updateEntity: vi.fn().mockResolvedValue(undefined),
-      search: vi.fn().mockResolvedValue([]),
-      getRelationships: vi.fn().mockResolvedValue([]),
-      getEntity: vi.fn().mockResolvedValue(null),
-      createRelationship: vi.fn().mockResolvedValue(undefined),
-      getEntityExamples: vi.fn().mockResolvedValue({
-        usageExamples: [],
-        testExamples: []
-      })
-    } as any;
+    mockKgService = makeRealisticKgService();
 
     mockDbService = {
       postgresQuery: vi.fn().mockResolvedValue([])

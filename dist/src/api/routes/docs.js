@@ -3,8 +3,8 @@
  * Handles documentation synchronization, domain analysis, and content management
  */
 export async function registerDocsRoutes(app, kgService, dbService, docParser) {
-    // POST /api/docs/sync - Synchronize documentation with knowledge graph
-    app.post('/docs/docs/sync', {
+    // POST /docs/sync - Synchronize documentation with knowledge graph
+    app.post('/docs/sync', {
         schema: {
             body: {
                 type: 'object',
@@ -278,8 +278,8 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
             });
         }
     });
-    // POST /api/docs/validate - Validate documentation
-    app.post('/docs/docs-validate', {
+    // POST /docs/validate - Validate documentation
+    app.post('/docs/validate', {
         schema: {
             body: {
                 type: 'object',

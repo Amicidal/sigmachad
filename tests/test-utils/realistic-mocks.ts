@@ -7,8 +7,8 @@ import type {
   IFalkorDBService,
   IQdrantService,
   IPostgreSQLService,
-  IRedisService
-} from '../../src/services/database/interfaces';
+  IRedisService,
+} from "../../src/services/database/interfaces";
 
 interface MockConfig {
   failureRate?: number; // 0-100 percentage
@@ -50,9 +50,9 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
 
   async initialize(): Promise<void> {
     if (this.config.connectionFailures && this.rng() * 100 < 50) {
-      throw new Error('FalkorDB connection failed: Connection refused');
+      throw new Error("FalkorDB connection failed: Connection refused");
     }
-    
+
     await this.simulateLatency();
     this.initialized = true;
   }
@@ -73,24 +73,24 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
     return {
       mockClient: true,
       queryCount: this.queryCount,
-      sendCommand: vi.fn().mockResolvedValue('mock-command-result')
+      sendCommand: vi.fn().mockResolvedValue("mock-command-result"),
     };
   }
 
   async query(query: string, params?: Record<string, any>): Promise<any> {
     if (!this.initialized) {
-      throw new Error('FalkorDB not initialized');
+      throw new Error("FalkorDB not initialized");
     }
 
     await this.simulateLatency();
-    
+
     if (this.shouldFail()) {
       this.failureCount++;
       const errors = [
-        'Query timeout exceeded',
-        'Connection lost during query execution',
-        'Constraint violation: duplicate key',
-        'Syntax error in Cypher query',
+        "Query timeout exceeded",
+        "Connection lost during query execution",
+        "Constraint violation: duplicate key",
+        "Syntax error in Cypher query",
       ];
       throw new Error(errors[Math.floor(this.rng() * errors.length)]);
     }
@@ -101,40 +101,40 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
     if (this.config.dataCorruption && this.rng() < 0.1) {
       return {
         corrupted: true,
-        error: 'Data integrity check failed',
+        error: "Data integrity check failed",
         originalQuery: query,
       };
     }
 
     // Return realistic results based on query type
-    if (query.includes('MATCH')) {
+    if (query.includes("MATCH")) {
       return this.generateRealisticMatchResults();
-    } else if (query.includes('CREATE')) {
+    } else if (query.includes("CREATE")) {
       return { created: 1, properties: params };
-    } else if (query.includes('DELETE')) {
+    } else if (query.includes("DELETE")) {
       return { deleted: Math.floor(this.rng() * 10) };
     }
 
-    return { query, params, result: 'success' };
+    return { query, params, result: "success" };
   }
 
   async command(...args: any[]): Promise<any> {
     if (!this.initialized) {
-      throw new Error('FalkorDB not initialized');
+      throw new Error("FalkorDB not initialized");
     }
 
     await this.simulateLatency();
-    
+
     if (this.shouldFail()) {
-      throw new Error('Command execution failed');
+      throw new Error("Command execution failed");
     }
 
-    return { args, result: 'command-success' };
+    return { args, result: "command-success" };
   }
 
   async setupGraph(): Promise<void> {
     if (!this.initialized) {
-      throw new Error('FalkorDB not initialized');
+      throw new Error("FalkorDB not initialized");
     }
     await this.simulateLatency();
   }
@@ -143,12 +143,12 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
     if (!this.initialized) {
       return false;
     }
-    
+
     // Simulate intermittent health check failures
     if (this.config.connectionFailures && this.rng() < 0.2) {
       return false;
     }
-    
+
     return true;
   }
 
@@ -163,7 +163,9 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
 
   private async simulateLatency(): Promise<void> {
     if (this.config.latencyMs > 0) {
-      await new Promise(resolve => setTimeout(resolve, this.config.latencyMs));
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.config.latencyMs)
+      );
     }
   }
 
@@ -177,11 +179,11 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
     for (let i = 0; i < count; i++) {
       results.push({
         id: `node-${i}`,
-        type: ['file', 'function', 'class'][Math.floor(this.rng() * 3)],
+        type: ["file", "function", "class"][Math.floor(this.rng() * 3)],
         properties: {
           name: `Entity${i}`,
           created: new Date().toISOString(),
-        }
+        },
       });
     }
     return results;
@@ -209,9 +211,9 @@ export class RealisticQdrantMock implements IQdrantService {
 
   async initialize(): Promise<void> {
     if (this.config.connectionFailures && this.rng() < 0.3) {
-      throw new Error('Qdrant connection failed: Service unavailable');
+      throw new Error("Qdrant connection failed: Service unavailable");
     }
-    
+
     await this.simulateLatency();
     this.initialized = true;
   }
@@ -234,7 +236,7 @@ export class RealisticQdrantMock implements IQdrantService {
     return {
       search: async (collection: string, params: any) => {
         if (this.shouldFail()) {
-          throw new Error('Vector search failed: Index corrupted');
+          throw new Error("Vector search failed: Index corrupted");
         }
 
         await this.simulateLatency();
@@ -243,22 +245,22 @@ export class RealisticQdrantMock implements IQdrantService {
         return {
           points: [
             {
-              id: 'vec-1',
+              id: "vec-1",
               score: 0.95,
-              payload: { type: 'document', content: 'test' }
+              payload: { type: "document", content: "test" },
             },
             {
-              id: 'vec-2',
+              id: "vec-2",
               score: 0.87,
-              payload: { type: 'code', language: 'typescript' }
-            }
-          ]
+              payload: { type: "code", language: "typescript" },
+            },
+          ],
         };
       },
 
       upsert: async (collection: string, data: any) => {
         if (this.shouldFail()) {
-          throw new Error('Upsert failed: Collection locked');
+          throw new Error("Upsert failed: Collection locked");
         }
 
         await this.simulateLatency();
@@ -268,25 +270,27 @@ export class RealisticQdrantMock implements IQdrantService {
         }
         this.collections.get(collection)!.push(data);
 
-        return { status: 'completed' };
+        return { status: "completed" };
       },
 
       createCollection: async (name: string, config: any) => {
         await this.simulateLatency();
         this.collections.set(name, []);
-        return { status: 'created' };
+        return { status: "created" };
       },
 
       deleteCollection: async (name: string) => {
         await this.simulateLatency();
         this.collections.delete(name);
-        return { status: 'deleted' };
+        return { status: "deleted" };
       },
 
       getCollections: async () => {
         await this.simulateLatency();
         return {
-          collections: Array.from(this.collections.keys()).map(name => ({ name }))
+          collections: Array.from(this.collections.keys()).map((name) => ({
+            name,
+          })),
         };
       },
 
@@ -295,7 +299,7 @@ export class RealisticQdrantMock implements IQdrantService {
         return {
           name: `${collectionName}_snapshot_${Date.now()}`,
           collection: collectionName,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
         };
       },
 
@@ -303,13 +307,13 @@ export class RealisticQdrantMock implements IQdrantService {
         await this.simulateLatency();
         const data = this.collections.get(collection) || [];
         return { points: data.slice(0, params?.limit || 10) };
-      }
+      },
     };
   }
 
   async setupCollections(): Promise<void> {
     if (!this.initialized) {
-      throw new Error('Qdrant not initialized');
+      throw new Error("Qdrant not initialized");
     }
     await this.simulateLatency();
   }
@@ -320,7 +324,9 @@ export class RealisticQdrantMock implements IQdrantService {
 
   private async simulateLatency(): Promise<void> {
     if (this.config.latencyMs) {
-      await new Promise(resolve => setTimeout(resolve, this.config.latencyMs));
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.config.latencyMs)
+      );
     }
   }
 
@@ -358,9 +364,9 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 
   async initialize(): Promise<void> {
     if (this.config.connectionFailures && this.rng() < 0.25) {
-      throw new Error('PostgreSQL connection failed: Max connections reached');
+      throw new Error("PostgreSQL connection failed: Max connections reached");
     }
-    
+
     await this.simulateLatency();
     this.initialized = true;
   }
@@ -378,20 +384,28 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
     if (!this.initialized) {
       return undefined;
     }
-    return { 
+    return {
       totalCount: 10,
       idleCount: 5,
-      waitingCount: 0
+      waitingCount: 0,
     };
   }
 
-  async query(query: string, params?: any[], options?: { timeout?: number }): Promise<any> {
+  async query(
+    query: string,
+    params?: any[],
+    options?: { timeout?: number }
+  ): Promise<any> {
     if (!this.initialized) {
-      throw new Error('PostgreSQL not initialized');
+      throw new Error("PostgreSQL not initialized");
     }
 
     // Simulate timeout
-    if (options?.timeout && this.config.latencyMs && this.config.latencyMs > options.timeout) {
+    if (
+      options?.timeout &&
+      this.config.latencyMs &&
+      this.config.latencyMs > options.timeout
+    ) {
       throw new Error(`Query timeout after ${options.timeout}ms`);
     }
 
@@ -400,32 +414,32 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 
     if (this.shouldFail()) {
       const errors = [
-        'duplicate key value violates unique constraint',
-        'deadlock detected',
-        'connection terminated unexpectedly',
-        'invalid input syntax for type',
+        "duplicate key value violates unique constraint",
+        "deadlock detected",
+        "connection terminated unexpectedly",
+        "invalid input syntax for type",
       ];
       throw new Error(errors[Math.floor(this.rng() * errors.length)]);
     }
 
     // Return realistic query results
-    if (query.toLowerCase().includes('select')) {
+    if (query.toLowerCase().includes("select")) {
       return {
         rows: this.generateRealisticRows(),
-        rowCount: Math.floor(this.rng() * 100)
+        rowCount: Math.floor(this.rng() * 100),
       };
-    } else if (query.toLowerCase().includes('insert')) {
+    } else if (query.toLowerCase().includes("insert")) {
       return {
         rows: [{ id: Math.floor(this.rng() * 1000) }],
-        rowCount: 1
+        rowCount: 1,
       };
-    } else if (query.toLowerCase().includes('update')) {
+    } else if (query.toLowerCase().includes("update")) {
       return {
-        rowCount: Math.floor(this.rng() * 10)
+        rowCount: Math.floor(this.rng() * 10),
       };
     }
 
-    return { query, params, options, result: 'success' };
+    return { query, params, options, result: "success" };
   }
 
   async transaction<T>(
@@ -433,7 +447,7 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
     options?: { timeout?: number; isolationLevel?: string }
   ): Promise<T> {
     if (!this.initialized) {
-      throw new Error('PostgreSQL not initialized');
+      throw new Error("PostgreSQL not initialized");
     }
 
     this.transactionCount++;
@@ -441,10 +455,10 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
     // Simulate transaction failures
     if (this.config.transactionFailures && this.rng() < 0.3) {
       const txErrors = [
-        'deadlock detected',
-        'could not serialize access due to concurrent update',
-        'current transaction is aborted',
-        'unique constraint violation',
+        "deadlock detected",
+        "could not serialize access due to concurrent update",
+        "current transaction is aborted",
+        "unique constraint violation",
       ];
       throw new Error(txErrors[Math.floor(this.rng() * txErrors.length)]);
     }
@@ -453,7 +467,7 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
       query: async (q: string, p?: any[]) => {
         this.queryLog.push(`TX: ${q}`);
         return this.query(q, p);
-      }
+      },
     };
 
     await this.simulateLatency();
@@ -465,7 +479,7 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
     options?: { continueOnError?: boolean }
   ): Promise<any[]> {
     const results = [];
-    
+
     for (const q of queries) {
       try {
         const result = await this.query(q.query, q.params);
@@ -478,13 +492,13 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
         }
       }
     }
-    
+
     return results;
   }
 
   async setupSchema(): Promise<void> {
     if (!this.initialized) {
-      throw new Error('PostgreSQL not initialized');
+      throw new Error("PostgreSQL not initialized");
     }
     await this.simulateLatency();
   }
@@ -495,7 +509,7 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 
   async storeTestSuiteResult(suiteResult: any): Promise<void> {
     await this.query(
-      'INSERT INTO test_suites (name, status, duration) VALUES ($1, $2, $3)',
+      "INSERT INTO test_suites (name, status, duration) VALUES ($1, $2, $3)",
       [suiteResult.name, suiteResult.status, suiteResult.duration]
     );
   }
@@ -503,68 +517,74 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
   async storeFlakyTestAnalyses(analyses: any[]): Promise<void> {
     for (const analysis of analyses) {
       await this.query(
-        'INSERT INTO flaky_test_analyses (test_id, failure_count) VALUES ($1, $2)',
+        "INSERT INTO flaky_test_analyses (test_id, failure_count) VALUES ($1, $2)",
         [analysis.testId, analysis.failureCount]
       );
     }
   }
 
-  async getTestExecutionHistory(entityId: string, limit?: number): Promise<any[]> {
+  async getTestExecutionHistory(
+    entityId: string,
+    limit?: number
+  ): Promise<any[]> {
     await this.simulateLatency();
-    
+
     const history = [];
     const count = Math.min(limit || 10, 5);
-    
+
     for (let i = 0; i < count; i++) {
       history.push({
         test_id: `test-${entityId}-${i}`,
         test_name: `Test ${i}`,
-        status: this.rng() > 0.3 ? 'passed' : 'failed',
+        status: this.rng() > 0.3 ? "passed" : "failed",
         duration: Math.floor(this.rng() * 1000),
-        timestamp: new Date(Date.now() - i * 86400000)
+        timestamp: new Date(Date.now() - i * 86400000),
       });
     }
-    
+
     return history;
   }
 
-  async getPerformanceMetricsHistory(entityId: string, days?: number): Promise<any[]> {
+  async getPerformanceMetricsHistory(
+    entityId: string,
+    days?: number
+  ): Promise<any[]> {
     await this.simulateLatency();
-    
+
     const metrics = [];
     const count = days || 7;
-    
+
     for (let i = 0; i < count; i++) {
       metrics.push({
         entity_id: entityId,
-        metric_type: 'response_time',
+        metric_type: "response_time",
         value: 50 + this.rng() * 200,
-        timestamp: new Date(Date.now() - i * 86400000)
+        timestamp: new Date(Date.now() - i * 86400000),
       });
     }
-    
+
     return metrics;
   }
 
   async getCoverageHistory(entityId: string, days?: number): Promise<any[]> {
     await this.simulateLatency();
-    
+
     const coverage = [];
     const count = days || 7;
-    
+
     for (let i = 0; i < count; i++) {
       const total = 1000 + Math.floor(this.rng() * 500);
       const covered = Math.floor(total * (0.6 + this.rng() * 0.35));
-      
+
       coverage.push({
         entity_id: entityId,
         percentage: (covered / total) * 100,
         lines_covered: covered,
         lines_total: total,
-        timestamp: new Date(Date.now() - i * 86400000)
+        timestamp: new Date(Date.now() - i * 86400000),
       });
     }
-    
+
     return coverage;
   }
 
@@ -579,7 +599,9 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 
   private async simulateLatency(): Promise<void> {
     if (this.config.latencyMs) {
-      await new Promise(resolve => setTimeout(resolve, this.config.latencyMs));
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.config.latencyMs)
+      );
     }
   }
 
@@ -590,16 +612,17 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
   private generateRealisticRows(): any[] {
     const count = Math.floor(this.rng() * 10);
     const rows = [];
-    
+
     for (let i = 0; i < count; i++) {
       rows.push({
         id: i + 1,
         name: `Item ${i}`,
+        timestamp: new Date(),
         created_at: new Date(),
-        metadata: { index: i }
+        metadata: { index: i },
       });
     }
-    
+
     return rows;
   }
 }
@@ -610,7 +633,8 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 export class RealisticRedisMock implements IRedisService {
   private initialized = false;
   private config: MockConfig;
-  private store: Map<string, { value: string; ttl?: number; setAt: number }> = new Map();
+  private store: Map<string, { value: string; ttl?: number; setAt: number }> =
+    new Map();
   private rngState: number = 1 >>> 0;
 
   private rng(): number {
@@ -620,16 +644,16 @@ export class RealisticRedisMock implements IRedisService {
 
   constructor(config: MockConfig = {}) {
     this.config = config;
-    if (typeof config.seed === 'number') {
-      this.rngState = (config.seed >>> 0);
+    if (typeof config.seed === "number") {
+      this.rngState = config.seed >>> 0;
     }
   }
 
   async initialize(): Promise<void> {
     if (this.config.connectionFailures && this.rng() < 0.2) {
-      throw new Error('Redis connection failed: Connection timeout');
+      throw new Error("Redis connection failed: Connection timeout");
     }
-    
+
     await this.simulateLatency();
     this.initialized = true;
   }
@@ -646,17 +670,17 @@ export class RealisticRedisMock implements IRedisService {
 
   async get(key: string): Promise<string | null> {
     if (!this.initialized) {
-      throw new Error('Redis not initialized');
+      throw new Error("Redis not initialized");
     }
 
     await this.simulateLatency();
 
     if (this.shouldFail()) {
-      throw new Error('Redis GET failed: Connection reset');
+      throw new Error("Redis GET failed: Connection reset");
     }
 
     const item = this.store.get(key);
-    
+
     if (!item) {
       return null;
     }
@@ -672,41 +696,41 @@ export class RealisticRedisMock implements IRedisService {
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
     if (!this.initialized) {
-      throw new Error('Redis not initialized');
+      throw new Error("Redis not initialized");
     }
 
     await this.simulateLatency();
 
     if (this.shouldFail()) {
-      throw new Error('Redis SET failed: Out of memory');
+      throw new Error("Redis SET failed: Out of memory");
     }
 
     // Simulate memory limit
     if (this.store.size > 1000 && this.rng() < 0.1) {
-      throw new Error('Redis memory limit exceeded');
+      throw new Error("Redis memory limit exceeded");
     }
 
     this.store.set(key, {
       value,
       ttl,
-      setAt: Date.now()
+      setAt: Date.now(),
     });
   }
 
   async del(key: string): Promise<number> {
     if (!this.initialized) {
-      throw new Error('Redis not initialized');
+      throw new Error("Redis not initialized");
     }
 
     await this.simulateLatency();
 
     if (this.shouldFail()) {
-      throw new Error('Redis DEL failed: Command timeout');
+      throw new Error("Redis DEL failed: Command timeout");
     }
 
     const existed = this.store.has(key);
     this.store.delete(key);
-    
+
     return existed ? 1 : 0;
   }
 
@@ -721,7 +745,9 @@ export class RealisticRedisMock implements IRedisService {
 
   private async simulateLatency(): Promise<void> {
     if (this.config.latencyMs) {
-      await new Promise(resolve => setTimeout(resolve, this.config.latencyMs));
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.config.latencyMs)
+      );
     }
   }
 

@@ -12,7 +12,7 @@ import archiver from 'archiver';
 import { pipeline } from 'stream/promises';
 import { createWriteStream, createReadStream } from 'fs';
 // Import realistic mocks
-import { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock } from '../../test-utils/realistic-mocks';
+import { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock, RealisticRedisMock } from '../../test-utils/realistic-mocks';
 // Mock file system operations
 vi.mock('fs/promises');
 vi.mock('fs');
@@ -90,46 +90,17 @@ describe('BackupService', () => {
                 url: 'redis://localhost:6379',
             },
         };
-        // Create mock services
+        // Create mock services via DI and initialize
         mockFalkorDB = new RealisticFalkorDBMock({ failureRate: 0 });
         mockQdrant = new RealisticQdrantMock({ failureRate: 0 });
         mockPostgres = new RealisticPostgreSQLMock({ failureRate: 0 });
-        // Initialize mock services
-        await mockFalkorDB.initialize();
-        await mockQdrant.initialize();
-        await mockPostgres.initialize();
-        // Create mock database service
-        mockDbService = new DatabaseService(testConfig);
-        // Set up service references using Object.defineProperty
-        Object.defineProperty(mockDbService, 'falkorDBService', {
-            value: mockFalkorDB,
-            writable: true
+        mockDbService = new DatabaseService(testConfig, {
+            falkorFactory: () => mockFalkorDB,
+            qdrantFactory: () => mockQdrant,
+            postgresFactory: () => mockPostgres,
+            redisFactory: () => new RealisticRedisMock({ failureRate: 0 })
         });
-        Object.defineProperty(mockDbService, 'qdrantService', {
-            value: mockQdrant,
-            writable: true
-        });
-        Object.defineProperty(mockDbService, 'postgresqlService', {
-            value: mockPostgres,
-            writable: true
-        });
-        Object.defineProperty(mockDbService, 'initialized', {
-            value: true,
-            writable: true
-        });
-        // Override the getFalkorDBService method to return our mock
-        Object.defineProperty(mockDbService, 'getFalkorDBService', {
-            value: () => mockFalkorDB,
-            writable: true
-        });
-        Object.defineProperty(mockDbService, 'getQdrantService', {
-            value: () => mockQdrant,
-            writable: true
-        });
-        Object.defineProperty(mockDbService, 'getPostgreSQLService', {
-            value: () => mockPostgres,
-            writable: true
-        });
+        await mockDbService.initialize();
         // Create backup service
         backupService = new BackupService(mockDbService, testConfig);
     });
@@ -260,14 +231,16 @@ describe('BackupService', () => {
                 expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining('falkordb.rdb'), expect.any(String));
             });
             it('should handle FalkorDB backup failures gracefully', async () => {
-                // Create service with failing FalkorDB
+                // Create service with failing FalkorDB via DI
                 const failingFalkorDB = new RealisticFalkorDBMock({ failureRate: 100 });
-                await failingFalkorDB.initialize();
-                Object.defineProperty(mockDbService, 'falkorDBService', {
-                    value: failingFalkorDB,
-                    writable: true
+                const failingDbService = new DatabaseService(testConfig, {
+                    falkorFactory: () => failingFalkorDB,
+                    qdrantFactory: () => mockQdrant,
+                    postgresFactory: () => mockPostgres,
+                    redisFactory: () => new RealisticRedisMock({ failureRate: 0 })
                 });
-                const backupServiceWithFailingDB = new BackupService(mockDbService, testConfig);
+                await failingDbService.initialize();
+                const backupServiceWithFailingDB = new BackupService(failingDbService, testConfig);
                 const backupId = 'test-backup-123';
                 const backupDir = '/tmp/backups';
                 // The mock may or may not fail depending on random chance, so just test that it completes
@@ -283,12 +256,14 @@ describe('BackupService', () => {
             });
             it('should handle Qdrant backup failures', async () => {
                 const failingQdrant = new RealisticQdrantMock({ failureRate: 100 });
-                await failingQdrant.initialize();
-                Object.defineProperty(mockDbService, 'qdrantService', {
-                    value: failingQdrant,
-                    writable: true
+                const failingDbService = new DatabaseService(testConfig, {
+                    falkorFactory: () => mockFalkorDB,
+                    qdrantFactory: () => failingQdrant,
+                    postgresFactory: () => mockPostgres,
+                    redisFactory: () => new RealisticRedisMock({ failureRate: 0 })
                 });
-                const backupServiceWithFailingDB = new BackupService(mockDbService, testConfig);
+                await failingDbService.initialize();
+                const backupServiceWithFailingDB = new BackupService(failingDbService, testConfig);
                 const backupId = 'test-backup-123';
                 const backupDir = '/tmp/backups';
                 // The mock may or may not fail depending on random chance, so just test that it completes
@@ -306,22 +281,27 @@ describe('BackupService', () => {
                         rowCount: 2
                     })
                 };
-                Object.defineProperty(mockDbService, 'postgresqlService', {
-                    value: mockPostgresService,
-                    writable: true
+                const svc = new DatabaseService(testConfig, {
+                    falkorFactory: () => mockFalkorDB,
+                    qdrantFactory: () => mockQdrant,
+                    postgresFactory: () => mockPostgresService,
+                    redisFactory: () => new RealisticRedisMock({ failureRate: 0 })
                 });
-                const backupServiceWithMockPostgres = new BackupService(mockDbService, testConfig);
+                await svc.initialize();
+                const backupServiceWithMockPostgres = new BackupService(svc, testConfig);
                 await backupServiceWithMockPostgres.backupPostgreSQL(backupDir, backupId);
                 expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining('postgres.sql'), expect.stringContaining('CREATE TABLE'));
             });
             it('should handle PostgreSQL backup failures', async () => {
                 const failingPostgres = new RealisticPostgreSQLMock({ failureRate: 100 });
-                await failingPostgres.initialize();
-                Object.defineProperty(mockDbService, 'postgresqlService', {
-                    value: failingPostgres,
-                    writable: true
+                const failingDbService = new DatabaseService(testConfig, {
+                    falkorFactory: () => mockFalkorDB,
+                    qdrantFactory: () => mockQdrant,
+                    postgresFactory: () => failingPostgres,
+                    redisFactory: () => new RealisticRedisMock({ failureRate: 0 })
                 });
-                const backupServiceWithFailingDB = new BackupService(mockDbService, testConfig);
+                await failingDbService.initialize();
+                const backupServiceWithFailingDB = new BackupService(failingDbService, testConfig);
                 const backupId = 'test-backup-123';
                 const backupDir = '/tmp/backups';
                 // The mock may or may not fail depending on random chance, so just test that it completes
@@ -612,12 +592,7 @@ describe('BackupService', () => {
                     },
                     status: 'completed'
                 };
-                // Make FalkorDB restore fail
-                const failingFalkorDB = new RealisticFalkorDBMock({ failureRate: 0 });
-                Object.defineProperty(mockDbService, 'falkorDBService', {
-                    value: failingFalkorDB,
-                    writable: true
-                });
+                // Make FalkorDB restore fail (restoreFalkorDB will be mocked to throw below)
                 // Mock the restore methods to throw
                 backupService.restoreFalkorDB = vi.fn().mockRejectedValue(new Error('Restore failed'));
                 backupService.restoreQdrant = vi.fn().mockResolvedValue(undefined);
@@ -651,13 +626,17 @@ describe('BackupService', () => {
                     includeConfig: true,
                     compression: false
                 };
-                // Make Qdrant backup fail but others succeed
+                // Make Qdrant backup fail but others succeed using DI
                 const failingQdrant = new RealisticQdrantMock({ failureRate: 100 });
-                Object.defineProperty(mockDbService, 'qdrantService', {
-                    value: failingQdrant,
-                    writable: true
+                const svc = new DatabaseService(testConfig, {
+                    falkorFactory: () => mockFalkorDB,
+                    qdrantFactory: () => failingQdrant,
+                    postgresFactory: () => mockPostgres,
+                    redisFactory: () => new RealisticRedisMock({ failureRate: 0 })
                 });
-                await backupService.createBackup(options);
+                await svc.initialize();
+                const bs = new BackupService(svc, testConfig);
+                await bs.createBackup(options);
                 // Should still complete but with partial success
                 expect(fs.writeFile).toHaveBeenCalled(); // Other components should still write
             });

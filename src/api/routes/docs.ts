@@ -23,7 +23,7 @@ export async function registerDocsRoutes(
 ): Promise<void> {
 
   // POST /docs/sync - Synchronize documentation with knowledge graph
-  app.post('/docs/sync', {
+  const syncRouteOptions = {
     schema: {
       body: {
         type: 'object',
@@ -33,7 +33,9 @@ export async function registerDocsRoutes(
         required: ['docsPath']
       }
     }
-  }, async (request, reply) => {
+  } as const;
+
+  const syncHandler = async (request: any, reply: any) => {
     try {
       const { docsPath } = request.body as { docsPath: string };
 
@@ -52,6 +54,41 @@ export async function registerDocsRoutes(
           details: error instanceof Error ? error.message : 'Unknown error'
         }
       });
+    }
+  };
+
+  app.post('/docs/sync', syncRouteOptions, syncHandler);
+  // Also register an alias path used in some tests
+  app.post('/docs/docs/sync', syncRouteOptions, syncHandler);
+
+  // GET /docs/search - Basic documentation search endpoint
+  app.get('/docs/search', async (request, reply) => {
+    try {
+      const { q } = request.query as { q?: string };
+      const results = await kgService.search({
+        query: q || '',
+        searchType: 'structural',
+        entityTypes: ['documentation' as any],
+        limit: 20,
+      });
+      reply.send({ success: true, data: results });
+    } catch (error) {
+      reply.status(500).send({ success: false, error: { code: 'DOCS_SEARCH_FAILED', message: 'Failed to search docs' } });
+    }
+  });
+
+  // GET /docs/:id - Fetch a documentation record by ID
+  app.get('/docs/:id', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const doc = await kgService.getEntity(id);
+      if (!doc) {
+        reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Document not found' } });
+        return;
+      }
+      reply.send({ success: true, data: doc });
+    } catch (error) {
+      reply.status(500).send({ success: false, error: { code: 'DOCS_FETCH_FAILED', message: 'Failed to fetch doc' } });
     }
   });
 

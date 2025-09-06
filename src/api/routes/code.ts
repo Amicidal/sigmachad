@@ -321,6 +321,11 @@ export async function registerCodeRoutes(
     }
   });
 
+  // GET /api/code/symbols - List code symbols (stubbed)
+  app.get('/code/symbols', async (_request, reply) => {
+    reply.send({ success: true, data: [] });
+  });
+
   // GET /api/code/suggestions/{file} - Get code improvement suggestions
   app.get('/code/suggestions/:file', {
     schema: {

@@ -146,8 +146,8 @@ describe('SynchronizationCoordinator Integration', () => {
         expect(typeof operation.relationshipsCreated).toBe('number');
         expect(typeof operation.relationshipsUpdated).toBe('number');
         expect(typeof operation.relationshipsDeleted).toBe('number');
-        expect(Array.isArray(operation.errors)).toBe(true);
-        expect(Array.isArray(operation.conflicts)).toBe(true);
+        expect(operation.errors).toEqual(expect.any(Array));
+        expect(operation.conflicts).toEqual(expect.any(Array));
       }
     });
   });

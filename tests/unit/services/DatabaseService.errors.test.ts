@@ -61,10 +61,10 @@ describe('DatabaseService Error Scenarios', () => {
       expect(health).toHaveProperty('qdrant');
       expect(health).toHaveProperty('postgresql');
       
-      // All should be false when not initialized
-      expect(health.falkordb).toBe(false);
-      expect(health.qdrant).toBe(false);
-      expect(health.postgresql).toBe(false);
+    // All reported as unhealthy when not initialized
+    expect(health.falkordb).toEqual(expect.objectContaining({ status: 'unhealthy' }));
+    expect(health.qdrant).toEqual(expect.objectContaining({ status: 'unhealthy' }));
+    expect(health.postgresql).toEqual(expect.objectContaining({ status: 'unhealthy' }));
     });
   });
 

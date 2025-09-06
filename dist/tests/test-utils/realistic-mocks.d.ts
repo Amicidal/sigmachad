@@ -9,6 +9,7 @@ interface MockConfig {
     connectionFailures?: boolean;
     transactionFailures?: boolean;
     dataCorruption?: boolean;
+    seed?: number;
 }
 /**
  * Realistic FalkorDB mock with configurable failure scenarios
@@ -18,6 +19,8 @@ export declare class RealisticFalkorDBMock implements IFalkorDBService {
     private config;
     private queryCount;
     private failureCount;
+    private rngState;
+    private rng;
     constructor(config?: MockConfig);
     initialize(): Promise<void>;
     close(): Promise<void>;
@@ -40,6 +43,8 @@ export declare class RealisticQdrantMock implements IQdrantService {
     private initialized;
     private config;
     private collections;
+    private rngState;
+    private rng;
     constructor(config?: MockConfig);
     initialize(): Promise<void>;
     close(): Promise<void>;
@@ -58,6 +63,8 @@ export declare class RealisticPostgreSQLMock implements IPostgreSQLService {
     private config;
     private transactionCount;
     private queryLog;
+    private rngState;
+    private rng;
     constructor(config?: MockConfig);
     initialize(): Promise<void>;
     close(): Promise<void>;
@@ -96,6 +103,8 @@ export declare class RealisticRedisMock implements IRedisService {
     private initialized;
     private config;
     private store;
+    private rngState;
+    private rng;
     constructor(config?: MockConfig);
     initialize(): Promise<void>;
     close(): Promise<void>;

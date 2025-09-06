@@ -29,8 +29,12 @@ vi.mock('path', () => ({
   })
 }));
 
-// Mock fs promises for file finding
+// Mock fs promises for file finding (support both specifiers)
 vi.mock('fs/promises', () => ({
+  readdir: vi.fn(),
+  stat: vi.fn()
+}));
+vi.mock('node:fs/promises', () => ({
   readdir: vi.fn(),
   stat: vi.fn()
 }));
@@ -843,9 +847,9 @@ This is a test document about user management for developers.
       let mockReaddir: any;
       let mockStat: any;
 
-      beforeEach(() => {
+      beforeEach(async () => {
         // Get the mocked functions
-        const fsPromises = require('fs/promises');
+        const fsPromises = await import('node:fs/promises');
         mockReaddir = fsPromises.readdir;
         mockStat = fsPromises.stat;
       });

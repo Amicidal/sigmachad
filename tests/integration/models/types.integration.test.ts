@@ -108,7 +108,7 @@ describe('Types Integration Tests', () => {
         };
 
         // Verify response structure
-        expect(apiResponse.success).toBe(true);
+        expect(apiResponse).toEqual(expect.objectContaining({ success: true }));
         expect(apiResponse.data).toBeDefined();
         expect(apiResponse.data?.id).toBe('test-spec-1');
         expect(apiResponse.error).toBeUndefined();
@@ -137,7 +137,7 @@ describe('Types Integration Tests', () => {
         );
 
         const parsedResponse = JSON.parse(storedResponse.rows[0].content);
-        expect(parsedResponse.success).toBe(true);
+        expect(parsedResponse).toEqual(expect.objectContaining({ success: true }));
         expect(parsedResponse.data.title).toBe('Test Specification');
       });
 
@@ -292,7 +292,7 @@ describe('Types Integration Tests', () => {
           };
 
           // Verify pagination structure
-          expect(paginatedResponse.success).toBe(true);
+          expect(paginatedResponse).toEqual(expect.objectContaining({ success: true }));
           expect(paginatedResponse.data).toBeDefined();
           expect(paginatedResponse.data?.length).toBe(page < totalPages ? pageSize : testEntities.length % pageSize || pageSize);
           expect(paginatedResponse.pagination?.page).toBe(page);

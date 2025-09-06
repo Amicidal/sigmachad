@@ -116,14 +116,14 @@ describe('Documentation Routes', () => {
         it('should register all documentation routes correctly', async () => {
             await registerDocsRoutes(mockApp, mockKgService, mockDbService, mockDocParser);
             const routes = mockApp.getRegisteredRoutes();
-            expect(routes.has('post:/docs/docs/sync')).toBe(true);
+            expect(routes.has('post:/docs/sync')).toBe(true);
             expect(routes.has('get:/docs/domains')).toBe(true);
             expect(routes.has('get:/docs/domains/:domainName/entities')).toBe(true);
             expect(routes.has('get:/docs/clusters')).toBe(true);
             expect(routes.has('get:/docs/business/impact/:domainName')).toBe(true);
             expect(routes.has('post:/docs/parse')).toBe(true);
             expect(routes.has('get:/docs/search')).toBe(true);
-            expect(routes.has('post:/docs/docs-validate')).toBe(true);
+            expect(routes.has('post:/docs/validate')).toBe(true);
         });
         it('should call registerDocsRoutes with correct dependencies', async () => {
             await registerDocsRoutes(mockApp, mockKgService, mockDbService, mockDocParser);
@@ -131,12 +131,12 @@ describe('Documentation Routes', () => {
             expect(mockApp.get).toHaveBeenCalled();
         });
     });
-    describe('POST /docs/docs/sync', () => {
+    describe('POST /docs/sync', () => {
         let syncHandler;
         beforeEach(async () => {
             await registerDocsRoutes(mockApp, mockKgService, mockDbService, mockDocParser);
             const routes = mockApp.getRegisteredRoutes();
-            syncHandler = routes.get('post:/docs/docs/sync');
+            syncHandler = routes.get('post:/docs/sync');
         });
         it('should synchronize documentation successfully', async () => {
             const mockRequestBody = {
@@ -575,12 +575,12 @@ describe('Documentation Routes', () => {
             expect(mockReply.send).toHaveBeenCalled();
         });
     });
-    describe('POST /docs/docs-validate', () => {
+    describe('POST /docs/validate', () => {
         let validateHandler;
         beforeEach(async () => {
             await registerDocsRoutes(mockApp, mockKgService, mockDbService, mockDocParser);
             const routes = mockApp.getRegisteredRoutes();
-            validateHandler = routes.get('post:/docs/docs-validate');
+            validateHandler = routes.get('post:/docs/validate');
         });
         it('should validate documentation files successfully', async () => {
             const mockRequestBody = {

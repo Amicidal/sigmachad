@@ -172,7 +172,9 @@ export async function registerGraphRoutes(
           code: 'GRAPH_SEARCH_FAILED',
           message: 'Failed to perform graph search',
           details: error instanceof Error ? error.message : 'Unknown error'
-        }
+        },
+        requestId: (request as any).id,
+        timestamp: new Date().toISOString(),
       });
     }
   });

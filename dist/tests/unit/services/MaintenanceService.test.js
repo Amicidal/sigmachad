@@ -8,7 +8,7 @@ import { MaintenanceService } from '../../../src/services/MaintenanceService';
 import { DatabaseService } from '../../../src/services/DatabaseService';
 import * as crypto from 'crypto';
 // Import realistic mocks
-import { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock } from '../../test-utils/realistic-mocks';
+import { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock, RealisticRedisMock } from '../../test-utils/realistic-mocks';
 // Mock crypto
 vi.mock('crypto');
 // Mock console methods for cleaner test output
@@ -60,58 +60,34 @@ describe('MaintenanceService', () => {
                 url: 'redis://localhost:6379',
             },
         };
-        // Create mock services
+        // Create mock services and DI-backed DatabaseService
         mockFalkorDB = new RealisticFalkorDBMock({ failureRate: 0 });
         mockQdrant = new RealisticQdrantMock({ failureRate: 0 });
         mockPostgres = new RealisticPostgreSQLMock({ failureRate: 0 });
-        // Initialize mock services
-        await mockFalkorDB.initialize();
-        await mockQdrant.initialize();
-        await mockPostgres.initialize();
-        // Create mock database service
-        mockDbService = new DatabaseService(testConfig);
-        // Set up service references using Object.defineProperty
-        Object.defineProperty(mockDbService, 'falkorDBService', {
-            value: mockFalkorDB,
-            writable: true
-        });
-        Object.defineProperty(mockDbService, 'qdrantService', {
-            value: mockQdrant,
-            writable: true
-        });
-        Object.defineProperty(mockDbService, 'postgresqlService', {
-            value: mockPostgres,
-            writable: true
-        });
-        Object.defineProperty(mockDbService, 'initialized', {
-            value: true,
-            writable: true
-        });
-        // Override methods that MaintenanceService uses
-        Object.defineProperty(mockDbService, 'falkordbQuery', {
-            value: vi.fn().mockResolvedValue([]),
-            writable: true
-        });
-        Object.defineProperty(mockDbService, 'postgresQuery', {
-            value: vi.fn().mockResolvedValue([]),
-            writable: true
-        });
-        // Mock Qdrant client methods
-        const mockQdrantClient = {
+        // Qdrant client stub with methods used by maintenance
+        mockQdrantClient = {
             getCollections: vi.fn().mockResolvedValue({ collections: [{ name: 'test-collection' }] }),
             updateCollection: vi.fn().mockResolvedValue({}),
             createSnapshot: vi.fn().mockResolvedValue({}),
             getCollection: vi.fn().mockResolvedValue({ points_count: 100 }),
             scroll: vi.fn().mockResolvedValue({ points: [] })
         };
-        Object.defineProperty(mockDbService, 'getQdrantClient', {
-            value: () => mockQdrantClient,
-            writable: true
+        mockDbService = new DatabaseService(testConfig, {
+            falkorFactory: () => mockFalkorDB,
+            qdrantFactory: () => ({
+                initialize: vi.fn().mockResolvedValue(undefined),
+                close: vi.fn().mockResolvedValue(undefined),
+                isInitialized: () => true,
+                getClient: () => mockQdrantClient,
+                healthCheck: vi.fn().mockResolvedValue(true)
+            }),
+            postgresFactory: () => mockPostgres,
+            redisFactory: () => new RealisticRedisMock({ failureRate: 0 })
         });
-        Object.defineProperty(mockDbService, 'getFalkorDBClient', {
-            value: () => ({ sendCommand: vi.fn().mockResolvedValue('OK') }),
-            writable: true
-        });
+        await mockDbService.initialize();
+        // Default DB calls return empty structures unless overridden per test
+        vi.spyOn(mockDbService, 'falkordbQuery').mockResolvedValue([]);
+        vi.spyOn(mockDbService, 'postgresQuery').mockResolvedValue([]);
         // Create mock KnowledgeGraph service
         mockKgService = {
             deleteEntity: vi.fn().mockResolvedValue(undefined),
@@ -417,12 +393,9 @@ describe('MaintenanceService', () => {
     describe('Error Handling and Failure Scenarios', () => {
         describe('Task Execution Failures', () => {
             it('should handle task execution failures and update task status', async () => {
-                // Mock database service to fail
-                Object.defineProperty(mockDbService, 'getQdrantClient', {
-                    value: () => {
-                        throw new Error('Qdrant connection failed');
-                    },
-                    writable: true
+                // Mock database service to fail via public method spy
+                vi.spyOn(mockDbService, 'getQdrantClient').mockImplementation(() => {
+                    throw new Error('Qdrant connection failed');
                 });
                 try {
                     await maintenanceService.runMaintenanceTask('optimize');
@@ -446,11 +419,8 @@ describe('MaintenanceService', () => {
             });
             it('should handle database connection failures gracefully', async () => {
                 // Mock database service methods to throw initialization errors
-                Object.defineProperty(mockDbService, 'falkordbQuery', {
-                    value: vi.fn().mockImplementation(() => {
-                        throw new Error('Database not initialized');
-                    }),
-                    writable: true
+                vi.spyOn(mockDbService, 'falkordbQuery').mockImplementation(() => {
+                    throw new Error('Database not initialized');
                 });
                 // The maintenance service is designed to be resilient and continue despite failures
                 const result = await maintenanceService.runMaintenanceTask('cleanup');

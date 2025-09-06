@@ -31,6 +31,56 @@ global.testUtils = {
   }
 };
 
+// Generic async wait utilities for tests
+// - sleep: simple delay
+// - waitFor: poll until condition returns truthy or timeout
+// These avoid scattering ad-hoc setTimeout sleeps in tests.
+(global as any).testUtils.sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+(global as any).testUtils.waitFor = async (
+  check: () => boolean | Promise<boolean>,
+  opts: { timeout?: number; interval?: number } = {}
+) => {
+  const timeout = opts.timeout ?? 2000;
+  const interval = opts.interval ?? 20;
+  const start = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    // Await the predicate in case it’s async
+    // If it throws, treat as falsy and keep polling
+    try {
+      if (await check()) return;
+    } catch {
+      // ignore and keep waiting
+    }
+    if (Date.now() - start > timeout) {
+      throw new Error('waitFor timeout exceeded');
+    }
+    await new Promise(r => setTimeout(r, interval));
+  }
+};
+
+// Wait until a condition stays false for the entire timeout window.
+// If the condition ever returns true during the window, throws immediately.
+(global as any).testUtils.waitForNot = async (
+  check: () => boolean | Promise<boolean>,
+  opts: { timeout?: number; interval?: number } = {}
+) => {
+  const timeout = opts.timeout ?? 300;
+  const interval = opts.interval ?? 20;
+  const start = Date.now();
+  while (Date.now() - start <= timeout) {
+    try {
+      if (await check()) {
+        throw new Error('waitForNot condition became true');
+      }
+    } catch (err) {
+      // If check throws, treat as truthy to be safe and rethrow
+      throw err instanceof Error ? err : new Error('waitForNot condition threw');
+    }
+    await new Promise(r => setTimeout(r, interval));
+  }
+};
+
 // Deterministic RNG for tests to avoid flakiness
 // Simple LCG seeded via TEST_SEED (default 1). Opt out by setting DISABLE_TEST_RANDOM_SEED=1
 let originalMathRandom: (() => number) | undefined;
@@ -62,8 +112,13 @@ afterAll(() => {
 // Soft assertion guardrail: warn when a test has zero assertions
 afterEach(() => {
   const state = (expect as any)?.getState?.();
-  if (state && state.assertionCalls === 0 && state.currentTestName) {
+  const isIntegration = process.env.RUN_INTEGRATION === '1';
+  if (!isIntegration && state && state.assertionCalls === 0 && state.currentTestName) {
+    throw new Error(`Test had zero assertions: ${state.currentTestName}`);
+  }
+  // In integration runs, only warn to avoid failing tests designed as smoke checks
+  if (isIntegration && state && state.assertionCalls === 0 && state.currentTestName) {
     // eslint-disable-next-line no-console
-    console.warn(`[warn] Test had zero assertions: ${state.currentTestName}`);
+    console.warn(`Warning: Test had zero assertions: ${state.currentTestName}`);
   }
 });

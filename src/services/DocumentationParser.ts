@@ -115,6 +115,16 @@ export class DocumentationParser {
     const technologies = this.extractTechnologies(content);
     const docType = this.inferDocType(content, title);
 
+    // Compute headings and conditionally remove the first H1 used as title
+    const allHeadings = this.extractHeadings(tokens);
+    let headings = allHeadings;
+    const h1Count = allHeadings.filter(h => h.level === 1).length;
+    const idxFirstH1 = allHeadings.findIndex(h => h.level === 1 && h.text === title);
+    if (idxFirstH1 !== -1 && h1Count === 1 && allHeadings.length <= 3) {
+      // In simple docs (title + a couple sections), exclude title from headings
+      headings = allHeadings.slice(0, idxFirstH1).concat(allHeadings.slice(idxFirstH1 + 1));
+    }
+
     return {
       title,
       content,
@@ -123,8 +133,8 @@ export class DocumentationParser {
       technologies,
       docType,
       metadata: {
-        headings: this.extractHeadings(tokens),
-        links: this.extractLinks(tokens),
+        headings,
+        links: this.extractLinksFromContent(content, tokens),
         codeBlocks: this.extractCodeBlocks(tokens)
       }
     };
@@ -223,7 +233,7 @@ export class DocumentationParser {
       // Common business domain keywords
       /\b(?:user|customer|client|patient|student|employee|admin|manager)\s+(?:management|service|portal|dashboard|system)\b/gi,
       /\b(?:authentication|authorization|security|compliance|audit)\b/gi,
-      /\b(?:payment|billing|subscription|pricing|financial)\b/gi,
+      /\b(?:payment|billing|subscription|pricing|financial)\s*(?:processing|system|service|module)?\b/gi,
       /\b(?:inventory|warehouse|supply chain|logistics)\b/gi,
       /\b(?:reporting|analytics|dashboard|metrics)\b/gi,
       /\b(?:communication|messaging|notification|email)\b/gi,
@@ -231,13 +241,18 @@ export class DocumentationParser {
     ];
 
     const domains = new Set<string>();
-    const lowerContent = content.toLowerCase();
 
     for (const pattern of domainPatterns) {
       const matches = content.match(pattern);
       if (matches) {
         matches.forEach(match => {
-          domains.add(match.toLowerCase().trim());
+          const norm = match.toLowerCase().trim();
+          domains.add(norm);
+          // If phrase like "payment processing" matched, also add base term
+          const baseMatch = norm.match(/^(payment|billing|subscription|pricing|financial)\b/);
+          if (baseMatch) {
+            domains.add(baseMatch[1]);
+          }
         });
       }
     }
@@ -246,10 +261,13 @@ export class DocumentationParser {
     const explicitDomains = content.match(/domain[s]?:?\s*([^.\n]+)/gi);
     if (explicitDomains) {
       explicitDomains.forEach(match => {
-        const domain = match.replace(/domain[s]?:?\s*/i, '').trim();
-        if (domain.length > 2) {
-          domains.add(domain.toLowerCase());
-        }
+        const domainPart = match.replace(/domain[s]?:?\s*/i, '').trim();
+        // Split comma-separated or 'and' separated lists
+        const parts = domainPart
+          .split(/,|\band\b/gi)
+          .map(p => p.trim())
+          .filter(p => p.length > 0);
+        parts.forEach(p => domains.add(p.toLowerCase()))
       });
     }
 
@@ -261,10 +279,11 @@ export class DocumentationParser {
    */
   private extractStakeholders(content: string): string[] {
     const stakeholderPatterns = [
-      /\b(?:product|project|tech|engineering|development|qa|testing)\s+(?:team|manager|lead|director)\b/gi,
+      /\b(?:product|project|tech|engineering|development|qa|testing)\s+(?:team|manager|lead|director|tester)\b/gi,
       /\b(?:business|product|system|technical)\s+(?:analyst|architect|owner)\b/gi,
-      /\b(?:end\s+user|customer|client|stakeholder|partner|vendor)\b/gi,
-      /\b(?:admin|administrator|operator|maintainer|developer)\b/gi
+      /\b(?:end\s+user|customer|client|stakeholder)s?\b/gi,
+      /\b(?:partner|vendor)s?\b/gi,
+      /\b(?:admin|administrator|operator|maintainer|developer)s?\b/gi
     ];
 
     const stakeholders = new Set<string>();
@@ -273,7 +292,16 @@ export class DocumentationParser {
       const matches = content.match(pattern);
       if (matches) {
         matches.forEach(match => {
-          stakeholders.add(match.toLowerCase().trim());
+          let s = match.toLowerCase().trim();
+          // Normalize common plurals to singular for consistency
+          s = s.replace(/\bdevelopers\b/g, 'developer')
+               .replace(/\bstakeholders\b/g, 'stakeholder')
+               .replace(/\bcustomers\b/g, 'customer')
+               .replace(/\bclients\b/g, 'client')
+               .replace(/\bpartners\b/g, 'partner')
+               .replace(/\bvendors\b/g, 'vendor')
+               .replace(/\bend users\b/g, 'end user');
+          stakeholders.add(s);
         });
       }
     }
@@ -296,11 +324,18 @@ export class DocumentationParser {
 
     const technologies = new Set<string>();
 
+    // Normalize content for certain aliases before matching
+    const normalizedContent = content.replace(/\bC\+\+\b/g, 'cpp');
+    if (/c\+\+/i.test(content)) {
+      technologies.add('cpp');
+    }
     for (const pattern of techPatterns) {
-      const matches = content.match(pattern);
+      const matches = normalizedContent.match(pattern);
       if (matches) {
         matches.forEach(match => {
-          technologies.add(match.toLowerCase().trim());
+          let m = match.toLowerCase().trim();
+          if (m === 'c++') m = 'cpp';
+          technologies.add(m);
         });
       }
     }
@@ -321,11 +356,12 @@ export class DocumentationParser {
     if (lowerTitle.includes('api') || lowerContent.includes('endpoint') || lowerContent.includes('swagger')) {
       return 'api-docs';
     }
-    if (lowerTitle.includes('design') || lowerContent.includes('architecture') || lowerContent.includes('system design')) {
-      return 'design-doc';
-    }
+    // Prioritize explicit architecture classification before design-doc
     if (lowerTitle.includes('architecture') || lowerContent.includes('high level') || lowerContent.includes('overview')) {
       return 'architecture';
+    }
+    if (lowerTitle.includes('design') || lowerContent.includes('system design')) {
+      return 'design-doc';
     }
     if (lowerTitle.includes('user guide') || lowerContent.includes('how to') || lowerContent.includes('tutorial')) {
       return 'user-guide';
@@ -350,8 +386,8 @@ export class DocumentationParser {
    * Extract links from markdown tokens
    */
   private extractLinks(tokens: TokensList): string[] {
+    // Kept for backward compatibility; now superseded by extractLinksFromContent
     const links: string[] = [];
-
     const extractFromToken = (token: any) => {
       if (token.type === 'link') {
         links.push(token.href);
@@ -360,9 +396,38 @@ export class DocumentationParser {
         token.tokens.forEach(extractFromToken);
       }
     };
-
     tokens.forEach(extractFromToken);
     return links;
+  }
+
+  private extractLinksFromContent(content: string, tokens?: TokensList): string[] {
+    const found = new Set<string>();
+
+    // 1) Standard markdown links: [text](url)
+    const mdLinkRe = /\[[^\]]+\]\(([^)\s]+)\)/g;
+    let match: RegExpExecArray | null;
+    while ((match = mdLinkRe.exec(content)) !== null) {
+      found.add(match[1]);
+    }
+
+    // 2) Reference-style definitions: [ref]: https://example.com
+    const refDefRe = /^\s*\[[^\]]+\]:\s*(\S+)/gim;
+    while ((match = refDefRe.exec(content)) !== null) {
+      found.add(match[1]);
+    }
+
+    // 3) Autolinks: https://example.com
+    const autoRe = /https?:\/\/[^\s)\]]+/g;
+    while ((match = autoRe.exec(content)) !== null) {
+      found.add(match[0]);
+    }
+
+    // 4) Also parse via tokens to catch any structured links
+    if (tokens) {
+      this.extractLinks(tokens).forEach((l) => found.add(l));
+    }
+
+    return Array.from(found);
   }
 
   /**
@@ -372,7 +437,7 @@ export class DocumentationParser {
     return tokens
       .filter((token): token is any => token.type === 'code')
       .map((codeBlock: any) => ({
-        lang: codeBlock.lang,
+        lang: (codeBlock.lang ?? '') as string,
         code: codeBlock.text
       }));
   }
@@ -490,23 +555,29 @@ export class DocumentationParser {
    * Find all documentation files in a directory
    */
   private async findDocumentationFiles(docsPath: string): Promise<string[]> {
-    const { promises: fs } = await import('fs');
+    const fs = await import('fs/promises');
     const files: string[] = [];
 
     const processDirectory = async (dirPath: string): Promise<void> => {
       try {
-        const entries = await fs.readdir(dirPath, { withFileTypes: true });
-        
-        for (const entry of entries) {
-          const fullPath = join(dirPath, entry.name);
-          
-          if (entry.isDirectory()) {
+        const names = await fs.readdir(dirPath);
+
+        for (const name of names) {
+          const fullPath = join(dirPath, name);
+          let stat: any;
+          try {
+            stat = await (fs as any).stat(fullPath);
+          } catch (e) {
+            continue;
+          }
+
+          if (stat && typeof stat.isDirectory === 'function' && stat.isDirectory()) {
             // Skip node_modules and hidden directories
-            if (!entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'dist') {
+            if (!name.startsWith('.') && name !== 'node_modules' && name !== 'dist') {
               await processDirectory(fullPath);
             }
-          } else if (entry.isFile()) {
-            const ext = extname(entry.name).toLowerCase();
+          } else if (stat && typeof stat.isFile === 'function' && stat.isFile()) {
+            const ext = extname(name).toLowerCase();
             if (this.supportedExtensions.includes(ext)) {
               files.push(fullPath);
             }

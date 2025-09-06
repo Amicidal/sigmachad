@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { expectSuccess } from '../../test-utils/assertions';
 import { FastifyInstance } from 'fastify';
 import { APIGateway } from '../../../src/api/APIGateway.js';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
@@ -85,10 +86,12 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
-        expect(body.data).toBeDefined();
-        expect(Array.isArray(body.data.entities)).toBe(true);
-        expect(Array.isArray(body.data.relationships)).toBe(true);
+        // Stronger assertions on structure
+        expect(body).toEqual(expect.objectContaining({ success: true }));
+        expect(body.data).toEqual(expect.objectContaining({
+          entities: expect.any(Array),
+          relationships: expect.any(Array),
+        }));
         expect(typeof body.data.relevanceScore).toBe('number');
       });
 
@@ -114,8 +117,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
-        expect(body.data).toBeDefined();
+        expectSuccess(body);
       });
 
       it('should return empty results for non-existent queries', async () => {
@@ -135,8 +137,8 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
-        expect(body.data.entities.length).toBe(0);
+        expectSuccess(body, { entities: expect.any(Array) });
+        expect(body.data.entities).toEqual([]);
       });
 
       it('should handle invalid search requests', async () => {
@@ -178,7 +180,7 @@ describe('REST API Endpoints Integration', () => {
 
             if (response.statusCode === 200) {
               const body = JSON.parse(response.payload);
-              expect(body.success).toBe(true);
+              expect(body).toEqual(expect.objectContaining({ success: true }));
               expect(body.data).toBeDefined();
             }
           }
@@ -220,7 +222,7 @@ describe('REST API Endpoints Integration', () => {
 
             if (response.statusCode === 200) {
               const body = JSON.parse(response.payload);
-              expect(body.success).toBe(true);
+              expect(body).toEqual(expect.objectContaining({ success: true }));
               expect(body.data).toBeDefined();
             }
           }
@@ -241,7 +243,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(Array.isArray(body.data)).toBe(true);
         expect(body.pagination).toBeDefined();
         expect(typeof body.pagination.page).toBe('number');
@@ -259,7 +261,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(Array.isArray(body.data)).toBe(true);
       });
 
@@ -272,7 +274,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(Array.isArray(body.data)).toBe(true);
       });
     });
@@ -287,7 +289,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(Array.isArray(body.data)).toBe(true);
         expect(body.pagination).toBeDefined();
       });
@@ -301,7 +303,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(Array.isArray(body.data)).toBe(true);
       });
     });
@@ -342,7 +344,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(body.data).toBeDefined();
         expect(body.data.testPlan).toBeDefined();
         expect(body.data.estimatedCoverage).toBeDefined();
@@ -366,7 +368,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(404);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(false);
+        expect(body).toEqual(expect.objectContaining({ success: false }));
         expect(body.error).toBeDefined();
         expect(body.error.code).toBe('SPEC_NOT_FOUND');
       });
@@ -417,7 +419,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(body.data).toBeDefined();
         expect(body.data.recorded).toBe(2);
       });
@@ -443,7 +445,7 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body.success).toBe(true);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(body.data.recorded).toBe(1);
       });
     });
@@ -466,7 +468,7 @@ describe('REST API Endpoints Integration', () => {
 
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
-          expect(body.success).toBe(true);
+          expect(body).toEqual(expect.objectContaining({ success: true }));
           expect(body.data).toBeDefined();
         }
       });
@@ -490,7 +492,7 @@ describe('REST API Endpoints Integration', () => {
 
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
-          expect(body.success).toBe(true);
+          expect(body).toEqual(expect.objectContaining({ success: true }));
           expect(body.data).toBeDefined();
         }
       });

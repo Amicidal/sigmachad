@@ -1,12 +1,12 @@
-import { createClient as createRedisClient, RedisClientType } from 'redis';
-import { IFalkorDBService } from './interfaces';
+import { createClient as createRedisClient, RedisClientType } from "redis";
+import { IFalkorDBService } from "./interfaces";
 
 export class FalkorDBService implements IFalkorDBService {
   private falkordbClient!: RedisClientType;
   private initialized = false;
-  private config: { url: string; database?: number };
+  private config: { url: string; database?: number; graphKey?: string };
 
-  constructor(config: { url: string; database?: number }) {
+  constructor(config: { url: string; database?: number; graphKey?: string }) {
     this.config = config;
   }
 
@@ -23,9 +23,9 @@ export class FalkorDBService implements IFalkorDBService {
 
       await this.falkordbClient.connect();
       this.initialized = true;
-      console.log('✅ FalkorDB connection established');
+      console.log("✅ FalkorDB connection established");
     } catch (error) {
-      console.error('❌ FalkorDB initialization failed:', error);
+      console.error("❌ FalkorDB initialization failed:", error);
       throw error;
     }
   }
@@ -43,14 +43,14 @@ export class FalkorDBService implements IFalkorDBService {
 
   getClient() {
     if (!this.initialized) {
-      throw new Error('FalkorDB not initialized');
+      throw new Error("FalkorDB not initialized");
     }
     return this.falkordbClient;
   }
 
   async query(query: string, params: Record<string, any> = {}): Promise<any> {
     if (!this.initialized) {
-      throw new Error('FalkorDB not initialized');
+      throw new Error("FalkorDB not initialized");
     }
 
     let processedQuery = query;
@@ -63,7 +63,9 @@ export class FalkorDBService implements IFalkorDBService {
 
       for (const [key, value] of Object.entries(params)) {
         if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
-          throw new Error(`Invalid parameter name: ${key}. Only alphanumeric characters and underscores are allowed.`);
+          throw new Error(
+            `Invalid parameter name: ${key}. Only alphanumeric characters and underscores are allowed.`
+          );
         }
 
         // Deep clone and sanitize the value
@@ -76,11 +78,15 @@ export class FalkorDBService implements IFalkorDBService {
         const replacementValue = this.parameterToCypherString(value);
 
         // Use word boundaries to ensure exact matches
-        const regex = new RegExp(`\\$${key}\\b`, 'g');
+        const regex = new RegExp(`\\$${key}\\b`, "g");
         processedQuery = processedQuery.replace(regex, replacementValue);
       }
 
-      const result = await this.falkordbClient.sendCommand(['GRAPH.QUERY', 'memento', processedQuery]);
+      const result = await this.falkordbClient.sendCommand([
+        "GRAPH.QUERY",
+        this.config.graphKey || "memento",
+        processedQuery,
+      ]);
 
       // FalkorDB returns results in a specific format:
       // [headers, data, statistics]
@@ -102,7 +108,7 @@ export class FalkorDBService implements IFalkorDBService {
               if (Array.isArray(row)) {
                 headers.forEach((header: any, index: number) => {
                   const headerName = String(header);
-                  obj[headerName] = row[index];
+                  obj[headerName] = this.decodeGraphValue(row[index]);
                 });
               }
               return obj;
@@ -118,71 +124,121 @@ export class FalkorDBService implements IFalkorDBService {
 
       return result;
     } catch (error) {
-      console.error('FalkorDB query error:', error);
-      console.error('Original query was:', query);
-      console.error('Processed query was:', processedQuery);
-      console.error('Params were:', params);
+      console.error("FalkorDB query error:", error);
+      console.error("Original query was:", query);
+      console.error("Processed query was:", processedQuery);
+      console.error("Params were:", params);
       throw error;
     }
   }
 
   async command(...args: any[]): Promise<any> {
     if (!this.initialized) {
-      throw new Error('FalkorDB not initialized');
+      throw new Error("FalkorDB not initialized");
     }
 
-    return this.falkordbClient.sendCommand(args);
+    // Normalize args to a flat string array. If last arg is params object, substitute.
+    let argv: any[] = [];
+    if (args.length === 1 && Array.isArray(args[0])) {
+      argv = args[0];
+    } else {
+      argv = [...args];
+    }
+
+    if (
+      argv.length >= 3 &&
+      typeof argv[0] === 'string' &&
+      typeof argv[1] === 'string' &&
+      typeof argv[2] === 'string' &&
+      typeof argv[argv.length - 1] === 'object' &&
+      argv[argv.length - 1] !== null && !Array.isArray(argv[argv.length - 1])
+    ) {
+      const params = argv.pop();
+      const processed = await this.buildProcessedQuery(argv[2] as string, params as Record<string, any>);
+      argv[2] = processed;
+    }
+
+    const flat: string[] = argv.map(v => (typeof v === 'string' ? v : String(v)));
+    return this.falkordbClient.sendCommand(flat as any);
   }
 
   async setupGraph(): Promise<void> {
     if (!this.initialized) {
-      throw new Error('FalkorDB not initialized');
+      throw new Error("FalkorDB not initialized");
     }
 
     try {
       // Create graph if it doesn't exist
-      await this.command('GRAPH.QUERY', 'memento', 'MATCH (n) RETURN count(n) LIMIT 1');
+      await this.command(
+        "GRAPH.QUERY",
+        this.config.graphKey || "memento",
+        "MATCH (n) RETURN count(n) LIMIT 1"
+      );
 
-      console.log('📊 Setting up FalkorDB graph indexes...');
+      console.log("📊 Setting up FalkorDB graph indexes...");
 
       // Create indexes for better query performance
       // Index on node ID for fast lookups
-      await this.command('GRAPH.QUERY', 'memento',
-        'CREATE INDEX FOR (n:Entity) ON (n.id)');
+      await this.command(
+        "GRAPH.QUERY",
+        this.config.graphKey || "memento",
+        "CREATE INDEX FOR (n:Entity) ON (n.id)"
+      );
 
       // Index on node type for filtering
-      await this.command('GRAPH.QUERY', 'memento',
-        'CREATE INDEX FOR (n:Entity) ON (n.type)');
+      await this.command(
+        "GRAPH.QUERY",
+        this.config.graphKey || "memento",
+        "CREATE INDEX FOR (n:Entity) ON (n.type)"
+      );
 
       // Index on node path for file-based queries
-      await this.command('GRAPH.QUERY', 'memento',
-        'CREATE INDEX FOR (n:Entity) ON (n.path)');
+      await this.command(
+        "GRAPH.QUERY",
+        this.config.graphKey || "memento",
+        "CREATE INDEX FOR (n:Entity) ON (n.path)"
+      );
 
       // Index on node language for language-specific queries
-      await this.command('GRAPH.QUERY', 'memento',
-        'CREATE INDEX FOR (n:Entity) ON (n.language)');
+      await this.command(
+        "GRAPH.QUERY",
+        this.config.graphKey || "memento",
+        "CREATE INDEX FOR (n:Entity) ON (n.language)"
+      );
 
       // Index on lastModified for temporal queries
-      await this.command('GRAPH.QUERY', 'memento',
-        'CREATE INDEX FOR (n:Entity) ON (n.lastModified)');
+      await this.command(
+        "GRAPH.QUERY",
+        this.config.graphKey || "memento",
+        "CREATE INDEX FOR (n:Entity) ON (n.lastModified)"
+      );
 
       // Composite index for common query patterns
-      await this.command('GRAPH.QUERY', 'memento',
-        'CREATE INDEX FOR (n:Entity) ON (n.type, n.path)');
+      await this.command(
+        "GRAPH.QUERY",
+        this.config.graphKey || "memento",
+        "CREATE INDEX FOR (n:Entity) ON (n.type, n.path)"
+      );
 
-      console.log('✅ FalkorDB graph indexes created');
+      console.log("✅ FalkorDB graph indexes created");
     } catch (error) {
       // Graph doesn't exist, it will be created on first write
-      console.log('📊 FalkorDB graph will be created on first write operation with indexes');
+      console.log(
+        "📊 FalkorDB graph will be created on first write operation with indexes"
+      );
     }
   }
 
   async healthCheck(): Promise<boolean> {
+    if (!this.initialized || !this.falkordbClient) {
+      return false;
+    }
+
     try {
       await this.falkordbClient.ping();
       return true;
     } catch (error) {
-      console.error('FalkorDB health check failed:', error);
+      console.error("FalkorDB health check failed:", error);
       return false;
     }
   }
@@ -193,16 +249,16 @@ export class FalkorDBService implements IFalkorDBService {
       return value;
     }
 
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
       // Remove or escape potentially dangerous characters
-      return value.replace(/['"`\\]/g, '\\$&');
+      return value.replace(/['"`\\]/g, "\\$&");
     }
 
     if (Array.isArray(value)) {
-      return value.map(item => this.sanitizeParameterValue(item));
+      return value.map((item) => this.sanitizeParameterValue(item));
     }
 
-    if (typeof value === 'object') {
+    if (typeof value === "object") {
       const sanitized: Record<string, any> = {};
       for (const [key, val] of Object.entries(value)) {
         if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
@@ -219,24 +275,27 @@ export class FalkorDBService implements IFalkorDBService {
 
   private parameterToCypherString(value: any): string {
     if (value === null || value === undefined) {
-      return 'null';
+      return "null";
     }
 
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
       return `'${value}'`;
     }
 
-    if (typeof value === 'boolean' || typeof value === 'number') {
+    if (typeof value === "boolean" || typeof value === "number") {
       return String(value);
     }
 
     if (Array.isArray(value)) {
-      const elements = value.map(item => this.parameterToCypherString(item));
-      return `[${elements.join(', ')}]`;
+      const elements = value.map((item) => this.parameterToCypherString(item));
+      return `[${elements.join(", ")}]`;
     }
 
-    if (typeof value === 'object') {
-      return this.objectToCypherProperties(value);
+    if (typeof value === "object") {
+      // Serialize objects to JSON for property storage
+      const json = JSON.stringify(value);
+      const escaped = json.replace(/'/g, "\\'");
+      return `'${escaped}'`;
     }
 
     // For other types, convert to string and quote
@@ -251,30 +310,87 @@ export class FalkorDBService implements IFalkorDBService {
           throw new Error(`Invalid property name: ${key}`);
         }
 
-        if (typeof value === 'string') {
+        if (typeof value === "string") {
           return `${key}: '${value}'`;
         } else if (Array.isArray(value)) {
           // Handle arrays properly for Cypher
-          const arrayElements = value.map(item => {
-            if (typeof item === 'string') {
+          const arrayElements = value.map((item) => {
+            if (typeof item === "string") {
               return `'${item}'`;
             } else if (item === null || item === undefined) {
-              return 'null';
+              return "null";
             } else {
               return String(item);
             }
           });
-          return `${key}: [${arrayElements.join(', ')}]`;
+          return `${key}: [${arrayElements.join(", ")}]`;
         } else if (value === null || value === undefined) {
           return `${key}: null`;
-        } else if (typeof value === 'boolean' || typeof value === 'number') {
+        } else if (typeof value === "boolean" || typeof value === "number") {
           return `${key}: ${value}`;
         } else {
-          // For other types, convert to string and quote
-          return `${key}: '${String(value)}'`;
+          // For other types (including objects), store JSON string
+          const json = JSON.stringify(value);
+          const escaped = json.replace(/'/g, "\\'");
+          return `${key}: '${escaped}'`;
         }
       })
-      .join(', ');
+      .join(", ");
     return `{${props}}`;
+  }
+
+  private async buildProcessedQuery(query: string, params: Record<string, any>): Promise<string> {
+    let processedQuery = query;
+    const sanitizedParams: Record<string, any> = {};
+    for (const [key, value] of Object.entries(params)) {
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+        throw new Error(
+          `Invalid parameter name: ${key}. Only alphanumeric characters and underscores are allowed.`
+        );
+      }
+      sanitizedParams[key] = this.sanitizeParameterValue(value);
+    }
+    for (const [key, value] of Object.entries(sanitizedParams)) {
+      const regex = new RegExp(`\\$${key}\\b`, 'g');
+      const replacement = this.parameterToCypherString(value);
+      processedQuery = processedQuery.replace(regex, replacement);
+    }
+    return processedQuery;
+  }
+
+  private decodeGraphValue(value: any): any {
+    if (value === null || value === undefined) return null;
+    if (Array.isArray(value)) return value.map(v => this.decodeGraphValue(v));
+    if (typeof value === 'object') {
+      const out: Record<string, any> = {};
+      for (const [k, v] of Object.entries(value)) out[k] = this.decodeGraphValue(v);
+      return out;
+    }
+    if (typeof value !== 'string') return value;
+    const t = value.trim();
+    if (t === 'null') return null;
+    if (t === 'true') return true;
+    if (t === 'false') return false;
+    if (/^-?\d+(?:\.\d+)?$/.test(t)) return Number(t);
+    if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+      try {
+        return JSON.parse(t);
+      } catch {
+        if (t.startsWith('[') && t.endsWith(']')) {
+          const inner = t.slice(1, -1).trim();
+          if (!inner) return [];
+          const parts = inner.split(',').map(s => s.trim());
+          return parts.map(p => {
+            const unq = p.replace(/^['"]|['"]$/g, '');
+            if (/^-?\d+(?:\.\d+)?$/.test(unq)) return Number(unq);
+            if (unq === 'true') return true;
+            if (unq === 'false') return false;
+            if (unq === 'null') return null;
+            return unq;
+          });
+        }
+      }
+    }
+    return value;
   }
 }

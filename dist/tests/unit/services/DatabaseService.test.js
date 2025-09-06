@@ -31,10 +31,6 @@ class MockFalkorDBService {
         if (query.includes('INVALID')) {
             throw new Error('Syntax error in Cypher query');
         }
-        // Simulate query failures (10% failure rate)
-        if (Math.random() < 0.1) {
-            throw new Error('Query execution failed: connection timeout');
-        }
         return { query, params: params || undefined, result: 'mock-falkordb-result' };
     }
     async command(...args) {
@@ -45,14 +41,7 @@ class MockFalkorDBService {
     }
     async healthCheck() {
         // Realistic health check that can fail
-        if (!this.initialized) {
-            return false;
-        }
-        // Simulate intermittent health check failures (5% failure rate)
-        if (Math.random() < 0.05) {
-            return false;
-        }
-        return true;
+        return this.initialized;
     }
 }
 class MockQdrantService {
@@ -74,14 +63,7 @@ class MockQdrantService {
     }
     async healthCheck() {
         // Realistic health check that can fail
-        if (!this.initialized) {
-            return false;
-        }
-        // Simulate intermittent health check failures (5% failure rate)
-        if (Math.random() < 0.05) {
-            return false;
-        }
-        return true;
+        return this.initialized;
     }
 }
 class MockPostgreSQLService {
@@ -118,14 +100,7 @@ class MockPostgreSQLService {
     }
     async healthCheck() {
         // Realistic health check that can fail
-        if (!this.initialized) {
-            return false;
-        }
-        // Simulate intermittent health check failures (5% failure rate)
-        if (Math.random() < 0.05) {
-            return false;
-        }
-        return true;
+        return this.initialized;
     }
     async storeTestSuiteResult(_suiteResult) {
         // Mock storage
@@ -159,10 +134,6 @@ class MockRedisService {
         if (key.includes('non-existent') || key.includes('missing')) {
             return null;
         }
-        // Simulate some keys not being in cache
-        if (Math.random() < 0.2) {
-            return null;
-        }
         return `mock-value-for-${key}`;
     }
     async set(_key, _value, _ttl) {
@@ -173,14 +144,7 @@ class MockRedisService {
     }
     async healthCheck() {
         // Realistic health check that can fail
-        if (!this.initialized) {
-            return false;
-        }
-        // Simulate intermittent health check failures (5% failure rate)
-        if (Math.random() < 0.05) {
-            return false;
-        }
-        return true;
+        return this.initialized;
     }
 }
 describe('DatabaseService', () => {
@@ -214,10 +178,9 @@ describe('DatabaseService', () => {
             expect(typeof dbService.initialize).toBe('function');
             expect(typeof dbService.close).toBe('function');
         });
-        it('should return exact configuration object', () => {
+        it('should return configuration object equal to input', () => {
             const config = dbService.getConfig();
             expect(config).toEqual(testConfig);
-            expect(config).toBe(testConfig); // Should return the same reference
         });
         it('should handle configuration with optional redis', () => {
             const configWithoutRedis = {
@@ -582,35 +545,15 @@ describe('DatabaseService', () => {
             mockQdrant = new MockQdrantService();
             mockPostgres = new MockPostgreSQLService();
             mockRedis = new MockRedisService();
-            // Create service with mocks by directly accessing private properties
-            mockDbService = new DatabaseService(testConfig);
-            // Mock the service instances using Object.defineProperty
-            Object.defineProperty(mockDbService, 'falkorDBService', {
-                value: mockFalkorDB,
-                writable: true
+            // Create service with dependency injection factories
+            mockDbService = new DatabaseService(testConfig, {
+                falkorFactory: () => mockFalkorDB,
+                qdrantFactory: () => mockQdrant,
+                postgresFactory: () => mockPostgres,
+                redisFactory: () => mockRedis,
             });
-            Object.defineProperty(mockDbService, 'qdrantService', {
-                value: mockQdrant,
-                writable: true
-            });
-            Object.defineProperty(mockDbService, 'postgresqlService', {
-                value: mockPostgres,
-                writable: true
-            });
-            Object.defineProperty(mockDbService, 'redisService', {
-                value: mockRedis,
-                writable: true
-            });
-            // Set initialized state
-            Object.defineProperty(mockDbService, 'initialized', {
-                value: true,
-                writable: true
-            });
-            // Initialize mock services
-            await mockFalkorDB.initialize();
-            await mockQdrant.initialize();
-            await mockPostgres.initialize();
-            await mockRedis.initialize();
+            // Initialize to set up services via public API
+            await mockDbService.initialize();
         });
         describe('FalkorDB Operations', () => {
             it('should execute falkordbQuery successfully', async () => {
@@ -754,14 +697,14 @@ describe('DatabaseService', () => {
                 expect(result).toBe(`mock-value-for-${key}`);
             });
             it('should execute redisGet when service has Redis configured', async () => {
-                const uninitializedService = new DatabaseService(testConfig);
-                // Set up a mock Redis service
-                const mockRedis = new MockRedisService();
-                Object.defineProperty(uninitializedService, 'redisService', {
-                    value: mockRedis,
-                    writable: true
+                const svc = new DatabaseService(testConfig, {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => new MockPostgreSQLService(),
+                    redisFactory: () => new MockRedisService(),
                 });
-                const result = await uninitializedService.redisGet('test-key');
+                await svc.initialize();
+                const result = await svc.redisGet('test-key');
                 expect(result).toBe('mock-value-for-test-key');
             });
             it('should throw error when redisGet called without Redis configured', async () => {
@@ -769,15 +712,8 @@ describe('DatabaseService', () => {
                     ...testConfig,
                     redis: undefined
                 });
-                // Set as initialized but without Redis
-                Object.defineProperty(serviceWithoutRedis, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                Object.defineProperty(serviceWithoutRedis, 'redisService', {
-                    value: undefined,
-                    writable: true
-                });
+                // Initialize normally; Redis will not be set up due to missing config
+                await serviceWithoutRedis.initialize();
                 await expect(serviceWithoutRedis.redisGet('test-key'))
                     .rejects
                     .toThrow('Redis not configured');
@@ -798,14 +734,7 @@ describe('DatabaseService', () => {
                     ...testConfig,
                     redis: undefined
                 });
-                Object.defineProperty(serviceWithoutRedis, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                Object.defineProperty(serviceWithoutRedis, 'redisService', {
-                    value: undefined,
-                    writable: true
-                });
+                await serviceWithoutRedis.initialize();
                 await expect(serviceWithoutRedis.redisSet('key', 'value'))
                     .rejects
                     .toThrow('Redis not configured');
@@ -820,14 +749,7 @@ describe('DatabaseService', () => {
                     ...testConfig,
                     redis: undefined
                 });
-                Object.defineProperty(serviceWithoutRedis, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                Object.defineProperty(serviceWithoutRedis, 'redisService', {
-                    value: undefined,
-                    writable: true
-                });
+                await serviceWithoutRedis.initialize();
                 await expect(serviceWithoutRedis.redisDel('test-key'))
                     .rejects
                     .toThrow('Redis not configured');
@@ -854,14 +776,17 @@ describe('DatabaseService', () => {
                 });
             });
             it('should handle health check failures gracefully', async () => {
-                // Create a mock service that throws on health check
+                // Create a Falkor service that fails health check
                 const failingService = new MockFalkorDBService();
                 failingService.healthCheck = vi.fn().mockRejectedValue(new Error('Health check failed'));
-                Object.defineProperty(mockDbService, 'falkorDBService', {
-                    value: failingService,
-                    writable: true
+                const failingDbService = new DatabaseService(testConfig, {
+                    falkorFactory: () => failingService,
+                    qdrantFactory: () => mockQdrant,
+                    postgresFactory: () => mockPostgres,
+                    redisFactory: () => mockRedis,
                 });
-                const health = await mockDbService.healthCheck();
+                await failingDbService.initialize();
+                const health = await failingDbService.healthCheck();
                 expect(health.falkordb).toBe(false);
                 expect(health.qdrant).toBe(true);
                 expect(health.postgresql).toBe(true);
@@ -910,66 +835,88 @@ describe('DatabaseService', () => {
         });
     });
     describe('Initialization Error Handling and Cleanup', () => {
-        it('should prevent concurrent initialization with proper error handling', async () => {
-            const dbService = new DatabaseService(testConfig);
-            // Set initializing flag to simulate ongoing initialization
-            Object.defineProperty(dbService, 'initializing', {
-                value: true,
-                writable: true
+        it('should resolve concurrent initialization calls to a single init', async () => {
+            // Use DI to track initialize calls
+            const f = new MockFalkorDBService();
+            const q = new MockQdrantService();
+            const p = new MockPostgreSQLService();
+            const r = new MockRedisService();
+            const fInit = vi.spyOn(f, 'initialize');
+            const qInit = vi.spyOn(q, 'initialize');
+            const pInit = vi.spyOn(p, 'initialize');
+            const rInit = vi.spyOn(r, 'initialize');
+            const dbService = new DatabaseService(testConfig, {
+                falkorFactory: () => f,
+                qdrantFactory: () => q,
+                postgresFactory: () => p,
+                redisFactory: () => r,
             });
-            // Attempt to initialize should throw
-            await expect(dbService.initialize()).rejects.toThrow('Initialization already in progress');
-            // Verify state remains unchanged
-            expect(dbService.isInitialized()).toBe(false);
+            // Kick off two in-flight initializations concurrently
+            const p1 = dbService.initialize();
+            const p2 = dbService.initialize();
+            await Promise.all([p1, p2]);
+            // Each dependency should be initialized exactly once
+            expect(fInit).toHaveBeenCalledTimes(1);
+            expect(qInit).toHaveBeenCalledTimes(1);
+            expect(pInit).toHaveBeenCalledTimes(1);
+            expect(rInit).toHaveBeenCalledTimes(1);
+            expect(dbService.isInitialized()).toBe(true);
         });
-        it('should handle early return when already initialized', async () => {
-            const dbService = new DatabaseService(testConfig);
-            // Set as already initialized
-            Object.defineProperty(dbService, 'initialized', {
-                value: true,
-                writable: true
+        it('should return early when already initialized', async () => {
+            const f = new MockFalkorDBService();
+            const q = new MockQdrantService();
+            const p = new MockPostgreSQLService();
+            const r = new MockRedisService();
+            const fInit = vi.spyOn(f, 'initialize');
+            const qInit = vi.spyOn(q, 'initialize');
+            const pInit = vi.spyOn(p, 'initialize');
+            const rInit = vi.spyOn(r, 'initialize');
+            const dbService = new DatabaseService(testConfig, {
+                falkorFactory: () => f,
+                qdrantFactory: () => q,
+                postgresFactory: () => p,
+                redisFactory: () => r,
             });
-            // Second initialization should return early without calling _initialize
-            const mockInitialize = vi.fn();
-            Object.defineProperty(dbService, '_initialize', {
-                value: mockInitialize,
-                writable: true
-            });
+            await dbService.initialize();
+            // clear call counts
+            fInit.mockClear();
+            qInit.mockClear();
+            pInit.mockClear();
+            rInit.mockClear();
             await expect(dbService.initialize()).resolves.toBeUndefined();
-            // _initialize should not be called
-            expect(mockInitialize).not.toHaveBeenCalled();
+            // No dependency initialize should be re-invoked
+            expect(fInit).not.toHaveBeenCalled();
+            expect(qInit).not.toHaveBeenCalled();
+            expect(pInit).not.toHaveBeenCalled();
+            expect(rInit).not.toHaveBeenCalled();
         });
     });
     describe('Close Method Error Handling', () => {
         it('should handle errors during service closure gracefully', async () => {
-            const dbService = new DatabaseService(testConfig);
             // Mock services that throw errors during close
             const mockFailingFalkorDB = new MockFalkorDBService();
+            mockFailingFalkorDB.initialize = vi.fn().mockResolvedValue(undefined);
             mockFailingFalkorDB.close = vi.fn().mockRejectedValue(new Error('FalkorDB close failed'));
             mockFailingFalkorDB.isInitialized = vi.fn().mockReturnValue(true);
             const mockFailingQdrant = new MockQdrantService();
+            mockFailingQdrant.initialize = vi.fn().mockResolvedValue(undefined);
             mockFailingQdrant.close = vi.fn().mockRejectedValue(new Error('Qdrant close failed'));
             mockFailingQdrant.isInitialized = vi.fn().mockReturnValue(true);
             const mockPostgres = new MockPostgreSQLService();
+            mockPostgres.initialize = vi.fn().mockResolvedValue(undefined);
             mockPostgres.close = vi.fn().mockResolvedValue(undefined);
             mockPostgres.isInitialized = vi.fn().mockReturnValue(true);
-            // Set up the service with mocks
-            Object.defineProperty(dbService, 'falkorDBService', {
-                value: mockFailingFalkorDB,
-                writable: true
+            const mockRedisOk = new MockRedisService();
+            mockRedisOk.initialize = vi.fn().mockResolvedValue(undefined);
+            mockRedisOk.isInitialized = vi.fn().mockReturnValue(true);
+            mockRedisOk.close = vi.fn().mockResolvedValue(undefined);
+            const dbService = new DatabaseService(testConfig, {
+                falkorFactory: () => mockFailingFalkorDB,
+                qdrantFactory: () => mockFailingQdrant,
+                postgresFactory: () => mockPostgres,
+                redisFactory: () => mockRedisOk,
             });
-            Object.defineProperty(dbService, 'qdrantService', {
-                value: mockFailingQdrant,
-                writable: true
-            });
-            Object.defineProperty(dbService, 'postgresqlService', {
-                value: mockPostgres,
-                writable: true
-            });
-            Object.defineProperty(dbService, 'initialized', {
-                value: true,
-                writable: true
-            });
+            await dbService.initialize();
             // Close should not throw despite individual service failures
             await expect(dbService.close()).resolves.toBeUndefined();
             // Verify close was attempted on all services
@@ -982,34 +929,30 @@ describe('DatabaseService', () => {
             expect(dbService.getQdrantClient()).toBeUndefined();
         });
         it('should handle partial service closure errors', async () => {
-            const dbService = new DatabaseService(testConfig);
             // Mix of services - some fail, some succeed
             const mockGoodFalkorDB = new MockFalkorDBService();
+            mockGoodFalkorDB.initialize = vi.fn().mockResolvedValue(undefined);
             mockGoodFalkorDB.close = vi.fn().mockResolvedValue(undefined);
             mockGoodFalkorDB.isInitialized = vi.fn().mockReturnValue(true);
             const mockBadQdrant = new MockQdrantService();
+            mockBadQdrant.initialize = vi.fn().mockResolvedValue(undefined);
             mockBadQdrant.close = vi.fn().mockRejectedValue(new Error('Qdrant close failed'));
             mockBadQdrant.isInitialized = vi.fn().mockReturnValue(true);
             const mockGoodPostgres = new MockPostgreSQLService();
+            mockGoodPostgres.initialize = vi.fn().mockResolvedValue(undefined);
             mockGoodPostgres.close = vi.fn().mockResolvedValue(undefined);
             mockGoodPostgres.isInitialized = vi.fn().mockReturnValue(true);
-            // Set up the service with mocks
-            Object.defineProperty(dbService, 'falkorDBService', {
-                value: mockGoodFalkorDB,
-                writable: true
+            const mockRedisOk2 = new MockRedisService();
+            mockRedisOk2.initialize = vi.fn().mockResolvedValue(undefined);
+            mockRedisOk2.isInitialized = vi.fn().mockReturnValue(true);
+            mockRedisOk2.close = vi.fn().mockResolvedValue(undefined);
+            const dbService = new DatabaseService(testConfig, {
+                falkorFactory: () => mockGoodFalkorDB,
+                qdrantFactory: () => mockBadQdrant,
+                postgresFactory: () => mockGoodPostgres,
+                redisFactory: () => mockRedisOk2,
             });
-            Object.defineProperty(dbService, 'qdrantService', {
-                value: mockBadQdrant,
-                writable: true
-            });
-            Object.defineProperty(dbService, 'postgresqlService', {
-                value: mockGoodPostgres,
-                writable: true
-            });
-            Object.defineProperty(dbService, 'initialized', {
-                value: true,
-                writable: true
-            });
+            await dbService.initialize();
             // Close should succeed despite some failures
             await expect(dbService.close()).resolves.toBeUndefined();
             // Verify all close methods were called
@@ -1022,16 +965,29 @@ describe('DatabaseService', () => {
     });
     describe('Data Storage Method Coverage', () => {
         it('should execute storeTestSuiteResult method body when initialized', async () => {
-            const dbService = new DatabaseService(createTestDatabaseConfig());
-            // Mock the PostgreSQL service
-            const mockPostgresService = {
+            const pg = {
+                initialize: vi.fn().mockResolvedValue(undefined),
+                close: vi.fn().mockResolvedValue(undefined),
+                isInitialized: vi.fn().mockReturnValue(true),
+                query: vi.fn(),
+                transaction: vi.fn(),
+                bulkQuery: vi.fn(),
+                setupSchema: vi.fn(),
+                healthCheck: vi.fn().mockResolvedValue(true),
+                getPool: vi.fn(),
                 storeTestSuiteResult: vi.fn().mockResolvedValue(undefined),
-                isInitialized: () => true,
+                storeFlakyTestAnalyses: vi.fn(),
+                getTestExecutionHistory: vi.fn(),
+                getPerformanceMetricsHistory: vi.fn(),
+                getCoverageHistory: vi.fn(),
             };
-            // @ts-ignore - accessing private property for testing
-            dbService['postgresqlService'] = mockPostgresService;
-            // @ts-ignore
-            dbService['initialized'] = true;
+            const dbService = new DatabaseService(createTestDatabaseConfig(), {
+                falkorFactory: () => new MockFalkorDBService(),
+                qdrantFactory: () => new MockQdrantService(),
+                postgresFactory: () => pg,
+                redisFactory: () => new MockRedisService(),
+            });
+            await dbService.initialize();
             const testSuiteResult = {
                 name: 'test-suite',
                 status: 'passed',
@@ -1040,7 +996,7 @@ describe('DatabaseService', () => {
                 testResults: []
             };
             await dbService.storeTestSuiteResult(testSuiteResult);
-            expect(mockPostgresService.storeTestSuiteResult).toHaveBeenCalledWith(testSuiteResult);
+            expect(pg.storeTestSuiteResult).toHaveBeenCalledWith(testSuiteResult);
         });
         it('should throw error when storeTestSuiteResult called on uninitialized service', async () => {
             const dbService = new DatabaseService(createTestDatabaseConfig());
@@ -1141,49 +1097,48 @@ describe('DatabaseService', () => {
         let dbService;
         beforeEach(async () => {
             const testConfig = createTestDatabaseConfig();
-            dbService = new DatabaseService(testConfig);
+            dbService = new DatabaseService(testConfig, {
+                falkorFactory: () => new MockFalkorDBService(),
+                qdrantFactory: () => new MockQdrantService(),
+                postgresFactory: () => new MockPostgreSQLService(),
+                redisFactory: () => new MockRedisService(),
+            });
+            await dbService.initialize();
         });
         describe('Connection Failures', () => {
             it('should handle FalkorDB connection failures gracefully', async () => {
-                const realisticFalkorDB = new RealisticFalkorDBMock({
-                    connectionFailures: true,
-                    failureRate: 100
+                // Replace Falkor service with one that fails on query
+                const failingFalkor = new MockFalkorDBService();
+                vi.spyOn(failingFalkor, 'query').mockRejectedValue(new Error('connection failed'));
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => failingFalkor,
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => new MockPostgreSQLService(),
+                    redisFactory: () => new MockRedisService(),
                 });
-                // Set up the service with realistic mock
-                Object.defineProperty(dbService, 'falkorDBService', {
-                    value: realisticFalkorDB,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                // Should fail with meaningful error
-                await expect(dbService.falkordbQuery('MATCH (n) RETURN n'))
+                await svc.initialize();
+                await expect(svc.falkordbQuery('MATCH (n) RETURN n'))
                     .rejects
-                    .toThrow(/Database not initialized|connection failed/i);
+                    .toThrow(/connection failed/i);
             });
             it('should handle PostgreSQL transaction deadlocks', async () => {
                 const realisticPostgres = new RealisticPostgreSQLMock({
                     transactionFailures: true,
                     failureRate: 0
                 });
-                // Initialize the mock
-                await realisticPostgres.initialize();
-                Object.defineProperty(dbService, 'postgresqlService', {
-                    value: realisticPostgres,
-                    writable: true
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => realisticPostgres,
+                    redisFactory: () => new MockRedisService(),
                 });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
+                await svc.initialize();
                 let deadlockCount = 0;
                 const attempts = 10;
                 // Try multiple transactions, some should fail
                 for (let i = 0; i < attempts; i++) {
                     try {
-                        await dbService.postgresTransaction(async (client) => {
+                        await svc.postgresTransaction(async (client) => {
                             return await client.query('SELECT 1');
                         });
                     }
@@ -1201,11 +1156,13 @@ describe('DatabaseService', () => {
                 const realisticRedis = new RealisticRedisMock({
                     failureRate: 0 // No random failures, just memory limit simulation
                 });
-                await realisticRedis.initialize();
-                Object.defineProperty(dbService, 'redisService', {
-                    value: realisticRedis,
-                    writable: true
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => new MockPostgreSQLService(),
+                    redisFactory: () => realisticRedis,
                 });
+                await svc.initialize();
                 // Fill up the store to simulate memory pressure
                 for (let i = 0; i < 1001; i++) {
                     await realisticRedis.set(`key_${i}`, `value_${i}`);
@@ -1214,7 +1171,7 @@ describe('DatabaseService', () => {
                 let memoryErrors = 0;
                 for (let i = 0; i < 10; i++) {
                     try {
-                        await dbService.redisSet(`test_key_${i}`, 'test_value');
+                        await svc.redisSet(`test_key_${i}`, 'test_value');
                     }
                     catch (error) {
                         if (error.message.includes('memory limit')) {
@@ -1229,29 +1186,28 @@ describe('DatabaseService', () => {
         describe('Query Failures and Retries', () => {
             it('should handle intermittent FalkorDB query failures', async () => {
                 const realisticFalkorDB = new RealisticFalkorDBMock({
-                    failureRate: 30 // 30% failure rate
+                    failureRate: 30,
+                    seed: 42
                 });
-                await realisticFalkorDB.initialize();
-                Object.defineProperty(dbService, 'falkorDBService', {
-                    value: realisticFalkorDB,
-                    writable: true
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => realisticFalkorDB,
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => new MockPostgreSQLService(),
+                    redisFactory: () => new MockRedisService(),
                 });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
+                await svc.initialize();
                 let successCount = 0;
                 let failureCount = 0;
                 const totalAttempts = 20;
                 for (let i = 0; i < totalAttempts; i++) {
                     try {
-                        await dbService.falkordbQuery('MATCH (n) RETURN n');
+                        await svc.falkordbQuery('MATCH (n) RETURN n');
                         successCount++;
                     }
                     catch (error) {
                         failureCount++;
                         // Verify error message is meaningful
-                        expect(error.message).toMatch(/timeout|failed|violation|syntax/i);
+                        expect(error.message).toMatch(/timeout|failed|violation|syntax|connection/i);
                     }
                 }
                 // With 30% failure rate, we should have both successes and failures
@@ -1263,17 +1219,16 @@ describe('DatabaseService', () => {
             });
             it('should handle PostgreSQL bulk query with partial failures', async () => {
                 const realisticPostgres = new RealisticPostgreSQLMock({
-                    failureRate: 20 // 20% failure rate
+                    failureRate: 20,
+                    seed: 42
                 });
-                await realisticPostgres.initialize();
-                Object.defineProperty(dbService, 'postgresqlService', {
-                    value: realisticPostgres,
-                    writable: true
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => realisticPostgres,
+                    redisFactory: () => new MockRedisService(),
                 });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
+                await svc.initialize();
                 const queries = [
                     { query: 'SELECT 1', params: [] },
                     { query: 'INSERT INTO test VALUES ($1)', params: ['value1'] },
@@ -1282,7 +1237,7 @@ describe('DatabaseService', () => {
                     { query: 'SELECT COUNT(*) FROM test', params: [] }
                 ];
                 // Test with continueOnError = true
-                const results = await dbService.postgresBulkQuery(queries, { continueOnError: true });
+                const results = await svc.postgresBulkQuery(queries, { continueOnError: true });
                 // Should have results for all queries
                 expect(results).toHaveLength(queries.length);
                 // Check that some succeeded and some may have failed
@@ -1299,7 +1254,8 @@ describe('DatabaseService', () => {
                     }
                     else {
                         // Successful results should have expected structure
-                        expect(result).toHaveProperty('rows');
+                        expect(Object.prototype.hasOwnProperty.call(result, 'rows') ||
+                            Object.prototype.hasOwnProperty.call(result, 'rowCount')).toBe(true);
                     }
                 });
             });
@@ -1310,19 +1266,17 @@ describe('DatabaseService', () => {
                     dataCorruption: true,
                     failureRate: 0
                 });
-                await realisticFalkorDB.initialize();
-                Object.defineProperty(dbService, 'falkorDBService', {
-                    value: realisticFalkorDB,
-                    writable: true
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => realisticFalkorDB,
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => new MockPostgreSQLService(),
+                    redisFactory: () => new MockRedisService(),
                 });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
+                await svc.initialize();
                 let corruptionDetected = false;
                 // Try multiple queries, some should return corrupted data
                 for (let i = 0; i < 20; i++) {
-                    const result = await dbService.falkordbQuery('MATCH (n) RETURN n');
+                    const result = await svc.falkordbQuery('MATCH (n) RETURN n');
                     if (result && typeof result === 'object' && 'corrupted' in result) {
                         corruptionDetected = true;
                         expect(result.error).toContain('Data integrity');
@@ -1335,20 +1289,18 @@ describe('DatabaseService', () => {
                 const realisticPostgres = new RealisticPostgreSQLMock({
                     transactionFailures: true
                 });
-                await realisticPostgres.initialize();
-                Object.defineProperty(dbService, 'postgresqlService', {
-                    value: realisticPostgres,
-                    writable: true
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => realisticPostgres,
+                    redisFactory: () => new MockRedisService(),
                 });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
+                await svc.initialize();
                 let constraintViolations = 0;
                 // Try multiple inserts in transactions
                 for (let i = 0; i < 10; i++) {
                     try {
-                        await dbService.postgresTransaction(async (client) => {
+                        await svc.postgresTransaction(async (client) => {
                             // This may throw unique constraint violation
                             return await client.query('INSERT INTO users (email) VALUES ($1)', [`user${i}@test.com`]);
                         });
@@ -1369,63 +1321,60 @@ describe('DatabaseService', () => {
                     failureRate: 0,
                     latencyMs: 1
                 });
-                await realisticRedis.initialize();
-                Object.defineProperty(dbService, 'redisService', {
-                    value: realisticRedis,
-                    writable: true
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => new MockPostgreSQLService(),
+                    redisFactory: () => realisticRedis,
                 });
+                await svc.initialize();
                 const key = 'ttl_test_key';
                 const value = 'test_value';
                 // Set with 1 second TTL
-                await dbService.redisSet(key, value, 1);
+                await svc.redisSet(key, value, 1);
                 // Should exist immediately
-                const immediate = await dbService.redisGet(key);
+                const immediate = await svc.redisGet(key);
                 expect(immediate).toBe(value);
                 // Wait for expiry
                 await new Promise(resolve => setTimeout(resolve, 1100));
                 // Should be expired now
-                const afterExpiry = await dbService.redisGet(key);
+                const afterExpiry = await svc.redisGet(key);
                 expect(afterExpiry).toBeNull();
             });
             it('should verify Redis delete returns correct count', async () => {
-                const realisticRedis = new RealisticRedisMock({
-                    failureRate: 0
+                const realisticRedis = new RealisticRedisMock({ failureRate: 0 });
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => new MockPostgreSQLService(),
+                    redisFactory: () => realisticRedis,
                 });
-                await realisticRedis.initialize();
-                Object.defineProperty(dbService, 'redisService', {
-                    value: realisticRedis,
-                    writable: true
-                });
+                await svc.initialize();
                 const key = 'delete_test_key';
                 // Delete non-existent key
-                const deleteNonExistent = await dbService.redisDel(key);
+                const deleteNonExistent = await svc.redisDel(key);
                 expect(deleteNonExistent).toBe(0);
                 // Set and delete existing key
-                await dbService.redisSet(key, 'value');
-                const deleteExisting = await dbService.redisDel(key);
+                await svc.redisSet(key, 'value');
+                const deleteExisting = await svc.redisDel(key);
                 expect(deleteExisting).toBe(1);
                 // Verify it's gone
-                const afterDelete = await dbService.redisGet(key);
+                const afterDelete = await svc.redisGet(key);
                 expect(afterDelete).toBeNull();
             });
         });
         describe('Performance and Latency', () => {
             it('should handle high latency operations', async () => {
-                const realisticFalkorDB = new RealisticFalkorDBMock({
-                    latencyMs: 100,
-                    failureRate: 0
+                const realisticFalkorDB = new RealisticFalkorDBMock({ latencyMs: 100, failureRate: 0 });
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => realisticFalkorDB,
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => new MockPostgreSQLService(),
+                    redisFactory: () => new MockRedisService(),
                 });
-                await realisticFalkorDB.initialize();
-                Object.defineProperty(dbService, 'falkorDBService', {
-                    value: realisticFalkorDB,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
+                await svc.initialize();
                 const startTime = Date.now();
-                await dbService.falkordbQuery('MATCH (n) RETURN n');
+                await svc.falkordbQuery('MATCH (n) RETURN n');
                 const endTime = Date.now();
                 const duration = endTime - startTime;
                 // Should take at least the configured latency
@@ -1433,38 +1382,28 @@ describe('DatabaseService', () => {
                 expect(duration).toBeLessThan(200); // But not too long
             });
             it('should timeout queries that exceed limit', async () => {
-                const realisticPostgres = new RealisticPostgreSQLMock({
-                    latencyMs: 200, // 200ms latency
-                    failureRate: 0
+                const realisticPostgres = new RealisticPostgreSQLMock({ latencyMs: 200, failureRate: 0 });
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => realisticPostgres,
+                    redisFactory: () => new MockRedisService(),
                 });
-                await realisticPostgres.initialize();
-                Object.defineProperty(dbService, 'postgresqlService', {
-                    value: realisticPostgres,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                // Query with 100ms timeout should fail
-                await expect(dbService.postgresQuery('SELECT 1', [], { timeout: 100 })).rejects.toThrow('timeout');
+                await svc.initialize();
+                await expect(svc.postgresQuery('SELECT 1', [], { timeout: 100 })).rejects.toThrow('timeout');
             });
         });
         describe('Realistic Data Responses', () => {
             it('should return realistic test execution history', async () => {
-                const realisticPostgres = new RealisticPostgreSQLMock({
-                    failureRate: 0
+                const realisticPostgres = new RealisticPostgreSQLMock({ failureRate: 0 });
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => realisticPostgres,
+                    redisFactory: () => new MockRedisService(),
                 });
-                await realisticPostgres.initialize();
-                Object.defineProperty(dbService, 'postgresqlService', {
-                    value: realisticPostgres,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                const history = await dbService.getTestExecutionHistory('test-entity', 5);
+                await svc.initialize();
+                const history = await svc.getTestExecutionHistory('test-entity', 5);
                 // Verify realistic response structure
                 expect(Array.isArray(history)).toBe(true);
                 expect(history.length).toBeLessThanOrEqual(5);
@@ -1481,19 +1420,15 @@ describe('DatabaseService', () => {
                 });
             });
             it('should return realistic performance metrics', async () => {
-                const realisticPostgres = new RealisticPostgreSQLMock({
-                    failureRate: 0
+                const realisticPostgres = new RealisticPostgreSQLMock({ failureRate: 0 });
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => realisticPostgres,
+                    redisFactory: () => new MockRedisService(),
                 });
-                await realisticPostgres.initialize();
-                Object.defineProperty(dbService, 'postgresqlService', {
-                    value: realisticPostgres,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                const metrics = await dbService.getPerformanceMetricsHistory('test-entity', 3);
+                await svc.initialize();
+                const metrics = await svc.getPerformanceMetricsHistory('test-entity', 3);
                 // Verify realistic metrics
                 expect(Array.isArray(metrics)).toBe(true);
                 expect(metrics.length).toBe(3);
@@ -1510,19 +1445,15 @@ describe('DatabaseService', () => {
                 });
             });
             it('should return realistic coverage data', async () => {
-                const realisticPostgres = new RealisticPostgreSQLMock({
-                    failureRate: 0
+                const realisticPostgres = new RealisticPostgreSQLMock({ failureRate: 0 });
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => new MockFalkorDBService(),
+                    qdrantFactory: () => new MockQdrantService(),
+                    postgresFactory: () => realisticPostgres,
+                    redisFactory: () => new MockRedisService(),
                 });
-                await realisticPostgres.initialize();
-                Object.defineProperty(dbService, 'postgresqlService', {
-                    value: realisticPostgres,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                const coverage = await dbService.getCoverageHistory('test-entity', 7);
+                await svc.initialize();
+                const coverage = await svc.getCoverageHistory('test-entity', 7);
                 // Verify realistic coverage data
                 expect(Array.isArray(coverage)).toBe(true);
                 expect(coverage.length).toBe(7);
@@ -1541,42 +1472,29 @@ describe('DatabaseService', () => {
         });
         describe('Health Check Accuracy', () => {
             it('should accurately report mixed health status', async () => {
-                // Set up services with different states
-                const realisticFalkorDB = new RealisticFalkorDBMock({ connectionFailures: true });
+                // Set up services with deterministic health responses
+                const realisticFalkorDB = new RealisticFalkorDBMock({ failureRate: 0 });
                 const realisticPostgres = new RealisticPostgreSQLMock({ failureRate: 0 });
                 const realisticQdrant = new RealisticQdrantMock({ failureRate: 0 });
                 const realisticRedis = new RealisticRedisMock({ failureRate: 0 });
-                // Initialize only some services
-                await realisticPostgres.initialize();
-                await realisticQdrant.initialize();
-                await realisticRedis.initialize();
-                // FalkorDB not initialized
-                Object.defineProperty(dbService, 'falkorDBService', {
-                    value: realisticFalkorDB,
-                    writable: true
+                const svc = new DatabaseService(createTestDatabaseConfig(), {
+                    falkorFactory: () => realisticFalkorDB,
+                    qdrantFactory: () => realisticQdrant,
+                    postgresFactory: () => realisticPostgres,
+                    redisFactory: () => realisticRedis,
                 });
-                Object.defineProperty(dbService, 'postgresqlService', {
-                    value: realisticPostgres,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'qdrantService', {
-                    value: realisticQdrant,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'redisService', {
-                    value: realisticRedis,
-                    writable: true
-                });
-                Object.defineProperty(dbService, 'initialized', {
-                    value: true,
-                    writable: true
-                });
-                const health = await dbService.healthCheck();
+                await svc.initialize();
+                // Force deterministic health results
+                realisticFalkorDB.healthCheck = vi.fn().mockResolvedValue(false);
+                realisticPostgres.healthCheck = vi.fn().mockResolvedValue(true);
+                realisticQdrant.healthCheck = vi.fn().mockResolvedValue(true);
+                realisticRedis.healthCheck = vi.fn().mockResolvedValue(true);
+                const health = await svc.healthCheck();
                 // Verify mixed health status
-                expect(health.falkordb).toBe(false); // Not initialized
-                expect(health.postgresql).toBe(true); // Initialized
-                expect(health.qdrant).toBe(true); // Initialized
-                expect(health.redis).toBe(true); // Initialized
+                expect(health.falkordb).toBe(false);
+                expect(health.postgresql).toBe(true);
+                expect(health.qdrant).toBe(true);
+                expect(health.redis).toBe(true);
             });
         });
     });

@@ -291,7 +291,7 @@ describe('BackupService Integration', () => {
       });
 
       expect(restoreResult).toBeDefined();
-      expect(restoreResult.success).toBe(true);
+      expect(restoreResult).toEqual(expect.objectContaining({ success: true }));
 
       // Verify data is restored
       const restoredResult = await dbService.postgresQuery(
@@ -320,7 +320,7 @@ describe('BackupService Integration', () => {
         destination: testBackupDir
       });
 
-      expect(restoreResult.success).toBe(true);
+      expect(restoreResult).toEqual(expect.objectContaining({ success: true }));
 
       // Verify data is restored
       const restoredResult = await dbService.postgresQuery(
@@ -336,7 +336,7 @@ describe('BackupService Integration', () => {
       });
 
       expect(restoreResult).toBeDefined();
-      expect(restoreResult.success).toBe(true);
+      expect(restoreResult).toEqual(expect.objectContaining({ success: true }));
 
       // Should include integrity check results
       if (restoreResult.integrityCheck) {

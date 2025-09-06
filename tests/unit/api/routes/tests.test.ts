@@ -912,6 +912,4 @@ describe('Test Routes', () => {
       );
     });
   });
-      // Engine should be invoked with the specific entity ID
-      expect(mockTestEngine.analyzeFlakyTests).toHaveBeenCalledWith([entityId]);
 });

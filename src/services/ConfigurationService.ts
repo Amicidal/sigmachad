@@ -3,18 +3,18 @@
  * Manages system configuration, feature detection, and health monitoring
  */
 
-import { DatabaseService } from './DatabaseService.js';
-import { SynchronizationCoordinator } from './SynchronizationCoordinator.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { DatabaseService } from "./DatabaseService.js";
+import { SynchronizationCoordinator } from "./SynchronizationCoordinator.js";
+import * as fs from "fs/promises";
+import * as path from "path";
 
 export interface SystemConfiguration {
   version: string;
   environment: string;
   databases: {
-    falkordb: 'configured' | 'error' | 'unavailable';
-    qdrant: 'configured' | 'error' | 'unavailable';
-    postgres: 'configured' | 'error' | 'unavailable';
+    falkordb: "configured" | "error" | "unavailable";
+    qdrant: "configured" | "error" | "unavailable";
+    postgres: "configured" | "error" | "unavailable";
   };
   features: {
     websocket: boolean;
@@ -52,12 +52,12 @@ export class ConfigurationService {
   async getSystemConfiguration(): Promise<SystemConfiguration> {
     const config: SystemConfiguration = {
       version: await this.getVersion(),
-      environment: process.env.NODE_ENV || 'development',
+      environment: process.env.NODE_ENV || "development",
       databases: await this.checkDatabaseStatus(),
       features: await this.checkFeatureStatus(),
       performance: await this.getPerformanceConfig(),
       security: await this.getSecurityConfig(),
-      system: await this.getSystemInfo()
+      system: await this.getSystemInfo(),
     };
 
     return config;
@@ -66,67 +66,71 @@ export class ConfigurationService {
   private async getVersion(): Promise<string> {
     try {
       // Read version from package.json
-      const packageJsonPath = path.join(process.cwd(), 'package.json');
-      const packageJson = await fs.readFile(packageJsonPath, 'utf-8');
+      const packageJsonPath = path.join(process.cwd(), "package.json");
+      const packageJson = await fs.readFile(packageJsonPath, "utf-8");
       const pkg = JSON.parse(packageJson);
-      return pkg.version || '0.1.0';
+      return pkg.version || "0.1.0";
     } catch (error) {
-      console.warn('Could not read package.json for version:', error);
-      return '0.1.0';
+      console.warn("Could not read package.json for version:", error);
+      return "0.1.0";
     }
   }
 
-  private async checkDatabaseStatus(): Promise<SystemConfiguration['databases']> {
-    const status: SystemConfiguration['databases'] = {
-      falkordb: 'unavailable',
-      qdrant: 'unavailable',
-      postgres: 'unavailable'
+  private async checkDatabaseStatus(): Promise<
+    SystemConfiguration["databases"]
+  > {
+    const status: SystemConfiguration["databases"] = {
+      falkordb: "unavailable",
+      qdrant: "unavailable",
+      postgres: "unavailable",
     };
 
     try {
       // Check FalkorDB
-      await this.dbService.falkordbQuery('MATCH (n) RETURN count(n) LIMIT 1');
-      status.falkordb = 'configured';
+      await this.dbService.falkordbQuery("MATCH (n) RETURN count(n) LIMIT 1");
+      status.falkordb = "configured";
     } catch (error) {
-      console.warn('FalkorDB connection check failed:', error);
-      status.falkordb = 'error';
+      console.warn("FalkorDB connection check failed:", error);
+      status.falkordb = "error";
     }
 
     try {
       // Check Qdrant
       const qdrantClient = this.dbService.getQdrantClient();
       await qdrantClient.getCollections();
-      status.qdrant = 'configured';
+      status.qdrant = "configured";
     } catch (error) {
-      console.warn('Qdrant connection check failed:', error);
-      status.qdrant = 'error';
+      console.warn("Qdrant connection check failed:", error);
+      status.qdrant = "error";
     }
 
     try {
       // Check PostgreSQL
-      await this.dbService.postgresQuery('SELECT 1');
-      status.postgres = 'configured';
+      await this.dbService.postgresQuery("SELECT 1");
+      status.postgres = "configured";
     } catch (error) {
-      console.warn('PostgreSQL connection check failed:', error);
-      status.postgres = 'error';
+      console.warn("PostgreSQL connection check failed:", error);
+      status.postgres = "error";
     }
 
     return status;
   }
 
-  private async checkFeatureStatus(): Promise<SystemConfiguration['features']> {
+  private async checkFeatureStatus(): Promise<SystemConfiguration["features"]> {
     const features = {
       websocket: true, // Always available in current implementation
       graphSearch: false,
       vectorSearch: false,
       securityScanning: false,
       mcpServer: true, // Always available
-      syncCoordinator: !!this.syncCoordinator
+      syncCoordinator: !!this.syncCoordinator,
     };
 
     try {
       // Check graph search capability
-      const testQuery = await this.dbService.falkordbQuery('MATCH (n) RETURN count(n) LIMIT 1');
+      const testQuery = await this.dbService.falkordbQuery(
+        "MATCH (n) RETURN count(n) LIMIT 1"
+      );
       features.graphSearch = Array.isArray(testQuery);
     } catch (error) {
       features.graphSearch = false;
@@ -136,7 +140,8 @@ export class ConfigurationService {
       // Check vector search capability
       const qdrantClient = this.dbService.getQdrantClient();
       const collections = await qdrantClient.getCollections();
-      features.vectorSearch = collections.collections && collections.collections.length >= 0;
+      features.vectorSearch =
+        collections.collections && collections.collections.length >= 0;
     } catch (error) {
       features.vectorSearch = false;
     }
@@ -152,35 +157,44 @@ export class ConfigurationService {
     return features;
   }
 
-  private async getPerformanceConfig(): Promise<SystemConfiguration['performance']> {
+  private async getPerformanceConfig(): Promise<
+    SystemConfiguration["performance"]
+  > {
     return {
       maxConcurrentSync: this.syncCoordinator ? 5 : 1, // Default values
       cacheSize: 1000,
-      requestTimeout: 30000
+      requestTimeout: 30000,
     };
   }
 
-  private async getSecurityConfig(): Promise<SystemConfiguration['security']> {
+  private async getSecurityConfig(): Promise<SystemConfiguration["security"]> {
     return {
       rateLimiting: true, // Rate limiting is implemented
       authentication: false, // Not implemented yet
-      auditLogging: false // Not implemented yet
+      auditLogging: false, // Not implemented yet
     };
   }
 
-  private async getSystemInfo(): Promise<SystemConfiguration['system']> {
-    const memUsage = process.memoryUsage();
+  private async getSystemInfo(): Promise<SystemConfiguration["system"]> {
+    let memUsage;
     let cpuUsage;
+
+    try {
+      memUsage = process.memoryUsage();
+    } catch (error) {
+      // If memory usage is unavailable, set to undefined
+      memUsage = undefined;
+    }
 
     try {
       // Get CPU usage (simplified)
       const startUsage = process.cpuUsage();
       // Wait a short moment
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
       const endUsage = process.cpuUsage(startUsage);
       cpuUsage = {
         user: endUsage.user / 1000, // Convert to milliseconds
-        system: endUsage.system / 1000
+        system: endUsage.system / 1000,
       };
     } catch (error) {
       cpuUsage = { user: 0, system: 0 };
@@ -191,27 +205,38 @@ export class ConfigurationService {
       memoryUsage: memUsage,
       cpuUsage,
       platform: process.platform,
-      nodeVersion: process.version
+      nodeVersion: process.version,
     };
   }
 
-  async updateConfiguration(updates: Partial<SystemConfiguration>): Promise<void> {
+  async updateConfiguration(
+    updates: Partial<SystemConfiguration>
+  ): Promise<void> {
     // Validate updates
     if (updates.performance) {
-      if (updates.performance.maxConcurrentSync && updates.performance.maxConcurrentSync < 1) {
-        throw new Error('maxConcurrentSync must be at least 1');
+      if (
+        updates.performance.maxConcurrentSync &&
+        updates.performance.maxConcurrentSync < 1
+      ) {
+        throw new Error("maxConcurrentSync must be at least 1");
       }
       if (updates.performance.cacheSize && updates.performance.cacheSize < 0) {
-        throw new Error('cacheSize cannot be negative');
+        throw new Error("cacheSize cannot be negative");
       }
-      if (updates.performance.requestTimeout && updates.performance.requestTimeout < 1000) {
-        throw new Error('requestTimeout must be at least 1000ms');
+      if (
+        updates.performance.requestTimeout &&
+        updates.performance.requestTimeout < 1000
+      ) {
+        throw new Error("requestTimeout must be at least 1000ms");
       }
     }
 
     // For now, we'll just validate and log the updates
     // In a production system, this would update environment variables or config files
-    console.log('Configuration update requested:', JSON.stringify(updates, null, 2));
+    console.log(
+      "Configuration update requested:",
+      JSON.stringify(updates, null, 2)
+    );
 
     // TODO: Implement actual configuration persistence
     // This could involve:
@@ -219,7 +244,9 @@ export class ConfigurationService {
     // 2. Updating database configuration
     // 3. Sending signals to other services to reload config
 
-    throw new Error('Configuration updates not yet implemented - this is a placeholder');
+    throw new Error(
+      "Configuration updates not yet implemented - this is a placeholder"
+    );
   }
 
   async getDatabaseHealth(): Promise<{
@@ -230,20 +257,20 @@ export class ConfigurationService {
     const health = {
       falkordb: null as any,
       qdrant: null as any,
-      postgres: null as any
+      postgres: null as any,
     };
 
     try {
       // Get FalkorDB stats
-      const falkordbStats = await this.dbService.falkordbQuery('INFO');
+      const falkordbStats = await this.dbService.falkordbQuery("INFO");
       health.falkordb = {
-        status: 'healthy',
-        stats: falkordbStats
+        status: "healthy",
+        stats: falkordbStats,
       };
     } catch (error) {
       health.falkordb = {
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        status: "error",
+        error: error instanceof Error ? error.message : "Unknown error",
       };
     }
 
@@ -252,13 +279,13 @@ export class ConfigurationService {
       const qdrantClient = this.dbService.getQdrantClient();
       const qdrantHealth = await qdrantClient.getCollections();
       health.qdrant = {
-        status: 'healthy',
-        collections: qdrantHealth.collections?.length || 0
+        status: "healthy",
+        collections: qdrantHealth.collections?.length || 0,
       };
     } catch (error) {
       health.qdrant = {
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        status: "error",
+        error: error instanceof Error ? error.message : "Unknown error",
       };
     }
 
@@ -275,13 +302,13 @@ export class ConfigurationService {
         LIMIT 10
       `);
       health.postgres = {
-        status: 'healthy',
-        tables: postgresStats.length
+        status: "healthy",
+        tables: postgresStats.length,
       };
     } catch (error) {
       health.postgres = {
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        status: "error",
+        error: error instanceof Error ? error.message : "Unknown error",
       };
     }
 
@@ -305,34 +332,49 @@ export class ConfigurationService {
       used: number;
     };
   }> {
-    const os = await import('os');
+    const os = await import("os");
 
     let diskInfo;
     try {
       // Try to get disk information (may not be available on all platforms)
-      const fsModule = await import('fs/promises');
+      const fsModule = await import("fs/promises");
       // This is a simplified disk check - in production you'd use a proper disk library
       diskInfo = {
         total: 0,
         free: 0,
-        used: 0
+        used: 0,
       };
     } catch (error) {
       // Disk info not available
     }
 
+    let timezone: string;
+    let locale: string;
+
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch (error) {
+      timezone = "UTC"; // Fallback timezone
+    }
+
+    try {
+      locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    } catch (error) {
+      locale = "en-US"; // Fallback locale
+    }
+
     return {
       nodeVersion: process.version,
       platform: process.platform,
-      environment: process.env.NODE_ENV || 'development',
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      locale: Intl.DateTimeFormat().resolvedOptions().locale,
+      environment: process.env.NODE_ENV || "development",
+      timezone,
+      locale,
       memory: {
         total: os.totalmem(),
         free: os.freemem(),
-        used: os.totalmem() - os.freemem()
+        used: os.totalmem() - os.freemem(),
       },
-      disk: diskInfo
+      disk: diskInfo,
     };
   }
 
@@ -348,23 +390,27 @@ export class ConfigurationService {
     // Check database configurations
     const dbStatus = await this.checkDatabaseStatus();
 
-    if (dbStatus.falkordb === 'error') {
-      issues.push('FalkorDB connection is failing');
-      recommendations.push('Check FalkorDB server status and connection string');
+    if (dbStatus.falkordb === "error") {
+      issues.push("FalkorDB connection is failing");
+      recommendations.push(
+        "Check FalkorDB server status and connection string"
+      );
     }
 
-    if (dbStatus.qdrant === 'error') {
-      issues.push('Qdrant connection is failing');
-      recommendations.push('Check Qdrant server status and API configuration');
+    if (dbStatus.qdrant === "error") {
+      issues.push("Qdrant connection is failing");
+      recommendations.push("Check Qdrant server status and API configuration");
     }
 
-    if (dbStatus.postgres === 'error') {
-      issues.push('PostgreSQL connection is failing');
-      recommendations.push('Check PostgreSQL server status and connection string');
+    if (dbStatus.postgres === "error") {
+      issues.push("PostgreSQL connection is failing");
+      recommendations.push(
+        "Check PostgreSQL server status and connection string"
+      );
     }
 
     // Check environment variables
-    const requiredEnvVars = ['NODE_ENV'];
+    const requiredEnvVars = ["NODE_ENV"];
     for (const envVar of requiredEnvVars) {
       if (!process.env[envVar]) {
         issues.push(`Required environment variable ${envVar} is not set`);
@@ -375,14 +421,16 @@ export class ConfigurationService {
     const memUsage = process.memoryUsage();
     const memUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
     if (memUsagePercent > 90) {
-      issues.push('High memory usage detected');
-      recommendations.push('Consider increasing memory limits or optimizing memory usage');
+      issues.push("High memory usage detected");
+      recommendations.push(
+        "Consider increasing memory limits or optimizing memory usage"
+      );
     }
 
     return {
       isValid: issues.length === 0,
       issues,
-      recommendations
+      recommendations,
     };
   }
 }
