@@ -58,6 +58,11 @@ export class FileWatcher extends EventEmitter {
     };
   }
 
+  // Backward-compatible initialize() alias for tests expecting this method
+  async initialize(): Promise<void> {
+    return this.start();
+  }
+
   async start(): Promise<void> {
     if (this.watcher) {
       await this.stop();

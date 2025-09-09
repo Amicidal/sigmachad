@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { v4 as uuidv4 } from 'uuid';
 import { expectSuccess } from '../../test-utils/assertions';
 import { FastifyInstance } from 'fastify';
 import { APIGateway } from '../../../src/api/APIGateway.js';
@@ -453,7 +454,7 @@ describe('REST API Endpoints Integration', () => {
     describe('GET /api/v1/tests/performance/:entityId', () => {
       it('should return performance metrics for entity', async () => {
         // Create test performance data
-        const entityId = 'perf-test-entity';
+        const entityId = uuidv4();
         await dbService.postgresQuery(`
           INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
           VALUES ($1, $2, $3, $4)
@@ -477,7 +478,7 @@ describe('REST API Endpoints Integration', () => {
     describe('GET /api/v1/tests/coverage/:entityId', () => {
       it('should return coverage analysis for entity', async () => {
         // Create test coverage data
-        const entityId = 'coverage-test-entity';
+        const entityId = uuidv4();
         await dbService.postgresQuery(`
           INSERT INTO coverage_history (entity_id, lines_covered, lines_total, percentage, timestamp)
           VALUES ($1, $2, $3, $4, $5)

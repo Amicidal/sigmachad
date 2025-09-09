@@ -29,6 +29,7 @@ export interface MaintenanceResult {
 
 export class MaintenanceService {
   private activeTasks = new Map<string, MaintenanceTask>();
+  private completedTasks = new Map<string, MaintenanceTask>();
 
   constructor(
     private dbService: DatabaseService,
@@ -74,6 +75,9 @@ export class MaintenanceService {
       task.status = 'completed';
       task.endTime = new Date();
       task.progress = 100;
+      
+      // Move completed task to completed tasks map
+      this.completedTasks.set(taskId, { ...task });
 
       return result;
 
@@ -81,6 +85,9 @@ export class MaintenanceService {
       task.status = 'failed';
       task.endTime = new Date();
       task.error = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Move failed task to completed tasks map
+      this.completedTasks.set(taskId, { ...task });
 
       throw error;
     } finally {
@@ -411,6 +418,7 @@ export class MaintenanceService {
   }
 
   getTaskStatus(taskId: string): MaintenanceTask | undefined {
-    return this.activeTasks.get(taskId);
+    // First check active tasks, then completed tasks
+    return this.activeTasks.get(taskId) || this.completedTasks.get(taskId);
   }
 }

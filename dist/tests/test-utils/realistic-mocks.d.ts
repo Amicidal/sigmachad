@@ -2,7 +2,7 @@
  * Realistic mock implementations for testing
  * These mocks simulate real-world failure scenarios and edge cases
  */
-import type { IFalkorDBService, IQdrantService, IPostgreSQLService, IRedisService } from '../../src/services/database/interfaces';
+import type { IFalkorDBService, IQdrantService, IPostgreSQLService, IRedisService } from "../../src/services/database/interfaces";
 interface MockConfig {
     failureRate?: number;
     latencyMs?: number;

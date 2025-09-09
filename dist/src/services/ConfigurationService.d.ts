@@ -2,15 +2,15 @@
  * Configuration Service for Memento
  * Manages system configuration, feature detection, and health monitoring
  */
-import { DatabaseService } from './DatabaseService.js';
-import { SynchronizationCoordinator } from './SynchronizationCoordinator.js';
+import { DatabaseService } from "./DatabaseService.js";
+import { SynchronizationCoordinator } from "./SynchronizationCoordinator.js";
 export interface SystemConfiguration {
     version: string;
     environment: string;
     databases: {
-        falkordb: 'configured' | 'error' | 'unavailable';
-        qdrant: 'configured' | 'error' | 'unavailable';
-        postgres: 'configured' | 'error' | 'unavailable';
+        falkordb: "configured" | "error" | "unavailable";
+        qdrant: "configured" | "error" | "unavailable";
+        postgres: "configured" | "error" | "unavailable";
     };
     features: {
         websocket: boolean;
@@ -41,7 +41,8 @@ export interface SystemConfiguration {
 export declare class ConfigurationService {
     private dbService;
     private syncCoordinator?;
-    constructor(dbService: DatabaseService, syncCoordinator?: SynchronizationCoordinator | undefined);
+    private testWorkingDir?;
+    constructor(dbService: DatabaseService, syncCoordinator?: SynchronizationCoordinator | undefined, testWorkingDir?: string | undefined);
     getSystemConfiguration(): Promise<SystemConfiguration>;
     private getVersion;
     private checkDatabaseStatus;

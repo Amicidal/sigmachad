@@ -28,6 +28,7 @@ export declare class FileWatcher extends EventEmitter {
     private processing;
     private fileHashes;
     constructor(config?: Partial<WatcherConfig>);
+    initialize(): Promise<void>;
     start(): Promise<void>;
     stop(): Promise<void>;
     private handleFileChange;

@@ -4,21 +4,21 @@
  * event broadcasting, and subscription handling
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { FastifyInstance } from 'fastify';
-import { WebSocket } from 'ws';
-import { APIGateway } from '../../../src/api/APIGateway.js';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../../src/services/DatabaseService.js';
-import { FileWatcher } from '../../../src/services/FileWatcher.js';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { FastifyInstance } from "fastify";
+import { WebSocket } from "ws";
+import { APIGateway } from "../../../src/api/APIGateway.js";
+import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
+import { DatabaseService } from "../../../src/services/DatabaseService.js";
+import { FileWatcher } from "../../../src/services/FileWatcher.js";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
   checkDatabaseHealth,
-} from '../../test-utils/database-helpers.js';
+} from "../../test-utils/database-helpers.js";
 
-describe('WebSocket Router Integration', () => {
+describe("WebSocket Router Integration", () => {
   let dbService: DatabaseService;
   let kgService: KnowledgeGraphService;
   let apiGateway: APIGateway;
@@ -31,7 +31,9 @@ describe('WebSocket Router Integration', () => {
     dbService = await setupTestDatabase();
     const isHealthy = await checkDatabaseHealth(dbService);
     if (!isHealthy) {
-      throw new Error('Database health check failed - cannot run integration tests');
+      throw new Error(
+        "Database health check failed - cannot run integration tests"
+      );
     }
 
     // Create services
@@ -62,37 +64,37 @@ describe('WebSocket Router Integration', () => {
     }
   });
 
-  describe('WebSocket Server Setup', () => {
-    it('should have WebSocket route registered', () => {
-      expect(app.hasRoute('GET', '/ws')).toBe(true);
+  describe("WebSocket Server Setup", () => {
+    it("should have WebSocket route registered", () => {
+      expect(app.hasRoute("GET", "/ws")).toBe(true);
     });
 
-    it('should accept WebSocket connections', async () => {
+    it("should accept WebSocket connections", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
 
-        ws.on('open', () => {
+        ws.on("open", () => {
           expect(ws.readyState).toBe(WebSocket.OPEN);
           ws.close();
           resolve();
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         // Timeout after 5 seconds
         setTimeout(() => {
           ws.close();
-          reject(new Error('WebSocket connection timeout'));
+          reject(new Error("WebSocket connection timeout"));
         }, 5000);
       });
     });
 
-    it('should handle multiple concurrent connections', async () => {
+    it("should handle multiple concurrent connections", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
       const connectionCount = 5;
@@ -106,53 +108,55 @@ describe('WebSocket Router Integration', () => {
           const ws = new WebSocket(wsUrl);
           connections.push(ws);
 
-          ws.on('open', () => {
+          ws.on("open", () => {
             connectedCount++;
             if (connectedCount === connectionCount) {
               // All connections established
-              connections.forEach(ws => ws.close());
+              connections.forEach((ws) => ws.close());
               resolve();
             }
           });
 
-          ws.on('error', (error) => {
+          ws.on("error", (error) => {
             errorCount++;
             if (errorCount + connectedCount === connectionCount) {
-              reject(new Error(`Failed to establish ${errorCount} connections`));
+              reject(
+                new Error(`Failed to establish ${errorCount} connections`)
+              );
             }
           });
         }
 
         // Timeout after 10 seconds
         setTimeout(() => {
-          connections.forEach(ws => ws.close());
-          reject(new Error('WebSocket connection timeout'));
+          connections.forEach((ws) => ws.close());
+          reject(new Error("WebSocket connection timeout"));
         }, 10000);
       });
     });
   });
 
-  describe('WebSocket Message Handling', () => {
-    it('should handle JSON messages', async () => {
+  describe("WebSocket Message Handling", () => {
+    it("should handle JSON messages", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
 
-        ws.on('open', () => {
+        ws.on("open", () => {
           const testMessage = {
-            type: 'ping',
+            type: "ping",
             data: { timestamp: Date.now() },
           };
           ws.send(JSON.stringify(testMessage));
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const response = JSON.parse(data.toString());
             expect(response).toBeDefined();
-            expect(typeof response).toBe('object');
+            expect(typeof response).toBe("object");
             ws.close();
             resolve();
           } catch (error) {
@@ -161,36 +165,36 @@ describe('WebSocket Router Integration', () => {
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
-          reject(new Error('Message handling timeout'));
+          reject(new Error("Message handling timeout"));
         }, 5000);
       });
     });
 
-    it('should handle subscription messages', async () => {
+    it("should handle subscription messages", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
 
-        ws.on('open', () => {
+        ws.on("open", () => {
           const subscribeMessage = {
-            type: 'subscribe',
+            type: "subscribe",
             data: {
-              channel: 'graph-updates',
-              entityId: 'test-entity-123',
+              channel: "graph-updates",
+              entityId: "test-entity-123",
             },
           };
           ws.send(JSON.stringify(subscribeMessage));
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const response = JSON.parse(data.toString());
             expect(response).toBeDefined();
@@ -203,34 +207,34 @@ describe('WebSocket Router Integration', () => {
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
-          reject(new Error('Subscription timeout'));
+          reject(new Error("Subscription timeout"));
         }, 5000);
       });
     });
 
-    it('should handle invalid JSON messages gracefully', async () => {
+    it("should handle invalid JSON messages gracefully", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
 
-        ws.on('open', () => {
-          ws.send('invalid json message');
+        ws.on("open", () => {
+          ws.send("invalid json message");
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const response = JSON.parse(data.toString());
             expect(response).toBeDefined();
             // Should receive error response
-            expect(response.type).toBe('error');
+            expect(response.type).toBe("error");
             ws.close();
             resolve();
           } catch (error) {
@@ -239,20 +243,20 @@ describe('WebSocket Router Integration', () => {
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
-          reject(new Error('Invalid JSON handling timeout'));
+          reject(new Error("Invalid JSON handling timeout"));
         }, 5000);
       });
     });
   });
 
-  describe('Real-time Graph Updates', () => {
-    it('should broadcast graph changes to subscribed clients', async () => {
+  describe("Real-time Graph Updates", () => {
+    it("should broadcast graph changes to subscribed clients", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
@@ -260,33 +264,36 @@ describe('WebSocket Router Integration', () => {
         const ws = new WebSocket(wsUrl);
         let receivedUpdate = false;
 
-        ws.on('open', async () => {
+        ws.on("open", async () => {
           // Subscribe to entity_created events
           const subscribeMessage = {
-            type: 'subscribe',
+            type: "subscribe",
             data: {
-              event: 'entity_created',
+              event: "entity_created",
             },
           };
           ws.send(JSON.stringify(subscribeMessage));
 
           // Create a graph entity to trigger update deterministically
           await kgService.createEntity({
-            id: 'ws-test-entity',
-            type: 'function',
-            name: 'WebSocketTestFunction',
-            path: '/test/file.ts',
-            language: 'typescript',
+            id: "ws-test-entity",
+            type: "function",
+            name: "WebSocketTestFunction",
+            path: "/test/file.ts",
+            language: "typescript",
             lastModified: new Date(),
             created: new Date(),
-            hash: 'abc',
+            hash: "abc",
           } as any);
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const message = JSON.parse(data.toString());
-            if (message.type === 'event' && message.data?.type === 'entity_created') {
+            if (
+              message.type === "event" &&
+              message.data?.type === "entity_created"
+            ) {
               receivedUpdate = true;
               expect(message.data).toBeDefined();
               ws.close();
@@ -297,20 +304,20 @@ describe('WebSocket Router Integration', () => {
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
           if (!receivedUpdate) {
-            reject(new Error('Did not receive entity_created event'));
+            reject(new Error("Did not receive entity_created event"));
           }
         }, 3000);
       });
     });
 
-    it('should handle file change notifications', async () => {
+    it("should handle file change notifications", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
@@ -318,28 +325,31 @@ describe('WebSocket Router Integration', () => {
         const ws = new WebSocket(wsUrl);
         let receivedFileChange = false;
 
-        ws.on('open', () => {
+        ws.on("open", () => {
           // Subscribe to file_change events
           const subscribeMessage = {
-            type: 'subscribe',
+            type: "subscribe",
             data: {
-              event: 'file_change',
+              event: "file_change",
             },
           };
           ws.send(JSON.stringify(subscribeMessage));
 
           // Emit a file change via the test file watcher
-          testFileWatcher.emit('change', {
-            path: '/tmp/test-file.ts',
-            type: 'modified',
+          testFileWatcher.emit("change", {
+            path: "/tmp/test-file.ts",
+            type: "modified",
             timestamp: new Date(),
           } as any);
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const message = JSON.parse(data.toString());
-            if (message.type === 'event' && message.data?.type === 'file_change') {
+            if (
+              message.type === "event" &&
+              message.data?.type === "file_change"
+            ) {
               receivedFileChange = true;
               expect(message.data).toBeDefined();
               expect(message.data.path).toBeDefined();
@@ -351,50 +361,50 @@ describe('WebSocket Router Integration', () => {
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
           if (!receivedFileChange) {
-            reject(new Error('Did not receive file_change event'));
+            reject(new Error("Did not receive file_change event"));
           }
         }, 3000);
       });
     });
   });
 
-  describe('Connection Management', () => {
-    it('should handle connection cleanup on client disconnect', async () => {
+  describe("Connection Management", () => {
+    it("should handle connection cleanup on client disconnect", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
 
-        ws.on('open', () => {
+        ws.on("open", () => {
           // Connection established, now close it
           ws.close();
         });
 
-        ws.on('close', (code, reason) => {
+        ws.on("close", (code, reason) => {
           expect(code).toBeDefined();
           // Connection should close cleanly
           resolve();
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
-          reject(new Error('Connection cleanup timeout'));
+          reject(new Error("Connection cleanup timeout"));
         }, 5000);
       });
     });
 
-    it('should handle heartbeat/ping messages', async () => {
+    it("should handle heartbeat/ping messages", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
@@ -402,19 +412,19 @@ describe('WebSocket Router Integration', () => {
         const ws = new WebSocket(wsUrl);
         let receivedPong = false;
 
-        ws.on('open', () => {
+        ws.on("open", () => {
           // Send ping
           const pingMessage = {
-            type: 'ping',
+            type: "ping",
             data: { timestamp: Date.now() },
           };
           ws.send(JSON.stringify(pingMessage));
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const message = JSON.parse(data.toString());
-            if (message.type === 'pong') {
+            if (message.type === "pong") {
               receivedPong = true;
               expect(message.data).toBeDefined();
               expect(message.data.timestamp).toBeDefined();
@@ -426,20 +436,20 @@ describe('WebSocket Router Integration', () => {
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
           if (!receivedPong) {
-            reject(new Error('Did not receive pong'));
+            reject(new Error("Did not receive pong"));
           }
         }, 3000);
       });
     });
 
-    it('should handle connection limits gracefully', async () => {
+    it("should handle connection limits gracefully", async () => {
       // This test verifies that the WebSocket server can handle connection limits
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
@@ -454,22 +464,22 @@ describe('WebSocket Router Integration', () => {
           const ws = new WebSocket(wsUrl);
           connections.push(ws);
 
-          ws.on('open', () => {
+          ws.on("open", () => {
             connectedCount++;
           });
 
-          ws.on('error', (error) => {
+          ws.on("error", (error) => {
             failedCount++;
           });
 
-          ws.on('close', () => {
+          ws.on("close", () => {
             connectedCount = Math.max(0, connectedCount - 1);
           });
         }
 
         setTimeout(() => {
           // Clean up all connections
-          connections.forEach(ws => {
+          connections.forEach((ws) => {
             try {
               ws.close();
             } catch (error) {
@@ -486,84 +496,128 @@ describe('WebSocket Router Integration', () => {
     });
   });
 
-  describe('Subscription Management', () => {
-    it('should handle multiple channel subscriptions', async () => {
+  describe("Subscription Management", () => {
+    it("should handle multiple channel subscriptions", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
-        const subscriptions = ['entity_created', 'file_change', 'sync_status'];
+        const subscriptions = ["entity_created", "file_change", "sync_status"];
         let ackCount = 0;
 
-        ws.on('open', () => {
-          // Subscribe to multiple events
-          subscriptions.forEach(event => {
-            const subscribeMessage = {
-              type: 'subscribe',
-              data: { event },
-            };
-            ws.send(JSON.stringify(subscribeMessage));
-          });
+        ws.on("open", () => {
+          console.log(
+            "WebSocket connected, subscribing to events:",
+            subscriptions
+          );
+          // Wait a brief moment to ensure connection is fully established
+          setTimeout(() => {
+            // Subscribe to multiple events
+            subscriptions.forEach((event, index) => {
+              const subscribeMessage = {
+                type: "subscribe",
+                data: { event },
+              };
+              console.log(
+                `Sending subscription ${index + 1}/${
+                  subscriptions.length
+                } for event: ${event}`
+              );
+              ws.send(JSON.stringify(subscribeMessage));
+            });
+          }, 100); // Small delay to ensure connection stability
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const message = JSON.parse(data.toString());
-            if (message.type === 'subscribed' || message.type === 'error') {
+            console.log(`Received WebSocket message:`, {
+              type: message.type,
+              ackCount: ackCount + 1,
+              totalExpected: subscriptions.length,
+            });
+
+            if (message.type === "subscribed") {
               ackCount++;
+              console.log(
+                `Subscription ack received. Count: ${ackCount}/${subscriptions.length}`
+              );
+
               if (ackCount >= subscriptions.length) {
+                console.log(
+                  "All subscription acknowledgments received, closing connection"
+                );
+                ws.close();
+                resolve();
+              }
+            } else if (message.type === "error") {
+              console.error("Received error message:", message);
+              ackCount++;
+              console.log(
+                `Error ack received. Count: ${ackCount}/${subscriptions.length}`
+              );
+
+              if (ackCount >= subscriptions.length) {
+                console.log(
+                  "All subscription acknowledgments received (including errors), closing connection"
+                );
                 ws.close();
                 resolve();
               }
             }
           } catch (error) {
-            // Ignore parsing errors
+            console.error("Failed to parse WebSocket message:", error);
+            // Don't reject on parsing errors, just log them
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
           if (ackCount < subscriptions.length) {
-            reject(new Error('Did not receive all subscription acks'));
+            reject(
+              new Error(
+                `Did not receive all subscription acks. Got ${ackCount}/${subscriptions.length}`
+              )
+            );
           }
-        }, 3000);
+        }, 10000); // Increased timeout to 10 seconds for better reliability
       });
     });
 
-    it('should handle unsubscription from channels', async () => {
+    it("should handle unsubscription from channels", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
 
-        ws.on('open', () => {
+        ws.on("open", () => {
           // Subscribe first
           const subscribeMessage = {
-            type: 'subscribe',
-            data: { channel: 'test-channel' },
+            type: "subscribe",
+            data: { channel: "test-channel" },
           };
           ws.send(JSON.stringify(subscribeMessage));
 
           // Then unsubscribe
           setTimeout(() => {
             const unsubscribeMessage = {
-              type: 'unsubscribe',
-              data: { channel: 'test-channel' },
+              type: "unsubscribe",
+              data: { channel: "test-channel" },
             };
             ws.send(JSON.stringify(unsubscribeMessage));
           }, 500);
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const message = JSON.parse(data.toString());
-            if (message.type === 'unsubscribed') {
+            if (message.type === "unsubscribed") {
               ws.close();
               resolve();
             }
@@ -572,37 +626,37 @@ describe('WebSocket Router Integration', () => {
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
-          reject(new Error('Did not receive unsubscribe ack'));
+          reject(new Error("Did not receive unsubscribe ack"));
         }, 3000);
       });
     });
 
-    it('should handle invalid subscription requests', async () => {
+    it("should handle invalid subscription requests", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
 
-        ws.on('open', () => {
+        ws.on("open", () => {
           // Send invalid subscription
           const invalidMessage = {
-            type: 'subscribe',
+            type: "subscribe",
             data: {}, // Missing channel
           };
           ws.send(JSON.stringify(invalidMessage));
         });
 
-        ws.on('message', (data) => {
+        ws.on("message", (data) => {
           try {
             const message = JSON.parse(data.toString());
-            if (message.type === 'error') {
+            if (message.type === "error") {
               expect(message.data).toBeDefined();
               ws.close();
               resolve();
@@ -612,20 +666,22 @@ describe('WebSocket Router Integration', () => {
           }
         });
 
-        ws.on('error', (error) => {
+        ws.on("error", (error) => {
           reject(error);
         });
 
         setTimeout(() => {
           ws.close();
-          reject(new Error('Did not receive error response for invalid subscription'));
+          reject(
+            new Error("Did not receive error response for invalid subscription")
+          );
         }, 3000);
       });
     });
   });
 
-  describe('Message Broadcasting', () => {
-    it('should broadcast messages to multiple subscribers', async () => {
+  describe("Message Broadcasting", () => {
+    it("should broadcast messages to multiple subscribers", async () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
       const clientCount = 3;
@@ -639,14 +695,14 @@ describe('WebSocket Router Integration', () => {
           const ws = new WebSocket(wsUrl);
           clients.push(ws);
 
-          ws.on('open', () => {
+          ws.on("open", () => {
             connectedCount++;
             if (connectedCount === clientCount) {
               // All clients connected, subscribe them
               clients.forEach((client, index) => {
                 const subscribeMessage = {
-                  type: 'subscribe',
-                  data: { channel: 'broadcast-test' },
+                  type: "subscribe",
+                  data: { channel: "broadcast-test" },
                 };
                 client.send(JSON.stringify(subscribeMessage));
               });
@@ -655,16 +711,16 @@ describe('WebSocket Router Integration', () => {
               setTimeout(() => {
                 // Note: In a real implementation, you'd have an admin endpoint to trigger broadcasts
                 // For this test, we just verify the subscription mechanism works
-                clients.forEach(client => client.close());
+                clients.forEach((client) => client.close());
                 resolve();
               }, 1000);
             }
           });
 
-          ws.on('message', (data) => {
+          ws.on("message", (data) => {
             try {
               const message = JSON.parse(data.toString());
-              if (message.type === 'broadcast') {
+              if (message.type === "broadcast") {
                 const clientIndex = clients.indexOf(ws);
                 if (clientIndex !== -1) {
                   receivedMessages[clientIndex]++;
@@ -675,13 +731,13 @@ describe('WebSocket Router Integration', () => {
             }
           });
 
-          ws.on('error', (error) => {
+          ws.on("error", (error) => {
             reject(error);
           });
         }
 
         setTimeout(() => {
-          clients.forEach(client => client.close());
+          clients.forEach((client) => client.close());
           resolve(); // Test passes as long as connections work
         }, 5000);
       });

@@ -2,11 +2,11 @@
  * WebSocket Router for Memento
  * Handles real-time updates, subscriptions, and connection management
  */
-import { FastifyInstance } from 'fastify';
-import { EventEmitter } from 'events';
-import { FileWatcher } from '../services/FileWatcher.js';
-import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../services/DatabaseService.js';
+import { FastifyInstance } from "fastify";
+import { EventEmitter } from "events";
+import { FileWatcher } from "../services/FileWatcher.js";
+import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
+import { DatabaseService } from "../services/DatabaseService.js";
 export interface WebSocketConnection {
     id: string;
     socket: any;
@@ -33,7 +33,7 @@ export interface SubscriptionRequest {
     filter?: WebSocketFilter;
 }
 export interface WebSocketEvent {
-    type: 'file_change' | 'graph_update' | 'entity_created' | 'entity_updated' | 'entity_deleted' | 'relationship_created' | 'relationship_deleted' | 'sync_status';
+    type: "file_change" | "graph_update" | "entity_created" | "entity_updated" | "entity_deleted" | "relationship_created" | "relationship_deleted" | "sync_status";
     timestamp: string;
     data: any;
     source?: string;
@@ -46,6 +46,8 @@ export declare class WebSocketRouter extends EventEmitter {
     private subscriptions;
     private heartbeatInterval?;
     private cleanupInterval?;
+    private wss?;
+    private lastEvents;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher?: FileWatcher | undefined);
     private bindEventHandlers;
     registerRoutes(app: FastifyInstance): void;

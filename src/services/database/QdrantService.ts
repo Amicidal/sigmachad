@@ -55,6 +55,7 @@ export class QdrantService implements IQdrantService {
     try {
       // Create collections if they don't exist
       const collections = await this.qdrantClient.getCollections();
+
       if (!collections || !collections.collections) {
         throw new Error("Invalid collections response from Qdrant");
       }
@@ -134,6 +135,101 @@ export class QdrantService implements IQdrantService {
     } catch (error) {
       console.error("Qdrant health check failed:", error);
       return false;
+    }
+  }
+
+  /**
+   * Upsert points to a collection
+   */
+  async upsert(collectionName: string, points: any): Promise<any> {
+    if (!this.initialized) {
+      throw new Error("Qdrant not initialized");
+    }
+
+    try {
+      return await this.qdrantClient.upsert(collectionName, points);
+    } catch (error) {
+      console.error(
+        `Qdrant upsert failed for collection ${collectionName}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Scroll through points in a collection
+   */
+  async scroll(collectionName: string, options: any): Promise<any> {
+    if (!this.initialized) {
+      throw new Error("Qdrant not initialized");
+    }
+
+    try {
+      return await this.qdrantClient.scroll(collectionName, options);
+    } catch (error) {
+      console.error(
+        `Qdrant scroll failed for collection ${collectionName}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Create a collection
+   */
+  async createCollection(collectionName: string, options: any): Promise<any> {
+    if (!this.initialized) {
+      throw new Error("Qdrant not initialized");
+    }
+
+    try {
+      return await this.qdrantClient.createCollection(collectionName, options);
+    } catch (error) {
+      console.error(
+        `Qdrant create collection failed for ${collectionName}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a collection
+   */
+  async deleteCollection(collectionName: string): Promise<any> {
+    if (!this.initialized) {
+      throw new Error("Qdrant not initialized");
+    }
+
+    try {
+      return await this.qdrantClient.deleteCollection(collectionName);
+    } catch (error) {
+      console.error(
+        `Qdrant delete collection failed for ${collectionName}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Search for similar vectors
+   */
+  async search(collectionName: string, options: any): Promise<any> {
+    if (!this.initialized) {
+      throw new Error("Qdrant not initialized");
+    }
+
+    try {
+      return await this.qdrantClient.search(collectionName, options);
+    } catch (error) {
+      console.error(
+        `Qdrant search failed for collection ${collectionName}:`,
+        error
+      );
+      throw error;
     }
   }
 }

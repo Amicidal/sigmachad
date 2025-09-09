@@ -3,8 +3,8 @@
  * Implements token bucket algorithm for rate limiting
  */
 import { createRateLimitKey } from './validation.js';
-// In-memory store for rate limiting (in production, use Redis)
-const buckets = new Map();
+// Registry of all bucket stores for stats/cleanup
+const bucketStores = new Set();
 // Default rate limit configurations
 const DEFAULT_CONFIGS = {
     search: { maxRequests: 100, windowMs: 60000 }, // 100 requests per minute for search
@@ -14,8 +14,17 @@ const DEFAULT_CONFIGS = {
 // Rate limiting middleware factory
 export function createRateLimit(config = {}) {
     const finalConfig = { ...DEFAULT_CONFIGS.default, ...config };
+    // Each middleware instance gets its own store to avoid cross-test interference
+    const buckets = new Map();
+    bucketStores.add(buckets);
+    const requestKeyCache = new WeakMap();
     return async (request, reply) => {
-        const key = createRateLimitKey(request);
+        // Snapshot the derived key per request object to ensure stability under mutation in concurrent scenarios
+        let key = requestKeyCache.get(request);
+        if (!key) {
+            key = createRateLimitKey(request);
+            requestKeyCache.set(request, key);
+        }
         const now = Date.now();
         // Get or create token bucket
         let bucket = buckets.get(key);
@@ -41,13 +50,19 @@ export function createRateLimit(config = {}) {
         // Check if rate limit exceeded
         if (bucket.tokens <= 0) {
             const resetTime = bucket.lastRefill + finalConfig.windowMs;
+            const retryAfter = Math.ceil((resetTime - now) / 1000);
+            // Ensure rate limit headers are present on 429 responses
+            reply.header('X-RateLimit-Limit', finalConfig.maxRequests.toString());
+            reply.header('X-RateLimit-Remaining', '0');
+            reply.header('X-RateLimit-Reset', resetTime.toString());
+            reply.header('Retry-After', retryAfter.toString());
             reply.status(429).send({
                 success: false,
                 error: {
                     code: 'RATE_LIMIT_EXCEEDED',
                     message: 'Too many requests',
                     details: {
-                        retryAfter: Math.ceil((resetTime - now) / 1000),
+                        retryAfter,
                         limit: finalConfig.maxRequests,
                         windowMs: finalConfig.windowMs,
                     },
@@ -76,9 +91,11 @@ export const strictRateLimit = createRateLimit({
 export function cleanupBuckets() {
     const now = Date.now();
     const maxAge = 3600000; // 1 hour
-    for (const [key, bucket] of buckets.entries()) {
-        if (now - bucket.lastRefill > maxAge) {
-            buckets.delete(key);
+    for (const store of bucketStores) {
+        for (const [key, bucket] of store.entries()) {
+            if (now - bucket.lastRefill > maxAge) {
+                store.delete(key);
+            }
         }
     }
 }
@@ -86,17 +103,20 @@ export function cleanupBuckets() {
 export function getRateLimitStats() {
     const now = Date.now();
     const stats = {
-        totalBuckets: buckets.size,
+        totalBuckets: 0,
         activeBuckets: 0,
         oldestBucket: now,
         newestBucket: 0,
     };
-    for (const bucket of buckets.values()) {
-        if (bucket.tokens < DEFAULT_CONFIGS.default.maxRequests) {
-            stats.activeBuckets++;
+    for (const store of bucketStores) {
+        stats.totalBuckets += store.size;
+        for (const bucket of store.values()) {
+            if (bucket.tokens < DEFAULT_CONFIGS.default.maxRequests) {
+                stats.activeBuckets++;
+            }
+            stats.oldestBucket = Math.min(stats.oldestBucket, bucket.lastRefill);
+            stats.newestBucket = Math.max(stats.newestBucket, bucket.lastRefill);
         }
-        stats.oldestBucket = Math.min(stats.oldestBucket, bucket.lastRefill);
-        stats.newestBucket = Math.max(stats.newestBucket, bucket.lastRefill);
     }
     return stats;
 }

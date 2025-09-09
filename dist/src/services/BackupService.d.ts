@@ -2,9 +2,9 @@
  * Backup Service for Memento
  * Handles system backup and restore operations across all databases
  */
-import { DatabaseService, DatabaseConfig } from './DatabaseService.js';
+import { DatabaseService, DatabaseConfig } from "./DatabaseService.js";
 export interface BackupOptions {
-    type: 'full' | 'incremental';
+    type: "full" | "incremental";
     includeData: boolean;
     includeConfig: boolean;
     compression: boolean;
@@ -12,7 +12,7 @@ export interface BackupOptions {
 }
 export interface BackupMetadata {
     id: string;
-    type: 'full' | 'incremental';
+    type: "full" | "incremental";
     timestamp: Date;
     size: number;
     checksum: string;
@@ -22,15 +22,18 @@ export interface BackupMetadata {
         postgres: boolean;
         config: boolean;
     };
-    status: 'completed' | 'failed' | 'in_progress';
+    status: "completed" | "failed" | "in_progress";
 }
 export declare class BackupService {
     private dbService;
     private config;
+    private backupDir;
     constructor(dbService: DatabaseService, config: DatabaseConfig);
     createBackup(options: BackupOptions): Promise<BackupMetadata>;
     restoreBackup(backupId: string, options: {
         dryRun?: boolean;
+        destination?: string;
+        validateIntegrity?: boolean;
     }): Promise<any>;
     private backupFalkorDB;
     private backupQdrant;
@@ -46,5 +49,15 @@ export declare class BackupService {
     private restoreQdrant;
     private restorePostgreSQL;
     private restoreConfig;
+    verifyBackupIntegrity(backupId: string, options?: {
+        destination?: string;
+    }): Promise<{
+        passed: boolean;
+        details: string;
+        isValid?: boolean;
+    }>;
+    listBackups(options?: {
+        destination?: string;
+    }): Promise<BackupMetadata[]>;
 }
 //# sourceMappingURL=BackupService.d.ts.map

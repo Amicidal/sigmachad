@@ -3,8 +3,15 @@
  * Based on the comprehensive API design
  */
 
-import { Entity, Spec, Test, SecurityIssue, Vulnerability, CoverageMetrics } from './entities.js';
-import { GraphRelationship, RelationshipType } from './relationships.js';
+import {
+  Entity,
+  Spec,
+  Test,
+  SecurityIssue,
+  Vulnerability,
+  CoverageMetrics,
+} from "./entities.js";
+import { GraphRelationship, RelationshipType } from "./relationships.js";
 
 // Base API response types
 export interface APIResponse<T = any> {
@@ -36,14 +43,14 @@ export interface BaseQueryParams {
   limit?: number;
   offset?: number;
   sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortOrder?: "asc" | "desc";
   includeMetadata?: boolean;
 }
 
 export interface TimeRangeParams {
   since?: Date;
   until?: Date;
-  timeRange?: '1h' | '24h' | '7d' | '30d' | '90d';
+  timeRange?: "1h" | "24h" | "7d" | "30d" | "90d";
 }
 
 // Design & Specification Management Types
@@ -52,7 +59,7 @@ export interface CreateSpecRequest {
   description: string;
   goals: string[];
   acceptanceCriteria: string[];
-  priority?: 'low' | 'medium' | 'high' | 'critical';
+  priority?: "low" | "medium" | "high" | "critical";
   assignee?: string;
   tags?: string[];
   dependencies?: string[];
@@ -79,8 +86,8 @@ export interface UpdateSpecRequest {
   title?: string;
   description?: string;
   acceptanceCriteria?: string[];
-  status?: 'draft' | 'approved' | 'implemented' | 'deprecated';
-  priority?: 'low' | 'medium' | 'high' | 'critical';
+  status?: "draft" | "approved" | "implemented" | "deprecated";
+  priority?: "low" | "medium" | "high" | "critical";
 }
 
 export interface ListSpecsParams extends BaseQueryParams {
@@ -94,7 +101,7 @@ export interface ListSpecsParams extends BaseQueryParams {
 // Test Management Types
 export interface TestPlanRequest {
   specId: string;
-  testTypes?: ('unit' | 'integration' | 'e2e')[];
+  testTypes?: ("unit" | "integration" | "e2e")[];
   coverage?: {
     minLines?: number;
     minBranches?: number;
@@ -118,7 +125,7 @@ export interface TestPlanResponse {
 export interface TestSpec {
   name: string;
   description: string;
-  type: 'unit' | 'integration' | 'e2e' | 'performance';
+  type: "unit" | "integration" | "e2e" | "performance";
   targetFunction?: string;
   assertions: string[];
   dataRequirements?: string[];
@@ -128,7 +135,7 @@ export interface TestExecutionResult {
   testId: string;
   testSuite: string;
   testName: string;
-  status: 'passed' | 'failed' | 'skipped' | 'error';
+  status: "passed" | "failed" | "skipped" | "error";
   duration: number;
   errorMessage?: string;
   stackTrace?: string;
@@ -145,11 +152,11 @@ export interface PerformanceMetrics {
   averageExecutionTime: number;
   p95ExecutionTime: number;
   successRate: number;
-  trend: 'improving' | 'stable' | 'degrading';
+  trend: "improving" | "stable" | "degrading";
   benchmarkComparisons: {
     benchmark: string;
     value: number;
-    status: 'above' | 'below' | 'at';
+    status: "above" | "below" | "at";
   }[];
   historicalData: {
     timestamp: Date;
@@ -178,8 +185,19 @@ export interface TestCoverage {
 // Graph Operations Types
 export interface GraphSearchRequest {
   query: string;
-  entityTypes?: ('function' | 'class' | 'interface' | 'file' | 'module')[];
-  searchType?: 'semantic' | 'structural' | 'usage' | 'dependency';
+  entityTypes?: (
+    | "function"
+    | "class"
+    | "interface"
+    | "file"
+    | "module"
+    | "spec"
+    | "test"
+    | "change"
+    | "session"
+    | "directory"
+  )[];
+  searchType?: "semantic" | "structural" | "usage" | "dependency";
   filters?: {
     language?: string;
     path?: string;
@@ -235,11 +253,11 @@ export interface DependencyAnalysis {
   reverseDependencies: {
     entity: Entity;
     relationship: RelationshipType;
-    impact: 'high' | 'medium' | 'low';
+    impact: "high" | "medium" | "low";
   }[];
   circularDependencies: {
     cycle: Entity[];
-    severity: 'critical' | 'warning' | 'info';
+    severity: "critical" | "warning" | "info";
   }[];
 }
 
@@ -247,7 +265,7 @@ export interface DependencyAnalysis {
 export interface CodeChangeProposal {
   changes: {
     file: string;
-    type: 'create' | 'modify' | 'delete' | 'rename';
+    type: "create" | "modify" | "delete" | "rename";
     oldContent?: string;
     newContent?: string;
     lineStart?: number;
@@ -260,7 +278,7 @@ export interface CodeChangeProposal {
 export interface CodeChangeAnalysis {
   affectedEntities: Entity[];
   breakingChanges: {
-    severity: 'breaking' | 'potentially-breaking' | 'safe';
+    severity: "breaking" | "potentially-breaking" | "safe";
     description: string;
     affectedEntities: string[];
   }[];
@@ -270,7 +288,7 @@ export interface CodeChangeAnalysis {
     testImpact: Test[];
   };
   recommendations: {
-    type: 'warning' | 'suggestion' | 'requirement';
+    type: "warning" | "suggestion" | "requirement";
     message: string;
     actions: string[];
   }[];
@@ -279,7 +297,14 @@ export interface CodeChangeAnalysis {
 export interface ValidationRequest {
   files?: string[];
   specId?: string;
-  includeTypes?: ('typescript' | 'eslint' | 'security' | 'tests' | 'coverage' | 'architecture')[];
+  includeTypes?: (
+    | "typescript"
+    | "eslint"
+    | "security"
+    | "tests"
+    | "coverage"
+    | "architecture"
+  )[];
   failOnWarnings?: boolean;
 }
 
@@ -312,6 +337,7 @@ export interface ValidationResult {
     skipped: number;
     coverage: CoverageMetrics;
   };
+  coverage: CoverageMetrics;
   architecture: {
     violations: number;
     issues: ValidationIssue[];
@@ -323,7 +349,7 @@ export interface ValidationIssue {
   line: number;
   column: number;
   rule: string;
-  severity: 'error' | 'warning' | 'info';
+  severity: "error" | "warning" | "info";
   message: string;
   suggestion?: string;
 }
@@ -332,7 +358,7 @@ export interface ValidationIssue {
 export interface ImpactAnalysisRequest {
   changes: {
     entityId: string;
-    changeType: 'modify' | 'delete' | 'rename';
+    changeType: "modify" | "delete" | "rename";
     newName?: string;
     signatureChange?: boolean;
   }[];
@@ -343,7 +369,7 @@ export interface ImpactAnalysisRequest {
 export interface ImpactAnalysis {
   directImpact: {
     entities: Entity[];
-    severity: 'high' | 'medium' | 'low';
+    severity: "high" | "medium" | "low";
     reason: string;
   }[];
   cascadingImpact: {
@@ -362,10 +388,10 @@ export interface ImpactAnalysis {
     requiredUpdates: string[];
   };
   recommendations: {
-    priority: 'immediate' | 'planned' | 'optional';
+    priority: "immediate" | "planned" | "optional";
     description: string;
-    effort: 'low' | 'medium' | 'high';
-    impact: 'breaking' | 'functional' | 'cosmetic';
+    effort: "low" | "medium" | "high";
+    impact: "breaking" | "functional" | "cosmetic";
   }[];
 }
 
@@ -424,8 +450,8 @@ export interface CommitPRResponse {
 // Security Types
 export interface SecurityScanRequest {
   entityIds?: string[];
-  scanTypes?: ('sast' | 'sca' | 'secrets' | 'dependency')[];
-  severity?: ('critical' | 'high' | 'medium' | 'low')[];
+  scanTypes?: ("sast" | "sca" | "secrets" | "dependency")[];
+  severity?: ("critical" | "high" | "medium" | "low")[];
 }
 
 export interface SecurityScanResult {
@@ -457,7 +483,7 @@ export interface VulnerabilityReport {
 
 // Administration Types
 export interface SystemHealth {
-  overall: 'healthy' | 'degraded' | 'unhealthy';
+  overall: "healthy" | "degraded" | "unhealthy";
   components: {
     graphDatabase: ComponentHealth;
     vectorDatabase: ComponentHealth;
@@ -474,7 +500,7 @@ export interface SystemHealth {
 }
 
 export interface ComponentHealth {
-  status: 'healthy' | 'degraded' | 'unhealthy';
+  status: "healthy" | "degraded" | "unhealthy";
   responseTime?: number;
   errorRate?: number;
   lastCheck: Date;
@@ -525,7 +551,12 @@ export interface SystemAnalytics extends TimeRangeParams {
 
 // Error handling
 export interface APIError {
-  code: 'VALIDATION_ERROR' | 'NOT_FOUND' | 'PERMISSION_DENIED' | 'INTERNAL_ERROR' | 'RATE_LIMITED';
+  code:
+    | "VALIDATION_ERROR"
+    | "NOT_FOUND"
+    | "PERMISSION_DENIED"
+    | "INTERNAL_ERROR"
+    | "RATE_LIMITED";
   message: string;
   details?: any;
   requestId: string;
@@ -535,9 +566,9 @@ export interface APIError {
 // Authentication types
 export interface AuthenticatedRequest {
   headers: {
-    'Authorization': `Bearer ${string}`;
-    'X-API-Key'?: string;
-    'X-Request-ID'?: string;
+    Authorization: `Bearer ${string}`;
+    "X-API-Key"?: string;
+    "X-Request-ID"?: string;
   };
 }
 
@@ -552,7 +583,7 @@ export interface RateLimit {
 // WebSocket and real-time types
 export interface WebhookConfig {
   url: string;
-  events: ('sync.completed' | 'validation.failed' | 'security.alert')[];
+  events: ("sync.completed" | "validation.failed" | "security.alert")[];
   secret: string;
 }
 
@@ -584,4 +615,3 @@ export interface MCPResponse {
   };
   id?: string;
 }
-

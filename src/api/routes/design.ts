@@ -3,9 +3,10 @@
  * Handles spec creation, validation, and management
  */
 
-import { FastifyInstance } from 'fastify';
-import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/DatabaseService.js';
+import { FastifyInstance } from "fastify";
+import { v4 as uuidv4 } from "uuid";
+import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
+import { DatabaseService } from "../../services/DatabaseService.js";
 import {
   CreateSpecRequest,
   CreateSpecResponse,
@@ -13,76 +14,90 @@ import {
   UpdateSpecRequest,
   ListSpecsParams,
   APIResponse,
-  PaginatedResponse
-} from '../../models/types.js';
-import { Spec } from '../../models/entities.js';
+  PaginatedResponse,
+} from "../../models/types.js";
+import { Spec } from "../../models/entities.js";
 
 export function registerDesignRoutes(
   app: FastifyInstance,
   kgService: KnowledgeGraphService,
   dbService: DatabaseService
 ): void {
-
   // Create specification
-  app.post('/design/create-spec', {
-    schema: {
-      body: {
-        type: 'object',
-        required: ['title', 'description', 'acceptanceCriteria'],
-        properties: {
-          title: { type: 'string', minLength: 1 },
-          description: { type: 'string', minLength: 1 },
-          goals: { type: 'array', items: { type: 'string' } },
-          acceptanceCriteria: { type: 'array', items: { type: 'string' }, minItems: 1 },
-          priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-          assignee: { type: 'string' },
-          tags: { type: 'array', items: { type: 'string' } },
-          dependencies: { type: 'array', items: { type: 'string' } },
-        },
-      },
-      response: {
-        200: {
-          type: 'object',
+  app.post(
+    "/design/create-spec",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["title", "description", "acceptanceCriteria"],
           properties: {
-            success: { type: 'boolean' },
-            data: {
-              type: 'object',
-              properties: {
-                specId: { type: 'string' },
-                spec: { type: 'object' },
-                validationResults: { type: 'object' },
+            title: { type: "string", minLength: 1 },
+            description: { type: "string", minLength: 1 },
+            goals: { type: "array", items: { type: "string" } },
+            acceptanceCriteria: {
+              type: "array",
+              items: { type: "string" },
+              minItems: 1,
+            },
+            priority: {
+              type: "string",
+              enum: ["low", "medium", "high", "critical"],
+            },
+            assignee: { type: "string" },
+            tags: { type: "array", items: { type: "string" } },
+            dependencies: { type: "array", items: { type: "string" } },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  specId: { type: "string" },
+                  spec: { type: "object" },
+                  validationResults: { type: "object" },
+                },
               },
             },
           },
         },
       },
     },
-  }, async (request, reply) => {
-    try {
-      const result = await createSpec(request.body as CreateSpecRequest, kgService, dbService);
-      reply.send({
-        success: true,
-        data: result,
-        metadata: {
-          requestId: request.id,
-          timestamp: new Date(),
-          executionTime: 0,
-        },
-      });
-    } catch (error) {
-      (reply as any).status(400);
-      reply.send({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
-        },
-      });
+    async (request, reply) => {
+      try {
+        const result = await createSpec(
+          request.body as CreateSpecRequest,
+          kgService,
+          dbService
+        );
+        reply.send({
+          success: true,
+          data: result,
+          metadata: {
+            requestId: request.id,
+            timestamp: new Date(),
+            executionTime: 0,
+          },
+        });
+      } catch (error) {
+        (reply as any).status(400);
+        reply.send({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: error instanceof Error ? error.message : "Unknown error",
+          },
+        });
+      }
     }
-  });
+  );
 
   // Get specification
-  app.get('/design/specs/:specId', async (request, reply) => {
+  app.get("/design/specs/:specId", async (request, reply) => {
     try {
       const { specId } = request.params as { specId: string };
       const result = await getSpec(specId, kgService, dbService);
@@ -100,21 +115,27 @@ export function registerDesignRoutes(
       reply.status(404).send({
         success: false,
         error: {
-          code: 'NOT_FOUND',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          code: "NOT_FOUND",
+          message: error instanceof Error ? error.message : "Unknown error",
         },
       });
     }
   });
 
   // Update specification
-  const registerUpdate = (app as any).put && typeof (app as any).put === 'function'
-    ? (app as any).put.bind(app)
-    : (app as any).post.bind(app);
-  registerUpdate('/design/specs/:specId', async (request: any, reply: any) => {
+  const registerUpdate =
+    (app as any).put && typeof (app as any).put === "function"
+      ? (app as any).put.bind(app)
+      : (app as any).post.bind(app);
+  registerUpdate("/design/specs/:specId", async (request: any, reply: any) => {
     try {
       const { specId } = request.params as { specId: string };
-      const result = await updateSpec(specId, request.body as UpdateSpecRequest, kgService, dbService);
+      const result = await updateSpec(
+        specId,
+        request.body as UpdateSpecRequest,
+        kgService,
+        dbService
+      );
 
       reply.send({
         success: true,
@@ -130,15 +151,15 @@ export function registerDesignRoutes(
       reply.send({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          code: "VALIDATION_ERROR",
+          message: error instanceof Error ? error.message : "Unknown error",
         },
       });
     }
   });
 
   // List specifications
-  app.get('/design/specs', async (request, reply) => {
+  app.get("/design/specs", async (request, reply) => {
     try {
       const params = request.query as ListSpecsParams;
       const result = await listSpecs(params, kgService, dbService);
@@ -166,8 +187,8 @@ export function registerDesignRoutes(
           hasMore: false,
         },
         error: {
-          code: 'VALIDATION_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          code: "VALIDATION_ERROR",
+          message: error instanceof Error ? error.message : "Unknown error",
         },
         metadata: {
           requestId: request.id,
@@ -179,11 +200,19 @@ export function registerDesignRoutes(
   });
 
   // POST /api/design/generate - Generate design/spec from inputs (stubbed)
-  app.post('/design/generate', async (request, reply) => {
+  app.post("/design/generate", async (request, reply) => {
     try {
-      reply.send({ success: true, data: { specId: `spec_${Date.now()}` } });
+      reply.send({ success: true, data: { specId: uuidv4() } });
     } catch (error) {
-      reply.status(500).send({ success: false, error: { code: 'GENERATE_FAILED', message: 'Failed to generate spec' } });
+      reply
+        .status(500)
+        .send({
+          success: false,
+          error: {
+            code: "GENERATE_FAILED",
+            message: "Failed to generate spec",
+          },
+        });
     }
   });
 }
@@ -194,21 +223,21 @@ async function createSpec(
   kgService: KnowledgeGraphService,
   dbService: DatabaseService
 ): Promise<CreateSpecResponse> {
-  const specId = `spec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const specId = uuidv4();
 
   const spec: Spec = {
     id: specId,
-    type: 'spec',
+    type: "spec",
     path: `specs/${specId}`,
-    hash: '', // Will be calculated from content
-    language: 'text',
+    hash: "", // Will be calculated from content
+    language: "text",
     lastModified: new Date(),
     created: new Date(),
     title: params.title,
     description: params.description,
     acceptanceCriteria: params.acceptanceCriteria,
-    status: 'draft',
-    priority: params.priority || 'medium',
+    status: "draft",
+    priority: params.priority || "medium",
     assignee: params.assignee,
     tags: params.tags || [],
     updated: new Date(),
@@ -222,7 +251,7 @@ async function createSpec(
     `INSERT INTO documents (id, type, content, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`,
     [
       specId,
-      'spec',
+      "spec",
       JSON.stringify(spec),
       spec.created.toISOString(),
       spec.updated.toISOString(),
@@ -245,8 +274,8 @@ async function getSpec(
   dbService: DatabaseService
 ): Promise<GetSpecResponse> {
   const result = await dbService.postgresQuery(
-    'SELECT content FROM documents WHERE id = $1 AND type = $2',
-    [specId, 'spec']
+    "SELECT content FROM documents WHERE id = $1 AND type = $2",
+    [specId, "spec"]
   );
 
   if (result.length === 0) {
@@ -287,8 +316,8 @@ async function updateSpec(
 ): Promise<Spec> {
   // Get existing spec
   const result = await dbService.postgresQuery(
-    'SELECT content FROM documents WHERE id = $1 AND type = $2',
-    [specId, 'spec']
+    "SELECT content FROM documents WHERE id = $1 AND type = $2",
+    [specId, "spec"]
   );
 
   if (result.length === 0) {
@@ -307,12 +336,16 @@ async function updateSpec(
   // Validate updated spec
   const validationResults = validateSpec(updatedSpec);
   if (!validationResults.isValid) {
-    throw new Error(`Validation failed: ${validationResults.issues.map(i => i.message).join(', ')}`);
+    throw new Error(
+      `Validation failed: ${validationResults.issues
+        .map((i) => i.message)
+        .join(", ")}`
+    );
   }
 
   // Update in database
   await dbService.postgresQuery(
-    'UPDATE documents SET content = $1, updated_at = $2 WHERE id = $3',
+    "UPDATE documents SET content = $1, updated_at = $2 WHERE id = $3",
     [JSON.stringify(updatedSpec), updatedSpec.updated.toISOString(), specId]
   );
 
@@ -327,8 +360,8 @@ async function listSpecs(
   kgService: KnowledgeGraphService,
   dbService: DatabaseService
 ): Promise<{ specs: Spec[]; pagination: any }> {
-  let query = 'SELECT content FROM documents WHERE type = $1';
-  const queryParams: any[] = ['spec'];
+  let query = "SELECT content FROM documents WHERE type = $1";
+  const queryParams: any[] = ["spec"];
   let paramIndex = 2;
 
   // Add filters
@@ -357,8 +390,8 @@ async function listSpecs(
   }
 
   // Add sorting
-  const sortBy = params.sortBy || 'created';
-  const sortOrder = params.sortOrder || 'desc';
+  const sortBy = params.sortBy || "created";
+  const sortOrder = params.sortOrder || "desc";
   query += ` ORDER BY content->>'${sortBy}' ${sortOrder.toUpperCase()}`;
 
   // Add pagination
@@ -384,94 +417,117 @@ async function listSpecs(
 
 function validateSpec(spec: Spec): {
   isValid: boolean;
-  issues: Array<{ field: string; message: string; severity: 'error' | 'warning'; file: string; line: number; column: number; rule: string; suggestion?: string }>;
+  issues: Array<{
+    field: string;
+    message: string;
+    severity: "error" | "warning";
+    file: string;
+    line: number;
+    column: number;
+    rule: string;
+    suggestion?: string;
+  }>;
   suggestions: string[];
 } {
-  const issues: Array<{ field: string; message: string; severity: 'error' | 'warning'; file: string; line: number; column: number; rule: string; suggestion?: string }> = [];
+  const issues: Array<{
+    field: string;
+    message: string;
+    severity: "error" | "warning";
+    file: string;
+    line: number;
+    column: number;
+    rule: string;
+    suggestion?: string;
+  }> = [];
   const suggestions: string[] = [];
 
   // Validate title
   if (!spec.title || spec.title.trim().length === 0) {
     issues.push({
-      field: 'title',
-      message: 'Title is required',
-      severity: 'error',
+      field: "title",
+      message: "Title is required",
+      severity: "error",
       file: spec.path,
       line: 0,
       column: 0,
-      rule: 'required-field',
+      rule: "required-field",
     });
   } else if (spec.title.length < 5) {
     issues.push({
-      field: 'title',
-      message: 'Title should be more descriptive (at least 5 characters)',
-      severity: 'warning',
+      field: "title",
+      message: "Title should be more descriptive (at least 5 characters)",
+      severity: "warning",
       file: spec.path,
       line: 0,
       column: 0,
-      rule: 'minimum-length',
-      suggestion: 'Consider making the title more descriptive',
+      rule: "minimum-length",
+      suggestion: "Consider making the title more descriptive",
     });
   }
 
   // Validate description
   if (!spec.description || spec.description.trim().length === 0) {
     issues.push({
-      field: 'description',
-      message: 'Description is required',
-      severity: 'error',
+      field: "description",
+      message: "Description is required",
+      severity: "error",
       file: spec.path,
       line: 0,
       column: 0,
-      rule: 'required-field',
+      rule: "required-field",
     });
   } else if (spec.description.length < 20) {
     issues.push({
-      field: 'description',
-      message: 'Description should provide more context (at least 20 characters)',
-      severity: 'warning',
+      field: "description",
+      message:
+        "Description should provide more context (at least 20 characters)",
+      severity: "warning",
       file: spec.path,
       line: 0,
       column: 0,
-      rule: 'minimum-length',
-      suggestion: 'Consider adding more context to the description',
+      rule: "minimum-length",
+      suggestion: "Consider adding more context to the description",
     });
   }
 
   // Validate acceptance criteria
   if (!spec.acceptanceCriteria || spec.acceptanceCriteria.length === 0) {
     issues.push({
-      field: 'acceptanceCriteria',
-      message: 'At least one acceptance criterion is required',
-      severity: 'error',
+      field: "acceptanceCriteria",
+      message: "At least one acceptance criterion is required",
+      severity: "error",
       file: spec.path,
       line: 0,
       column: 0,
-      rule: 'required-field',
+      rule: "required-field",
     });
   } else {
     spec.acceptanceCriteria.forEach((criterion, index) => {
       if (criterion.trim().length < 10) {
         issues.push({
           field: `acceptanceCriteria[${index}]`,
-          message: `Acceptance criterion ${index + 1} should be more specific (at least 10 characters)`,
-          severity: 'warning',
+          message: `Acceptance criterion ${
+            index + 1
+          } should be more specific (at least 10 characters)`,
+          severity: "warning",
           file: spec.path,
           line: 0,
           column: 0,
-          rule: 'minimum-length',
-          suggestion: 'Consider making the acceptance criterion more specific',
+          rule: "minimum-length",
+          suggestion: "Consider making the acceptance criterion more specific",
         });
       }
     });
 
     if (spec.acceptanceCriteria.length < 3) {
-      suggestions.push('Consider adding more acceptance criteria for better test coverage');
+      suggestions.push(
+        "Consider adding more acceptance criteria for better test coverage"
+      );
     }
   }
 
   return {
-    isValid: issues.filter(issue => issue.severity === 'error').length === 0,
+    isValid: issues.filter((issue) => issue.severity === "error").length === 0,
     issues,
     suggestions,
   };

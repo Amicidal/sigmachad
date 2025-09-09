@@ -18,7 +18,7 @@ export async function performHealthCheck() {
         // Close connections
         await dbService.close();
         // Check overall health
-        const allHealthy = Object.values(health).every(status => status === true || status === undefined);
+        const allHealthy = Object.values(health).every((s) => s?.status !== 'unhealthy');
         return {
             healthy: allHealthy,
             databases: health,
@@ -28,10 +28,10 @@ export async function performHealthCheck() {
         return {
             healthy: false,
             databases: {
-                falkordb: false,
-                qdrant: false,
-                postgresql: false,
-                redis: false,
+                falkordb: { status: 'unhealthy' },
+                qdrant: { status: 'unhealthy' },
+                postgresql: { status: 'unhealthy' },
+                redis: { status: 'unhealthy' },
             },
             error: error instanceof Error ? error.message : 'Unknown error',
         };

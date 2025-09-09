@@ -11,6 +11,7 @@ vi.mock('../../../src/services/DatabaseService.js');
 vi.mock('../../../src/services/ASTParser.js');
 vi.mock('../../../src/services/TestEngine.js');
 vi.mock('../../../src/services/SecurityScanner.js');
+import { makeRealisticKgService } from '../../test-utils/kg-realistic';
 describe('MCPRouter', () => {
     let mockKgService;
     let mockDbService;
@@ -56,18 +57,7 @@ describe('MCPRouter', () => {
     };
     beforeEach(() => {
         // Create fresh mocks for each test
-        mockKgService = {
-            createEntity: vi.fn().mockResolvedValue(undefined),
-            updateEntity: vi.fn().mockResolvedValue(undefined),
-            search: vi.fn().mockResolvedValue([]),
-            getRelationships: vi.fn().mockResolvedValue([]),
-            getEntity: vi.fn().mockResolvedValue(null),
-            createRelationship: vi.fn().mockResolvedValue(undefined),
-            getEntityExamples: vi.fn().mockResolvedValue({
-                usageExamples: [],
-                testExamples: []
-            })
-        };
+        mockKgService = makeRealisticKgService();
         mockDbService = {
             postgresQuery: vi.fn().mockResolvedValue([])
         };

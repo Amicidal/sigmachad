@@ -3,6 +3,7 @@
  * Tests rate limiting, validation, CORS, authentication, and other middleware functionality
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { expectSuccess } from '../../test-utils/assertions';
 import { APIGateway } from '../../../src/api/APIGateway.js';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
 import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from '../../test-utils/database-helpers.js';
@@ -125,7 +126,7 @@ describe('API Middleware Integration', () => {
             expect([200, 400]).toContain(response.statusCode);
             if (response.statusCode === 200) {
                 const body = JSON.parse(response.payload);
-                expect(body.success).toBe(true);
+                expectSuccess(body);
                 // The input should be sanitized and not contain script tags
                 // (exact sanitization behavior depends on implementation)
             }

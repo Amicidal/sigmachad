@@ -32,6 +32,12 @@ export class RedisService {
     isInitialized() {
         return this.initialized;
     }
+    getClient() {
+        if (!this.initialized) {
+            throw new Error('Redis not configured');
+        }
+        return this.redisClient;
+    }
     async get(key) {
         if (!this.initialized) {
             throw new Error('Redis not configured');

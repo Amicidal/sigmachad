@@ -69,6 +69,9 @@ describe('Authentication & Authorization Integration', () => {
 
   // Helper functions for creating test tokens
   function createValidJWT(payload: any = {}, expiresIn: string = '1h'): string {
+    const options: any = { expiresIn };
+    // Avoid issuer conflict if payload already sets `iss`
+    if (payload.iss === undefined) options.issuer = 'memento-test';
     return jwt.sign(
       {
         userId: 'test-user-123',
@@ -77,11 +80,13 @@ describe('Authentication & Authorization Integration', () => {
         ...payload,
       },
       JWT_SECRET,
-      { expiresIn, issuer: 'memento-test' }
+      options
     );
   }
 
   function createExpiredJWT(payload: any = {}): string {
+    const options: any = { expiresIn: '-1h' };
+    if (payload.iss === undefined) options.issuer = 'memento-test';
     return jwt.sign(
       {
         userId: 'test-user-123',
@@ -89,11 +94,13 @@ describe('Authentication & Authorization Integration', () => {
         ...payload,
       },
       JWT_SECRET,
-      { expiresIn: '-1h', issuer: 'memento-test' } // Expired 1 hour ago
+      options // Expired 1 hour ago
     );
   }
 
   function createInvalidSignatureJWT(payload: any = {}): string {
+    const options: any = { expiresIn: '1h' };
+    if (payload.iss === undefined) options.issuer = 'memento-test';
     return jwt.sign(
       {
         userId: 'test-user-123',
@@ -101,7 +108,7 @@ describe('Authentication & Authorization Integration', () => {
         ...payload,
       },
       'wrong-secret',
-      { expiresIn: '1h', issuer: 'memento-test' }
+      options
     );
   }
 

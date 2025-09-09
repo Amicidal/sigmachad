@@ -2,35 +2,43 @@
  * Design & Specification Routes
  * Handles spec creation, validation, and management
  */
+import { v4 as uuidv4 } from "uuid";
 export function registerDesignRoutes(app, kgService, dbService) {
     // Create specification
-    app.post('/design/create-spec', {
+    app.post("/design/create-spec", {
         schema: {
             body: {
-                type: 'object',
-                required: ['title', 'description', 'acceptanceCriteria'],
+                type: "object",
+                required: ["title", "description", "acceptanceCriteria"],
                 properties: {
-                    title: { type: 'string', minLength: 1 },
-                    description: { type: 'string', minLength: 1 },
-                    goals: { type: 'array', items: { type: 'string' } },
-                    acceptanceCriteria: { type: 'array', items: { type: 'string' }, minItems: 1 },
-                    priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-                    assignee: { type: 'string' },
-                    tags: { type: 'array', items: { type: 'string' } },
-                    dependencies: { type: 'array', items: { type: 'string' } },
+                    title: { type: "string", minLength: 1 },
+                    description: { type: "string", minLength: 1 },
+                    goals: { type: "array", items: { type: "string" } },
+                    acceptanceCriteria: {
+                        type: "array",
+                        items: { type: "string" },
+                        minItems: 1,
+                    },
+                    priority: {
+                        type: "string",
+                        enum: ["low", "medium", "high", "critical"],
+                    },
+                    assignee: { type: "string" },
+                    tags: { type: "array", items: { type: "string" } },
+                    dependencies: { type: "array", items: { type: "string" } },
                 },
             },
             response: {
                 200: {
-                    type: 'object',
+                    type: "object",
                     properties: {
-                        success: { type: 'boolean' },
+                        success: { type: "boolean" },
                         data: {
-                            type: 'object',
+                            type: "object",
                             properties: {
-                                specId: { type: 'string' },
-                                spec: { type: 'object' },
-                                validationResults: { type: 'object' },
+                                specId: { type: "string" },
+                                spec: { type: "object" },
+                                validationResults: { type: "object" },
                             },
                         },
                     },
@@ -55,14 +63,14 @@ export function registerDesignRoutes(app, kgService, dbService) {
             reply.send({
                 success: false,
                 error: {
-                    code: 'VALIDATION_ERROR',
-                    message: error instanceof Error ? error.message : 'Unknown error',
+                    code: "VALIDATION_ERROR",
+                    message: error instanceof Error ? error.message : "Unknown error",
                 },
             });
         }
     });
     // Get specification
-    app.get('/design/specs/:specId', async (request, reply) => {
+    app.get("/design/specs/:specId", async (request, reply) => {
         try {
             const { specId } = request.params;
             const result = await getSpec(specId, kgService, dbService);
@@ -80,14 +88,17 @@ export function registerDesignRoutes(app, kgService, dbService) {
             reply.status(404).send({
                 success: false,
                 error: {
-                    code: 'NOT_FOUND',
-                    message: error instanceof Error ? error.message : 'Unknown error',
+                    code: "NOT_FOUND",
+                    message: error instanceof Error ? error.message : "Unknown error",
                 },
             });
         }
     });
     // Update specification
-    app.put('/design/specs/:specId', async (request, reply) => {
+    const registerUpdate = app.put && typeof app.put === "function"
+        ? app.put.bind(app)
+        : app.post.bind(app);
+    registerUpdate("/design/specs/:specId", async (request, reply) => {
         try {
             const { specId } = request.params;
             const result = await updateSpec(specId, request.body, kgService, dbService);
@@ -106,14 +117,14 @@ export function registerDesignRoutes(app, kgService, dbService) {
             reply.send({
                 success: false,
                 error: {
-                    code: 'VALIDATION_ERROR',
-                    message: error instanceof Error ? error.message : 'Unknown error',
+                    code: "VALIDATION_ERROR",
+                    message: error instanceof Error ? error.message : "Unknown error",
                 },
             });
         }
     });
     // List specifications
-    app.get('/design/specs', async (request, reply) => {
+    app.get("/design/specs", async (request, reply) => {
         try {
             const params = request.query;
             const result = await listSpecs(params, kgService, dbService);
@@ -141,8 +152,8 @@ export function registerDesignRoutes(app, kgService, dbService) {
                     hasMore: false,
                 },
                 error: {
-                    code: 'VALIDATION_ERROR',
-                    message: error instanceof Error ? error.message : 'Unknown error',
+                    code: "VALIDATION_ERROR",
+                    message: error instanceof Error ? error.message : "Unknown error",
                 },
                 metadata: {
                     requestId: request.id,
@@ -152,23 +163,40 @@ export function registerDesignRoutes(app, kgService, dbService) {
             });
         }
     });
+    // POST /api/design/generate - Generate design/spec from inputs (stubbed)
+    app.post("/design/generate", async (request, reply) => {
+        try {
+            reply.send({ success: true, data: { specId: uuidv4() } });
+        }
+        catch (error) {
+            reply
+                .status(500)
+                .send({
+                success: false,
+                error: {
+                    code: "GENERATE_FAILED",
+                    message: "Failed to generate spec",
+                },
+            });
+        }
+    });
 }
 // Business logic functions
 async function createSpec(params, kgService, dbService) {
-    const specId = `spec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const specId = uuidv4();
     const spec = {
         id: specId,
-        type: 'spec',
+        type: "spec",
         path: `specs/${specId}`,
-        hash: '', // Will be calculated from content
-        language: 'text',
+        hash: "", // Will be calculated from content
+        language: "text",
         lastModified: new Date(),
         created: new Date(),
         title: params.title,
         description: params.description,
         acceptanceCriteria: params.acceptanceCriteria,
-        status: 'draft',
-        priority: params.priority || 'medium',
+        status: "draft",
+        priority: params.priority || "medium",
         assignee: params.assignee,
         tags: params.tags || [],
         updated: new Date(),
@@ -178,7 +206,7 @@ async function createSpec(params, kgService, dbService) {
     // Store in database
     await dbService.postgresQuery(`INSERT INTO documents (id, type, content, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`, [
         specId,
-        'spec',
+        "spec",
         JSON.stringify(spec),
         spec.created.toISOString(),
         spec.updated.toISOString(),
@@ -192,7 +220,7 @@ async function createSpec(params, kgService, dbService) {
     };
 }
 async function getSpec(specId, kgService, dbService) {
-    const result = await dbService.postgresQuery('SELECT content FROM documents WHERE id = $1 AND type = $2', [specId, 'spec']);
+    const result = await dbService.postgresQuery("SELECT content FROM documents WHERE id = $1 AND type = $2", [specId, "spec"]);
     if (result.length === 0) {
         throw new Error(`Specification ${specId} not found`);
     }
@@ -221,7 +249,7 @@ async function getSpec(specId, kgService, dbService) {
 }
 async function updateSpec(specId, updates, kgService, dbService) {
     // Get existing spec
-    const result = await dbService.postgresQuery('SELECT content FROM documents WHERE id = $1 AND type = $2', [specId, 'spec']);
+    const result = await dbService.postgresQuery("SELECT content FROM documents WHERE id = $1 AND type = $2", [specId, "spec"]);
     if (result.length === 0) {
         throw new Error(`Specification ${specId} not found`);
     }
@@ -235,17 +263,19 @@ async function updateSpec(specId, updates, kgService, dbService) {
     // Validate updated spec
     const validationResults = validateSpec(updatedSpec);
     if (!validationResults.isValid) {
-        throw new Error(`Validation failed: ${validationResults.issues.map(i => i.message).join(', ')}`);
+        throw new Error(`Validation failed: ${validationResults.issues
+            .map((i) => i.message)
+            .join(", ")}`);
     }
     // Update in database
-    await dbService.postgresQuery('UPDATE documents SET content = $1, updated_at = $2 WHERE id = $3', [JSON.stringify(updatedSpec), updatedSpec.updated.toISOString(), specId]);
+    await dbService.postgresQuery("UPDATE documents SET content = $1, updated_at = $2 WHERE id = $3", [JSON.stringify(updatedSpec), updatedSpec.updated.toISOString(), specId]);
     // Update in knowledge graph
     await kgService.updateEntity(specId, updatedSpec);
     return updatedSpec;
 }
 async function listSpecs(params, kgService, dbService) {
-    let query = 'SELECT content FROM documents WHERE type = $1';
-    const queryParams = ['spec'];
+    let query = "SELECT content FROM documents WHERE type = $1";
+    const queryParams = ["spec"];
     let paramIndex = 2;
     // Add filters
     if (params.status && params.status.length > 0) {
@@ -269,8 +299,8 @@ async function listSpecs(params, kgService, dbService) {
         paramIndex++;
     }
     // Add sorting
-    const sortBy = params.sortBy || 'created';
-    const sortOrder = params.sortOrder || 'desc';
+    const sortBy = params.sortBy || "created";
+    const sortOrder = params.sortOrder || "desc";
     query += ` ORDER BY content->>'${sortBy}' ${sortOrder.toUpperCase()}`;
     // Add pagination
     const limit = params.limit || 20;
@@ -295,61 +325,61 @@ function validateSpec(spec) {
     // Validate title
     if (!spec.title || spec.title.trim().length === 0) {
         issues.push({
-            field: 'title',
-            message: 'Title is required',
-            severity: 'error',
+            field: "title",
+            message: "Title is required",
+            severity: "error",
             file: spec.path,
             line: 0,
             column: 0,
-            rule: 'required-field',
+            rule: "required-field",
         });
     }
     else if (spec.title.length < 5) {
         issues.push({
-            field: 'title',
-            message: 'Title should be more descriptive (at least 5 characters)',
-            severity: 'warning',
+            field: "title",
+            message: "Title should be more descriptive (at least 5 characters)",
+            severity: "warning",
             file: spec.path,
             line: 0,
             column: 0,
-            rule: 'minimum-length',
-            suggestion: 'Consider making the title more descriptive',
+            rule: "minimum-length",
+            suggestion: "Consider making the title more descriptive",
         });
     }
     // Validate description
     if (!spec.description || spec.description.trim().length === 0) {
         issues.push({
-            field: 'description',
-            message: 'Description is required',
-            severity: 'error',
+            field: "description",
+            message: "Description is required",
+            severity: "error",
             file: spec.path,
             line: 0,
             column: 0,
-            rule: 'required-field',
+            rule: "required-field",
         });
     }
     else if (spec.description.length < 20) {
         issues.push({
-            field: 'description',
-            message: 'Description should provide more context (at least 20 characters)',
-            severity: 'warning',
+            field: "description",
+            message: "Description should provide more context (at least 20 characters)",
+            severity: "warning",
             file: spec.path,
             line: 0,
             column: 0,
-            rule: 'minimum-length',
-            suggestion: 'Consider adding more context to the description',
+            rule: "minimum-length",
+            suggestion: "Consider adding more context to the description",
         });
     }
     // Validate acceptance criteria
     if (!spec.acceptanceCriteria || spec.acceptanceCriteria.length === 0) {
         issues.push({
-            field: 'acceptanceCriteria',
-            message: 'At least one acceptance criterion is required',
-            severity: 'error',
+            field: "acceptanceCriteria",
+            message: "At least one acceptance criterion is required",
+            severity: "error",
             file: spec.path,
             line: 0,
             column: 0,
-            rule: 'required-field',
+            rule: "required-field",
         });
     }
     else {
@@ -358,21 +388,21 @@ function validateSpec(spec) {
                 issues.push({
                     field: `acceptanceCriteria[${index}]`,
                     message: `Acceptance criterion ${index + 1} should be more specific (at least 10 characters)`,
-                    severity: 'warning',
+                    severity: "warning",
                     file: spec.path,
                     line: 0,
                     column: 0,
-                    rule: 'minimum-length',
-                    suggestion: 'Consider making the acceptance criterion more specific',
+                    rule: "minimum-length",
+                    suggestion: "Consider making the acceptance criterion more specific",
                 });
             }
         });
         if (spec.acceptanceCriteria.length < 3) {
-            suggestions.push('Consider adding more acceptance criteria for better test coverage');
+            suggestions.push("Consider adding more acceptance criteria for better test coverage");
         }
     }
     return {
-        isValid: issues.filter(issue => issue.severity === 'error').length === 0,
+        isValid: issues.filter((issue) => issue.severity === "error").length === 0,
         issues,
         suggestions,
     };

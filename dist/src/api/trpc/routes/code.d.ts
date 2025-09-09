@@ -19,15 +19,15 @@ export declare const codeRouter: import("@trpc/server").CreateRouterInner<import
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
             file: string;
+            types?: string[] | undefined;
             lineStart?: number | undefined;
             lineEnd?: number | undefined;
-            types?: string[] | undefined;
         };
         _input_out: {
             file: string;
+            types?: string[] | undefined;
             lineStart?: number | undefined;
             lineEnd?: number | undefined;
-            types?: string[] | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;

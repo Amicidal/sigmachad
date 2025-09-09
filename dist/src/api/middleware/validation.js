@@ -2,9 +2,9 @@
  * Validation Middleware for API Requests
  * Provides reusable validation functions and middleware
  */
-import { ZodError } from 'zod';
+import { ZodError } from "zod";
 // Import validation schemas
-import { z } from 'zod';
+import { z } from "zod";
 // Common validation schemas
 export const uuidSchema = z.string().uuid();
 export const paginationSchema = z.object({
@@ -14,17 +14,25 @@ export const paginationSchema = z.object({
 export const entityIdSchema = z.string().min(1).max(255);
 export const searchQuerySchema = z.object({
     query: z.string().min(1).max(1000),
-    entityTypes: z.array(z.enum(['function', 'class', 'interface', 'file', 'module'])).optional(),
-    searchType: z.enum(['semantic', 'structural', 'usage', 'dependency']).optional(),
-    filters: z.object({
+    entityTypes: z
+        .array(z.enum(["function", "class", "interface", "file", "module"]))
+        .optional(),
+    searchType: z
+        .enum(["semantic", "structural", "usage", "dependency"])
+        .optional(),
+    filters: z
+        .object({
         language: z.string().optional(),
         path: z.string().optional(),
         tags: z.array(z.string()).optional(),
-        lastModified: z.object({
+        lastModified: z
+            .object({
             since: z.string().datetime().optional(),
             until: z.string().datetime().optional(),
-        }).optional(),
-    }).optional(),
+        })
+            .optional(),
+    })
+        .optional(),
     includeRelated: z.boolean().optional(),
     limit: z.number().int().min(1).max(100).optional(),
 });
@@ -57,10 +65,10 @@ export function validateSchema(schema) {
                 reply.status(400).send({
                     success: false,
                     error: {
-                        code: 'VALIDATION_ERROR',
-                        message: 'Request validation failed',
-                        details: error.errors.map(err => ({
-                            field: err.path.join('.'),
+                        code: "VALIDATION_ERROR",
+                        message: "Request validation failed",
+                        details: error.errors.map((err) => ({
+                            field: err.path.join("."),
                             message: err.message,
                             code: err.code,
                         })),
@@ -71,8 +79,8 @@ export function validateSchema(schema) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'VALIDATION_INTERNAL_ERROR',
-                    message: 'Internal validation error',
+                    code: "VALIDATION_INTERNAL_ERROR",
+                    message: "Internal validation error",
                 },
             });
         }
@@ -82,13 +90,17 @@ export function validateSchema(schema) {
 function extractQuerySchema(schema) {
     try {
         // In Zod v3, we need to check if it's an object schema differently
-        if (schema.constructor.name === 'ZodObject') {
+        if (schema.constructor.name === "ZodObject") {
             const zodObjectSchema = schema;
             const shape = zodObjectSchema._def.shape();
             const queryFields = {};
             for (const [key, fieldSchema] of Object.entries(shape)) {
-                if (key.includes('query') || key.includes('limit') || key.includes('offset') ||
-                    key.includes('filter') || key.includes('sort') || key.includes('page')) {
+                if (key.includes("query") ||
+                    key.includes("limit") ||
+                    key.includes("offset") ||
+                    key.includes("filter") ||
+                    key.includes("sort") ||
+                    key.includes("page")) {
                     queryFields[key] = fieldSchema;
                 }
             }
@@ -97,7 +109,7 @@ function extractQuerySchema(schema) {
     }
     catch (error) {
         // If schema introspection fails, return null
-        console.warn('Could not extract query schema:', error);
+        console.warn("Could not extract query schema:", error);
     }
     return null;
 }
@@ -105,13 +117,16 @@ function extractQuerySchema(schema) {
 function extractParamsSchema(schema) {
     try {
         // In Zod v3, we need to check if it's an object schema differently
-        if (schema.constructor.name === 'ZodObject') {
+        if (schema.constructor.name === "ZodObject") {
             const zodObjectSchema = schema;
             const shape = zodObjectSchema._def.shape();
             const paramFields = {};
             for (const [key, fieldSchema] of Object.entries(shape)) {
-                if (key.includes('Id') || key.includes('id') || key === 'entityId' ||
-                    key === 'file' || key === 'name') {
+                if (key.includes("Id") ||
+                    key.includes("id") ||
+                    key === "entityId" ||
+                    key === "file" ||
+                    key === "name") {
                     paramFields[key] = fieldSchema;
                 }
             }
@@ -120,7 +135,7 @@ function extractParamsSchema(schema) {
     }
     catch (error) {
         // If schema introspection fails, return null
-        console.warn('Could not extract params schema:', error);
+        console.warn("Could not extract params schema:", error);
     }
     return null;
 }
@@ -134,19 +149,19 @@ export const validatePagination = validateSchema(paginationSchema);
 export function sanitizeInput() {
     return async (request, reply) => {
         // Sanitize string inputs
-        if (request.body && typeof request.body === 'object') {
+        if (request.body && typeof request.body === "object") {
             request.body = sanitizeObject(request.body);
         }
-        if (request.query && typeof request.query === 'object') {
+        if (request.query && typeof request.query === "object") {
             request.query = sanitizeObject(request.query);
         }
-        if (request.params && typeof request.params === 'object') {
+        if (request.params && typeof request.params === "object") {
             request.params = sanitizeObject(request.params);
         }
     };
 }
 function sanitizeObject(obj) {
-    if (typeof obj !== 'object' || obj === null) {
+    if (typeof obj !== "object" || obj === null) {
         return obj;
     }
     if (Array.isArray(obj)) {
@@ -154,14 +169,21 @@ function sanitizeObject(obj) {
     }
     const sanitized = {};
     for (const [key, value] of Object.entries(obj)) {
-        if (typeof value === 'string') {
-            // Basic XSS prevention - remove potentially dangerous characters
-            sanitized[key] = value
-                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                .replace(/<[^>]*>/g, '')
-                .trim();
+        if (typeof value === "string") {
+            // Basic XSS prevention - only sanitize if there are actual HTML tags
+            const hasScriptTags = /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi.test(value);
+            const hasHtmlTags = /<[^>]*>/g.test(value);
+            if (hasScriptTags || hasHtmlTags) {
+                sanitized[key] = value
+                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+                    .replace(/<[^>]*>/g, "")
+                    .trim();
+            }
+            else {
+                sanitized[key] = value.trim();
+            }
         }
-        else if (typeof value === 'object') {
+        else if (typeof value === "object") {
             sanitized[key] = sanitizeObject(value);
         }
         else {
@@ -172,8 +194,12 @@ function sanitizeObject(obj) {
 }
 // Rate limiting helper (will be used with rate limiting middleware)
 export function createRateLimitKey(request) {
-    const ip = request.ip || 'unknown';
-    const userAgent = request.headers['user-agent'] || 'unknown';
+    // Prefer client IP from x-forwarded-for if present; fall back to Fastify's derived IP
+    const xff = request.headers["x-forwarded-for"]
+        ?.split(",")[0]
+        ?.trim();
+    const ip = xff || request.ip || "unknown";
+    const userAgent = request.headers["user-agent"] || "unknown";
     const method = request.method;
     const url = request.url;
     return `${ip}:${userAgent}:${method}:${url}`;

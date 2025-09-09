@@ -2,17 +2,17 @@
  * API Gateway for Memento
  * Main entry point for all API interactions (REST, WebSocket, MCP)
  */
-import { FastifyInstance } from 'fastify';
-import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../services/DatabaseService.js';
-import { FileWatcher } from '../services/FileWatcher.js';
-import { ASTParser } from '../services/ASTParser.js';
-import { DocumentationParser } from '../services/DocumentationParser.js';
-import { SynchronizationCoordinator } from '../services/SynchronizationCoordinator.js';
-import { ConflictResolution } from '../services/ConflictResolution.js';
-import { SynchronizationMonitoring } from '../services/SynchronizationMonitoring.js';
-import { RollbackCapabilities } from '../services/RollbackCapabilities.js';
-import { SecurityScanner } from '../services/SecurityScanner.js';
+import { FastifyInstance } from "fastify";
+import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
+import { DatabaseService } from "../services/DatabaseService.js";
+import { FileWatcher } from "../services/FileWatcher.js";
+import { ASTParser } from "../services/ASTParser.js";
+import { DocumentationParser } from "../services/DocumentationParser.js";
+import { SynchronizationCoordinator } from "../services/SynchronizationCoordinator.js";
+import { ConflictResolution } from "../services/ConflictResolution.js";
+import { SynchronizationMonitoring } from "../services/SynchronizationMonitoring.js";
+import { RollbackCapabilities } from "../services/RollbackCapabilities.js";
+import { SecurityScanner } from "../services/SecurityScanner.js";
 export interface APIGatewayConfig {
     port: number;
     host: string;
@@ -48,6 +48,8 @@ export declare class APIGateway {
     private loggingService?;
     private maintenanceService?;
     private configurationService?;
+    private healthCheckCache;
+    private readonly HEALTH_CACHE_TTL;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher?: FileWatcher, astParser?: ASTParser, docParser?: DocumentationParser, securityScanner?: SecurityScanner, config?: Partial<APIGatewayConfig>, syncServices?: SynchronizationServices);
     private setupMiddleware;
     private setupRoutes;
@@ -60,5 +62,6 @@ export declare class APIGateway {
     stop(): Promise<void>;
     getApp(): FastifyInstance;
     getConfig(): APIGatewayConfig;
+    private isOriginAllowed;
 }
 //# sourceMappingURL=APIGateway.d.ts.map

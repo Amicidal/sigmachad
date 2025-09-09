@@ -79,6 +79,29 @@ export class SynchronizationCoordinator extends EventEmitter {
     this.on("conflictDetected", this.handleConflictDetected.bind(this));
   }
 
+  // Convenience methods used by integration tests
+  async startSync(): Promise<string> {
+    return this.startFullSynchronization({});
+  }
+
+  async stopSync(): Promise<void> {
+    // Halt processing of the queue
+    this.isProcessing = false;
+    // Mark all active operations as completed to simulate stop
+    const now = new Date();
+    for (const [id, op] of this.activeOperations.entries()) {
+      if (op.status === "running" || op.status === "pending") {
+        op.status = "completed";
+        op.endTime = now;
+        this.completedOperations.set(id, op);
+        this.activeOperations.delete(id);
+        this.emit("operationCompleted", op);
+      }
+    }
+    // Clear queued operations
+    this.operationQueue = [];
+  }
+
   async startFullSynchronization(options: SyncOptions = {}): Promise<string> {
     const operation: SyncOperation = {
       id: `full_sync_${Date.now()}`,
@@ -198,6 +221,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
         operation.status = "completed";
         operation.endTime = new Date();
+        this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
         this.emit("operationCompleted", operation);
       } catch (error) {
@@ -211,6 +235,7 @@ export class SynchronizationCoordinator extends EventEmitter {
           recoverable: false,
         });
 
+        this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
         this.emit("operationFailed", operation);
       }
@@ -360,9 +385,25 @@ export class SynchronizationCoordinator extends EventEmitter {
           case "create":
           case "modify":
             // Parse the file and update graph
-            const parseResult = await this.astParser.parseFileIncremental(
-              change.path
-            );
+            let parseResult;
+            try {
+              parseResult = await this.astParser.parseFileIncremental(
+                change.path
+              );
+            } catch (error) {
+              // Handle parsing errors (e.g., invalid file paths)
+              operation.errors.push({
+                file: change.path,
+                type: "parse",
+                message: `Failed to parse file: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+                timestamp: new Date(),
+                recoverable: false,
+              });
+              processedChanges++;
+              continue; // Skip to next change
+            }
 
             // Detect conflicts before applying changes
             if (

@@ -62,7 +62,7 @@ export declare class SynchronizationMonitoring extends EventEmitter {
     recordOperationComplete(operation: SyncOperation): void;
     recordOperationFailed(operation: SyncOperation, error: Error): void;
     recordConflict(conflict: SyncConflict | Conflict): void;
-    recordError(operationId: string, error: SyncError): void;
+    recordError(operationId: string, error: SyncError | string | unknown): void;
     private updateSyncMetrics;
     private updatePerformanceMetrics;
     getSyncMetrics(): SyncMetrics;

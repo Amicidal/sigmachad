@@ -3,8 +3,8 @@
  * Parses various test framework output formats into standardized test results
  */
 
-import { TestSuiteResult, TestResult } from './TestEngine.js';
-import * as fs from 'fs/promises';
+import { TestSuiteResult, TestResult } from "./TestEngine.js";
+import * as fs from "fs/promises";
 
 export interface ParsedTestSuite {
   suiteName: string;
@@ -28,7 +28,7 @@ export interface ParsedTestResult {
   testId: string;
   testSuite: string;
   testName: string;
-  status: 'passed' | 'failed' | 'skipped' | 'error';
+  status: "passed" | "failed" | "skipped" | "error";
   duration: number;
   errorMessage?: string;
   stackTrace?: string;
@@ -49,27 +49,33 @@ export class TestResultParser {
   /**
    * Parse test results from a file
    */
-  async parseFile(filePath: string, format: 'junit' | 'jest' | 'mocha' | 'vitest' | 'cypress' | 'playwright'): Promise<TestSuiteResult> {
-    const content = await fs.readFile(filePath, 'utf-8');
+  async parseFile(
+    filePath: string,
+    format: "junit" | "jest" | "mocha" | "vitest" | "cypress" | "playwright"
+  ): Promise<TestSuiteResult> {
+    const content = await fs.readFile(filePath, "utf-8");
     return this.parseContent(content, format);
   }
 
   /**
    * Parse test results from content string
    */
-  async parseContent(content: string, format: 'junit' | 'jest' | 'mocha' | 'vitest' | 'cypress' | 'playwright'): Promise<TestSuiteResult> {
+  async parseContent(
+    content: string,
+    format: "junit" | "jest" | "mocha" | "vitest" | "cypress" | "playwright"
+  ): Promise<TestSuiteResult> {
     switch (format) {
-      case 'junit':
+      case "junit":
         return this.parseJUnitXML(content);
-      case 'jest':
+      case "jest":
         return this.parseJestJSON(content);
-      case 'mocha':
+      case "mocha":
         return this.parseMochaJSON(content);
-      case 'vitest':
+      case "vitest":
         return this.parseVitestJSON(content);
-      case 'cypress':
+      case "cypress":
         return this.parseCypressJSON(content);
-      case 'playwright':
+      case "playwright":
         return this.parsePlaywrightJSON(content);
       default:
         throw new Error(`Unsupported test format: ${format}`);
@@ -85,7 +91,7 @@ export class TestResultParser {
 
     // Empty content should be treated as an error
     if (!content || content.trim().length === 0) {
-      throw new Error('Empty test result content');
+      throw new Error("Empty test result content");
     }
 
     const testSuites: ParsedTestSuite[] = [];
@@ -99,34 +105,36 @@ export class TestResultParser {
       const suiteAttrs = this.parseXMLAttributes(suiteMatch[0]);
 
       const suite: ParsedTestSuite = {
-        suiteName: suiteAttrs.name || 'Unknown Suite',
+        suiteName: suiteAttrs.name || "Unknown Suite",
         timestamp: new Date(suiteAttrs.timestamp || Date.now()),
-        framework: 'junit',
+        framework: "junit",
         totalTests: 0,
         passedTests: 0,
         failedTests: 0,
         skippedTests: 0,
-        duration: parseFloat(suiteAttrs.time || '0') * 1000, // Convert to milliseconds
-        results: []
+        duration: parseFloat(suiteAttrs.time || "0") * 1000, // Convert to milliseconds
+        results: [],
       };
 
       let testMatch;
       while ((testMatch = testcaseRegex.exec(suiteContent)) !== null) {
         const testAttrs = this.parseXMLAttributes(testMatch[0]);
-        const testContent = testMatch[1] || '';
+        const testContent = testMatch[1] || "";
 
         const testResult: ParsedTestResult = {
-          testId: `${suite.suiteName}#${testAttrs.name}`,
+          testId: `${suite.suiteName}:${testAttrs.name}`,
           testSuite: suite.suiteName,
-          testName: testAttrs.name || 'Unknown Test',
-          duration: parseFloat(testAttrs.time || '0') * 1000,
-          status: 'passed'
+          testName: testAttrs.name || "Unknown Test",
+          duration: parseFloat(testAttrs.time || "0") * 1000,
+          status: "passed",
         };
 
         // Check for failure
         if (/<failure\b/.test(testContent)) {
-          testResult.status = 'failed';
-          const failureMatch = testContent.match(/<failure[^>]*>(.*?)<\/failure>/s);
+          testResult.status = "failed";
+          const failureMatch = testContent.match(
+            /<failure[^>]*>(.*?)<\/failure>/s
+          );
           if (failureMatch) {
             testResult.errorMessage = this.stripXMLTags(failureMatch[1]);
           }
@@ -134,7 +142,7 @@ export class TestResultParser {
 
         // Check for error
         if (/<error\b/.test(testContent)) {
-          testResult.status = 'error';
+          testResult.status = "error";
           const errorMatch = testContent.match(/<error[^>]*>(.*?)<\/error>/s);
           if (errorMatch) {
             testResult.errorMessage = this.stripXMLTags(errorMatch[1]);
@@ -143,20 +151,20 @@ export class TestResultParser {
 
         // Check for skipped
         if (/<skipped\b/.test(testContent)) {
-          testResult.status = 'skipped';
+          testResult.status = "skipped";
         }
 
         suite.results.push(testResult);
 
         // Update suite counters
         switch (testResult.status) {
-          case 'passed':
+          case "passed":
             suite.passedTests++;
             break;
-          case 'failed':
+          case "failed":
             suite.failedTests++;
             break;
-          case 'skipped':
+          case "skipped":
             suite.skippedTests++;
             break;
         }
@@ -164,14 +172,17 @@ export class TestResultParser {
 
       // Handle self-closing <testcase ... /> entries (no inner content)
       let selfClosingMatch;
-      while ((selfClosingMatch = selfClosingTestcaseRegex.exec(suiteContent)) !== null) {
+      while (
+        (selfClosingMatch = selfClosingTestcaseRegex.exec(suiteContent)) !==
+        null
+      ) {
         const testAttrs = this.parseXMLAttributes(selfClosingMatch[0]);
         const testResult: ParsedTestResult = {
-          testId: `${suite.suiteName}#${testAttrs.name}`,
+          testId: `${suite.suiteName}:${testAttrs.name}`,
           testSuite: suite.suiteName,
-          testName: testAttrs.name || 'Unknown Test',
-          duration: parseFloat(testAttrs.time || '0') * 1000,
-          status: 'passed'
+          testName: testAttrs.name || "Unknown Test",
+          duration: parseFloat(testAttrs.time || "0") * 1000,
+          status: "passed",
         };
 
         suite.results.push(testResult);
@@ -202,20 +213,21 @@ export class TestResultParser {
 
     if (data.testResults) {
       for (const testFile of data.testResults) {
-        const suiteName = testFile.testFilePath || testFile.name || 'Jest Suite';
+        const suiteName =
+          testFile.testFilePath || testFile.name || "Jest Suite";
 
         for (const test of testFile.testResults || []) {
           const testResult: ParsedTestResult = {
-            testId: `${suiteName}#${test.title}`,
+            testId: `${suiteName}:${test.title}`,
             testSuite: suiteName,
             testName: test.title,
             status: this.mapJestStatus(test.status),
-            duration: test.duration || 0
+            duration: test.duration || 0,
           };
 
           if (test.failureMessages && test.failureMessages.length > 0) {
-            testResult.errorMessage = test.failureMessages.join('\n');
-            testResult.stackTrace = test.failureMessages.join('\n');
+            testResult.errorMessage = test.failureMessages.join("\n");
+            testResult.stackTrace = test.failureMessages.join("\n");
           }
 
           results.push(testResult);
@@ -223,13 +235,13 @@ export class TestResultParser {
           totalDuration += testResult.duration;
 
           switch (testResult.status) {
-            case 'passed':
+            case "passed":
               passedTests++;
               break;
-            case 'failed':
+            case "failed":
               failedTests++;
               break;
-            case 'skipped':
+            case "skipped":
               skippedTests++;
               break;
           }
@@ -238,23 +250,23 @@ export class TestResultParser {
     }
 
     return {
-      suiteName: data.testResults?.[0]?.name || 'Jest Test Suite',
+      suiteName: data.testResults?.[0]?.name || "Jest Test Suite",
       timestamp: new Date(),
-      framework: 'jest',
+      framework: "jest",
       totalTests,
       passedTests,
       failedTests,
       skippedTests,
       duration: totalDuration,
-      results: results.map(r => ({
+      results: results.map((r) => ({
         testId: r.testId,
         testSuite: r.testSuite,
         testName: r.testName,
         status: r.status,
         duration: r.duration,
         errorMessage: r.errorMessage,
-        stackTrace: r.stackTrace
-      }))
+        stackTrace: r.stackTrace,
+      })),
     };
   }
 
@@ -271,16 +283,23 @@ export class TestResultParser {
     let skippedTests = 0;
     let totalDuration = 0;
 
-    const processSuite = (suite: any, parentName = '') => {
-      const suiteName = parentName ? `${parentName} > ${suite.title}` : suite.title;
+    const processSuite = (suite: any, parentName = "") => {
+      const suiteName = parentName
+        ? `${parentName} > ${suite.title}`
+        : suite.title;
 
       for (const test of suite.tests || []) {
         const testResult: ParsedTestResult = {
-          testId: `${suiteName}#${test.title}`,
+          testId: `${suiteName}:${test.title}`,
           testSuite: suiteName,
           testName: test.title,
-          status: test.state === 'passed' ? 'passed' : test.state === 'failed' ? 'failed' : 'skipped',
-          duration: test.duration || 0
+          status:
+            test.state === "passed"
+              ? "passed"
+              : test.state === "failed"
+              ? "failed"
+              : "skipped",
+          duration: test.duration || 0,
         };
 
         if (test.err) {
@@ -293,13 +312,13 @@ export class TestResultParser {
         totalDuration += testResult.duration;
 
         switch (testResult.status) {
-          case 'passed':
+          case "passed":
             passedTests++;
             break;
-          case 'failed':
+          case "failed":
             failedTests++;
             break;
-          case 'skipped':
+          case "skipped":
             skippedTests++;
             break;
         }
@@ -317,23 +336,23 @@ export class TestResultParser {
     }
 
     return {
-      suiteName: data.title || 'Mocha Test Suite',
+      suiteName: data.title || "Mocha Test Suite",
       timestamp: new Date(data.stats?.start || Date.now()),
-      framework: 'mocha',
+      framework: "mocha",
       totalTests,
       passedTests,
       failedTests,
       skippedTests,
       duration: data.stats?.duration || totalDuration,
-      results: results.map(r => ({
+      results: results.map((r) => ({
         testId: r.testId,
         testSuite: r.testSuite,
         testName: r.testName,
         status: r.status,
         duration: r.duration,
         errorMessage: r.errorMessage,
-        stackTrace: r.stackTrace
-      }))
+        stackTrace: r.stackTrace,
+      })),
     };
   }
 
@@ -363,15 +382,22 @@ export class TestResultParser {
       const spec = run.spec || run.specs?.[0];
       if (!spec) return;
       for (const test of run.tests || spec.tests || []) {
-        const title = Array.isArray(test.title) ? test.title.join(' > ') : String(test.title ?? '');
-        const specPath = spec.relative || spec.file || 'unknown.spec';
+        const title = Array.isArray(test.title)
+          ? test.title.join(" > ")
+          : String(test.title ?? "");
+        const specPath = spec.relative || spec.file || "unknown.spec";
 
         const testResult: ParsedTestResult = {
-          testId: `${specPath}#${title}`,
+          testId: `${specPath}:${title}`,
           testSuite: specPath,
           testName: title,
-          status: test.state === 'passed' ? 'passed' : test.state === 'failed' ? 'failed' : 'skipped',
-          duration: test.duration || 0
+          status:
+            test.state === "passed"
+              ? "passed"
+              : test.state === "failed"
+              ? "failed"
+              : "skipped",
+          duration: test.duration || 0,
         };
 
         if (test.err) {
@@ -384,13 +410,13 @@ export class TestResultParser {
         totalDuration += testResult.duration;
 
         switch (testResult.status) {
-          case 'passed':
+          case "passed":
             passedTests++;
             break;
-          case 'failed':
+          case "failed":
             failedTests++;
             break;
-          case 'skipped':
+          case "skipped":
             skippedTests++;
             break;
         }
@@ -404,23 +430,23 @@ export class TestResultParser {
     }
 
     return {
-      suiteName: data.runUrl || 'Cypress Test Suite',
+      suiteName: data.runUrl || "Cypress Test Suite",
       timestamp: new Date(),
-      framework: 'cypress',
+      framework: "cypress",
       totalTests,
       passedTests,
       failedTests,
       skippedTests,
       duration: totalDuration,
-      results: results.map(r => ({
+      results: results.map((r) => ({
         testId: r.testId,
         testSuite: r.testSuite,
         testName: r.testName,
         status: r.status,
         duration: r.duration,
         errorMessage: r.errorMessage,
-        stackTrace: r.stackTrace
-      }))
+        stackTrace: r.stackTrace,
+      })),
     };
   }
 
@@ -438,17 +464,17 @@ export class TestResultParser {
     let totalDuration = 0;
 
     const processSuite = (suite: any) => {
-      const suiteTitle = suite.title || 'Playwright Suite';
+      const suiteTitle = suite.title || "Playwright Suite";
 
       for (const spec of suite.specs || []) {
         for (const test of spec.tests || []) {
           for (const result of test.results || []) {
             const testResult: ParsedTestResult = {
-              testId: `${spec.file}#${test.title}`,
+              testId: `${spec.file}:${test.title}`,
               testSuite: suiteTitle,
               testName: test.title,
               status: this.mapPlaywrightStatus(result.status),
-              duration: result.duration || 0
+              duration: result.duration || 0,
             };
 
             if (result.error) {
@@ -461,13 +487,13 @@ export class TestResultParser {
             totalDuration += testResult.duration;
 
             switch (testResult.status) {
-              case 'passed':
+              case "passed":
                 passedTests++;
                 break;
-              case 'failed':
+              case "failed":
                 failedTests++;
                 break;
-              case 'skipped':
+              case "skipped":
                 skippedTests++;
                 break;
             }
@@ -487,23 +513,23 @@ export class TestResultParser {
     }
 
     return {
-      suiteName: data.config?.name || 'Playwright Test Suite',
+      suiteName: data.config?.name || "Playwright Test Suite",
       timestamp: new Date(),
-      framework: 'playwright',
+      framework: "playwright",
       totalTests,
       passedTests,
       failedTests,
       skippedTests,
       duration: totalDuration,
-      results: results.map(r => ({
+      results: results.map((r) => ({
         testId: r.testId,
         testSuite: r.testSuite,
         testName: r.testName,
         status: r.status,
         duration: r.duration,
         errorMessage: r.errorMessage,
-        stackTrace: r.stackTrace
-      }))
+        stackTrace: r.stackTrace,
+      })),
     };
   }
 
@@ -520,21 +546,21 @@ export class TestResultParser {
   }
 
   private stripXMLTags(content: string): string {
-    return content.replace(/<[^>]*>/g, '').trim();
+    return content.replace(/<[^>]*>/g, "").trim();
   }
 
   private mergeTestSuites(suites: ParsedTestSuite[]): TestSuiteResult {
     if (suites.length === 0) {
       return {
-        suiteName: 'JUnit Test Suite',
+        suiteName: "JUnit Test Suite",
         timestamp: new Date(),
-        framework: 'junit',
+        framework: "junit",
         totalTests: 0,
         passedTests: 0,
         failedTests: 0,
         skippedTests: 0,
         duration: 0,
-        results: []
+        results: [],
       };
     }
 
@@ -544,7 +570,7 @@ export class TestResultParser {
 
     // Merge multiple suites
     const merged: TestSuiteResult = {
-      suiteName: 'Merged Test Suite',
+      suiteName: "Merged Test Suite",
       timestamp: suites[0].timestamp,
       framework: suites[0].framework,
       totalTests: 0,
@@ -552,7 +578,7 @@ export class TestResultParser {
       failedTests: 0,
       skippedTests: 0,
       duration: 0,
-      results: []
+      results: [],
     };
 
     for (const suite of suites) {
@@ -567,33 +593,37 @@ export class TestResultParser {
     return merged;
   }
 
-  private mapJestStatus(status: string): 'passed' | 'failed' | 'skipped' | 'error' {
+  private mapJestStatus(
+    status: string
+  ): "passed" | "failed" | "skipped" | "error" {
     switch (status) {
-      case 'passed':
-        return 'passed';
-      case 'failed':
-        return 'failed';
-      case 'pending':
-      case 'todo':
-        return 'skipped';
+      case "passed":
+        return "passed";
+      case "failed":
+        return "failed";
+      case "pending":
+      case "todo":
+        return "skipped";
       default:
-        return 'error';
+        return "error";
     }
   }
 
-  private mapPlaywrightStatus(status: string): 'passed' | 'failed' | 'skipped' | 'error' {
+  private mapPlaywrightStatus(
+    status: string
+  ): "passed" | "failed" | "skipped" | "error" {
     switch (status) {
-      case 'passed':
-        return 'passed';
-      case 'failed':
-        return 'failed';
-      case 'skipped':
-      case 'pending':
-        return 'skipped';
-      case 'timedOut':
-        return 'error';
+      case "passed":
+        return "passed";
+      case "failed":
+        return "failed";
+      case "skipped":
+      case "pending":
+        return "skipped";
+      case "timedOut":
+        return "error";
       default:
-        return 'error';
+        return "error";
     }
   }
 }

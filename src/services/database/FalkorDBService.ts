@@ -145,21 +145,107 @@ export class FalkorDBService implements IFalkorDBService {
       argv = [...args];
     }
 
+    let processedQuery = "";
     if (
       argv.length >= 3 &&
-      typeof argv[0] === 'string' &&
-      typeof argv[1] === 'string' &&
-      typeof argv[2] === 'string' &&
-      typeof argv[argv.length - 1] === 'object' &&
-      argv[argv.length - 1] !== null && !Array.isArray(argv[argv.length - 1])
+      typeof argv[0] === "string" &&
+      typeof argv[1] === "string" &&
+      typeof argv[2] === "string" &&
+      typeof argv[argv.length - 1] === "object" &&
+      argv[argv.length - 1] !== null &&
+      !Array.isArray(argv[argv.length - 1])
     ) {
       const params = argv.pop();
-      const processed = await this.buildProcessedQuery(argv[2] as string, params as Record<string, any>);
-      argv[2] = processed;
+      processedQuery = await this.buildProcessedQuery(
+        argv[2] as string,
+        params as Record<string, any>
+      );
+      argv[2] = processedQuery;
     }
 
-    const flat: string[] = argv.map(v => (typeof v === 'string' ? v : String(v)));
-    return this.falkordbClient.sendCommand(flat as any);
+    const flat: string[] = argv.map((v) =>
+      typeof v === "string" ? v : String(v)
+    );
+    const result = await this.falkordbClient.sendCommand(flat as any);
+
+    // Handle different command types differently
+    const command = flat[0]?.toUpperCase();
+
+    // For simple Redis commands (PING, etc.), return raw result
+    if (command === "PING" || flat.length === 1) {
+      return result;
+    }
+
+    // For GRAPH.QUERY commands, parse and return structured data
+    if (command === "GRAPH.QUERY") {
+      // FalkorDB GRAPH.QUERY returns [header, ...dataRows, stats]
+      if (result && Array.isArray(result) && result.length >= 2) {
+        const headers = result[0] as any;
+        const data = result[1] as any;
+        
+        // If there's no data, return empty array
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          return { data: [], headers: headers || [] };
+        }
+        
+        // Parse the data into objects using headers
+        if (Array.isArray(headers) && Array.isArray(data)) {
+          const processedData = data.map((row: any) => {
+            const obj: Record<string, any> = {};
+            if (Array.isArray(row)) {
+              headers.forEach((header: any, index: number) => {
+                const headerName = String(header);
+                obj[headerName] = this.decodeGraphValue(row[index]);
+              });
+            }
+            return obj;
+          });
+          return { data: processedData, headers: headers };
+        }
+        
+        // If we can't parse, return raw data in expected format
+        return { data: data || [], headers: headers || [] };
+      }
+      // Fallback if result doesn't match expected format
+      return { data: [], headers: [] };
+    }
+
+    // For other commands, use the structured format
+    if (result && Array.isArray(result)) {
+      if (result.length === 3) {
+        // Standard query result format
+        const headers = result[0] as any;
+        const data = result[1] as any;
+
+        // If there's no data, return empty array
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          return { data: [], headers: headers || [] };
+        }
+
+        // Parse the data into objects using headers
+        if (Array.isArray(headers) && Array.isArray(data)) {
+          const processedData = data.map((row: any) => {
+            const obj: Record<string, any> = {};
+            if (Array.isArray(row)) {
+              headers.forEach((header: any, index: number) => {
+                const headerName = String(header);
+                obj[headerName] = this.decodeGraphValue(row[index]);
+              });
+            }
+            return obj;
+          });
+          return { data: processedData, headers: headers };
+        }
+
+        // If we can't parse the data, return the raw data
+        return { data: data || [], headers: headers || [] };
+      } else if (result.length === 1) {
+        // Write operation result (CREATE, SET, DELETE)
+        return { data: result[0] || [], headers: [] };
+      }
+    }
+
+    return { data: result || [], headers: [] };
   }
 
   async setupGraph(): Promise<void> {
@@ -339,7 +425,10 @@ export class FalkorDBService implements IFalkorDBService {
     return `{${props}}`;
   }
 
-  private async buildProcessedQuery(query: string, params: Record<string, any>): Promise<string> {
+  private async buildProcessedQuery(
+    query: string,
+    params: Record<string, any>
+  ): Promise<string> {
     let processedQuery = query;
     const sanitizedParams: Record<string, any> = {};
     for (const [key, value] of Object.entries(params)) {
@@ -351,7 +440,7 @@ export class FalkorDBService implements IFalkorDBService {
       sanitizedParams[key] = this.sanitizeParameterValue(value);
     }
     for (const [key, value] of Object.entries(sanitizedParams)) {
-      const regex = new RegExp(`\\$${key}\\b`, 'g');
+      const regex = new RegExp(`\\$${key}\\b`, "g");
       const replacement = this.parameterToCypherString(value);
       processedQuery = processedQuery.replace(regex, replacement);
     }
@@ -360,32 +449,36 @@ export class FalkorDBService implements IFalkorDBService {
 
   private decodeGraphValue(value: any): any {
     if (value === null || value === undefined) return null;
-    if (Array.isArray(value)) return value.map(v => this.decodeGraphValue(v));
-    if (typeof value === 'object') {
+    if (Array.isArray(value)) return value.map((v) => this.decodeGraphValue(v));
+    if (typeof value === "object") {
       const out: Record<string, any> = {};
-      for (const [k, v] of Object.entries(value)) out[k] = this.decodeGraphValue(v);
+      for (const [k, v] of Object.entries(value))
+        out[k] = this.decodeGraphValue(v);
       return out;
     }
-    if (typeof value !== 'string') return value;
+    if (typeof value !== "string") return value;
     const t = value.trim();
-    if (t === 'null') return null;
-    if (t === 'true') return true;
-    if (t === 'false') return false;
+    if (t === "null") return null;
+    if (t === "true") return true;
+    if (t === "false") return false;
     if (/^-?\d+(?:\.\d+)?$/.test(t)) return Number(t);
-    if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+    if (
+      (t.startsWith("{") && t.endsWith("}")) ||
+      (t.startsWith("[") && t.endsWith("]"))
+    ) {
       try {
         return JSON.parse(t);
       } catch {
-        if (t.startsWith('[') && t.endsWith(']')) {
+        if (t.startsWith("[") && t.endsWith("]")) {
           const inner = t.slice(1, -1).trim();
           if (!inner) return [];
-          const parts = inner.split(',').map(s => s.trim());
-          return parts.map(p => {
-            const unq = p.replace(/^['"]|['"]$/g, '');
+          const parts = inner.split(",").map((s) => s.trim());
+          return parts.map((p) => {
+            const unq = p.replace(/^['"]|['"]$/g, "");
             if (/^-?\d+(?:\.\d+)?$/.test(unq)) return Number(unq);
-            if (unq === 'true') return true;
-            if (unq === 'false') return false;
-            if (unq === 'null') return null;
+            if (unq === "true") return true;
+            if (unq === "false") return false;
+            if (unq === "null") return null;
             return unq;
           });
         }

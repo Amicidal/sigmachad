@@ -33,6 +33,10 @@ export class FileWatcher extends EventEmitter {
             maxConcurrent: config.maxConcurrent || 10,
         };
     }
+    // Backward-compatible initialize() alias for tests expecting this method
+    async initialize() {
+        return this.start();
+    }
     async start() {
         if (this.watcher) {
             await this.stop();

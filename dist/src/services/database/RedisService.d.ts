@@ -1,3 +1,4 @@
+import { RedisClientType } from 'redis';
 import { IRedisService } from './interfaces';
 export declare class RedisService implements IRedisService {
     private redisClient;
@@ -9,6 +10,7 @@ export declare class RedisService implements IRedisService {
     initialize(): Promise<void>;
     close(): Promise<void>;
     isInitialized(): boolean;
+    getClient(): RedisClientType;
     get(key: string): Promise<string | null>;
     set(key: string, value: string, ttl?: number): Promise<void>;
     del(key: string): Promise<number>;

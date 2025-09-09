@@ -6,6 +6,7 @@ export class MaintenanceService {
     dbService;
     kgService;
     activeTasks = new Map();
+    completedTasks = new Map();
     constructor(dbService, kgService) {
         this.dbService = dbService;
         this.kgService = kgService;
@@ -44,12 +45,16 @@ export class MaintenanceService {
             task.status = 'completed';
             task.endTime = new Date();
             task.progress = 100;
+            // Move completed task to completed tasks map
+            this.completedTasks.set(taskId, { ...task });
             return result;
         }
         catch (error) {
             task.status = 'failed';
             task.endTime = new Date();
             task.error = error instanceof Error ? error.message : 'Unknown error';
+            // Move failed task to completed tasks map
+            this.completedTasks.set(taskId, { ...task });
             throw error;
         }
         finally {
@@ -356,7 +361,8 @@ export class MaintenanceService {
         return Array.from(this.activeTasks.values());
     }
     getTaskStatus(taskId) {
-        return this.activeTasks.get(taskId);
+        // First check active tasks, then completed tasks
+        return this.activeTasks.get(taskId) || this.completedTasks.get(taskId);
     }
 }
 //# sourceMappingURL=MaintenanceService.js.map

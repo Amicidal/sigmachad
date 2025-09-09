@@ -72,6 +72,13 @@ export function createRateLimit(config: Partial<RateLimitConfig> = {}) {
     // Check if rate limit exceeded
     if (bucket.tokens <= 0) {
       const resetTime = bucket.lastRefill + finalConfig.windowMs;
+      const retryAfter = Math.ceil((resetTime - now) / 1000);
+
+      // Ensure rate limit headers are present on 429 responses
+      reply.header('X-RateLimit-Limit', finalConfig.maxRequests.toString());
+      reply.header('X-RateLimit-Remaining', '0');
+      reply.header('X-RateLimit-Reset', resetTime.toString());
+      reply.header('Retry-After', retryAfter.toString());
 
       reply.status(429).send({
         success: false,
@@ -79,7 +86,7 @@ export function createRateLimit(config: Partial<RateLimitConfig> = {}) {
           code: 'RATE_LIMIT_EXCEEDED',
           message: 'Too many requests',
           details: {
-            retryAfter: Math.ceil((resetTime - now) / 1000),
+            retryAfter,
             limit: finalConfig.maxRequests,
             windowMs: finalConfig.windowMs,
           },

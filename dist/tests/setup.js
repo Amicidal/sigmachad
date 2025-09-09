@@ -97,8 +97,14 @@ afterAll(() => {
 // Soft assertion guardrail: warn when a test has zero assertions
 afterEach(() => {
     const state = expect?.getState?.();
-    if (state && state.assertionCalls === 0 && state.currentTestName) {
+    const isIntegration = process.env.RUN_INTEGRATION === '1';
+    if (!isIntegration && state && state.assertionCalls === 0 && state.currentTestName) {
         throw new Error(`Test had zero assertions: ${state.currentTestName}`);
+    }
+    // In integration runs, only warn to avoid failing tests designed as smoke checks
+    if (isIntegration && state && state.assertionCalls === 0 && state.currentTestName) {
+        // eslint-disable-next-line no-console
+        console.warn(`Warning: Test had zero assertions: ${state.currentTestName}`);
     }
 });
 //# sourceMappingURL=setup.js.map

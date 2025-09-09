@@ -66,11 +66,11 @@ describe('MaintenanceService Integration', () => {
         it('should successfully run cleanup task and remove orphaned data', async () => {
             const result = await maintenanceService.runMaintenanceTask('cleanup');
             expect(result).toBeDefined();
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             expect(result.taskId).toMatch(/^cleanup_/);
             expect(typeof result.duration).toBe('number');
             expect(result.duration).toBeGreaterThan(0);
-            expect(Array.isArray(result.changes)).toBe(true);
+            expect(result.changes).toEqual(expect.any(Array));
             expect(result.statistics).toBeDefined();
             // Verify cleanup statistics
             expect(result.statistics.entitiesRemoved).toBeGreaterThanOrEqual(0);
@@ -86,7 +86,7 @@ describe('MaintenanceService Integration', () => {
         it('should handle cleanup task progress tracking', async () => {
             // This test verifies that the task completes and progress is tracked
             const result = await maintenanceService.runMaintenanceTask('cleanup');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             expect(result.taskId).toBeDefined();
         });
         it('should handle cleanup with no orphaned data gracefully', async () => {
@@ -94,7 +94,7 @@ describe('MaintenanceService Integration', () => {
             await maintenanceService.runMaintenanceTask('cleanup');
             // Second cleanup should handle empty state gracefully
             const result = await maintenanceService.runMaintenanceTask('cleanup');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             expect(result.taskId).toBeDefined();
             // Statistics might be 0 but should still be defined
             expect(result.statistics).toBeDefined();
@@ -104,7 +104,7 @@ describe('MaintenanceService Integration', () => {
         it('should successfully run optimization task', async () => {
             const result = await maintenanceService.runMaintenanceTask('optimize');
             expect(result).toBeDefined();
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             expect(result.taskId).toMatch(/^optimize_/);
             expect(typeof result.duration).toBe('number');
             expect(result.duration).toBeGreaterThan(0);
@@ -117,15 +117,15 @@ describe('MaintenanceService Integration', () => {
         });
         it('should optimize Qdrant collections when available', async () => {
             const result = await maintenanceService.runMaintenanceTask('optimize');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             // Check if Qdrant optimization was attempted
             const qdrantOptimizationChanges = result.changes.filter(change => change.type === 'collection_optimized');
             // May be empty if no collections exist, but should not error
-            expect(Array.isArray(qdrantOptimizationChanges)).toBe(true);
+            expect(qdrantOptimizationChanges).toEqual(expect.any(Array));
         });
         it('should perform PostgreSQL vacuum operation', async () => {
             const result = await maintenanceService.runMaintenanceTask('optimize');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             // Check for vacuum operation
             const vacuumChanges = result.changes.filter(change => change.type === 'postgres_vacuum');
             // Should contain vacuum operation
@@ -136,11 +136,11 @@ describe('MaintenanceService Integration', () => {
         it('should successfully run reindexing task', async () => {
             const result = await maintenanceService.runMaintenanceTask('reindex');
             expect(result).toBeDefined();
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             expect(result.taskId).toMatch(/^reindex_/);
             expect(typeof result.duration).toBe('number');
             expect(result.duration).toBeGreaterThan(0);
-            expect(Array.isArray(result.changes)).toBe(true);
+            expect(result.changes).toEqual(expect.any(Array));
             expect(result.statistics).toBeDefined();
             // Verify reindexing statistics
             expect(typeof result.statistics.indexesRebuilt).toBe('number');
@@ -149,19 +149,19 @@ describe('MaintenanceService Integration', () => {
         });
         it('should handle reindexing of PostgreSQL tables', async () => {
             const result = await maintenanceService.runMaintenanceTask('reindex');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             // Check for table reindexing changes
             const tableReindexChanges = result.changes.filter(change => change.type === 'table_reindexed');
             // Should contain table reindexing operations
-            expect(Array.isArray(tableReindexChanges)).toBe(true);
+            expect(tableReindexChanges).toEqual(expect.any(Array));
         });
         it('should handle reindexing of Qdrant collections', async () => {
             const result = await maintenanceService.runMaintenanceTask('reindex');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             // Check for collection reindexing changes
             const collectionReindexChanges = result.changes.filter(change => change.type === 'collection_reindexed');
             // Should contain collection reindexing operations
-            expect(Array.isArray(collectionReindexChanges)).toBe(true);
+            expect(collectionReindexChanges).toEqual(expect.any(Array));
         });
     });
     describe('Validation Operations Integration', () => {
@@ -189,7 +189,7 @@ describe('MaintenanceService Integration', () => {
         it('should successfully run validation task', async () => {
             const result = await maintenanceService.runMaintenanceTask('validate');
             expect(result).toBeDefined();
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             expect(result.taskId).toMatch(/^validate_/);
             expect(typeof result.duration).toBe('number');
             expect(result.duration).toBeGreaterThan(0);
@@ -203,7 +203,7 @@ describe('MaintenanceService Integration', () => {
         });
         it('should validate entity integrity', async () => {
             const result = await maintenanceService.runMaintenanceTask('validate');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             // Check for entity validation changes
             const entityValidationChanges = result.changes.filter(change => change.type === 'invalid_entity');
             // Should contain entity validation results
@@ -211,7 +211,7 @@ describe('MaintenanceService Integration', () => {
         });
         it('should validate Qdrant collections', async () => {
             const result = await maintenanceService.runMaintenanceTask('validate');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             // Check for collection validation changes
             const collectionValidationChanges = result.changes.filter(change => change.type === 'collection_integrity_issue' ||
                 change.type === 'collection_validation_failed');
@@ -220,7 +220,7 @@ describe('MaintenanceService Integration', () => {
         });
         it('should validate database connectivity', async () => {
             const result = await maintenanceService.runMaintenanceTask('validate');
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             // If database connectivity validation fails, it should be reflected in the result
             // The test passes if the validation completes (regardless of connectivity status)
             expect(result).toBeDefined();
@@ -306,7 +306,7 @@ describe('MaintenanceService Integration', () => {
             await clearTestData(dbService);
             const result = await maintenanceService.runMaintenanceTask('cleanup');
             // Should succeed even with empty data
-            expect(result.success).toBe(true);
+            expect(result).toEqual(expect.objectContaining({ success: true }));
             expect(result.taskId).toBeDefined();
             expect(result.statistics).toBeDefined();
         });
@@ -325,7 +325,7 @@ describe('MaintenanceService Integration', () => {
             for (let i = 0; i < cycles; i++) {
                 const result = await maintenanceService.runMaintenanceTask('cleanup');
                 results.push(result);
-                expect(result.success).toBe(true);
+                expect(result).toEqual(expect.objectContaining({ success: true }));
             }
             // All cycles should have succeeded
             expect(results.every(r => r.success)).toBe(true);

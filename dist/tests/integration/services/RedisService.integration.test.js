@@ -16,7 +16,7 @@ describe('RedisService Integration', () => {
             return;
         }
         const testConfig = {
-            url: process.env.REDIS_URL || 'redis://localhost:6379',
+            url: process.env.REDIS_URL || 'redis://localhost:6381',
         };
         redisService = new RedisService(testConfig);
         await redisService.initialize();
@@ -263,7 +263,8 @@ describe('RedisService Integration', () => {
                 expect(result).toBe(1);
             });
             // Verify all keys are gone
-            const finalValues = await Promise.all(getPromises);
+            const finalGetPromises = testKeys.map(key => redisService.get(key));
+            const finalValues = await Promise.all(finalGetPromises);
             finalValues.forEach(value => {
                 expect(value).toBeNull();
             });
@@ -634,7 +635,7 @@ describe('RedisService Integration', () => {
                 return;
             }
             const userId = 'user_rate_limit_test';
-            const windowSeconds = 60; // 1 minute window
+            const windowSeconds = 2; // shorter window for tests
             const maxRequests = 5;
             // Simulate rate limiting logic
             const rateLimitKey = `ratelimit:${userId}`;

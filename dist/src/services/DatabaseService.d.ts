@@ -2,8 +2,8 @@
  * Database Service for Memento
  * Orchestrates specialized database services for FalkorDB, Qdrant, PostgreSQL, and Redis
  */
-import { QdrantClient } from '@qdrant/js-client-rest';
-import { DatabaseConfig, IFalkorDBService, IQdrantService, IPostgreSQLService, IRedisService, IDatabaseHealthCheck } from './database';
+import { QdrantClient } from "@qdrant/js-client-rest";
+import { DatabaseConfig, IFalkorDBService, IQdrantService, IPostgreSQLService, IRedisService, IDatabaseHealthCheck } from "./database";
 export interface DatabaseQueryResult {
     rows?: any[];
     rowCount?: number;
@@ -17,7 +17,7 @@ export interface FalkorDBQueryResult {
 export interface TestSuiteResult {
     id?: string;
     name: string;
-    status: 'passed' | 'failed' | 'skipped';
+    status: "passed" | "failed" | "skipped";
     duration: number;
     timestamp: Date;
     testResults: TestResult[];
@@ -25,7 +25,7 @@ export interface TestSuiteResult {
 export interface TestResult {
     id?: string;
     name: string;
-    status: 'passed' | 'failed' | 'skipped';
+    status: "passed" | "failed" | "skipped";
     duration: number;
     error?: string;
 }
@@ -38,10 +38,10 @@ export interface FlakyTestAnalysis {
     failurePatterns: string[];
 }
 export type DatabaseServiceDeps = {
-    falkorFactory?: (cfg: DatabaseConfig['falkordb']) => IFalkorDBService;
-    qdrantFactory?: (cfg: DatabaseConfig['qdrant']) => IQdrantService;
-    postgresFactory?: (cfg: DatabaseConfig['postgresql']) => IPostgreSQLService;
-    redisFactory?: (cfg: NonNullable<DatabaseConfig['redis']>) => IRedisService;
+    falkorFactory?: (cfg: DatabaseConfig["falkordb"]) => IFalkorDBService;
+    qdrantFactory?: (cfg: DatabaseConfig["qdrant"]) => IQdrantService;
+    postgresFactory?: (cfg: DatabaseConfig["postgresql"]) => IPostgreSQLService;
+    redisFactory?: (cfg: NonNullable<DatabaseConfig["redis"]>) => IRedisService;
 };
 export declare class DatabaseService {
     private config;
@@ -114,7 +114,7 @@ export declare class DatabaseService {
      */
     getCoverageHistory(entityId: string, days?: number): Promise<any[]>;
 }
-export { DatabaseConfig } from './database';
+export { DatabaseConfig } from "./database";
 export declare function getDatabaseService(config?: DatabaseConfig): DatabaseService;
 export declare function createDatabaseConfig(): DatabaseConfig;
 export declare function createTestDatabaseConfig(): DatabaseConfig;

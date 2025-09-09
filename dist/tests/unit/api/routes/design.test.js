@@ -5,6 +5,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { registerDesignRoutes } from '../../../../src/api/routes/design.js';
 import { createMockRequest, createMockReply } from '../../../test-utils.js';
+import { makeRealisticKgService } from '../../../test-utils/kg-realistic';
+import { makeRealisticDbService } from '../../../test-utils/db-realistic';
 // Mock external dependencies
 vi.mock('../../../../src/services/KnowledgeGraphService.js');
 vi.mock('../../../../src/services/DatabaseService.js');
@@ -78,15 +80,9 @@ describe('Design Routes', () => {
     beforeEach(() => {
         // Create fresh mocks for each test
         mockApp = createMockApp();
-        mockKgService = {
-            createEntity: vi.fn().mockResolvedValue(undefined),
-            updateEntity: vi.fn().mockResolvedValue(undefined),
-            search: vi.fn().mockResolvedValue([]),
-            getRelationships: vi.fn().mockResolvedValue([])
-        };
-        mockDbService = {
-            postgresQuery: vi.fn().mockResolvedValue([])
-        };
+        // Use a realistic KG mock; tests still stub specifics where needed
+        mockKgService = makeRealisticKgService();
+        mockDbService = makeRealisticDbService();
         mockRequest = createMockRequest();
         mockReply = createMockReply();
         // Reset all mocks
@@ -130,7 +126,7 @@ describe('Design Routes', () => {
             await createSpecHandler(mockRequest, mockReply);
             expect(mockReply.send).toHaveBeenCalled();
             const callArgs = mockReply.send.mock.calls[0][0];
-            expect(callArgs.success).toBe(true);
+            expect(callArgs).toEqual(expect.objectContaining({ success: true }));
             expect(callArgs.data).toHaveProperty('specId');
             expect(callArgs.data).toHaveProperty('spec');
             expect(callArgs.data).toHaveProperty('validationResults');
@@ -154,7 +150,7 @@ describe('Design Routes', () => {
             await createSpecHandler(mockRequest, mockReply);
             expect(mockReply.send).toHaveBeenCalled();
             const callArgs = mockReply.send.mock.calls[0][0];
-            expect(callArgs.success).toBe(true);
+            expect(callArgs).toEqual(expect.objectContaining({ success: true }));
             expect(callArgs.data).toHaveProperty('validationResults');
             expect(callArgs.data.validationResults.isValid).toBe(true); // Warnings don't make it invalid
             expect(callArgs.data.validationResults.issues).toBeDefined();

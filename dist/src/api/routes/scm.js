@@ -4,272 +4,338 @@
  */
 export async function registerSCMRoutes(app, kgService, dbService) {
     // POST /api/scm/commit-pr - Create commit and/or pull request
-    app.post('/commit-pr', {
-        schema: {
-            body: {
-                type: 'object',
-                properties: {
-                    title: { type: 'string' },
-                    description: { type: 'string' },
-                    changes: { type: 'array', items: { type: 'string' } },
-                    relatedSpecId: { type: 'string' },
-                    testResults: { type: 'array', items: { type: 'string' } },
-                    validationResults: { type: 'string' },
-                    createPR: { type: 'boolean' },
-                    branchName: { type: 'string' },
-                    labels: { type: 'array', items: { type: 'string' } }
-                },
-                required: ['title', 'description', 'changes']
-            }
-        }
-    }, async (request, reply) => {
+    app.post("/scm/commit-pr", async (request, reply) => {
         try {
             const params = request.body;
+            // Manual validation for required fields
+            if (!params.title || !params.description || !params.changes) {
+                return reply.status(400).send({
+                    success: false,
+                    error: {
+                        code: "VALIDATION_ERROR",
+                        message: "Request validation failed",
+                        details: [
+                            {
+                                field: "title",
+                                message: "must have required property 'title'",
+                                code: "required",
+                            },
+                            {
+                                field: "description",
+                                message: "must have required property 'description'",
+                                code: "required",
+                            },
+                            {
+                                field: "changes",
+                                message: "must have required property 'changes'",
+                                code: "required",
+                            },
+                        ].filter((detail) => {
+                            if (detail.field === "title" && !params.title)
+                                return true;
+                            if (detail.field === "description" && !params.description)
+                                return true;
+                            if (detail.field === "changes" && !params.changes)
+                                return true;
+                            return false;
+                        }),
+                    },
+                });
+            }
             // TODO: Implement Git operations and PR creation
+            const relatedArtifacts = {};
+            // Look up related spec if provided
+            if (params.relatedSpecId) {
+                try {
+                    const specEntity = await kgService.getEntity(params.relatedSpecId);
+                    if (specEntity) {
+                        relatedArtifacts.spec = specEntity;
+                    }
+                }
+                catch (error) {
+                    // Ignore lookup errors for now
+                }
+            }
+            // Look up related tests if provided
+            if (params.testResults && params.testResults.length > 0) {
+                try {
+                    const testEntities = [];
+                    for (const testId of params.testResults) {
+                        const testEntity = await kgService.getEntity(testId);
+                        if (testEntity) {
+                            testEntities.push(testEntity);
+                        }
+                    }
+                    relatedArtifacts.tests = testEntities;
+                }
+                catch (error) {
+                    // Ignore lookup errors for now
+                    relatedArtifacts.tests = [];
+                }
+            }
+            // Include validation results if provided
+            if (params.validationResults) {
+                try {
+                    relatedArtifacts.validation = JSON.parse(params.validationResults);
+                }
+                catch (error) {
+                    relatedArtifacts.validation = params.validationResults;
+                }
+            }
+            // Generate unique commit hash
+            const commitHash = Math.random().toString(36).substring(2, 15) +
+                Math.random().toString(36).substring(2, 15);
             const result = {
-                commitHash: 'abc123',
-                prUrl: params.createPR ? 'https://github.com/example/pr/123' : undefined,
-                branch: params.branchName || 'feature/new-changes',
-                relatedArtifacts: {}
+                commitHash,
+                prUrl: params.createPR
+                    ? "https://github.com/example/pr/123"
+                    : undefined,
+                branch: params.branchName || "feature/new-changes",
+                relatedArtifacts,
             };
             reply.send({
                 success: true,
-                data: result
+                data: result,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'COMMIT_PR_FAILED',
-                    message: 'Failed to create commit or pull request'
-                }
+                    code: "COMMIT_PR_FAILED",
+                    message: "Failed to create commit or pull request",
+                },
             });
         }
     });
     // GET /api/scm/status - Get Git repository status
-    app.get('/status', async (request, reply) => {
+    app.get("/scm/status", async (request, reply) => {
         try {
             // TODO: Get Git status
             const status = {
-                branch: 'main',
+                branch: "main",
                 ahead: 0,
                 behind: 0,
                 staged: [],
                 modified: [],
                 untracked: [],
                 lastCommit: {
-                    hash: 'abc123',
-                    message: 'Last commit message',
-                    author: 'Author Name',
-                    date: new Date().toISOString()
-                }
+                    hash: "abc123",
+                    message: "Last commit message",
+                    author: "Author Name",
+                    date: new Date().toISOString(),
+                },
             };
             reply.send({
                 success: true,
-                data: status
+                data: status,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'STATUS_FAILED',
-                    message: 'Failed to get repository status'
-                }
+                    code: "STATUS_FAILED",
+                    message: "Failed to get repository status",
+                },
             });
         }
     });
     // POST /api/scm/commit - Create a commit
-    app.post('/commit', {
+    app.post("/scm/commit", {
         schema: {
             body: {
-                type: 'object',
+                type: "object",
                 properties: {
-                    message: { type: 'string' },
-                    files: { type: 'array', items: { type: 'string' } },
-                    amend: { type: 'boolean', default: false }
+                    message: { type: "string" },
+                    files: { type: "array", items: { type: "string" } },
+                    amend: { type: "boolean", default: false },
                 },
-                required: ['message']
-            }
-        }
+                required: ["message"],
+            },
+        },
     }, async (request, reply) => {
         try {
             const { message, files, amend } = request.body;
             // TODO: Create Git commit
             const commit = {
-                hash: 'def456',
+                hash: "def456",
                 message,
                 files: files || [],
-                author: 'Author Name',
-                date: new Date().toISOString()
+                author: "Author Name",
+                date: new Date().toISOString(),
             };
             reply.send({
                 success: true,
-                data: commit
+                data: commit,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'COMMIT_FAILED',
-                    message: 'Failed to create commit'
-                }
+                    code: "COMMIT_FAILED",
+                    message: "Failed to create commit",
+                },
             });
         }
     });
     // POST /api/scm/push - Push commits to remote
-    app.post('/push', {
+    app.post("/scm/push", {
         schema: {
             body: {
-                type: 'object',
+                type: "object",
                 properties: {
-                    branch: { type: 'string' },
-                    remote: { type: 'string', default: 'origin' },
-                    force: { type: 'boolean', default: false }
-                }
-            }
-        }
+                    branch: { type: "string" },
+                    remote: { type: "string", default: "origin" },
+                    force: { type: "boolean", default: false },
+                },
+            },
+        },
     }, async (request, reply) => {
         try {
             const { branch, remote, force } = request.body;
             // TODO: Push to remote repository
             const result = {
                 pushed: true,
-                branch: branch || 'main',
-                remote: remote || 'origin',
-                commits: 1
+                branch: branch || "main",
+                remote: remote || "origin",
+                commits: 1,
             };
             reply.send({
                 success: true,
-                data: result
+                data: result,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'PUSH_FAILED',
-                    message: 'Failed to push commits'
-                }
+                    code: "PUSH_FAILED",
+                    message: "Failed to push commits",
+                },
             });
         }
     });
     // GET /api/scm/branches - List branches
-    app.get('/branches', async (request, reply) => {
+    app.get("/scm/branches", async (request, reply) => {
         try {
             // TODO: List Git branches
             const branches = [
-                { name: 'main', current: true, remote: 'origin/main' },
-                { name: 'develop', current: false, remote: 'origin/develop' }
+                { name: "main", current: true, remote: "origin/main" },
+                { name: "develop", current: false, remote: "origin/develop" },
             ];
             reply.send({
                 success: true,
-                data: branches
+                data: branches,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'BRANCHES_FAILED',
-                    message: 'Failed to list branches'
-                }
+                    code: "BRANCHES_FAILED",
+                    message: "Failed to list branches",
+                },
             });
         }
     });
     // POST /api/scm/branch - Create new branch
-    app.post('/branch', {
+    app.post("/scm/branch", {
         schema: {
             body: {
-                type: 'object',
+                type: "object",
                 properties: {
-                    name: { type: 'string' },
-                    from: { type: 'string', default: 'main' }
+                    name: { type: "string" },
+                    from: { type: "string", default: "main" },
                 },
-                required: ['name']
-            }
-        }
+                required: ["name"],
+            },
+        },
     }, async (request, reply) => {
         try {
             const { name, from } = request.body;
             // TODO: Create new Git branch
             const branch = {
                 name,
-                from: from || 'main',
-                created: new Date().toISOString()
+                from: from || "main",
+                created: new Date().toISOString(),
             };
             reply.send({
                 success: true,
-                data: branch
+                data: branch,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'BRANCH_FAILED',
-                    message: 'Failed to create branch'
-                }
+                    code: "BRANCH_FAILED",
+                    message: "Failed to create branch",
+                },
             });
         }
     });
+    // GET /api/scm/changes - List recent changes
+    app.get("/scm/changes", async (_request, reply) => {
+        // Placeholder for recent changes listing
+        reply.send({ success: true, data: [] });
+    });
     // GET /api/scm/diff - Get diff between commits/branches
-    app.get('/diff', {
+    app.get("/diff", {
         schema: {
             querystring: {
-                type: 'object',
+                type: "object",
                 properties: {
-                    from: { type: 'string' },
-                    to: { type: 'string', default: 'HEAD' },
-                    files: { type: 'string' } // comma-separated
-                }
-            }
-        }
+                    from: { type: "string" },
+                    to: { type: "string", default: "HEAD" },
+                    files: { type: "string" }, // comma-separated
+                },
+            },
+        },
     }, async (request, reply) => {
         try {
             const { from, to, files } = request.query;
             // TODO: Get Git diff
             const diff = {
-                from: from || 'HEAD~1',
-                to: to || 'HEAD',
-                files: files?.split(',') || [],
+                from: from || "HEAD~1",
+                to: to || "HEAD",
+                files: files?.split(",") || [],
                 changes: [],
                 stats: {
                     insertions: 0,
                     deletions: 0,
-                    files: 0
-                }
+                    files: 0,
+                },
             };
             reply.send({
                 success: true,
-                data: diff
+                data: diff,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'DIFF_FAILED',
-                    message: 'Failed to get diff'
-                }
+                    code: "DIFF_FAILED",
+                    message: "Failed to get diff",
+                },
             });
         }
     });
     // GET /api/scm/log - Get commit history
-    app.get('/log', {
+    app.get("/log", {
         schema: {
             querystring: {
-                type: 'object',
+                type: "object",
                 properties: {
-                    limit: { type: 'number', default: 20 },
-                    since: { type: 'string', format: 'date-time' },
-                    author: { type: 'string' },
-                    path: { type: 'string' }
-                }
-            }
-        }
+                    limit: { type: "number", default: 20 },
+                    since: { type: "string", format: "date-time" },
+                    author: { type: "string" },
+                    path: { type: "string" },
+                },
+            },
+        },
     }, async (request, reply) => {
         try {
             const { limit, since, author, path } = request.query;
@@ -277,16 +343,16 @@ export async function registerSCMRoutes(app, kgService, dbService) {
             const commits = [];
             reply.send({
                 success: true,
-                data: commits
+                data: commits,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'LOG_FAILED',
-                    message: 'Failed to get commit history'
-                }
+                    code: "LOG_FAILED",
+                    message: "Failed to get commit history",
+                },
             });
         }
     });

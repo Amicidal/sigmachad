@@ -17,15 +17,15 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _ctx_out: import("./base.js").TRPCContext;
                 _input_in: {
                     file: string;
+                    types?: string[] | undefined;
                     lineStart?: number | undefined;
                     lineEnd?: number | undefined;
-                    types?: string[] | undefined;
                 };
                 _input_out: {
                     file: string;
+                    types?: string[] | undefined;
                     lineStart?: number | undefined;
                     lineEnd?: number | undefined;
-                    types?: string[] | undefined;
                 };
                 _output_in: typeof import("@trpc/server").unsetMarker;
                 _output_out: typeof import("@trpc/server").unsetMarker;
@@ -133,8 +133,8 @@ export declare const createTRPCClient: (baseUrl: string) => {
             }, {
                 issues: {
                     field: string;
-                    severity: "error" | "warning";
                     message: string;
+                    severity: "error" | "warning";
                     file?: string | undefined;
                     line?: number | undefined;
                     column?: number | undefined;
@@ -292,9 +292,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _ctx_out: import("./base.js").TRPCContext;
                 _input_in: {
                     type?: "feature" | "component" | "page" | "system" | undefined;
-                    status?: "draft" | "approved" | "implemented" | "deprecated" | "review" | undefined;
                     limit?: number | undefined;
                     offset?: number | undefined;
+                    status?: "draft" | "approved" | "implemented" | "deprecated" | "review" | undefined;
                 };
                 _input_out: {
                     limit: number;
@@ -379,8 +379,8 @@ export declare const createTRPCClient: (baseUrl: string) => {
                     direction?: "outgoing" | "incoming" | "both" | undefined;
                 };
                 _input_out: {
-                    entityId: string;
                     limit: number;
+                    entityId: string;
                     direction: "outgoing" | "incoming" | "both";
                     type?: string | undefined;
                 };

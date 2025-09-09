@@ -2,10 +2,10 @@
  * Rollback Capabilities Service
  * Handles reverting changes when synchronization operations fail
  */
-import { KnowledgeGraphService } from './KnowledgeGraphService.ts';
-import { DatabaseService } from './DatabaseService.ts';
-import { Entity } from '../models/entities.ts';
-import { GraphRelationship } from '../models/relationships.ts';
+import { KnowledgeGraphService } from "./KnowledgeGraphService.ts";
+import { DatabaseService } from "./DatabaseService.ts";
+import { Entity } from "../models/entities.ts";
+import { GraphRelationship } from "../models/relationships.ts";
 export interface RollbackPoint {
     id: string;
     operationId: string;
@@ -16,13 +16,13 @@ export interface RollbackPoint {
 }
 export interface RollbackEntity {
     id: string;
-    action: 'create' | 'update' | 'delete';
+    action: "create" | "update" | "delete";
     previousState?: Entity;
     newState?: Entity;
 }
 export interface RollbackRelationship {
     id: string;
-    action: 'create' | 'update' | 'delete';
+    action: "create" | "update" | "delete";
     previousState?: GraphRelationship;
     newState?: GraphRelationship;
 }
@@ -34,7 +34,7 @@ export interface RollbackResult {
     partialSuccess: boolean;
 }
 export interface RollbackError {
-    type: 'entity' | 'relationship';
+    type: "entity" | "relationship";
     id: string;
     action: string;
     error: string;
@@ -65,11 +65,11 @@ export declare class RollbackCapabilities {
     /**
      * Record an entity change for potential rollback
      */
-    recordEntityChange(rollbackId: string, entityId: string, action: 'create' | 'update' | 'delete', previousState?: Entity, newState?: Entity): Promise<void>;
+    recordEntityChange(rollbackId: string, entityId: string, action: "create" | "update" | "delete", previousState?: Entity, newState?: Entity): Promise<void>;
     /**
      * Record a relationship change for potential rollback
      */
-    recordRelationshipChange(rollbackId: string, relationshipId: string, action: 'create' | 'update' | 'delete', previousState?: GraphRelationship, newState?: GraphRelationship): void;
+    recordRelationshipChange(rollbackId: string, relationshipId: string, action: "create" | "update" | "delete", previousState?: GraphRelationship, newState?: GraphRelationship): void;
     /**
      * Perform a rollback to a specific point
      */

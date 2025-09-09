@@ -159,7 +159,9 @@ describe('Admin Routes', () => {
             // Mock healthy database response
             mockDbService.healthCheck = vi.fn().mockResolvedValue({
                 falkordb: { status: 'healthy' },
-                qdrant: { status: 'healthy' }
+                qdrant: { status: 'healthy' },
+                postgresql: { status: 'healthy' },
+                redis: { status: 'unknown' }
             });
             // Mock knowledge graph metrics
             mockKgService.listEntities = vi.fn().mockResolvedValue({
@@ -201,8 +203,9 @@ describe('Admin Routes', () => {
         });
         it('should return unhealthy status when services are down', async () => {
             mockDbService.healthCheck = vi.fn().mockResolvedValue({
-                falkordb: false,
-                qdrant: false
+                falkordb: { status: 'unhealthy' },
+                qdrant: { status: 'unhealthy' },
+                postgresql: { status: 'unhealthy' },
             });
             await healthHandler(mockRequest, mockReply);
             expect(mockReply.status).toHaveBeenCalledWith(503);
@@ -216,7 +219,8 @@ describe('Admin Routes', () => {
         it('should handle knowledge graph metric errors gracefully', async () => {
             mockDbService.healthCheck = vi.fn().mockResolvedValue({
                 falkordb: { status: 'healthy' },
-                qdrant: { status: 'healthy' }
+                qdrant: { status: 'healthy' },
+                postgresql: { status: 'healthy' },
             });
             mockKgService.listEntities = vi.fn().mockRejectedValue(new Error('Graph error'));
             await healthHandler(mockRequest, mockReply);
@@ -807,8 +811,8 @@ describe('Admin Routes', () => {
             await maintenanceHandler(mockRequest, mockReply);
             const responseData = mockReply.send.mock.calls[0][0].data;
             expect(responseData.tasks).toHaveLength(2);
-            expect(responseData.tasks[0].success).toBe(true);
-            expect(responseData.tasks[1].success).toBe(false);
+            expect(responseData.tasks[0]).toEqual(expect.objectContaining({ success: true }));
+            expect(responseData.tasks[1]).toEqual(expect.objectContaining({ success: false }));
             expect(responseData.tasks[1].error).toBe('Invalid maintenance task');
         });
         it('should return 503 when maintenance service is not available', async () => {

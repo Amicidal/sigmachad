@@ -1,4 +1,9 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
+export type HealthStatus = 'healthy' | 'unhealthy' | 'unknown';
+export interface HealthComponentStatus {
+    status: HealthStatus;
+    details?: any;
+}
 export interface DatabaseConfig {
     falkordb: {
         url: string;
@@ -72,9 +77,9 @@ export interface IRedisService {
     healthCheck(): Promise<boolean>;
 }
 export interface IDatabaseHealthCheck {
-    falkordb: boolean;
-    qdrant: boolean;
-    postgresql: boolean;
-    redis?: boolean;
+    falkordb: HealthComponentStatus;
+    qdrant: HealthComponentStatus;
+    postgresql: HealthComponentStatus;
+    redis?: HealthComponentStatus;
 }
 //# sourceMappingURL=interfaces.d.ts.map

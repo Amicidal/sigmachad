@@ -15,9 +15,35 @@ import { EventEmitter } from 'events';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
 import { RelationshipType } from '../../../src/models/relationships';
 // Mock implementations
+import { makeNodeRow, makeRelationshipRow } from '../../test-utils/graph-fixtures';
 const mockDatabaseService = {
     initialize: vi.fn().mockResolvedValue(undefined),
-    falkordbQuery: vi.fn().mockResolvedValue([]),
+    // Provide a realistic default for generic queries, while specific tests override as needed
+    falkordbQuery: vi.fn().mockImplementation(async (query, _params) => {
+        // Index check queries can legitimately return empty
+        if (query.includes('CALL db.indexes')) {
+            return [];
+        }
+        // Relationship listing
+        if (query.includes('RETURN r') || query.includes('RETURN r,')) {
+            return [
+                makeRelationshipRow({ id: 'rel-1', type: 'CALLS', fromId: 'entity-a', toId: 'entity-b' })
+            ];
+        }
+        // Node listing / structural search / traversal
+        if (query.includes('RETURN n') || query.includes('RETURN DISTINCT connected')) {
+            return [
+                makeNodeRow({ id: 'node-1', type: 'file', path: '/src/a.ts' }),
+                makeNodeRow({ id: 'node-2', type: 'function', name: 'foo' }),
+            ];
+        }
+        // Paths (content not asserted in tests)
+        if (query.includes('RETURN path')) {
+            return [{ path: ['node-1', 'node-2'] }];
+        }
+        // Fallback to empty
+        return [];
+    }),
     qdrant: {
         search: vi.fn().mockResolvedValue({ points: [] }),
         upsert: vi.fn().mockResolvedValue(undefined),

@@ -2,13 +2,13 @@
  * MCP Server Router for Memento
  * Provides MCP protocol support for AI assistants (Claude, etc.)
  */
-import { FastifyInstance } from 'fastify';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { KnowledgeGraphService } from '../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../services/DatabaseService.js';
-import { ASTParser } from '../services/ASTParser.js';
-import { TestEngine } from '../services/TestEngine.js';
-import { SecurityScanner } from '../services/SecurityScanner.js';
+import { FastifyInstance } from "fastify";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
+import { DatabaseService } from "../services/DatabaseService.js";
+import { ASTParser } from "../services/ASTParser.js";
+import { TestEngine } from "../services/TestEngine.js";
+import { SecurityScanner } from "../services/SecurityScanner.js";
 interface ToolExecutionMetrics {
     toolName: string;
     executionCount: number;
@@ -74,6 +74,7 @@ export declare class MCPRouter {
     getPerformanceReport(): any;
     private generatePerformanceRecommendations;
     private determineHealthStatus;
+    private handleSimpleToolCall;
     private processMCPRequest;
     validateServer(): Promise<{
         isValid: boolean;

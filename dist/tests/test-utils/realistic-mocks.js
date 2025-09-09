@@ -30,7 +30,7 @@ export class RealisticFalkorDBMock {
     }
     async initialize() {
         if (this.config.connectionFailures && this.rng() * 100 < 50) {
-            throw new Error('FalkorDB connection failed: Connection refused');
+            throw new Error("FalkorDB connection failed: Connection refused");
         }
         await this.simulateLatency();
         this.initialized = true;
@@ -49,21 +49,21 @@ export class RealisticFalkorDBMock {
         return {
             mockClient: true,
             queryCount: this.queryCount,
-            sendCommand: vi.fn().mockResolvedValue('mock-command-result')
+            sendCommand: vi.fn().mockResolvedValue("mock-command-result"),
         };
     }
     async query(query, params) {
         if (!this.initialized) {
-            throw new Error('FalkorDB not initialized');
+            throw new Error("FalkorDB not initialized");
         }
         await this.simulateLatency();
         if (this.shouldFail()) {
             this.failureCount++;
             const errors = [
-                'Query timeout exceeded',
-                'Connection lost during query execution',
-                'Constraint violation: duplicate key',
-                'Syntax error in Cypher query',
+                "Query timeout exceeded",
+                "Connection lost during query execution",
+                "Constraint violation: duplicate key",
+                "Syntax error in Cypher query",
             ];
             throw new Error(errors[Math.floor(this.rng() * errors.length)]);
         }
@@ -72,35 +72,35 @@ export class RealisticFalkorDBMock {
         if (this.config.dataCorruption && this.rng() < 0.1) {
             return {
                 corrupted: true,
-                error: 'Data integrity check failed',
+                error: "Data integrity check failed",
                 originalQuery: query,
             };
         }
         // Return realistic results based on query type
-        if (query.includes('MATCH')) {
+        if (query.includes("MATCH")) {
             return this.generateRealisticMatchResults();
         }
-        else if (query.includes('CREATE')) {
+        else if (query.includes("CREATE")) {
             return { created: 1, properties: params };
         }
-        else if (query.includes('DELETE')) {
+        else if (query.includes("DELETE")) {
             return { deleted: Math.floor(this.rng() * 10) };
         }
-        return { query, params, result: 'success' };
+        return { query, params, result: "success" };
     }
     async command(...args) {
         if (!this.initialized) {
-            throw new Error('FalkorDB not initialized');
+            throw new Error("FalkorDB not initialized");
         }
         await this.simulateLatency();
         if (this.shouldFail()) {
-            throw new Error('Command execution failed');
+            throw new Error("Command execution failed");
         }
-        return { args, result: 'command-success' };
+        return { args, result: "command-success" };
     }
     async setupGraph() {
         if (!this.initialized) {
-            throw new Error('FalkorDB not initialized');
+            throw new Error("FalkorDB not initialized");
         }
         await this.simulateLatency();
     }
@@ -123,7 +123,7 @@ export class RealisticFalkorDBMock {
     }
     async simulateLatency() {
         if (this.config.latencyMs > 0) {
-            await new Promise(resolve => setTimeout(resolve, this.config.latencyMs));
+            await new Promise((resolve) => setTimeout(resolve, this.config.latencyMs));
         }
     }
     shouldFail() {
@@ -135,11 +135,11 @@ export class RealisticFalkorDBMock {
         for (let i = 0; i < count; i++) {
             results.push({
                 id: `node-${i}`,
-                type: ['file', 'function', 'class'][Math.floor(this.rng() * 3)],
+                type: ["file", "function", "class"][Math.floor(this.rng() * 3)],
                 properties: {
                     name: `Entity${i}`,
                     created: new Date().toISOString(),
-                }
+                },
             });
         }
         return results;
@@ -163,7 +163,7 @@ export class RealisticQdrantMock {
     }
     async initialize() {
         if (this.config.connectionFailures && this.rng() < 0.3) {
-            throw new Error('Qdrant connection failed: Service unavailable');
+            throw new Error("Qdrant connection failed: Service unavailable");
         }
         await this.simulateLatency();
         this.initialized = true;
@@ -183,50 +183,52 @@ export class RealisticQdrantMock {
         return {
             search: async (collection, params) => {
                 if (this.shouldFail()) {
-                    throw new Error('Vector search failed: Index corrupted');
+                    throw new Error("Vector search failed: Index corrupted");
                 }
                 await this.simulateLatency();
                 // Return realistic search results
                 return {
                     points: [
                         {
-                            id: 'vec-1',
+                            id: "vec-1",
                             score: 0.95,
-                            payload: { type: 'document', content: 'test' }
+                            payload: { type: "document", content: "test" },
                         },
                         {
-                            id: 'vec-2',
+                            id: "vec-2",
                             score: 0.87,
-                            payload: { type: 'code', language: 'typescript' }
-                        }
-                    ]
+                            payload: { type: "code", language: "typescript" },
+                        },
+                    ],
                 };
             },
             upsert: async (collection, data) => {
                 if (this.shouldFail()) {
-                    throw new Error('Upsert failed: Collection locked');
+                    throw new Error("Upsert failed: Collection locked");
                 }
                 await this.simulateLatency();
                 if (!this.collections.has(collection)) {
                     this.collections.set(collection, []);
                 }
                 this.collections.get(collection).push(data);
-                return { status: 'completed' };
+                return { status: "completed" };
             },
             createCollection: async (name, config) => {
                 await this.simulateLatency();
                 this.collections.set(name, []);
-                return { status: 'created' };
+                return { status: "created" };
             },
             deleteCollection: async (name) => {
                 await this.simulateLatency();
                 this.collections.delete(name);
-                return { status: 'deleted' };
+                return { status: "deleted" };
             },
             getCollections: async () => {
                 await this.simulateLatency();
                 return {
-                    collections: Array.from(this.collections.keys()).map(name => ({ name }))
+                    collections: Array.from(this.collections.keys()).map((name) => ({
+                        name,
+                    })),
                 };
             },
             createSnapshot: async (collectionName) => {
@@ -234,19 +236,19 @@ export class RealisticQdrantMock {
                 return {
                     name: `${collectionName}_snapshot_${Date.now()}`,
                     collection: collectionName,
-                    created_at: new Date().toISOString()
+                    created_at: new Date().toISOString(),
                 };
             },
             scroll: async (collection, params) => {
                 await this.simulateLatency();
                 const data = this.collections.get(collection) || [];
                 return { points: data.slice(0, params?.limit || 10) };
-            }
+            },
         };
     }
     async setupCollections() {
         if (!this.initialized) {
-            throw new Error('Qdrant not initialized');
+            throw new Error("Qdrant not initialized");
         }
         await this.simulateLatency();
     }
@@ -255,7 +257,7 @@ export class RealisticQdrantMock {
     }
     async simulateLatency() {
         if (this.config.latencyMs) {
-            await new Promise(resolve => setTimeout(resolve, this.config.latencyMs));
+            await new Promise((resolve) => setTimeout(resolve, this.config.latencyMs));
         }
     }
     shouldFail() {
@@ -288,7 +290,7 @@ export class RealisticPostgreSQLMock {
     }
     async initialize() {
         if (this.config.connectionFailures && this.rng() < 0.25) {
-            throw new Error('PostgreSQL connection failed: Max connections reached');
+            throw new Error("PostgreSQL connection failed: Max connections reached");
         }
         await this.simulateLatency();
         this.initialized = true;
@@ -307,60 +309,62 @@ export class RealisticPostgreSQLMock {
         return {
             totalCount: 10,
             idleCount: 5,
-            waitingCount: 0
+            waitingCount: 0,
         };
     }
     async query(query, params, options) {
         if (!this.initialized) {
-            throw new Error('PostgreSQL not initialized');
+            throw new Error("PostgreSQL not initialized");
         }
         // Simulate timeout
-        if (options?.timeout && this.config.latencyMs && this.config.latencyMs > options.timeout) {
+        if (options?.timeout &&
+            this.config.latencyMs &&
+            this.config.latencyMs > options.timeout) {
             throw new Error(`Query timeout after ${options.timeout}ms`);
         }
         await this.simulateLatency();
         this.queryLog.push(query);
         if (this.shouldFail()) {
             const errors = [
-                'duplicate key value violates unique constraint',
-                'deadlock detected',
-                'connection terminated unexpectedly',
-                'invalid input syntax for type',
+                "duplicate key value violates unique constraint",
+                "deadlock detected",
+                "connection terminated unexpectedly",
+                "invalid input syntax for type",
             ];
             throw new Error(errors[Math.floor(this.rng() * errors.length)]);
         }
         // Return realistic query results
-        if (query.toLowerCase().includes('select')) {
+        if (query.toLowerCase().includes("select")) {
             return {
                 rows: this.generateRealisticRows(),
-                rowCount: Math.floor(this.rng() * 100)
+                rowCount: Math.floor(this.rng() * 100),
             };
         }
-        else if (query.toLowerCase().includes('insert')) {
+        else if (query.toLowerCase().includes("insert")) {
             return {
                 rows: [{ id: Math.floor(this.rng() * 1000) }],
-                rowCount: 1
+                rowCount: 1,
             };
         }
-        else if (query.toLowerCase().includes('update')) {
+        else if (query.toLowerCase().includes("update")) {
             return {
-                rowCount: Math.floor(this.rng() * 10)
+                rowCount: Math.floor(this.rng() * 10),
             };
         }
-        return { query, params, options, result: 'success' };
+        return { query, params, options, result: "success" };
     }
     async transaction(callback, options) {
         if (!this.initialized) {
-            throw new Error('PostgreSQL not initialized');
+            throw new Error("PostgreSQL not initialized");
         }
         this.transactionCount++;
         // Simulate transaction failures
         if (this.config.transactionFailures && this.rng() < 0.3) {
             const txErrors = [
-                'deadlock detected',
-                'could not serialize access due to concurrent update',
-                'current transaction is aborted',
-                'unique constraint violation',
+                "deadlock detected",
+                "could not serialize access due to concurrent update",
+                "current transaction is aborted",
+                "unique constraint violation",
             ];
             throw new Error(txErrors[Math.floor(this.rng() * txErrors.length)]);
         }
@@ -368,7 +372,7 @@ export class RealisticPostgreSQLMock {
             query: async (q, p) => {
                 this.queryLog.push(`TX: ${q}`);
                 return this.query(q, p);
-            }
+            },
         };
         await this.simulateLatency();
         return callback(mockClient);
@@ -393,7 +397,7 @@ export class RealisticPostgreSQLMock {
     }
     async setupSchema() {
         if (!this.initialized) {
-            throw new Error('PostgreSQL not initialized');
+            throw new Error("PostgreSQL not initialized");
         }
         await this.simulateLatency();
     }
@@ -401,11 +405,11 @@ export class RealisticPostgreSQLMock {
         return this.initialized && this.rng() > 0.05;
     }
     async storeTestSuiteResult(suiteResult) {
-        await this.query('INSERT INTO test_suites (name, status, duration) VALUES ($1, $2, $3)', [suiteResult.name, suiteResult.status, suiteResult.duration]);
+        await this.query("INSERT INTO test_suites (name, status, duration) VALUES ($1, $2, $3)", [suiteResult.name, suiteResult.status, suiteResult.duration]);
     }
     async storeFlakyTestAnalyses(analyses) {
         for (const analysis of analyses) {
-            await this.query('INSERT INTO flaky_test_analyses (test_id, failure_count) VALUES ($1, $2)', [analysis.testId, analysis.failureCount]);
+            await this.query("INSERT INTO flaky_test_analyses (test_id, failure_count) VALUES ($1, $2)", [analysis.testId, analysis.failureCount]);
         }
     }
     async getTestExecutionHistory(entityId, limit) {
@@ -416,9 +420,9 @@ export class RealisticPostgreSQLMock {
             history.push({
                 test_id: `test-${entityId}-${i}`,
                 test_name: `Test ${i}`,
-                status: this.rng() > 0.3 ? 'passed' : 'failed',
+                status: this.rng() > 0.3 ? "passed" : "failed",
                 duration: Math.floor(this.rng() * 1000),
-                timestamp: new Date(Date.now() - i * 86400000)
+                timestamp: new Date(Date.now() - i * 86400000),
             });
         }
         return history;
@@ -430,9 +434,9 @@ export class RealisticPostgreSQLMock {
         for (let i = 0; i < count; i++) {
             metrics.push({
                 entity_id: entityId,
-                metric_type: 'response_time',
+                metric_type: "response_time",
                 value: 50 + this.rng() * 200,
-                timestamp: new Date(Date.now() - i * 86400000)
+                timestamp: new Date(Date.now() - i * 86400000),
             });
         }
         return metrics;
@@ -449,7 +453,7 @@ export class RealisticPostgreSQLMock {
                 percentage: (covered / total) * 100,
                 lines_covered: covered,
                 lines_total: total,
-                timestamp: new Date(Date.now() - i * 86400000)
+                timestamp: new Date(Date.now() - i * 86400000),
             });
         }
         return coverage;
@@ -463,7 +467,7 @@ export class RealisticPostgreSQLMock {
     }
     async simulateLatency() {
         if (this.config.latencyMs) {
-            await new Promise(resolve => setTimeout(resolve, this.config.latencyMs));
+            await new Promise((resolve) => setTimeout(resolve, this.config.latencyMs));
         }
     }
     shouldFail() {
@@ -476,8 +480,9 @@ export class RealisticPostgreSQLMock {
             rows.push({
                 id: i + 1,
                 name: `Item ${i}`,
+                timestamp: new Date(),
                 created_at: new Date(),
-                metadata: { index: i }
+                metadata: { index: i },
             });
         }
         return rows;
@@ -497,13 +502,13 @@ export class RealisticRedisMock {
     }
     constructor(config = {}) {
         this.config = config;
-        if (typeof config.seed === 'number') {
-            this.rngState = (config.seed >>> 0);
+        if (typeof config.seed === "number") {
+            this.rngState = config.seed >>> 0;
         }
     }
     async initialize() {
         if (this.config.connectionFailures && this.rng() < 0.2) {
-            throw new Error('Redis connection failed: Connection timeout');
+            throw new Error("Redis connection failed: Connection timeout");
         }
         await this.simulateLatency();
         this.initialized = true;
@@ -518,11 +523,11 @@ export class RealisticRedisMock {
     }
     async get(key) {
         if (!this.initialized) {
-            throw new Error('Redis not initialized');
+            throw new Error("Redis not initialized");
         }
         await this.simulateLatency();
         if (this.shouldFail()) {
-            throw new Error('Redis GET failed: Connection reset');
+            throw new Error("Redis GET failed: Connection reset");
         }
         const item = this.store.get(key);
         if (!item) {
@@ -537,29 +542,29 @@ export class RealisticRedisMock {
     }
     async set(key, value, ttl) {
         if (!this.initialized) {
-            throw new Error('Redis not initialized');
+            throw new Error("Redis not initialized");
         }
         await this.simulateLatency();
         if (this.shouldFail()) {
-            throw new Error('Redis SET failed: Out of memory');
+            throw new Error("Redis SET failed: Out of memory");
         }
         // Simulate memory limit
         if (this.store.size > 1000 && this.rng() < 0.1) {
-            throw new Error('Redis memory limit exceeded');
+            throw new Error("Redis memory limit exceeded");
         }
         this.store.set(key, {
             value,
             ttl,
-            setAt: Date.now()
+            setAt: Date.now(),
         });
     }
     async del(key) {
         if (!this.initialized) {
-            throw new Error('Redis not initialized');
+            throw new Error("Redis not initialized");
         }
         await this.simulateLatency();
         if (this.shouldFail()) {
-            throw new Error('Redis DEL failed: Command timeout');
+            throw new Error("Redis DEL failed: Command timeout");
         }
         const existed = this.store.has(key);
         this.store.delete(key);
@@ -574,7 +579,7 @@ export class RealisticRedisMock {
     }
     async simulateLatency() {
         if (this.config.latencyMs) {
-            await new Promise(resolve => setTimeout(resolve, this.config.latencyMs));
+            await new Promise((resolve) => setTimeout(resolve, this.config.latencyMs));
         }
     }
     shouldFail() {

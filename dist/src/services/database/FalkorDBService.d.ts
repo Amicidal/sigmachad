@@ -1,5 +1,5 @@
-import { RedisClientType } from 'redis';
-import { IFalkorDBService } from './interfaces';
+import { RedisClientType } from "redis";
+import { IFalkorDBService } from "./interfaces";
 export declare class FalkorDBService implements IFalkorDBService {
     private falkordbClient;
     private initialized;
@@ -7,6 +7,7 @@ export declare class FalkorDBService implements IFalkorDBService {
     constructor(config: {
         url: string;
         database?: number;
+        graphKey?: string;
     });
     initialize(): Promise<void>;
     close(): Promise<void>;
@@ -19,5 +20,7 @@ export declare class FalkorDBService implements IFalkorDBService {
     private sanitizeParameterValue;
     private parameterToCypherString;
     private objectToCypherProperties;
+    private buildProcessedQuery;
+    private decodeGraphValue;
 }
 //# sourceMappingURL=FalkorDBService.d.ts.map

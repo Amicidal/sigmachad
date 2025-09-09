@@ -2,20 +2,20 @@
  * Security Scanner Service for Memento
  * Performs security scanning, vulnerability detection, and security monitoring
  */
-import { DatabaseService } from './DatabaseService.js';
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { SecurityIssue } from '../models/entities.js';
-import { SecurityScanRequest, SecurityScanResult, VulnerabilityReport } from '../models/types.js';
-import { EventEmitter } from 'events';
+import { DatabaseService } from "./DatabaseService.js";
+import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
+import { SecurityIssue } from "../models/entities.js";
+import { SecurityScanRequest, SecurityScanResult, VulnerabilityReport } from "../models/types.js";
+import { EventEmitter } from "events";
 export interface SecurityRule {
     id: string;
     name: string;
     description: string;
-    severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+    severity: "critical" | "high" | "medium" | "low" | "info";
     cwe?: string;
     owasp?: string;
     pattern: RegExp;
-    category: 'sast' | 'secrets' | 'dependency' | 'configuration';
+    category: "sast" | "secrets" | "dependency" | "configuration";
     remediation: string;
 }
 export interface SecurityScanOptions {
@@ -23,12 +23,12 @@ export interface SecurityScanOptions {
     includeSCA: boolean;
     includeSecrets: boolean;
     includeDependencies: boolean;
-    severityThreshold: 'critical' | 'high' | 'medium' | 'low' | 'info';
+    severityThreshold: "critical" | "high" | "medium" | "low" | "info";
     confidenceThreshold: number;
 }
 export interface SecurityMonitoringConfig {
     enabled: boolean;
-    schedule: 'hourly' | 'daily' | 'weekly';
+    schedule: "hourly" | "daily" | "weekly";
     alerts: {
         type: string;
         severity: string;
@@ -63,6 +63,7 @@ export declare class SecurityScanner extends EventEmitter {
     private generateScanSummary;
     private storeScanResults;
     getVulnerabilityReport(): Promise<VulnerabilityReport>;
+    private validateSecurityIssue;
     getSecurityIssues(filters?: {
         severity?: string[];
         status?: string[];
@@ -72,7 +73,7 @@ export declare class SecurityScanner extends EventEmitter {
         issues: SecurityIssue[];
         total: number;
     }>;
-    performSecurityAudit(scope?: 'full' | 'recent' | 'critical-only'): Promise<any>;
+    performSecurityAudit(scope?: "full" | "recent" | "critical-only"): Promise<any>;
     private analyzeAuditFindings;
     private generateAuditRecommendations;
     private calculateSecurityScore;

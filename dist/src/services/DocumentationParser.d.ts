@@ -2,22 +2,22 @@
  * Documentation Parser Service
  * Handles parsing, indexing, and synchronization of documentation files
  */
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { DatabaseService } from './DatabaseService.js';
-import { DocumentationNode, BusinessDomain } from '../models/entities.js';
+import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
+import { DatabaseService } from "./DatabaseService.js";
+import { DocumentationNode, BusinessDomain } from "../models/entities.js";
 export interface ParsedDocument {
     title: string;
     content: string;
     businessDomains: string[];
     stakeholders: string[];
     technologies: string[];
-    docType: DocumentationNode['docType'];
+    docType: DocumentationNode["docType"];
     metadata: Record<string, any>;
 }
 export interface DomainExtraction {
     name: string;
     description: string;
-    criticality: BusinessDomain['criticality'];
+    criticality: BusinessDomain["criticality"];
     stakeholders: string[];
     keyProcesses: string[];
     confidence: number;
@@ -86,6 +86,7 @@ export declare class DocumentationParser {
      * Extract links from markdown tokens
      */
     private extractLinks;
+    private extractLinksFromContent;
     /**
      * Extract code blocks from markdown tokens
      */
@@ -139,7 +140,7 @@ export declare class DocumentationParser {
      */
     searchDocumentation(query: string, options?: {
         domain?: string;
-        docType?: DocumentationNode['docType'];
+        docType?: DocumentationNode["docType"];
         limit?: number;
     }): Promise<SearchResult[]>;
     /**

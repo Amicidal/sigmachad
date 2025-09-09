@@ -69,8 +69,8 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
             direction?: "outgoing" | "incoming" | "both" | undefined;
         };
         _input_out: {
-            entityId: string;
             limit: number;
+            entityId: string;
             direction: "outgoing" | "incoming" | "both";
             type?: string | undefined;
         };

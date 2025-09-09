@@ -3,12 +3,12 @@
  * Captures and manages system logs with querying capabilities
  */
 
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import * as fs from "fs/promises";
+import * as path from "path";
 
 export interface LogEntry {
   timestamp: Date;
-  level: 'error' | 'warn' | 'info' | 'debug';
+  level: "error" | "warn" | "info" | "debug";
   component: string;
   message: string;
   data?: any;
@@ -44,47 +44,57 @@ export class LoggingService {
     const originalConsoleDebug = console.debug;
 
     console.log = (...args) => {
-      this.captureLog('info', 'console', args.join(' '));
+      this.captureLog("info", "console", args.join(" "));
       originalConsoleLog(...args);
     };
 
     console.error = (...args) => {
-      this.captureLog('error', 'console', args.join(' '));
+      this.captureLog("error", "console", args.join(" "));
       originalConsoleError(...args);
     };
 
     console.warn = (...args) => {
-      this.captureLog('warn', 'console', args.join(' '));
+      this.captureLog("warn", "console", args.join(" "));
       originalConsoleWarn(...args);
     };
 
     console.debug = (...args) => {
-      this.captureLog('debug', 'console', args.join(' '));
+      this.captureLog("debug", "console", args.join(" "));
       originalConsoleDebug(...args);
     };
 
     // Also capture uncaught exceptions and unhandled rejections
-    process.on('uncaughtException', (error) => {
-      this.captureLog('error', 'process', `Uncaught Exception: ${error.message}`, {
-        stack: error.stack,
-        name: error.name
-      });
+    process.on("uncaughtException", (error) => {
+      this.captureLog(
+        "error",
+        "process",
+        `Uncaught Exception: ${error.message}`,
+        {
+          stack: error.stack,
+          name: error.name,
+        }
+      );
     });
 
-    process.on('unhandledRejection', (reason, promise) => {
-      this.captureLog('error', 'process', `Unhandled Rejection: ${reason}`, {
-        promise: promise.toString()
+    process.on("unhandledRejection", (reason, promise) => {
+      this.captureLog("error", "process", `Unhandled Rejection: ${reason}`, {
+        promise: promise.toString(),
       });
     });
   }
 
-  private captureLog(level: LogEntry['level'], component: string, message: string, data?: any): void {
+  private captureLog(
+    level: LogEntry["level"],
+    component: string,
+    message: string,
+    data?: any
+  ): void {
     const logEntry: LogEntry = {
       timestamp: new Date(),
       level,
       component,
       message,
-      data
+      data,
     };
 
     this.logs.push(logEntry);
@@ -102,13 +112,73 @@ export class LoggingService {
 
   private async writeToFile(entry: LogEntry): Promise<void> {
     try {
-      const fsModule = await import('fs/promises');
-      const logLine = JSON.stringify(entry) + '\n';
+      const fsModule = await import("fs/promises");
+      const logLine = JSON.stringify(entry) + "\n";
       await fsModule.appendFile(this.logFile!, logLine);
     } catch (error) {
       // Don't recursively log file write errors
-      console.warn('Failed to write log to file:', error);
+      console.warn("Failed to write log to file:", error);
     }
+  }
+
+  /**
+   * Get all logs from memory (simple method for tests)
+   */
+  getLogs(query?: LogQuery): LogEntry[] {
+    if (!query) {
+      return [...this.logs];
+    }
+    return this.queryLogsSync(query);
+  }
+
+  /**
+   * Synchronous version of queryLogs for getLogs method
+   */
+  private queryLogsSync(query: LogQuery): LogEntry[] {
+    let filteredLogs = [...this.logs];
+
+    // Filter by level
+    if (query.level) {
+      filteredLogs = filteredLogs.filter((log) => log.level === query.level);
+    }
+
+    // Filter by component
+    if (query.component) {
+      filteredLogs = filteredLogs.filter(
+        (log) => log.component === query.component
+      );
+    }
+
+    // Filter by time range
+    if (query.since) {
+      filteredLogs = filteredLogs.filter(
+        (log) => log.timestamp >= query.since!
+      );
+    }
+
+    if (query.until) {
+      filteredLogs = filteredLogs.filter(
+        (log) => log.timestamp <= query.until!
+      );
+    }
+
+    // Search in message and data
+    if (query.search) {
+      const searchTerm = query.search.toLowerCase();
+      filteredLogs = filteredLogs.filter(
+        (log) =>
+          log.message.toLowerCase().includes(searchTerm) ||
+          (log.data &&
+            JSON.stringify(log.data).toLowerCase().includes(searchTerm))
+      );
+    }
+
+    // Sort by timestamp (newest first)
+    filteredLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+    // Apply limit
+    const limit = query.limit || 100;
+    return filteredLogs.slice(0, limit);
   }
 
   async queryLogs(query: LogQuery): Promise<LogEntry[]> {
@@ -116,29 +186,37 @@ export class LoggingService {
 
     // Filter by level
     if (query.level) {
-      filteredLogs = filteredLogs.filter(log => log.level === query.level);
+      filteredLogs = filteredLogs.filter((log) => log.level === query.level);
     }
 
     // Filter by component
     if (query.component) {
-      filteredLogs = filteredLogs.filter(log => log.component === query.component);
+      filteredLogs = filteredLogs.filter(
+        (log) => log.component === query.component
+      );
     }
 
     // Filter by time range
     if (query.since) {
-      filteredLogs = filteredLogs.filter(log => log.timestamp >= query.since!);
+      filteredLogs = filteredLogs.filter(
+        (log) => log.timestamp >= query.since!
+      );
     }
 
     if (query.until) {
-      filteredLogs = filteredLogs.filter(log => log.timestamp <= query.until!);
+      filteredLogs = filteredLogs.filter(
+        (log) => log.timestamp <= query.until!
+      );
     }
 
     // Search in message and data
     if (query.search) {
       const searchTerm = query.search.toLowerCase();
-      filteredLogs = filteredLogs.filter(log =>
-        log.message.toLowerCase().includes(searchTerm) ||
-        (log.data && JSON.stringify(log.data).toLowerCase().includes(searchTerm))
+      filteredLogs = filteredLogs.filter(
+        (log) =>
+          log.message.toLowerCase().includes(searchTerm) ||
+          (log.data &&
+            JSON.stringify(log.data).toLowerCase().includes(searchTerm))
       );
     }
 
@@ -156,9 +234,12 @@ export class LoggingService {
     }
 
     try {
-      const fsModule = await import('fs/promises');
-      const content = await fsModule.readFile(this.logFile, 'utf-8');
-      const lines = content.trim().split('\n').filter(line => line.trim());
+      const fsModule = await import("fs/promises");
+      const content = await fsModule.readFile(this.logFile, "utf-8");
+      const lines = content
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim());
 
       const fileLogs: LogEntry[] = [];
       for (const line of lines) {
@@ -171,7 +252,7 @@ export class LoggingService {
           fileLogs.push(entry);
         } catch (parseError) {
           // Skip malformed log entries
-          console.warn('Skipping malformed log entry:', line.substring(0, 100));
+          console.warn("Skipping malformed log entry:", line.substring(0, 100));
         }
       }
 
@@ -179,82 +260,97 @@ export class LoggingService {
       let filteredLogs = fileLogs;
 
       if (query.level) {
-        filteredLogs = filteredLogs.filter(log => log.level === query.level);
+        filteredLogs = filteredLogs.filter((log) => log.level === query.level);
       }
 
       if (query.component) {
-        filteredLogs = filteredLogs.filter(log => log.component === query.component);
+        filteredLogs = filteredLogs.filter(
+          (log) => log.component === query.component
+        );
       }
 
       if (query.since) {
-        filteredLogs = filteredLogs.filter(log => log.timestamp >= query.since!);
+        filteredLogs = filteredLogs.filter(
+          (log) => log.timestamp >= query.since!
+        );
       }
 
       if (query.until) {
-        filteredLogs = filteredLogs.filter(log => log.timestamp <= query.until!);
+        filteredLogs = filteredLogs.filter(
+          (log) => log.timestamp <= query.until!
+        );
       }
 
       if (query.search) {
         const searchTerm = query.search.toLowerCase();
-        filteredLogs = filteredLogs.filter(log =>
-          log.message.toLowerCase().includes(searchTerm) ||
-          (log.data && JSON.stringify(log.data).toLowerCase().includes(searchTerm))
+        filteredLogs = filteredLogs.filter(
+          (log) =>
+            log.message.toLowerCase().includes(searchTerm) ||
+            (log.data &&
+              JSON.stringify(log.data).toLowerCase().includes(searchTerm))
         );
       }
 
-      filteredLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      filteredLogs.sort(
+        (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+      );
 
       const limit = query.limit || 100;
       return filteredLogs.slice(0, limit);
-
     } catch (error) {
-      console.warn('Failed to read logs from file:', error);
+      console.warn("Failed to read logs from file:", error);
       return [];
     }
   }
 
-  log(level: LogEntry['level'], component: string, message: string, data?: any): void {
+  log(
+    level: LogEntry["level"],
+    component: string,
+    message: string,
+    data?: any
+  ): void {
     this.captureLog(level, component, message, data);
   }
 
   info(component: string, message: string, data?: any): void {
-    this.captureLog('info', component, message, data);
+    this.captureLog("info", component, message, data);
   }
 
   warn(component: string, message: string, data?: any): void {
-    this.captureLog('warn', component, message, data);
+    this.captureLog("warn", component, message, data);
   }
 
   error(component: string, message: string, data?: any): void {
-    this.captureLog('error', component, message, data);
+    this.captureLog("error", component, message, data);
   }
 
   debug(component: string, message: string, data?: any): void {
-    this.captureLog('debug', component, message, data);
+    this.captureLog("debug", component, message, data);
   }
 
   // Get log statistics
   getLogStats(): {
     totalLogs: number;
-    logsByLevel: Record<string, number>;
-    logsByComponent: Record<string, number>;
+    byLevel: Record<string, number>;
+    byComponent: Record<string, number>;
     oldestLog?: Date;
     newestLog?: Date;
   } {
     const stats = {
       totalLogs: this.logs.length,
-      logsByLevel: {} as Record<string, number>,
-      logsByComponent: {} as Record<string, number>,
+      byLevel: {} as Record<string, number>,
+      byComponent: {} as Record<string, number>,
       oldestLog: undefined as Date | undefined,
-      newestLog: undefined as Date | undefined
+      newestLog: undefined as Date | undefined,
     };
 
     for (const log of this.logs) {
       // Count by level
-      stats.logsByLevel[log.level] = (stats.logsByLevel[log.level] || 0) + 1;
+      stats.byLevel[log.level] = (stats.byLevel[log.level] || 0) + 1;
 
       // Count by component
-      stats.logsByComponent[log.component] = (stats.logsByComponent[log.component] || 0) + 1;
+      stats.byComponent[log.component] =
+        (stats.byComponent[log.component] || 0) + 1;
 
       // Track oldest and newest
       if (!stats.oldestLog || log.timestamp < stats.oldestLog) {
@@ -273,33 +369,83 @@ export class LoggingService {
     const cutoffTime = new Date(Date.now() - olderThanHours * 60 * 60 * 1000);
     const initialCount = this.logs.length;
 
-    this.logs = this.logs.filter(log => log.timestamp >= cutoffTime);
+    this.logs = this.logs.filter((log) => log.timestamp >= cutoffTime);
 
     return initialCount - this.logs.length;
   }
 
+  // Export logs in different formats
+  exportLogsInFormat(format: "json" | "csv"): string {
+    const logs = this.getLogs(); // Get all logs
+
+    if (format === "json") {
+      return JSON.stringify(logs, null, 2);
+    } else if (format === "csv") {
+      if (logs.length === 0) {
+        return "timestamp,level,component,message,data\n";
+      }
+
+      const headers = "timestamp,level,component,message,data\n";
+      const rows = logs
+        .map((log) => {
+          const timestamp = log.timestamp.toISOString();
+          const level = log.level;
+          const component = log.component;
+          const message = `"${log.message.replace(/"/g, '""')}"`; // Escape quotes
+          const data = log.data
+            ? `"${JSON.stringify(log.data).replace(/"/g, '""')}"`
+            : "";
+          return `${timestamp},${level},${component},${message},${data}`;
+        })
+        .join("\n");
+
+      return headers + rows;
+    }
+
+    throw new Error(`Unsupported export format: ${format}`);
+  }
+
   // Export logs to a file
-  async exportLogs(query: LogQuery, exportPath: string): Promise<number> {
+  async exportLogsToFile(query: LogQuery, exportPath: string): Promise<number> {
     const logs = await this.queryLogs({ ...query, limit: undefined }); // Remove limit for export
 
     try {
-      const fsModule = await import('fs/promises');
+      const fsModule = await import("fs/promises");
       const exportData = {
         exportedAt: new Date().toISOString(),
         query,
-        logs
+        logs,
       };
 
       await fsModule.writeFile(exportPath, JSON.stringify(exportData, null, 2));
       return logs.length;
     } catch (error) {
-      throw new Error(`Failed to export logs: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to export logs: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  // Legacy method for backward compatibility
+  async exportLogs(query: LogQuery, exportPath: string): Promise<number>;
+  // New method for format-based export
+  exportLogs(format: "json" | "csv"): string;
+  // Implementation
+  exportLogs(
+    param1: LogQuery | "json" | "csv",
+    param2?: string
+  ): number | string | Promise<number> {
+    if (typeof param1 === "string") {
+      // Format-based export
+      return this.exportLogsInFormat(param1);
+    } else {
+      // File-based export
+      if (!param2) {
+        throw new Error("Export path is required for file export");
+      }
+      return this.exportLogsToFile(param1, param2);
     }
   }
 }
-
-
-
-
-
-

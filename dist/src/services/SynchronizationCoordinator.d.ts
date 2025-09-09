@@ -2,15 +2,15 @@
  * Synchronization Coordinator Service
  * Central orchestrator for graph synchronization operations
  */
-import { EventEmitter } from 'events';
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { ASTParser } from './ASTParser.js';
-import { DatabaseService } from './DatabaseService.js';
-import { FileChange } from './FileWatcher.js';
+import { EventEmitter } from "events";
+import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
+import { ASTParser } from "./ASTParser.js";
+import { DatabaseService } from "./DatabaseService.js";
+import { FileChange } from "./FileWatcher.js";
 export interface SyncOperation {
     id: string;
-    type: 'full' | 'incremental' | 'partial';
-    status: 'pending' | 'running' | 'completed' | 'failed' | 'rolled_back';
+    type: "full" | "incremental" | "partial";
+    status: "pending" | "running" | "completed" | "failed" | "rolled_back";
     startTime: Date;
     endTime?: Date;
     filesProcessed: number;
@@ -26,16 +26,16 @@ export interface SyncOperation {
 }
 export interface SyncError {
     file: string;
-    type: 'parse' | 'database' | 'conflict' | 'unknown';
+    type: "parse" | "database" | "conflict" | "unknown";
     message: string;
     timestamp: Date;
     recoverable: boolean;
 }
 export interface SyncConflict {
     entityId: string;
-    type: 'version_conflict' | 'deletion_conflict' | 'relationship_conflict';
+    type: "version_conflict" | "deletion_conflict" | "relationship_conflict";
     description: string;
-    resolution?: 'overwrite' | 'merge' | 'skip';
+    resolution?: "overwrite" | "merge" | "skip";
     timestamp: Date;
 }
 export interface SyncOptions {
@@ -44,13 +44,14 @@ export interface SyncOptions {
     maxConcurrency?: number;
     timeout?: number;
     rollbackOnError?: boolean;
-    conflictResolution?: 'overwrite' | 'merge' | 'skip' | 'manual';
+    conflictResolution?: "overwrite" | "merge" | "skip" | "manual";
 }
 export declare class SynchronizationCoordinator extends EventEmitter {
     private kgService;
     private astParser;
     private dbService;
     private activeOperations;
+    private completedOperations;
     private operationQueue;
     private isProcessing;
     private retryQueue;
@@ -58,6 +59,8 @@ export declare class SynchronizationCoordinator extends EventEmitter {
     private retryDelay;
     constructor(kgService: KnowledgeGraphService, astParser: ASTParser, dbService: DatabaseService);
     private setupEventHandlers;
+    startSync(): Promise<string>;
+    stopSync(): Promise<void>;
     startFullSynchronization(options?: SyncOptions): Promise<string>;
     synchronizeFileChanges(changes: FileChange[]): Promise<string>;
     synchronizePartial(updates: PartialUpdate[]): Promise<string>;
@@ -96,7 +99,7 @@ export declare class SynchronizationCoordinator extends EventEmitter {
 export interface PartialUpdate {
     entityId: string;
     changes: Record<string, any>;
-    type: 'update' | 'delete' | 'create';
+    type: "update" | "delete" | "create";
     newValue?: any;
 }
 //# sourceMappingURL=SynchronizationCoordinator.d.ts.map

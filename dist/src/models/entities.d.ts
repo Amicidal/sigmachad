@@ -12,7 +12,7 @@ export interface CodebaseEntity {
     metadata?: Record<string, any>;
 }
 export interface File extends CodebaseEntity {
-    type: 'file';
+    type: "file";
     extension: string;
     size: number;
     lines: number;
@@ -21,24 +21,24 @@ export interface File extends CodebaseEntity {
     dependencies: string[];
 }
 export interface Directory extends CodebaseEntity {
-    type: 'directory';
+    type: "directory";
     children: string[];
     depth: number;
 }
 export interface Module extends CodebaseEntity {
-    type: 'module';
+    type: "module";
     name: string;
     version: string;
     packageJson: any;
     entryPoint: string;
 }
 export interface Symbol extends CodebaseEntity {
-    type: 'symbol';
+    type: "symbol";
     name: string;
-    kind: 'function' | 'class' | 'interface' | 'typeAlias' | 'variable' | 'property' | 'method' | 'unknown';
+    kind: "function" | "class" | "interface" | "typeAlias" | "variable" | "property" | "method" | "unknown";
     signature: string;
     docstring: string;
-    visibility: 'public' | 'private' | 'protected';
+    visibility: "public" | "private" | "protected";
     isExported: boolean;
     isDeprecated: boolean;
     location?: {
@@ -49,7 +49,7 @@ export interface Symbol extends CodebaseEntity {
     };
 }
 export interface FunctionSymbol extends Symbol {
-    kind: 'function';
+    kind: "function";
     parameters: FunctionParameter[];
     returnType: string;
     isAsync: boolean;
@@ -64,7 +64,7 @@ export interface FunctionParameter {
     optional: boolean;
 }
 export interface ClassSymbol extends Symbol {
-    kind: 'class';
+    kind: "class";
     extends: string[];
     implements: string[];
     methods: string[];
@@ -72,24 +72,24 @@ export interface ClassSymbol extends Symbol {
     isAbstract: boolean;
 }
 export interface InterfaceSymbol extends Symbol {
-    kind: 'interface';
+    kind: "interface";
     extends: string[];
     methods: string[];
     properties: string[];
 }
 export interface TypeAliasSymbol extends Symbol {
-    kind: 'typeAlias';
+    kind: "typeAlias";
     aliasedType: string;
     isUnion: boolean;
     isIntersection: boolean;
 }
 export interface Test extends CodebaseEntity {
-    type: 'test';
-    testType: 'unit' | 'integration' | 'e2e';
+    type: "test";
+    testType: "unit" | "integration" | "e2e";
     targetSymbol: string;
     framework: string;
     coverage: CoverageMetrics;
-    status: 'passing' | 'failing' | 'skipped' | 'unknown';
+    status: "passing" | "failing" | "skipped" | "unknown";
     flakyScore: number;
     lastRunAt?: Date;
     lastDuration?: number;
@@ -107,7 +107,7 @@ export interface CoverageMetrics {
 export interface TestExecution {
     id: string;
     timestamp: Date;
-    status: 'passed' | 'failed' | 'skipped' | 'error';
+    status: "passed" | "failed" | "skipped" | "error";
     duration: number;
     errorMessage?: string;
     stackTrace?: string;
@@ -126,14 +126,14 @@ export interface TestPerformanceMetrics {
     averageExecutionTime: number;
     p95ExecutionTime: number;
     successRate: number;
-    trend: 'improving' | 'stable' | 'degrading';
+    trend: "improving" | "stable" | "degrading";
     benchmarkComparisons: TestBenchmark[];
     historicalData: TestHistoricalData[];
 }
 export interface TestBenchmark {
     benchmark: string;
     value: number;
-    status: 'above' | 'below' | 'at';
+    status: "above" | "below" | "at";
     threshold: number;
 }
 export interface TestHistoricalData {
@@ -143,20 +143,20 @@ export interface TestHistoricalData {
     coveragePercentage: number;
 }
 export interface Spec extends CodebaseEntity {
-    type: 'spec';
+    type: "spec";
     title: string;
     description: string;
     acceptanceCriteria: string[];
-    status: 'draft' | 'approved' | 'implemented' | 'deprecated';
-    priority: 'low' | 'medium' | 'high' | 'critical';
+    status: "draft" | "approved" | "implemented" | "deprecated";
+    priority: "low" | "medium" | "high" | "critical";
     assignee?: string;
     tags?: string[];
     updated: Date;
 }
 export interface Change {
     id: string;
-    type: 'change';
-    changeType: 'create' | 'update' | 'delete' | 'rename' | 'move';
+    type: "change";
+    changeType: "create" | "update" | "delete" | "rename" | "move";
     entityType: string;
     entityId: string;
     timestamp: Date;
@@ -170,54 +170,54 @@ export interface Change {
 }
 export interface Session {
     id: string;
-    type: 'session';
+    type: "session";
     startTime: Date;
     endTime?: Date;
     agentType: string;
     userId?: string;
     changes: string[];
     specs: string[];
-    status: 'active' | 'completed' | 'failed';
+    status: "active" | "completed" | "failed";
     metadata?: Record<string, any>;
 }
 export interface DocumentationNode extends CodebaseEntity {
-    type: 'documentation';
+    type: "documentation";
     title: string;
     content: string;
-    docType: 'readme' | 'api-docs' | 'design-doc' | 'architecture' | 'user-guide';
+    docType: "readme" | "api-docs" | "design-doc" | "architecture" | "user-guide";
     businessDomains: string[];
     stakeholders: string[];
     technologies: string[];
-    status: 'active' | 'deprecated' | 'draft';
+    status: "active" | "deprecated" | "draft";
 }
 export interface BusinessDomain {
     id: string;
-    type: 'businessDomain';
+    type: "businessDomain";
     name: string;
     description: string;
     parentDomain?: string;
-    criticality: 'core' | 'supporting' | 'utility';
+    criticality: "core" | "supporting" | "utility";
     stakeholders: string[];
     keyProcesses: string[];
     extractedFrom: string[];
 }
 export interface SemanticCluster {
     id: string;
-    type: 'semanticCluster';
+    type: "semanticCluster";
     name: string;
     description: string;
     businessDomainId: string;
-    clusterType: 'feature' | 'module' | 'capability' | 'service';
+    clusterType: "feature" | "module" | "capability" | "service";
     cohesionScore: number;
     lastAnalyzed: Date;
     memberEntities: string[];
 }
 export interface SecurityIssue {
     id: string;
-    type: 'securityIssue';
+    type: "securityIssue";
     tool: string;
     ruleId: string;
-    severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+    severity: "critical" | "high" | "medium" | "low" | "info";
     title: string;
     description: string;
     cwe?: string;
@@ -226,25 +226,25 @@ export interface SecurityIssue {
     lineNumber: number;
     codeSnippet: string;
     remediation: string;
-    status: 'open' | 'fixed' | 'accepted' | 'false-positive';
+    status: "open" | "fixed" | "accepted" | "false-positive";
     discoveredAt: Date;
     lastScanned: Date;
     confidence: number;
 }
 export interface Vulnerability {
     id: string;
-    type: 'vulnerability';
+    type: "vulnerability";
     packageName: string;
     version: string;
     vulnerabilityId: string;
-    severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+    severity: "critical" | "high" | "medium" | "low" | "info";
     description: string;
     cvssScore: number;
     affectedVersions: string;
     fixedInVersion: string;
     publishedAt: Date;
     lastUpdated: Date;
-    exploitability: 'high' | 'medium' | 'low';
+    exploitability: "high" | "medium" | "low";
 }
 export type Entity = File | Directory | Module | Symbol | FunctionSymbol | ClassSymbol | InterfaceSymbol | TypeAliasSymbol | Test | Spec | Change | Session | DocumentationNode | BusinessDomain | SemanticCluster | SecurityIssue | Vulnerability;
 export declare const isFile: (entity: Entity | null | undefined) => entity is File;
@@ -255,4 +255,5 @@ export declare const isClass: (entity: Entity | null | undefined) => entity is C
 export declare const isInterface: (entity: Entity | null | undefined) => entity is InterfaceSymbol;
 export declare const isTest: (entity: Entity | null | undefined) => entity is Test;
 export declare const isSpec: (entity: Entity | null | undefined) => entity is Spec;
+export { RelationshipType } from "./relationships";
 //# sourceMappingURL=entities.d.ts.map

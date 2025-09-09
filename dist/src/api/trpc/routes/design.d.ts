@@ -30,8 +30,8 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
     }, {
         issues: {
             field: string;
-            severity: "error" | "warning";
             message: string;
+            severity: "error" | "warning";
             file?: string | undefined;
             line?: number | undefined;
             column?: number | undefined;
@@ -181,9 +181,9 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
             type?: "feature" | "component" | "page" | "system" | undefined;
-            status?: "draft" | "approved" | "implemented" | "deprecated" | "review" | undefined;
             limit?: number | undefined;
             offset?: number | undefined;
+            status?: "draft" | "approved" | "implemented" | "deprecated" | "review" | undefined;
         };
         _input_out: {
             limit: number;

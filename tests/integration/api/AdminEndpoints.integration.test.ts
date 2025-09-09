@@ -42,8 +42,20 @@ describe('Admin API Endpoints Integration', () => {
     syncCoordinator = new SynchronizationCoordinator(kgService, dbService);
     syncMonitor = new SynchronizationMonitoring(kgService, dbService);
 
-    // Create API Gateway
-    apiGateway = new APIGateway(kgService, dbService);
+    // Create API Gateway with sync services
+    apiGateway = new APIGateway(
+      kgService, 
+      dbService,
+      fileWatcher,
+      undefined, // astParser
+      undefined, // docParser
+      undefined, // securityScanner
+      {}, // config
+      {
+        syncCoordinator,
+        syncMonitor,
+      }
+    );
     app = apiGateway.getApp();
 
     // Start the server
@@ -68,14 +80,14 @@ describe('Admin API Endpoints Integration', () => {
     }
   });
 
-  describe('GET /api/v1/admin/admin-health', () => {
+  describe('GET /api/v1/admin-health', () => {
     it('should return healthy status when all services are working', async () => {
       // Insert test data for metrics
       await insertTestFixtures(dbService);
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/admin-health',
+        url: '/api/v1/admin-health',
       });
 
       expect(response.statusCode).toBe(200);
@@ -113,7 +125,7 @@ describe('Admin API Endpoints Integration', () => {
       try {
         const response = await app.inject({
           method: 'GET',
-          url: '/api/v1/admin/admin-health',
+          url: '/api/v1/admin-health',
         });
 
         expect(response.statusCode).toBe(200);
@@ -138,7 +150,7 @@ describe('Admin API Endpoints Integration', () => {
       try {
         const response = await app.inject({
           method: 'GET',
-          url: '/api/v1/admin/admin-health',
+          url: '/api/v1/admin-health',
         });
 
         expect(response.statusCode).toBe(200);
@@ -156,7 +168,7 @@ describe('Admin API Endpoints Integration', () => {
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/admin-health',
+        url: '/api/v1/admin-health',
       });
 
       const body = JSON.parse(response.payload);
@@ -169,7 +181,7 @@ describe('Admin API Endpoints Integration', () => {
     it('should return current synchronization status', async () => {
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/sync-status',
+        url: '/api/v1/sync-status',
       });
 
       expect(response.statusCode).toBe(200);
@@ -202,7 +214,7 @@ describe('Admin API Endpoints Integration', () => {
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/sync-status',
+        url: '/api/v1/sync-status',
       });
 
       const body = JSON.parse(response.payload);
@@ -223,7 +235,7 @@ describe('Admin API Endpoints Integration', () => {
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/sync-status',
+        url: '/api/v1/sync-status',
       });
 
       const body = JSON.parse(response.payload);
@@ -236,7 +248,7 @@ describe('Admin API Endpoints Integration', () => {
     it('should return analytics for default time period', async () => {
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/analytics',
+        url: '/api/v1/analytics',
       });
 
       expect(response.statusCode).toBe(200);
@@ -289,7 +301,7 @@ describe('Admin API Endpoints Integration', () => {
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/analytics',
+        url: '/api/v1/analytics',
       });
 
       const body = JSON.parse(response.payload);
@@ -302,7 +314,7 @@ describe('Admin API Endpoints Integration', () => {
     it('should trigger manual synchronization with default options', async () => {
       const response = await app.inject({
         method: 'POST',
-        url: '/api/v1/admin/admin/sync',
+        url: '/api/v1/admin/sync',
         headers: {
           'content-type': 'application/json',
         },
@@ -320,7 +332,7 @@ describe('Admin API Endpoints Integration', () => {
     it('should accept force sync with all options enabled', async () => {
       const response = await app.inject({
         method: 'POST',
-        url: '/api/v1/admin/admin/sync',
+        url: '/api/v1/admin/sync',
         headers: {
           'content-type': 'application/json',
         },
@@ -342,7 +354,7 @@ describe('Admin API Endpoints Integration', () => {
     it('should handle selective sync options', async () => {
       const response = await app.inject({
         method: 'POST',
-        url: '/api/v1/admin/admin/sync',
+        url: '/api/v1/admin/sync',
         headers: {
           'content-type': 'application/json',
         },
@@ -364,7 +376,7 @@ describe('Admin API Endpoints Integration', () => {
       // Start first sync
       const firstResponse = await app.inject({
         method: 'POST',
-        url: '/api/v1/admin/admin/sync',
+        url: '/api/v1/admin/sync',
         headers: {
           'content-type': 'application/json',
         },
@@ -376,7 +388,7 @@ describe('Admin API Endpoints Integration', () => {
       // Attempt concurrent sync
       const secondResponse = await app.inject({
         method: 'POST',
-        url: '/api/v1/admin/admin/sync',
+        url: '/api/v1/admin/sync',
         headers: {
           'content-type': 'application/json',
         },
@@ -395,7 +407,7 @@ describe('Admin API Endpoints Integration', () => {
     it('should validate request body schema', async () => {
       const response = await app.inject({
         method: 'POST',
-        url: '/api/v1/admin/admin/sync',
+        url: '/api/v1/admin/sync',
         headers: {
           'content-type': 'application/json',
         },
@@ -420,7 +432,7 @@ describe('Admin API Endpoints Integration', () => {
       try {
         const response = await app.inject({
           method: 'GET',
-          url: '/api/v1/admin/admin-health',
+          url: '/api/v1/admin-health',
         });
 
         expect([200, 500, 503]).toContain(response.statusCode);
@@ -439,7 +451,7 @@ describe('Admin API Endpoints Integration', () => {
       // Test endpoints when optional services are not initialized
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/sync-status',
+        url: '/api/v1/sync-status',
       });
 
       // Should still return a response even if sync services are not available

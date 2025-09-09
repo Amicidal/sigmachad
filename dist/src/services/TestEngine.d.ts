@@ -3,14 +3,14 @@
  * Comprehensive test management, analysis, and integration service
  * Implements Phase 5.2 requirements for test integration
  */
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { DatabaseService } from './DatabaseService.js';
-import { TestPerformanceMetrics, CoverageMetrics } from '../models/entities.js';
+import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
+import { DatabaseService } from "./DatabaseService.js";
+import { TestPerformanceMetrics, CoverageMetrics } from "../models/entities.js";
 export interface TestResult {
     testId: string;
     testSuite: string;
     testName: string;
-    status: 'passed' | 'failed' | 'skipped' | 'error';
+    status: "passed" | "failed" | "skipped" | "error";
     duration: number;
     errorMessage?: string;
     stackTrace?: string;
@@ -72,7 +72,7 @@ export declare class TestEngine {
     /**
      * Parse test results from a file and record them
      */
-    parseAndRecordTestResults(filePath: string, format: 'junit' | 'jest' | 'mocha' | 'vitest' | 'cypress' | 'playwright'): Promise<void>;
+    parseAndRecordTestResults(filePath: string, format: "junit" | "jest" | "mocha" | "vitest" | "cypress" | "playwright"): Promise<void>;
     /**
      * Parse and store test execution results from various formats
      */
@@ -104,7 +104,7 @@ export declare class TestEngine {
     /**
      * Parse test results from different formats
      */
-    parseTestResults(filePath: string, format: 'junit' | 'jest' | 'mocha' | 'vitest'): Promise<TestSuiteResult>;
+    parseTestResults(filePath: string, format: "junit" | "jest" | "mocha" | "vitest"): Promise<TestSuiteResult>;
     private parseJUnitXML;
     private parseJestJSON;
     private parseMochaJSON;

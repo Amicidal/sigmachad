@@ -2,13 +2,15 @@
  * Knowledge Graph Service for Memento
  * Manages graph operations, vector embeddings, and entity relationships
  */
-import { DatabaseService } from './DatabaseService.js';
-import { Entity } from '../models/entities.js';
-import { GraphRelationship, RelationshipQuery, PathQuery, TraversalQuery } from '../models/relationships.js';
-import { GraphSearchRequest, GraphExamples, DependencyAnalysis } from '../models/types.js';
-import { EventEmitter } from 'events';
+import { DatabaseService } from "./DatabaseService.js";
+import { Entity } from "../models/entities.js";
+import { GraphRelationship, RelationshipType, RelationshipQuery, PathQuery, TraversalQuery } from "../models/relationships.js";
+import { GraphSearchRequest, GraphExamples, DependencyAnalysis } from "../models/types.js";
+import { EventEmitter } from "events";
 export declare class KnowledgeGraphService extends EventEmitter {
     private db;
+    private searchCache;
+    private entityCache;
     constructor(db: DatabaseService);
     initialize(): Promise<void>;
     private hasCodebaseProperties;
@@ -18,18 +20,26 @@ export declare class KnowledgeGraphService extends EventEmitter {
     createOrUpdateEntity(entity: Entity): Promise<void>;
     deleteEntity(entityId: string): Promise<void>;
     deleteRelationship(relationshipId: string): Promise<void>;
-    createRelationship(relationship: GraphRelationship): Promise<void>;
+    createRelationship(relationship: GraphRelationship | string, toEntityId?: string, type?: RelationshipType): Promise<void>;
     getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
     queryRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
     search(request: GraphSearchRequest): Promise<Entity[]>;
+    /**
+     * Clear search cache
+     */
+    private clearSearchCache;
+    /**
+     * Invalidate cache entries related to an entity
+     */
+    private invalidateEntityCache;
     /**
      * Find entities by type
      */
     findEntitiesByType(entityType: string): Promise<Entity[]>;
     private semanticSearch;
     private structuralSearch;
-    getEntityExamples(entityId: string): Promise<GraphExamples>;
-    getEntityDependencies(entityId: string): Promise<DependencyAnalysis>;
+    getEntityExamples(entityId: string): Promise<GraphExamples | null>;
+    getEntityDependencies(entityId: string): Promise<DependencyAnalysis | null>;
     findPaths(query: PathQuery): Promise<any[]>;
     traverseGraph(query: TraversalQuery): Promise<Entity[]>;
     createEmbeddingsBatch(entities: Entity[]): Promise<void>;
@@ -66,5 +76,6 @@ export declare class KnowledgeGraphService extends EventEmitter {
         total: number;
     }>;
     private stringToNumericId;
+    private sanitizeParameterName;
 }
 //# sourceMappingURL=KnowledgeGraphService.d.ts.map

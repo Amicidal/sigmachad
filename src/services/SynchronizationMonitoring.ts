@@ -182,20 +182,50 @@ export class SynchronizationMonitoring extends EventEmitter {
     this.emit('conflictDetected', conflict);
   }
 
-  recordError(operationId: string, error: SyncError): void {
+  recordError(operationId: string, error: SyncError | string | unknown): void {
+    // Coerce non-object inputs into a SyncError-like shape for robustness in tests
+    const normalized: SyncError = ((): SyncError => {
+      if (typeof error === 'string') {
+        return {
+          file: 'unknown',
+          type: 'unknown',
+          message: error,
+          timestamp: new Date(),
+          recoverable: true,
+        };
+      }
+      if (error && typeof error === 'object' && 'message' in (error as any)) {
+        const e = error as any;
+        return {
+          file: e.file ?? 'unknown',
+          type: e.type ?? 'unknown',
+          message: String(e.message ?? 'Unknown error'),
+          timestamp: e.timestamp instanceof Date ? e.timestamp : new Date(),
+          recoverable: e.recoverable ?? true,
+        };
+      }
+      return {
+        file: 'unknown',
+        type: 'unknown',
+        message: 'Unknown error',
+        timestamp: new Date(),
+        recoverable: true,
+      };
+    })();
+
     // Include the error message in the log message to aid debugging/tests
-    this.log('error', operationId, `Sync error: ${error.message}`, {
-      file: error.file,
-      type: error.type,
-      message: error.message,
-      recoverable: error.recoverable,
+    this.log('error', operationId, `Sync error: ${normalized.message}`, {
+      file: normalized.file,
+      type: normalized.type,
+      message: normalized.message,
+      recoverable: normalized.recoverable,
     });
 
     // Trigger alert for non-recoverable errors
-    if (!error.recoverable) {
+    if (!normalized.recoverable) {
       this.triggerAlert({
         type: 'error',
-        message: `Non-recoverable error in ${error.file}: ${error.message}`,
+        message: `Non-recoverable error in ${normalized.file}: ${normalized.message}`,
         operationId,
       });
     }

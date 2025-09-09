@@ -3,22 +3,22 @@
  * Handles parsing, indexing, and synchronization of documentation files
  */
 
-import { marked } from 'marked';
-import type { Tokens, TokensList } from 'marked';
-import { readFileSync } from 'fs';
-import { join, extname, basename } from 'path';
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { DatabaseService } from './DatabaseService.js';
+import { marked } from "marked";
+import type { Tokens, TokensList } from "marked";
+import { readFileSync } from "fs";
+import { join, extname, basename } from "path";
+import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
+import { DatabaseService } from "./DatabaseService.js";
 import {
   DocumentationNode,
   BusinessDomain,
   SemanticCluster,
-  Entity
-} from '../models/entities.js';
+  Entity,
+} from "../models/entities.js";
 import {
   RelationshipType,
-  DocumentationRelationship
-} from '../models/relationships.js';
+  DocumentationRelationship,
+} from "../models/relationships.js";
 
 export interface ParsedDocument {
   title: string;
@@ -26,14 +26,14 @@ export interface ParsedDocument {
   businessDomains: string[];
   stakeholders: string[];
   technologies: string[];
-  docType: DocumentationNode['docType'];
+  docType: DocumentationNode["docType"];
   metadata: Record<string, any>;
 }
 
 export interface DomainExtraction {
   name: string;
   description: string;
-  criticality: BusinessDomain['criticality'];
+  criticality: BusinessDomain["criticality"];
   stakeholders: string[];
   keyProcesses: string[];
   confidence: number;
@@ -55,7 +55,7 @@ export interface SearchResult {
 export class DocumentationParser {
   private kgService: KnowledgeGraphService;
   private dbService: DatabaseService;
-  private supportedExtensions = ['.md', '.txt', '.rst', '.adoc'];
+  private supportedExtensions = [".md", ".txt", ".rst", ".adoc"];
 
   constructor(kgService: KnowledgeGraphService, dbService: DatabaseService) {
     this.kgService = kgService;
@@ -67,22 +67,22 @@ export class DocumentationParser {
    */
   async parseFile(filePath: string): Promise<ParsedDocument> {
     try {
-      const content = readFileSync(filePath, 'utf-8');
+      const content = readFileSync(filePath, "utf-8");
       const extension = extname(filePath).toLowerCase();
 
       let parsedContent: ParsedDocument;
 
       switch (extension) {
-        case '.md':
+        case ".md":
           parsedContent = await this.parseMarkdown(content);
           break;
-        case '.txt':
+        case ".txt":
           parsedContent = this.parsePlaintext(content);
           break;
-        case '.rst':
+        case ".rst":
           parsedContent = this.parseRestructuredText(content);
           break;
-        case '.adoc':
+        case ".adoc":
           parsedContent = this.parseAsciiDoc(content);
           break;
         default:
@@ -95,12 +95,16 @@ export class DocumentationParser {
         filePath,
         fileSize: content.length,
         lastModified: new Date(),
-        checksum: this.calculateChecksum(content)
+        checksum: this.calculateChecksum(content),
       };
 
       return parsedContent;
     } catch (error) {
-      throw new Error(`Failed to parse file ${filePath}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to parse file ${filePath}: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 
@@ -118,11 +122,20 @@ export class DocumentationParser {
     // Compute headings and conditionally remove the first H1 used as title
     const allHeadings = this.extractHeadings(tokens);
     let headings = allHeadings;
-    const h1Count = allHeadings.filter(h => h.level === 1).length;
-    const idxFirstH1 = allHeadings.findIndex(h => h.level === 1 && h.text === title);
-    if (idxFirstH1 !== -1 && h1Count === 1 && allHeadings.length <= 3) {
-      // In simple docs (title + a couple sections), exclude title from headings
-      headings = allHeadings.slice(0, idxFirstH1).concat(allHeadings.slice(idxFirstH1 + 1));
+    const h1Count = allHeadings.filter((h) => h.level === 1).length;
+    const idxFirstH1 = allHeadings.findIndex(
+      (h) => h.level === 1 && h.text === title
+    );
+    if (
+      idxFirstH1 !== -1 &&
+      h1Count === 1 &&
+      allHeadings.length > 1 &&
+      allHeadings.length <= 5
+    ) {
+      // In simple docs (title + a few sections), exclude title from headings
+      headings = allHeadings
+        .slice(0, idxFirstH1)
+        .concat(allHeadings.slice(idxFirstH1 + 1));
     }
 
     return {
@@ -135,8 +148,8 @@ export class DocumentationParser {
       metadata: {
         headings,
         links: this.extractLinksFromContent(content, tokens),
-        codeBlocks: this.extractCodeBlocks(tokens)
-      }
+        codeBlocks: this.extractCodeBlocks(tokens),
+      },
     };
   }
 
@@ -144,8 +157,8 @@ export class DocumentationParser {
    * Parse plaintext content
    */
   parsePlaintext(content: string): ParsedDocument {
-    const lines = content.split('\n');
-    const title = lines[0]?.trim() || 'Untitled Document';
+    const lines = content.split("\n");
+    const title = lines[0]?.trim() || "Untitled Document";
     const businessDomains = this.extractBusinessDomains(content);
     const stakeholders = this.extractStakeholders(content);
     const technologies = this.extractTechnologies(content);
@@ -160,8 +173,8 @@ export class DocumentationParser {
       docType,
       metadata: {
         lineCount: lines.length,
-        wordCount: content.split(/\s+/).length
-      }
+        wordCount: content.split(/\s+/).length,
+      },
     };
   }
 
@@ -170,7 +183,7 @@ export class DocumentationParser {
    */
   private parseRestructuredText(content: string): ParsedDocument {
     // Basic RST parsing - could be enhanced with a dedicated library
-    const lines = content.split('\n');
+    const lines = content.split("\n");
     const title = this.extractRstTitle(lines);
     const businessDomains = this.extractBusinessDomains(content);
     const stakeholders = this.extractStakeholders(content);
@@ -185,8 +198,8 @@ export class DocumentationParser {
       technologies,
       docType,
       metadata: {
-        sections: this.extractRstSections(lines)
-      }
+        sections: this.extractRstSections(lines),
+      },
     };
   }
 
@@ -195,7 +208,7 @@ export class DocumentationParser {
    */
   private parseAsciiDoc(content: string): ParsedDocument {
     // Basic AsciiDoc parsing - could be enhanced with a dedicated library
-    const lines = content.split('\n');
+    const lines = content.split("\n");
     const title = this.extractAsciiDocTitle(lines);
     const businessDomains = this.extractBusinessDomains(content);
     const stakeholders = this.extractStakeholders(content);
@@ -209,7 +222,7 @@ export class DocumentationParser {
       stakeholders,
       technologies,
       docType,
-      metadata: {}
+      metadata: {},
     };
   }
 
@@ -218,11 +231,11 @@ export class DocumentationParser {
    */
   private extractTitle(tokens: TokensList): string {
     for (const token of tokens) {
-      if (token.type === 'heading' && token.depth === 1) {
+      if (token.type === "heading" && token.depth === 1) {
         return token.text;
       }
     }
-    return 'Untitled Document';
+    return "Untitled Document";
   }
 
   /**
@@ -230,14 +243,51 @@ export class DocumentationParser {
    */
   private extractBusinessDomains(content: string): string[] {
     const domainPatterns = [
-      // Common business domain keywords
+      // User and customer management domains
+      /\b(?:user|customer|client)\s+(?:registration|authentication|authorization|management|service|support)\b/gi,
+      /\b(?:user|customer|client)\s+(?:account|profile|portal|dashboard)\s+(?:management|service)?\b/gi,
+      /\b(?:customer|client)\s+(?:relationship|service|support)\s+(?:management|system)?\b/gi,
+
+      // Authentication and security domains
+      /\b(?:authentication|authorization|security|compliance|audit)\s*(?:system|service|module|management)?\b/gi,
+      /\b(?:multi.?factor|two.?factor)\s+(?:authentication|auth)\b/gi,
+
+      // Payment and financial domains
+      /\b(?:payment|billing|subscription|pricing|financial)\s*(?:processing|system|service|module|management)?\b/gi,
+      /\b(?:credit\s+card|bank|paypal|stripe)\s+(?:payment|processing|integration)\b/gi,
+
+      // Inventory and supply chain domains
+      /\b(?:inventory|warehouse|supply\s+chain|logistics|shipping)\s*(?:management|system|tracking)?\b/gi,
+
+      // Reporting and analytics domains
+      /\b(?:reporting|analytics|dashboard|metrics|business\s+intelligence)\s*(?:system|service|platform)?\b/gi,
+
+      // Communication and messaging domains
+      /\b(?:communication|messaging|notification|email|sms)\s*(?:system|service|platform)?\b/gi,
+
+      // Content and document management domains
+      /\b(?:content|media|file|document)\s+(?:management|storage|processing|system)\b/gi,
+
+      // Human resources and employee domains
+      /\b(?:human\s+resources|employee|hr|payroll|benefits)\s*(?:management|system|service)?\b/gi,
+
+      // Sales and marketing domains
+      /\b(?:sales|marketing|campaign|ecommerce)\s*(?:management|system|platform)?\b/gi,
+
+      // Infrastructure and operations domains
+      /\b(?:infrastructure|deployment|monitoring|maintenance)\s*(?:management|system)?\b/gi,
+
+      // Data management domains
+      /\b(?:data|database|backup|recovery)\s*(?:management|processing|storage|system)?\b/gi,
+
+      // API and integration domains
+      /\b(?:api|integration|webhook|middleware)\s*(?:management|service|platform)?\b/gi,
+
+      // Generic management domains
       /\b(?:user|customer|client|patient|student|employee|admin|manager)\s+(?:management|service|portal|dashboard|system)\b/gi,
-      /\b(?:authentication|authorization|security|compliance|audit)\b/gi,
-      /\b(?:payment|billing|subscription|pricing|financial)\s*(?:processing|system|service|module)?\b/gi,
-      /\b(?:inventory|warehouse|supply chain|logistics)\b/gi,
-      /\b(?:reporting|analytics|dashboard|metrics)\b/gi,
-      /\b(?:communication|messaging|notification|email)\b/gi,
-      /\b(?:content|media|file|document)\s+(?:management|storage)\b/gi
+
+      // Single word domains (keep these for backwards compatibility)
+      /\b(?:authentication|authorization|security|compliance|audit|inventory|warehouse|reporting|analytics|communication|messaging)\b/gi,
     ];
 
     const domains = new Set<string>();
@@ -245,30 +295,85 @@ export class DocumentationParser {
     for (const pattern of domainPatterns) {
       const matches = content.match(pattern);
       if (matches) {
-        matches.forEach(match => {
+        matches.forEach((match) => {
           const norm = match.toLowerCase().trim();
           domains.add(norm);
-          // If phrase like "payment processing" matched, also add base term
-          const baseMatch = norm.match(/^(payment|billing|subscription|pricing|financial)\b/);
+
+          // Extract base terms from compound phrases for better matching
+          const baseMatch = norm.match(
+            /^(payment|billing|subscription|pricing|financial|customer|user|client|authentication|authorization|security)\b/
+          );
           if (baseMatch) {
             domains.add(baseMatch[1]);
+          }
+
+          // Handle specific multi-word combinations that should be preserved
+          if (norm.includes("customer relationship")) {
+            domains.add("customer relationship management");
+          }
+          if (norm.includes("customer service")) {
+            domains.add("customer service management");
+          }
+          if (norm.includes("user registration")) {
+            domains.add("user registration");
+          }
+          if (norm.includes("user management")) {
+            domains.add("user management");
+          }
+          if (norm.includes("payment processing")) {
+            domains.add("payment processing");
+          }
+          if (norm.includes("data processing")) {
+            domains.add("data processing");
+          }
+          if (norm.includes("document management")) {
+            domains.add("document management");
           }
         });
       }
     }
 
-    // Also look for explicit domain mentions
+    // Also look for explicit domain mentions in structured format
     const explicitDomains = content.match(/domain[s]?:?\s*([^.\n]+)/gi);
     if (explicitDomains) {
-      explicitDomains.forEach(match => {
-        const domainPart = match.replace(/domain[s]?:?\s*/i, '').trim();
+      explicitDomains.forEach((match) => {
+        const domainPart = match.replace(/domain[s]?:?\s*/i, "").trim();
         // Split comma-separated or 'and' separated lists
         const parts = domainPart
           .split(/,|\band\b/gi)
-          .map(p => p.trim())
-          .filter(p => p.length > 0);
-        parts.forEach(p => domains.add(p.toLowerCase()))
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0);
+        parts.forEach((p) => {
+          const normalized = p.toLowerCase();
+          domains.add(normalized);
+          // Also add variations without "management" suffix for better matching
+          if (normalized.endsWith(" management")) {
+            domains.add(normalized.replace(" management", ""));
+          }
+        });
       });
+    }
+
+    // Handle Unicode/special characters in domain extraction
+    // Look for patterns with accented characters
+    const unicodePatterns = [
+      /\b(?:naïve|naive)\s+(?:user|customer|client)\s+(?:management|service|system)\b/gi,
+      /\b[\wàâäçéèêëïîôùûüÿñáéíóúü]+\s+(?:management|service|system|processing)\b/gi,
+    ];
+
+    for (const pattern of unicodePatterns) {
+      const matches = content.match(pattern);
+      if (matches) {
+        matches.forEach((match) => {
+          const norm = match.toLowerCase().trim();
+          domains.add(norm);
+          // Also extract base terms for Unicode words
+          const baseMatch = norm.match(/^([\wàâäçéèêëïîôùûüÿñáéíóúü]+)\s+/);
+          if (baseMatch) {
+            domains.add(baseMatch[1]);
+          }
+        });
+      }
     }
 
     return Array.from(domains);
@@ -279,11 +384,28 @@ export class DocumentationParser {
    */
   private extractStakeholders(content: string): string[] {
     const stakeholderPatterns = [
-      /\b(?:product|project|tech|engineering|development|qa|testing)\s+(?:team|manager|lead|director|tester)\b/gi,
-      /\b(?:business|product|system|technical)\s+(?:analyst|architect|owner)\b/gi,
-      /\b(?:end\s+user|customer|client|stakeholder)s?\b/gi,
-      /\b(?:partner|vendor)s?\b/gi,
-      /\b(?:admin|administrator|operator|maintainer|developer)s?\b/gi
+      // Team roles and positions
+      /\b(?:product|project|tech|engineering|development|qa|testing|devops|security)\s+(?:team|manager|lead|director|specialist|engineer|coordinator)\b/gi,
+      /\b(?:business|product|system|technical|solution|data)\s+(?:analyst|architect|owner|consultant)\b/gi,
+
+      // User types and roles
+      /\b(?:end\s+)?(?:user|customer|client|consumer|subscriber|member|participant|visitor)s?\b/gi,
+      /\b(?:admin|administrator|operator|maintainer|supervisor|moderator)s?\b/gi,
+
+      // Organization roles
+      /\b(?:partner|vendor|supplier|contractor)s?\b/gi,
+      /\b(?:stakeholder|shareholder|investor)s?\b/gi,
+
+      // Individual roles
+      /\b(?:developer|programmer|coder|architect|designer)s?\b/gi,
+
+      // Department roles
+      /\b(?:sales|marketing|support|customer service|help desk|it|hr)\s+(?:team|manager|representative|specialist|agent)\b/gi,
+
+      // Generic user mentions (more specific patterns first)
+      /\busers?\b/gi,
+      /\bpeople\b/gi,
+      /\bpersonnel\b/gi,
     ];
 
     const stakeholders = new Set<string>();
@@ -291,17 +413,68 @@ export class DocumentationParser {
     for (const pattern of stakeholderPatterns) {
       const matches = content.match(pattern);
       if (matches) {
-        matches.forEach(match => {
+        matches.forEach((match) => {
           let s = match.toLowerCase().trim();
-          // Normalize common plurals to singular for consistency
-          s = s.replace(/\bdevelopers\b/g, 'developer')
-               .replace(/\bstakeholders\b/g, 'stakeholder')
-               .replace(/\bcustomers\b/g, 'customer')
-               .replace(/\bclients\b/g, 'client')
-               .replace(/\bpartners\b/g, 'partner')
-               .replace(/\bvendors\b/g, 'vendor')
-               .replace(/\bend users\b/g, 'end user');
-          stakeholders.add(s);
+
+          // Normalize common plurals and variations to singular for consistency
+          s = s
+            .replace(/\bdevelopers\b/g, "developer")
+            .replace(/\busers\b/g, "user")
+            .replace(/\bcustomers\b/g, "customer")
+            .replace(/\bclients\b/g, "client")
+            .replace(/\bpartners\b/g, "partner")
+            .replace(/\bvendors\b/g, "vendor")
+            .replace(/\bstakeholders\b/g, "stakeholder")
+            .replace(/\badministrators\b/g, "administrator")
+            .replace(/\bmanagers\b/g, "manager")
+            .replace(/\bteams\b/g, "team")
+            .replace(/\bengineers\b/g, "engineer")
+            .replace(/\banalysts\b/g, "analyst")
+            .replace(/\barchitects\b/g, "architect")
+            .replace(/\bspecialists\b/g, "specialist")
+            .replace(/\bsupervisors\b/g, "supervisor")
+            .replace(/\bmoderators\b/g, "moderator")
+            .replace(/\boperators\b/g, "operator")
+            .replace(/\bmaintainers\b/g, "maintainer")
+            .replace(/\bcoordinators\b/g, "coordinator")
+            .replace(/\bconsultants\b/g, "consultant")
+            .replace(/\bdesigners\b/g, "designer")
+            .replace(/\bprogrammers\b/g, "programmer")
+            .replace(/\bcoders\b/g, "coder")
+            .replace(/\brepresentatives\b/g, "representative")
+            .replace(/\bagents\b/g, "agent")
+            .replace(/\bowners\b/g, "owner")
+            .replace(/\bleads\b/g, "lead")
+            .replace(/\bdirectors\b/g, "director")
+            .replace(/\bvisitors\b/g, "visitor")
+            .replace(/\bmembers\b/g, "member")
+            .replace(/\bparticipants\b/g, "participant")
+            .replace(/\bsubscribers\b/g, "subscriber")
+            .replace(/\bconsumers\b/g, "consumer")
+            .replace(/\bshareholders\b/g, "shareholder")
+            .replace(/\binvestors\b/g, "investor")
+            .replace(/\bcontractors\b/g, "contractor")
+            .replace(/\bsuppliers\b/g, "supplier")
+            .replace(/\bpeople\b/g, "person")
+            .replace(/\bpersonnel\b/g, "person")
+            .replace(/\bend users\b/g, "end user")
+            .replace(/\bsales teams\b/g, "sales team")
+            .replace(/\bmarketing teams\b/g, "marketing team")
+            .replace(/\bsupport teams\b/g, "support team")
+            .replace(/\bcustomer service teams\b/g, "customer service team")
+            .replace(/\bhelp desk teams\b/g, "help desk team")
+            .replace(/\bit teams\b/g, "it team")
+            .replace(/\bhr teams\b/g, "hr team");
+
+          // Skip very generic terms that aren't meaningful stakeholders
+          if (
+            s !== "person" &&
+            s !== "people" &&
+            s !== "personnel" &&
+            s.length > 2
+          ) {
+            stakeholders.add(s);
+          }
         });
       }
     }
@@ -319,22 +492,22 @@ export class DocumentationParser {
       /\b(?:node\.js|express|fastify|django|flask|spring)\b/gi,
       /\b(?:postgresql|mysql|mongodb|redis|elasticsearch)\b/gi,
       /\b(?:docker|kubernetes|aws|gcp|azure)\b/gi,
-      /\b(?:rest|grpc|websocket)\b/gi
+      /\b(?:rest|grpc|websocket)\b/gi,
     ];
 
     const technologies = new Set<string>();
 
     // Normalize content for certain aliases before matching
-    const normalizedContent = content.replace(/\bC\+\+\b/g, 'cpp');
+    const normalizedContent = content.replace(/\bC\+\+\b/g, "cpp");
     if (/c\+\+/i.test(content)) {
-      technologies.add('cpp');
+      technologies.add("cpp");
     }
     for (const pattern of techPatterns) {
       const matches = normalizedContent.match(pattern);
       if (matches) {
-        matches.forEach(match => {
+        matches.forEach((match) => {
           let m = match.toLowerCase().trim();
-          if (m === 'c++') m = 'cpp';
+          if (m === "c++") m = "cpp";
           technologies.add(m);
         });
       }
@@ -346,39 +519,84 @@ export class DocumentationParser {
   /**
    * Infer document type based on content and title
    */
-  private inferDocType(content: string, title: string): DocumentationNode['docType'] {
+  private inferDocType(
+    content: string,
+    title: string
+  ): DocumentationNode["docType"] {
     const lowerContent = content.toLowerCase();
     const lowerTitle = title.toLowerCase();
 
-    if (lowerTitle.includes('readme') || lowerTitle.includes('getting started')) {
-      return 'readme';
-    }
-    if (lowerTitle.includes('api') || lowerContent.includes('endpoint') || lowerContent.includes('swagger')) {
-      return 'api-docs';
-    }
-    // Prioritize explicit architecture classification before design-doc
-    if (lowerTitle.includes('architecture') || lowerContent.includes('high level') || lowerContent.includes('overview')) {
-      return 'architecture';
-    }
-    if (lowerTitle.includes('design') || lowerContent.includes('system design')) {
-      return 'design-doc';
-    }
-    if (lowerTitle.includes('user guide') || lowerContent.includes('how to') || lowerContent.includes('tutorial')) {
-      return 'user-guide';
+    // Prioritize architecture detection when title indicates it
+    if (
+      lowerTitle.includes("architecture") ||
+      lowerContent.includes("system architecture") ||
+      lowerContent.includes("technical architecture")
+    ) {
+      return "architecture";
     }
 
-    return 'readme'; // Default fallback
+    // Check for API documentation
+    if (
+      lowerTitle.includes("api") ||
+      lowerContent.includes("endpoint") ||
+      lowerContent.includes("swagger") ||
+      lowerContent.includes("rest")
+    ) {
+      return "api-docs";
+    }
+
+    // Check for design documents
+    if (
+      lowerTitle.includes("design") ||
+      lowerContent.includes("system design") ||
+      lowerContent.includes("design document")
+    ) {
+      return "design-doc";
+    }
+
+    // Check for user guides and manuals - broader detection
+    if (
+      lowerTitle.includes("guide") ||
+      lowerTitle.includes("manual") ||
+      lowerTitle.includes("getting started") ||
+      lowerTitle.includes("tutorial") ||
+      lowerTitle.includes("user") ||
+      lowerContent.includes("how to") ||
+      lowerContent.includes("step by step") ||
+      lowerContent.includes("instructions") ||
+      lowerContent.includes("getting started") ||
+      lowerContent.includes("introduction")
+    ) {
+      return "user-guide";
+    }
+
+    // Check for README files
+    if (lowerTitle.includes("readme") || lowerTitle.includes("read me")) {
+      return "readme";
+    }
+
+    // Check for high-level overview content
+    if (
+      lowerContent.includes("high level") ||
+      lowerContent.includes("overview")
+    ) {
+      return "architecture";
+    }
+
+    return "readme"; // Default fallback
   }
 
   /**
    * Extract headings from markdown tokens
    */
-  private extractHeadings(tokens: TokensList): Array<{ level: number; text: string }> {
+  private extractHeadings(
+    tokens: TokensList
+  ): Array<{ level: number; text: string }> {
     return tokens
-      .filter((token): token is Tokens.Heading => token.type === 'heading')
-      .map(heading => ({
+      .filter((token): token is Tokens.Heading => token.type === "heading")
+      .map((heading) => ({
         level: heading.depth,
-        text: heading.text
+        text: heading.text,
       }));
   }
 
@@ -389,10 +607,10 @@ export class DocumentationParser {
     // Kept for backward compatibility; now superseded by extractLinksFromContent
     const links: string[] = [];
     const extractFromToken = (token: any) => {
-      if (token.type === 'link') {
+      if (token.type === "link") {
         links.push(token.href);
       }
-      if ('tokens' in token && token.tokens) {
+      if ("tokens" in token && token.tokens) {
         token.tokens.forEach(extractFromToken);
       }
     };
@@ -400,7 +618,10 @@ export class DocumentationParser {
     return links;
   }
 
-  private extractLinksFromContent(content: string, tokens?: TokensList): string[] {
+  private extractLinksFromContent(
+    content: string,
+    tokens?: TokensList
+  ): string[] {
     const found = new Set<string>();
 
     // 1) Standard markdown links: [text](url)
@@ -433,12 +654,14 @@ export class DocumentationParser {
   /**
    * Extract code blocks from markdown tokens
    */
-  private extractCodeBlocks(tokens: TokensList): Array<{ lang?: string; code: string }> {
+  private extractCodeBlocks(
+    tokens: TokensList
+  ): Array<{ lang?: string; code: string }> {
     return tokens
-      .filter((token): token is any => token.type === 'code')
+      .filter((token): token is any => token.type === "code")
       .map((codeBlock: any) => ({
-        lang: (codeBlock.lang ?? '') as string,
-        code: codeBlock.text
+        lang: (codeBlock.lang ?? "") as string,
+        code: codeBlock.text,
       }));
   }
 
@@ -450,17 +673,24 @@ export class DocumentationParser {
       const line = lines[i].trim();
       const nextLine = lines[i + 1]?.trim();
 
-      if (line && nextLine && /^[=]+$/.test(nextLine) && nextLine.length >= line.length) {
+      if (
+        line &&
+        nextLine &&
+        /^[=]+$/.test(nextLine) &&
+        nextLine.length >= line.length
+      ) {
         return line;
       }
     }
-    return lines[0]?.trim() || 'Untitled Document';
+    return lines[0]?.trim() || "Untitled Document";
   }
 
   /**
    * Extract sections from RST content
    */
-  private extractRstSections(lines: string[]): Array<{ title: string; level: number }> {
+  private extractRstSections(
+    lines: string[]
+  ): Array<{ title: string; level: number }> {
     const sections: Array<{ title: string; level: number }> = [];
 
     for (let i = 0; i < lines.length - 1; i++) {
@@ -486,11 +716,11 @@ export class DocumentationParser {
    */
   private extractAsciiDocTitle(lines: string[]): string {
     for (const line of lines) {
-      if (line.startsWith('= ')) {
+      if (line.startsWith("= ")) {
         return line.substring(2).trim();
       }
     }
-    return lines[0]?.trim() || 'Untitled Document';
+    return lines[0]?.trim() || "Untitled Document";
   }
 
   /**
@@ -500,7 +730,7 @@ export class DocumentationParser {
     let hash = 0;
     for (let i = 0; i < content.length; i++) {
       const char = content.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash; // Convert to 32-bit integer
     }
     return hash.toString(16);
@@ -514,7 +744,7 @@ export class DocumentationParser {
       processedFiles: 0,
       newDomains: 0,
       updatedClusters: 0,
-      errors: []
+      errors: [],
     };
 
     try {
@@ -538,14 +768,21 @@ export class DocumentationParser {
 
           result.processedFiles++;
         } catch (error) {
-          result.errors.push(`${filePath}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          result.errors.push(
+            `${filePath}: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`
+          );
         }
       }
 
       result.updatedClusters = await this.refreshClusters();
-
     } catch (error) {
-      result.errors.push(`Sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      result.errors.push(
+        `Sync failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
 
     return result;
@@ -555,7 +792,7 @@ export class DocumentationParser {
    * Find all documentation files in a directory
    */
   private async findDocumentationFiles(docsPath: string): Promise<string[]> {
-    const fs = await import('fs/promises');
+    const fs = await import("fs/promises");
     const files: string[] = [];
 
     const processDirectory = async (dirPath: string): Promise<void> => {
@@ -571,12 +808,24 @@ export class DocumentationParser {
             continue;
           }
 
-          if (stat && typeof stat.isDirectory === 'function' && stat.isDirectory()) {
+          if (
+            stat &&
+            typeof stat.isDirectory === "function" &&
+            stat.isDirectory()
+          ) {
             // Skip node_modules and hidden directories
-            if (!name.startsWith('.') && name !== 'node_modules' && name !== 'dist') {
+            if (
+              !name.startsWith(".") &&
+              name !== "node_modules" &&
+              name !== "dist"
+            ) {
               await processDirectory(fullPath);
             }
-          } else if (stat && typeof stat.isFile === 'function' && stat.isFile()) {
+          } else if (
+            stat &&
+            typeof stat.isFile === "function" &&
+            stat.isFile()
+          ) {
             const ext = extname(name).toLowerCase();
             if (this.supportedExtensions.includes(ext)) {
               files.push(fullPath);
@@ -595,24 +844,30 @@ export class DocumentationParser {
   /**
    * Create or update documentation node in knowledge graph
    */
-  private async createOrUpdateDocumentationNode(filePath: string, parsedDoc: ParsedDocument): Promise<void> {
-    const docId = `doc_${basename(filePath, extname(filePath))}_${this.calculateChecksum(parsedDoc.content).substring(0, 8)}`;
+  private async createOrUpdateDocumentationNode(
+    filePath: string,
+    parsedDoc: ParsedDocument
+  ): Promise<void> {
+    const docId = `doc_${basename(
+      filePath,
+      extname(filePath)
+    )}_${this.calculateChecksum(parsedDoc.content).substring(0, 8)}`;
 
     const docNode: DocumentationNode = {
       id: docId,
       path: filePath,
       hash: this.calculateChecksum(parsedDoc.content),
-      language: 'markdown', // or detect from extension
+      language: "markdown", // or detect from extension
       lastModified: new Date(),
       created: new Date(),
-      type: 'documentation',
+      type: "documentation",
       title: parsedDoc.title,
       content: parsedDoc.content,
       docType: parsedDoc.docType,
       businessDomains: parsedDoc.businessDomains,
       stakeholders: parsedDoc.stakeholders,
       technologies: parsedDoc.technologies,
-      status: 'active'
+      status: "active",
     };
 
     await this.kgService.createEntity(docNode);
@@ -621,24 +876,28 @@ export class DocumentationParser {
   /**
    * Extract and create business domains
    */
-  private async extractAndCreateDomains(parsedDoc: ParsedDocument): Promise<number> {
+  private async extractAndCreateDomains(
+    parsedDoc: ParsedDocument
+  ): Promise<number> {
     let newDomainsCount = 0;
 
     for (const domainName of parsedDoc.businessDomains) {
-      const domainId = `domain_${domainName.replace(/\s+/g, '_').toLowerCase()}`;
+      const domainId = `domain_${domainName
+        .replace(/\s+/g, "_")
+        .toLowerCase()}`;
 
       // Check if domain already exists
       const existingDomain = await this.kgService.getEntity(domainId);
       if (!existingDomain) {
         const domain: BusinessDomain = {
           id: domainId,
-          type: 'businessDomain',
+          type: "businessDomain",
           name: domainName,
           description: `Business domain extracted from documentation: ${parsedDoc.title}`,
           criticality: this.inferDomainCriticality(domainName),
           stakeholders: parsedDoc.stakeholders,
           keyProcesses: [], // Could be extracted from content
-          extractedFrom: [parsedDoc.title]
+          extractedFrom: [parsedDoc.title],
         };
 
         await this.kgService.createEntity(domain);
@@ -652,38 +911,50 @@ export class DocumentationParser {
   /**
    * Infer domain criticality based on name patterns
    */
-  private inferDomainCriticality(domainName: string): BusinessDomain['criticality'] {
+  private inferDomainCriticality(
+    domainName: string
+  ): BusinessDomain["criticality"] {
     const lowerName = domainName.toLowerCase();
 
-    if (lowerName.includes('authentication') || lowerName.includes('security') || lowerName.includes('payment')) {
-      return 'core';
+    if (
+      lowerName.includes("authentication") ||
+      lowerName.includes("security") ||
+      lowerName.includes("payment")
+    ) {
+      return "core";
     }
-    if (lowerName.includes('user management') || lowerName.includes('reporting') || lowerName.includes('communication')) {
-      return 'supporting';
+    if (
+      lowerName.includes("user management") ||
+      lowerName.includes("reporting") ||
+      lowerName.includes("communication")
+    ) {
+      return "supporting";
     }
 
-    return 'utility';
+    return "utility";
   }
 
   /**
    * Update semantic clusters based on parsed documentation
    */
-  private async updateSemanticClusters(parsedDoc: ParsedDocument): Promise<void> {
+  private async updateSemanticClusters(
+    parsedDoc: ParsedDocument
+  ): Promise<void> {
     // This is a simplified implementation
     // In a real scenario, this would analyze the content and group related entities
     for (const domain of parsedDoc.businessDomains) {
-      const clusterId = `cluster_${domain.replace(/\s+/g, '_').toLowerCase()}`;
+      const clusterId = `cluster_${domain.replace(/\s+/g, "_").toLowerCase()}`;
 
       const cluster: SemanticCluster = {
         id: clusterId,
-        type: 'semanticCluster',
+        type: "semanticCluster",
         name: `${domain} Cluster`,
         description: `Semantic cluster for ${domain} domain`,
-        businessDomainId: `domain_${domain.replace(/\s+/g, '_').toLowerCase()}`,
-        clusterType: 'capability',
+        businessDomainId: `domain_${domain.replace(/\s+/g, "_").toLowerCase()}`,
+        clusterType: "capability",
         cohesionScore: 0.8,
         lastAnalyzed: new Date(),
-        memberEntities: []
+        memberEntities: [],
       };
 
       await this.kgService.createEntity(cluster);
@@ -701,26 +972,33 @@ export class DocumentationParser {
   /**
    * Search documentation content
    */
-  async searchDocumentation(query: string, options: {
-    domain?: string;
-    docType?: DocumentationNode['docType'];
-    limit?: number;
-  } = {}): Promise<SearchResult[]> {
+  async searchDocumentation(
+    query: string,
+    options: {
+      domain?: string;
+      docType?: DocumentationNode["docType"];
+      limit?: number;
+    } = {}
+  ): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
 
     // This is a simplified search implementation
     // In a real scenario, this would use vector search or full-text search
 
     // Get all documentation nodes
-    const docs = await this.kgService.findEntitiesByType('documentation');
+    const docs = await this.kgService.findEntitiesByType("documentation");
 
     for (const doc of docs) {
       const documentationNode = doc as DocumentationNode;
 
       // Filter by options
-      if (options.domain && (!documentationNode.businessDomains || 
-          !documentationNode.businessDomains.some(d =>
-            d.toLowerCase().includes(options.domain!.toLowerCase())))) {
+      if (
+        options.domain &&
+        (!documentationNode.businessDomains ||
+          !documentationNode.businessDomains.some((d) =>
+            d.toLowerCase().includes(options.domain!.toLowerCase())
+          ))
+      ) {
         continue;
       }
 
@@ -729,12 +1007,18 @@ export class DocumentationParser {
       }
 
       // Simple text matching (could be enhanced with NLP)
-      const relevanceScore = this.calculateRelevanceScore(query, documentationNode);
+      const relevanceScore = this.calculateRelevanceScore(
+        query,
+        documentationNode
+      );
       if (relevanceScore > 0) {
         results.push({
           document: documentationNode,
           relevanceScore,
-          matchedSections: this.findMatchedSections(query, documentationNode.content)
+          matchedSections: this.findMatchedSections(
+            query,
+            documentationNode.content
+          ),
         });
       }
     }
@@ -747,7 +1031,10 @@ export class DocumentationParser {
   /**
    * Calculate relevance score for search query
    */
-  private calculateRelevanceScore(query: string, doc: DocumentationNode): number {
+  private calculateRelevanceScore(
+    query: string,
+    doc: DocumentationNode
+  ): number {
     const lowerQuery = query.toLowerCase();
     const lowerContent = doc.content.toLowerCase();
     const lowerTitle = doc.title.toLowerCase();
@@ -760,20 +1047,24 @@ export class DocumentationParser {
     }
 
     // Content matches
-    const contentMatches = (lowerContent.match(new RegExp(lowerQuery, 'g')) || []).length;
+    const contentMatches = (
+      lowerContent.match(new RegExp(lowerQuery, "g")) || []
+    ).length;
     score += contentMatches * 2;
 
     // Business domain matches
     if (doc.businessDomains && doc.businessDomains.length > 0) {
-      const domainMatches = doc.businessDomains.filter(d =>
-        d.toLowerCase().includes(lowerQuery)).length;
+      const domainMatches = doc.businessDomains.filter((d) =>
+        d.toLowerCase().includes(lowerQuery)
+      ).length;
       score += domainMatches * 5;
     }
 
     // Technology matches
     if (doc.technologies && doc.technologies.length > 0) {
-      const techMatches = doc.technologies.filter(t =>
-        t.toLowerCase().includes(lowerQuery)).length;
+      const techMatches = doc.technologies.filter((t) =>
+        t.toLowerCase().includes(lowerQuery)
+      ).length;
       score += techMatches * 3;
     }
 
@@ -785,7 +1076,7 @@ export class DocumentationParser {
    */
   private findMatchedSections(query: string, content: string): string[] {
     const sections: string[] = [];
-    const lines = content.split('\n');
+    const lines = content.split("\n");
     const lowerQuery = query.toLowerCase();
 
     for (let i = 0; i < lines.length; i++) {
@@ -794,7 +1085,7 @@ export class DocumentationParser {
         // Include context around the match
         const start = Math.max(0, i - 2);
         const end = Math.min(lines.length, i + 3);
-        const context = lines.slice(start, end).join('\n');
+        const context = lines.slice(start, end).join("\n");
         sections.push(context);
       }
     }

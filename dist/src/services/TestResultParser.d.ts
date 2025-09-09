@@ -2,7 +2,7 @@
  * Test Result Parser
  * Parses various test framework output formats into standardized test results
  */
-import { TestSuiteResult } from './TestEngine.js';
+import { TestSuiteResult } from "./TestEngine.js";
 export interface ParsedTestSuite {
     suiteName: string;
     timestamp: Date;
@@ -24,7 +24,7 @@ export interface ParsedTestResult {
     testId: string;
     testSuite: string;
     testName: string;
-    status: 'passed' | 'failed' | 'skipped' | 'error';
+    status: "passed" | "failed" | "skipped" | "error";
     duration: number;
     errorMessage?: string;
     stackTrace?: string;
@@ -44,11 +44,11 @@ export declare class TestResultParser {
     /**
      * Parse test results from a file
      */
-    parseFile(filePath: string, format: 'junit' | 'jest' | 'mocha' | 'vitest' | 'cypress' | 'playwright'): Promise<TestSuiteResult>;
+    parseFile(filePath: string, format: "junit" | "jest" | "mocha" | "vitest" | "cypress" | "playwright"): Promise<TestSuiteResult>;
     /**
      * Parse test results from content string
      */
-    parseContent(content: string, format: 'junit' | 'jest' | 'mocha' | 'vitest' | 'cypress' | 'playwright'): Promise<TestSuiteResult>;
+    parseContent(content: string, format: "junit" | "jest" | "mocha" | "vitest" | "cypress" | "playwright"): Promise<TestSuiteResult>;
     /**
      * Parse JUnit XML format
      */

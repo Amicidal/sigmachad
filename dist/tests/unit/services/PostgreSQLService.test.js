@@ -30,8 +30,8 @@ describe('PostgreSQLService', () => {
             idleTimeoutMillis: 30000,
             connectionTimeoutMillis: 10000,
         };
-        // Create fresh service instance
-        service = new PostgreSQLService(testConfig);
+        // Create fresh service instance with injected pool factory by default
+        service = new PostgreSQLService(testConfig, { poolFactory: () => mockPool });
     });
     afterEach(() => {
         // Clean up after each test
@@ -115,6 +115,10 @@ describe('PostgreSQLService', () => {
             expect(mockClient.release).toHaveBeenCalledTimes(1);
         });
         it('should not initialize twice', async () => {
+            // For this test we want to verify Pool() creation count,
+            // so we use a service without factory and re-apply Pool mock.
+            Pool.mockImplementation(() => mockPool);
+            const localService = new PostgreSQLService(testConfig);
             // Mock successful connection
             const mockClient = {
                 query: vi.fn().mockResolvedValue({ rows: [] }),
@@ -123,11 +127,11 @@ describe('PostgreSQLService', () => {
             mockPool.connect.mockResolvedValue(mockClient);
             mockPool.query = vi.fn().mockResolvedValue({ rows: [] });
             // First initialization
-            await service.initialize();
-            expect(service.isInitialized()).toBe(true);
+            await localService.initialize();
+            expect(localService.isInitialized()).toBe(true);
             // Second initialization should return early
-            await service.initialize();
-            expect(service.isInitialized()).toBe(true);
+            await localService.initialize();
+            expect(localService.isInitialized()).toBe(true);
             // Pool should only be created once
             expect(Pool).toHaveBeenCalledTimes(1);
         });
@@ -154,9 +158,13 @@ describe('PostgreSQLService', () => {
                 query: vi.fn().mockResolvedValue({ rows: [] }),
                 release: vi.fn(),
             };
+            // For this test we want to verify Pool() is called with config, so
+            // construct a service without factory and re-apply Pool mock.
+            Pool.mockImplementation(() => mockPool);
+            const localService = new PostgreSQLService(testConfig);
             mockPool.connect.mockResolvedValue(mockClient);
             mockPool.query = vi.fn().mockResolvedValue({ rows: [] });
-            await service.initialize();
+            await localService.initialize();
             expect(Pool).toHaveBeenCalledWith({
                 connectionString: testConfig.connectionString,
                 max: testConfig.max,

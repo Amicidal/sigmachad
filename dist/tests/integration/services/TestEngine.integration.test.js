@@ -2,14 +2,14 @@
  * Integration tests for TestEngine
  * Tests test result processing, analysis, and database integration
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { TestEngine } from '../../../src/services/TestEngine';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
-import { setupTestDatabase, cleanupTestDatabase, clearTestData } from '../../test-utils/database-helpers';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import { tmpdir } from 'os';
-describe('TestEngine Integration', () => {
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { TestEngine, } from "../../../src/services/TestEngine";
+import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, } from "../../test-utils/database-helpers";
+import * as fs from "fs/promises";
+import * as path from "path";
+import { tmpdir } from "os";
+describe("TestEngine Integration", () => {
     let testEngine;
     let kgService;
     let dbService;
@@ -20,7 +20,7 @@ describe('TestEngine Integration', () => {
         await kgService.initialize();
         testEngine = new TestEngine(kgService, dbService);
         // Create test directory
-        testDir = path.join(tmpdir(), 'test-engine-integration-tests');
+        testDir = path.join(tmpdir(), "test-engine-integration-tests");
         await fs.mkdir(testDir, { recursive: true });
     }, 30000);
     afterAll(async () => {
@@ -29,14 +29,14 @@ describe('TestEngine Integration', () => {
             await fs.rm(testDir, { recursive: true, force: true });
         }
         catch (error) {
-            console.warn('Failed to clean up test directory:', error);
+            console.warn("Failed to clean up test directory:", error);
         }
     });
     beforeEach(async () => {
         await clearTestData(dbService);
     });
-    describe('Test Result Parsing', () => {
-        it('should parse JUnit XML format', async () => {
+    describe("Test Result Parsing", () => {
+        it("should parse JUnit XML format", async () => {
             const junitXml = `<?xml version="1.0" encoding="UTF-8"?>
         <testsuites>
           <testsuite name="Unit Tests" tests="2" failures="0" time="0.5">
@@ -52,436 +52,438 @@ describe('TestEngine Integration', () => {
             </testcase>
           </testsuite>
         </testsuites>`;
-            const testFile = path.join(testDir, 'junit-results.xml');
+            const testFile = path.join(testDir, "junit-results.xml");
             await fs.writeFile(testFile, junitXml);
-            const result = await testEngine.parseTestResults(testFile, 'junit');
+            const result = await testEngine.parseTestResults(testFile, "junit");
             expect(result).toBeDefined();
-            expect(result.suiteName).toContain('JUnit');
+            expect(result.suiteName).toContain("JUnit");
             expect(result.results.length).toBe(2);
             expect(result.totalTests).toBe(2);
             expect(result.passedTests).toBe(2);
             expect(result.failedTests).toBe(0);
         });
-        it('should parse Jest JSON format', async () => {
+        it("should parse Jest JSON format", async () => {
             const jestJson = {
                 testResults: [
                     {
-                        testFilePath: 'src/components/Button.test.js',
+                        testFilePath: "src/components/Button.test.js",
                         testResults: [
                             {
-                                title: 'renders correctly',
-                                status: 'passed',
-                                duration: 150
+                                title: "renders correctly",
+                                status: "passed",
+                                duration: 150,
                             },
                             {
-                                title: 'handles click events',
-                                status: 'passed',
-                                duration: 200
-                            }
-                        ]
-                    }
+                                title: "handles click events",
+                                status: "passed",
+                                duration: 200,
+                            },
+                        ],
+                    },
                 ],
-                success: true
+                success: true,
             };
-            const testFile = path.join(testDir, 'jest-results.json');
+            const testFile = path.join(testDir, "jest-results.json");
             await fs.writeFile(testFile, JSON.stringify(jestJson));
-            const result = await testEngine.parseTestResults(testFile, 'jest');
+            const result = await testEngine.parseTestResults(testFile, "jest");
             expect(result).toBeDefined();
-            expect(result.suiteName).toContain('Jest');
+            expect(result.suiteName).toContain("Jest");
             expect(result.results.length).toBe(2);
             expect(result.totalTests).toBe(2);
             expect(result.passedTests).toBe(2);
         });
-        it('should parse Vitest JSON format', async () => {
+        it("should parse Vitest JSON format", async () => {
             const vitestJson = {
                 testResults: [
                     {
-                        name: 'Button Component',
-                        filepath: 'src/components/Button.test.ts',
-                        status: 'pass',
-                        duration: 250
+                        name: "Button Component",
+                        filepath: "src/components/Button.test.ts",
+                        status: "pass",
+                        duration: 250,
                     },
                     {
-                        name: 'Input Component',
-                        filepath: 'src/components/Input.test.ts',
-                        status: 'pass',
-                        duration: 180
-                    }
-                ]
+                        name: "Input Component",
+                        filepath: "src/components/Input.test.ts",
+                        status: "pass",
+                        duration: 180,
+                    },
+                ],
             };
-            const testFile = path.join(testDir, 'vitest-results.json');
+            const testFile = path.join(testDir, "vitest-results.json");
             await fs.writeFile(testFile, JSON.stringify(vitestJson));
-            const result = await testEngine.parseTestResults(testFile, 'vitest');
+            const result = await testEngine.parseTestResults(testFile, "vitest");
             expect(result).toBeDefined();
-            expect(result.suiteName).toContain('Vitest');
+            expect(result.suiteName).toContain("Vitest");
             expect(result.results.length).toBe(2);
             expect(result.totalTests).toBe(2);
         });
-        it('should handle malformed test files gracefully', async () => {
-            const malformedFile = path.join(testDir, 'malformed.json');
-            await fs.writeFile(malformedFile, '{ invalid json content }');
-            await expect(testEngine.parseTestResults(malformedFile, 'jest')).rejects.toThrow();
+        it("should handle malformed test files gracefully", async () => {
+            const malformedFile = path.join(testDir, "malformed.json");
+            await fs.writeFile(malformedFile, "{ invalid json content }");
+            await expect(testEngine.parseTestResults(malformedFile, "jest")).rejects.toThrow();
         });
     });
-    describe('Test Result Recording', () => {
+    describe("Test Result Recording", () => {
         let sampleTestResults;
         beforeEach(() => {
             sampleTestResults = [
                 {
-                    testId: 'integration-test-1',
-                    testSuite: 'IntegrationTests',
-                    testName: 'should integrate with database',
-                    status: 'passed',
+                    testId: "integration-test-1",
+                    testSuite: "IntegrationTests",
+                    testName: "should integrate with database",
+                    status: "passed",
                     duration: 1500,
                     coverage: {
                         statements: 85,
                         branches: 80,
                         functions: 90,
-                        lines: 85
+                        lines: 85,
                     },
                     performance: {
                         memoryUsage: 1024000,
                         cpuUsage: 15,
-                        networkRequests: 3
-                    }
+                        networkRequests: 3,
+                    },
                 },
                 {
-                    testId: 'integration-test-2',
-                    testSuite: 'IntegrationTests',
-                    testName: 'should handle errors gracefully',
-                    status: 'passed',
+                    testId: "integration-test-2",
+                    testSuite: "IntegrationTests",
+                    testName: "should handle errors gracefully",
+                    status: "passed",
                     duration: 1200,
                     coverage: {
                         statements: 82,
                         branches: 78,
                         functions: 88,
-                        lines: 82
-                    }
+                        lines: 82,
+                    },
                 },
                 {
-                    testId: 'unit-test-1',
-                    testSuite: 'UnitTests',
-                    testName: 'should validate input',
-                    status: 'failed',
+                    testId: "unit-test-1",
+                    testSuite: "UnitTests",
+                    testName: "should validate input",
+                    status: "failed",
                     duration: 100,
-                    errorMessage: 'Expected true but received false',
-                    stackTrace: 'Error: Expected true but received false\n    at test file:25:10'
-                }
+                    errorMessage: "Expected true but received false",
+                    stackTrace: "Error: Expected true but received false\n    at test file:25:10",
+                },
             ];
         });
-        it('should record test suite results to database', async () => {
+        it("should record test suite results to database", async () => {
             const suiteResult = {
-                suiteName: 'Integration Test Suite',
+                suiteName: "Integration Test Suite",
                 timestamp: new Date(),
                 results: sampleTestResults,
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 3,
                 passedTests: 2,
                 failedTests: 1,
                 skippedTests: 0,
-                duration: 2800
+                duration: 2800,
             };
             await testEngine.recordTestResults(suiteResult);
             // Verify test entities were created in knowledge graph
-            const testEntity1 = await kgService.getEntity('integration-test-1');
-            const testEntity2 = await kgService.getEntity('integration-test-2');
-            const testEntity3 = await kgService.getEntity('unit-test-1');
+            const testEntity1 = await kgService.getEntity("integration-test-1");
+            const testEntity2 = await kgService.getEntity("integration-test-2");
+            const testEntity3 = await kgService.getEntity("unit-test-1");
             expect(testEntity1).toBeDefined();
             expect(testEntity2).toBeDefined();
             expect(testEntity3).toBeDefined();
-            expect(testEntity1?.type).toBe('test');
-            expect(testEntity2?.type).toBe('test');
-            expect(testEntity3?.type).toBe('test');
+            expect(testEntity1?.type).toBe("test");
+            expect(testEntity2?.type).toBe("test");
+            expect(testEntity3?.type).toBe("test");
         });
-        it('should update performance metrics', async () => {
+        it("should update performance metrics", async () => {
             const suiteResult = {
-                suiteName: 'Performance Test Suite',
+                suiteName: "Performance Test Suite",
                 timestamp: new Date(),
                 results: [sampleTestResults[0]], // Use the test with performance data
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 1,
                 passedTests: 1,
                 failedTests: 0,
                 skippedTests: 0,
-                duration: 1500
+                duration: 1500,
             };
             await testEngine.recordTestResults(suiteResult);
-            const performanceMetrics = await testEngine.getPerformanceMetrics('integration-test-1');
+            const performanceMetrics = await testEngine.getPerformanceMetrics("integration-test-1");
             expect(performanceMetrics).toBeDefined();
             expect(performanceMetrics.averageExecutionTime).toBeGreaterThan(0);
             expect(performanceMetrics.successRate).toBe(1); // 100% success rate
         });
-        it('should handle failed test results', async () => {
+        it("should handle failed test results", async () => {
             const suiteResult = {
-                suiteName: 'Failing Test Suite',
+                suiteName: "Failing Test Suite",
                 timestamp: new Date(),
                 results: [sampleTestResults[2]], // Failed test
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 1,
                 passedTests: 0,
                 failedTests: 1,
                 skippedTests: 0,
-                duration: 100
+                duration: 100,
             };
             await testEngine.recordTestResults(suiteResult);
-            const testEntity = await kgService.getEntity('unit-test-1');
+            const testEntity = await kgService.getEntity("unit-test-1");
             expect(testEntity).toBeDefined();
             // Check that failure information is recorded
             const executionHistory = testEntity.executionHistory;
             expect(executionHistory).toBeDefined();
             expect(executionHistory.length).toBe(1);
-            expect(executionHistory[0].status).toBe('failed');
-            expect(executionHistory[0].errorMessage).toBe('Expected true but received false');
+            expect(executionHistory[0].status).toBe("failed");
+            expect(executionHistory[0].errorMessage).toBe("Expected true but received false");
         });
     });
-    describe('Flaky Test Analysis', () => {
+    describe("Flaky Test Analysis", () => {
         let flakyTestResults;
         beforeEach(() => {
             // Create alternating pass/fail pattern to simulate flaky behavior
             flakyTestResults = [];
             for (let i = 0; i < 10; i++) {
                 flakyTestResults.push({
-                    testId: 'flaky-test-1',
-                    testSuite: 'FlakyTests',
-                    testName: 'unstable test',
-                    status: i % 2 === 0 ? 'passed' : 'failed', // Alternate pass/fail
-                    duration: 100 + Math.random() * 50,
-                    errorMessage: i % 2 === 1 ? 'Intermittent failure' : undefined
+                    testId: "flaky-test-1",
+                    testSuite: "FlakyTests",
+                    testName: "unstable test",
+                    status: i % 2 === 0 ? "passed" : "failed", // Alternate pass/fail
+                    duration: Math.floor(100 + Math.random() * 50),
+                    errorMessage: i % 2 === 1 ? "Intermittent failure" : undefined,
                 });
             }
         });
-        it('should detect flaky tests', async () => {
+        it("should detect flaky tests", async () => {
             const suiteResult = {
-                suiteName: 'Flaky Test Suite',
+                suiteName: "Flaky Test Suite",
                 timestamp: new Date(),
                 results: flakyTestResults,
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 10,
                 passedTests: 5,
                 failedTests: 5,
                 skippedTests: 0,
-                duration: 1000
+                duration: 1000,
             };
             const analysisResults = await testEngine.analyzeFlakyTests(flakyTestResults);
             expect(analysisResults.length).toBe(1);
             const analysis = analysisResults[0];
-            expect(analysis.testId).toBe('flaky-test-1');
+            expect(analysis.testId).toBe("flaky-test-1");
             expect(analysis.flakyScore).toBeGreaterThan(0.3); // Should be considered flaky
             expect(analysis.totalRuns).toBe(10);
             expect(analysis.failureRate).toBe(0.5); // 50% failure rate
             expect(analysis.recentFailures).toBeGreaterThan(0);
             expect(analysis.recommendations.length).toBeGreaterThan(0);
         });
-        it('should not flag stable tests as flaky', async () => {
+        it("should not flag stable tests as flaky", async () => {
             const stableResults = Array.from({ length: 10 }, () => ({
-                testId: 'stable-test-1',
-                testSuite: 'StableTests',
-                testName: 'stable test',
-                status: 'passed',
-                duration: 100
+                testId: "stable-test-1",
+                testSuite: "StableTests",
+                testName: "stable test",
+                status: "passed",
+                duration: 100,
             }));
             const analysisResults = await testEngine.analyzeFlakyTests(stableResults);
             expect(analysisResults.length).toBe(0); // Should not be considered flaky
         });
-        it('should generate appropriate recommendations for flaky tests', async () => {
+        it("should generate appropriate recommendations for flaky tests", async () => {
             const suiteResult = {
-                suiteName: 'High Failure Test Suite',
+                suiteName: "High Failure Test Suite",
                 timestamp: new Date(),
                 results: flakyTestResults,
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 10,
                 passedTests: 2,
                 failedTests: 8,
                 skippedTests: 0,
-                duration: 1000
+                duration: 1000,
             };
             const analysisResults = await testEngine.analyzeFlakyTests(flakyTestResults);
             const analysis = analysisResults[0];
-            expect(analysis.recommendations).toContain('Consider rewriting this test to be more deterministic');
-            expect(analysis.recommendations).toContain('Check for race conditions or timing dependencies');
+            expect(analysis.recommendations).toContain("Consider rewriting this test to be more deterministic");
+            expect(analysis.recommendations).toContain("Check for race conditions or timing dependencies");
         });
     });
-    describe('Coverage Analysis', () => {
+    describe("Coverage Analysis", () => {
         let coverageTestResults;
         beforeEach(async () => {
             // Create test entities first
             const testEntity = {
-                id: 'coverage-test-entity',
-                path: 'src/utils/helpers.ts',
-                hash: 'cover123',
-                language: 'typescript',
+                id: "coverage-test-entity",
+                path: "src/utils/helpers.ts",
+                hash: "cover123",
+                language: "typescript",
                 lastModified: new Date(),
                 created: new Date(),
-                type: 'file'
+                type: "file",
             };
             await kgService.createEntity(testEntity);
             coverageTestResults = [
                 {
-                    testId: 'coverage-test-1',
-                    testSuite: 'CoverageTests',
-                    testName: 'should cover helpers',
-                    status: 'passed',
+                    testId: "coverage-test-1",
+                    testSuite: "CoverageTests",
+                    testName: "should cover helpers",
+                    status: "passed",
                     duration: 200,
                     coverage: {
                         statements: 90,
                         branches: 85,
                         functions: 95,
-                        lines: 90
-                    }
+                        lines: 90,
+                    },
                 },
                 {
-                    testId: 'coverage-test-2',
-                    testSuite: 'CoverageTests',
-                    testName: 'should cover edge cases',
-                    status: 'passed',
+                    testId: "coverage-test-2",
+                    testSuite: "CoverageTests",
+                    testName: "should cover edge cases",
+                    status: "passed",
                     duration: 150,
                     coverage: {
                         statements: 88,
                         branches: 82,
                         functions: 92,
-                        lines: 88
-                    }
-                }
+                        lines: 88,
+                    },
+                },
             ];
         });
-        it('should analyze coverage for entities', async () => {
+        it("should analyze coverage for entities", async () => {
             const suiteResult = {
-                suiteName: 'Coverage Test Suite',
+                suiteName: "Coverage Test Suite",
                 timestamp: new Date(),
                 results: coverageTestResults,
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 2,
                 passedTests: 2,
                 failedTests: 0,
                 skippedTests: 0,
-                duration: 350
+                duration: 350,
             };
             await testEngine.recordTestResults(suiteResult);
-            const coverageAnalysis = await testEngine.getCoverageAnalysis('coverage-test-entity');
+            const coverageAnalysis = await testEngine.getCoverageAnalysis("coverage-test-1");
             expect(coverageAnalysis).toBeDefined();
-            expect(coverageAnalysis.entityId).toBe('coverage-test-entity');
+            expect(coverageAnalysis.entityId).toBe("coverage-test-1");
             expect(coverageAnalysis.overallCoverage.statements).toBeGreaterThan(0);
             expect(coverageAnalysis.testCases.length).toBeGreaterThan(0);
         });
-        it('should aggregate coverage from multiple tests', async () => {
+        it("should aggregate coverage from multiple tests", async () => {
             const suiteResult = {
-                suiteName: 'Coverage Aggregation Test Suite',
+                suiteName: "Coverage Aggregation Test Suite",
                 timestamp: new Date(),
                 results: coverageTestResults,
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 2,
                 passedTests: 2,
                 failedTests: 0,
                 skippedTests: 0,
-                duration: 350
+                duration: 350,
             };
             await testEngine.recordTestResults(suiteResult);
-            const coverageAnalysis = await testEngine.getCoverageAnalysis('coverage-test-entity');
+            const coverageAnalysis = await testEngine.getCoverageAnalysis("coverage-test-1");
             // Should aggregate coverage from both tests
             expect(coverageAnalysis.overallCoverage.statements).toBeGreaterThan(85);
             expect(coverageAnalysis.testBreakdown.unitTests.statements).toBeGreaterThan(85);
         });
     });
-    describe('File-based Test Processing', () => {
-        it('should parse and record test results from file', async () => {
+    describe("File-based Test Processing", () => {
+        it("should parse and record test results from file", async () => {
             const jestResults = {
                 testResults: [
                     {
-                        testFilePath: 'src/services/__tests__/UserService.test.js',
+                        testFilePath: "src/services/__tests__/UserService.test.js",
                         testResults: [
                             {
-                                title: 'should create user successfully',
-                                status: 'passed',
-                                duration: 120
+                                title: "should create user successfully",
+                                status: "passed",
+                                duration: 120,
                             },
                             {
-                                title: 'should handle invalid input',
-                                status: 'passed',
-                                duration: 95
+                                title: "should handle invalid input",
+                                status: "passed",
+                                duration: 95,
                             },
                             {
-                                title: 'should delete user',
-                                status: 'failed',
+                                title: "should delete user",
+                                status: "failed",
                                 duration: 80,
-                                failureMessages: ['Expected user to be deleted but user still exists']
-                            }
-                        ]
-                    }
+                                failureMessages: [
+                                    "Expected user to be deleted but user still exists",
+                                ],
+                            },
+                        ],
+                    },
                 ],
-                success: false
+                success: false,
             };
-            const testFile = path.join(testDir, 'file-based-results.json');
+            const testFile = path.join(testDir, "file-based-results.json");
             await fs.writeFile(testFile, JSON.stringify(jestResults));
-            await testEngine.parseAndRecordTestResults(testFile, 'jest');
+            await testEngine.parseAndRecordTestResults(testFile, "jest");
             // Verify results were recorded
-            const test1 = await kgService.getEntity('src/services/__tests__/UserService.test.js:should create user successfully');
-            const test2 = await kgService.getEntity('src/services/__tests__/UserService.test.js:should handle invalid input');
-            const test3 = await kgService.getEntity('src/services/__tests__/UserService.test.js:should delete user');
+            const test1 = await kgService.getEntity("src/services/__tests__/UserService.test.js:should create user successfully");
+            const test2 = await kgService.getEntity("src/services/__tests__/UserService.test.js:should handle invalid input");
+            const test3 = await kgService.getEntity("src/services/__tests__/UserService.test.js:should delete user");
             expect(test1).toBeDefined();
             expect(test2).toBeDefined();
             expect(test3).toBeDefined();
             // Check status of failed test
-            expect(test3.status).toBe('failing');
+            expect(test3.status).toBe("failing");
         });
-        it('should handle multiple test suites in one file', async () => {
+        it("should handle multiple test suites in one file", async () => {
             const multiSuiteResults = {
                 testResults: [
                     {
-                        testFilePath: 'src/components/Button.test.js',
+                        testFilePath: "src/components/Button.test.js",
                         testResults: [
                             {
-                                title: 'renders button',
-                                status: 'passed',
-                                duration: 100
-                            }
-                        ]
+                                title: "renders button",
+                                status: "passed",
+                                duration: 100,
+                            },
+                        ],
                     },
                     {
-                        testFilePath: 'src/components/Input.test.js',
+                        testFilePath: "src/components/Input.test.js",
                         testResults: [
                             {
-                                title: 'handles input changes',
-                                status: 'passed',
-                                duration: 120
-                            }
-                        ]
-                    }
-                ]
+                                title: "handles input changes",
+                                status: "passed",
+                                duration: 120,
+                            },
+                        ],
+                    },
+                ],
             };
-            const testFile = path.join(testDir, 'multi-suite-results.json');
+            const testFile = path.join(testDir, "multi-suite-results.json");
             await fs.writeFile(testFile, JSON.stringify(multiSuiteResults));
-            await testEngine.parseAndRecordTestResults(testFile, 'jest');
-            const buttonTest = await kgService.getEntity('src/components/Button.test.js:renders button');
-            const inputTest = await kgService.getEntity('src/components/Input.test.js:handles input changes');
+            await testEngine.parseAndRecordTestResults(testFile, "jest");
+            const buttonTest = await kgService.getEntity("src/components/Button.test.js:renders button");
+            const inputTest = await kgService.getEntity("src/components/Input.test.js:handles input changes");
             expect(buttonTest).toBeDefined();
             expect(inputTest).toBeDefined();
         });
     });
-    describe('Performance and Load Testing', () => {
-        it('should handle large test result sets efficiently', async () => {
+    describe("Performance and Load Testing", () => {
+        it("should handle large test result sets efficiently", async () => {
             const largeTestResults = Array.from({ length: 100 }, (_, i) => ({
                 testId: `performance-test-${i}`,
-                testSuite: 'PerformanceTests',
+                testSuite: "PerformanceTests",
                 testName: `performance test ${i}`,
-                status: 'passed',
-                duration: 50 + Math.random() * 100,
+                status: "passed",
+                duration: Math.floor(50 + Math.random() * 100),
                 coverage: {
                     statements: 80 + Math.random() * 15,
                     branches: 75 + Math.random() * 20,
                     functions: 85 + Math.random() * 10,
-                    lines: 80 + Math.random() * 15
-                }
+                    lines: 80 + Math.random() * 15,
+                },
             }));
             const suiteResult = {
-                suiteName: 'Large Performance Test Suite',
+                suiteName: "Large Performance Test Suite",
                 timestamp: new Date(),
                 results: largeTestResults,
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 100,
                 passedTests: 100,
                 failedTests: 0,
                 skippedTests: 0,
-                duration: 7500
+                duration: 7500,
             };
             const startTime = Date.now();
             await testEngine.recordTestResults(suiteResult);
@@ -489,12 +491,13 @@ describe('TestEngine Integration', () => {
             // Should complete within reasonable time
             expect(endTime - startTime).toBeLessThan(30000); // 30 seconds max
             // Verify all tests were recorded
-            for (let i = 0; i < 10; i++) { // Check first 10
+            for (let i = 0; i < 10; i++) {
+                // Check first 10
                 const testEntity = await kgService.getEntity(`performance-test-${i}`);
                 expect(testEntity).toBeDefined();
             }
         });
-        it('should handle concurrent test result processing', async () => {
+        it("should handle concurrent test result processing", async () => {
             const concurrentSuites = Array.from({ length: 5 }, (_, i) => ({
                 suiteName: `Concurrent Suite ${i}`,
                 timestamp: new Date(),
@@ -503,19 +506,19 @@ describe('TestEngine Integration', () => {
                         testId: `concurrent-test-${i}`,
                         testSuite: `ConcurrentSuite${i}`,
                         testName: `concurrent test ${i}`,
-                        status: 'passed',
-                        duration: 100
-                    }
+                        status: "passed",
+                        duration: 100,
+                    },
                 ],
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 1,
                 passedTests: 1,
                 failedTests: 0,
                 skippedTests: 0,
-                duration: 100
+                duration: 100,
             }));
             const startTime = Date.now();
-            await Promise.all(concurrentSuites.map(suite => testEngine.recordTestResults(suite)));
+            await Promise.all(concurrentSuites.map((suite) => testEngine.recordTestResults(suite)));
             const endTime = Date.now();
             // Should complete within reasonable time
             expect(endTime - startTime).toBeLessThan(10000); // 10 seconds max
@@ -526,137 +529,185 @@ describe('TestEngine Integration', () => {
             }
         });
     });
-    describe('Historical Analysis and Trends', () => {
-        it('should track test performance over time', async () => {
+    describe("Historical Analysis and Trends", () => {
+        it("should track test performance over time", async () => {
             const baseTestResult = {
-                testId: 'trend-test-1',
-                testSuite: 'TrendTests',
-                testName: 'performance trend test',
-                status: 'passed',
+                testId: "trend-test-1",
+                testSuite: "TrendTests",
+                testName: "performance trend test",
+                status: "passed",
                 duration: 100,
                 coverage: {
                     statements: 85,
                     branches: 80,
                     functions: 90,
-                    lines: 85
-                }
+                    lines: 85,
+                },
             };
             // Record multiple runs with varying performance
             const runs = [
-                { duration: 100, status: 'passed' },
-                { duration: 95, status: 'passed' },
-                { duration: 110, status: 'passed' },
-                { duration: 90, status: 'passed' },
-                { duration: 105, status: 'passed' }
+                { duration: 100, status: "passed" },
+                { duration: 95, status: "passed" },
+                { duration: 110, status: "passed" },
+                { duration: 90, status: "passed" },
+                { duration: 105, status: "passed" },
             ];
             for (const run of runs) {
                 const suiteResult = {
-                    suiteName: 'Trend Test Suite',
+                    suiteName: "Trend Test Suite",
                     timestamp: new Date(),
-                    results: [{
+                    results: [
+                        {
                             ...baseTestResult,
                             duration: run.duration,
-                            status: run.status
-                        }],
-                    framework: 'jest',
+                            status: run.status,
+                        },
+                    ],
+                    framework: "jest",
                     totalTests: 1,
-                    passedTests: run.status === 'passed' ? 1 : 0,
-                    failedTests: run.status === 'failed' ? 1 : 0,
+                    passedTests: run.status === "passed" ? 1 : 0,
+                    failedTests: run.status === "failed" ? 1 : 0,
                     skippedTests: 0,
-                    duration: run.duration
+                    duration: run.duration,
                 };
                 await testEngine.recordTestResults(suiteResult);
             }
-            const performanceMetrics = await testEngine.getPerformanceMetrics('trend-test-1');
+            const performanceMetrics = await testEngine.getPerformanceMetrics("trend-test-1");
             expect(performanceMetrics.averageExecutionTime).toBeGreaterThan(0);
             expect(performanceMetrics.historicalData.length).toBeGreaterThan(0);
             expect(performanceMetrics.successRate).toBe(1); // All passed
         });
-        it('should calculate performance trends', async () => {
-            const testEntity = await kgService.getEntity('trend-test-1');
+        it("should calculate performance trends", async () => {
+            // Record test data for trend analysis
+            const baseTestResult = {
+                testId: "trend-test-1",
+                testSuite: "TrendTests",
+                testName: "performance trend test",
+                status: "passed",
+                duration: 100,
+                coverage: {
+                    statements: 85,
+                    branches: 80,
+                    functions: 90,
+                    lines: 85,
+                },
+            };
+            // Record multiple runs with varying performance
+            const runs = [
+                { duration: 100, status: "passed" },
+                { duration: 95, status: "passed" },
+                { duration: 110, status: "passed" },
+                { duration: 90, status: "passed" },
+                { duration: 105, status: "passed" },
+            ];
+            for (const run of runs) {
+                const suiteResult = {
+                    suiteName: "Trend Test Suite",
+                    timestamp: new Date(),
+                    results: [
+                        {
+                            ...baseTestResult,
+                            duration: run.duration,
+                            status: run.status,
+                        },
+                    ],
+                    framework: "jest",
+                    totalTests: 1,
+                    passedTests: run.status === "passed" ? 1 : 0,
+                    failedTests: run.status === "failed" ? 1 : 0,
+                    skippedTests: 0,
+                    duration: run.duration,
+                };
+                await testEngine.recordTestResults(suiteResult);
+            }
+            const testEntity = await kgService.getEntity("trend-test-1");
             expect(testEntity).toBeDefined();
-            const performanceMetrics = await testEngine.getPerformanceMetrics('trend-test-1');
+            const performanceMetrics = await testEngine.getPerformanceMetrics("trend-test-1");
             // Trend should be calculated (may be stable, improving, or degrading)
-            expect(['stable', 'improving', 'degrading']).toContain(performanceMetrics.trend);
+            expect(["stable", "improving", "degrading"]).toContain(performanceMetrics.trend);
         });
     });
-    describe('Error Handling and Edge Cases', () => {
-        it('should handle empty test results gracefully', async () => {
+    describe("Error Handling and Edge Cases", () => {
+        it("should handle empty test results gracefully", async () => {
             const emptySuite = {
-                suiteName: 'Empty Test Suite',
+                suiteName: "Empty Test Suite",
                 timestamp: new Date(),
                 results: [],
-                framework: 'jest',
+                framework: "jest",
                 totalTests: 0,
                 passedTests: 0,
                 failedTests: 0,
                 skippedTests: 0,
-                duration: 0
+                duration: 0,
             };
             await expect(testEngine.recordTestResults(emptySuite)).rejects.toThrow();
         });
-        it('should handle malformed test data', async () => {
+        it("should handle malformed test data", async () => {
             const malformedSuite = {
-                suiteName: 'Malformed Test Suite',
+                suiteName: "Malformed Test Suite",
                 timestamp: new Date(),
-                results: [{
-                        testId: '',
-                        testSuite: '',
-                        testName: '',
-                        status: 'passed',
-                        duration: -100 // Invalid duration
-                    }],
-                framework: 'jest',
+                results: [
+                    {
+                        testId: "",
+                        testSuite: "",
+                        testName: "",
+                        status: "passed",
+                        duration: -100, // Invalid duration
+                    },
+                ],
+                framework: "jest",
                 totalTests: 1,
                 passedTests: 1,
                 failedTests: 0,
                 skippedTests: 0,
-                duration: -100
+                duration: -100,
             };
             await expect(testEngine.recordTestResults(malformedSuite)).rejects.toThrow();
         });
-        it('should handle database connection failures during recording', async () => {
+        it("should handle database connection failures during recording", async () => {
             // Create a valid test suite
             const suiteResult = {
-                suiteName: 'Database Failure Test Suite',
+                suiteName: "Database Failure Test Suite",
                 timestamp: new Date(),
-                results: [{
-                        testId: 'db-failure-test',
-                        testSuite: 'DBFailureTests',
-                        testName: 'should handle db failure',
-                        status: 'passed',
-                        duration: 100
-                    }],
-                framework: 'jest',
+                results: [
+                    {
+                        testId: "db-failure-test",
+                        testSuite: "DBFailureTests",
+                        testName: "should handle db failure",
+                        status: "passed",
+                        duration: 100,
+                    },
+                ],
+                framework: "jest",
                 totalTests: 1,
                 passedTests: 1,
                 failedTests: 0,
                 skippedTests: 0,
-                duration: 100
+                duration: 100,
             };
             // Temporarily break the database connection
             const originalQuery = dbService.falkordbQuery;
             dbService.falkordbQuery = async () => {
-                throw new Error('Database connection failed');
+                throw new Error("Database connection failed");
             };
             try {
-                await expect(testEngine.recordTestResults(suiteResult)).rejects.toThrow('Test result recording failed');
+                await expect(testEngine.recordTestResults(suiteResult)).rejects.toThrow("Test result recording failed");
             }
             finally {
                 // Restore the database connection
                 dbService.falkordbQuery = originalQuery;
             }
         });
-        it('should handle coverage analysis for non-existent entities', async () => {
-            await expect(testEngine.getCoverageAnalysis('non-existent-entity')).rejects.toThrow('Test entity non-existent-entity not found');
+        it("should handle coverage analysis for non-existent entities", async () => {
+            await expect(testEngine.getCoverageAnalysis("non-existent-entity")).rejects.toThrow("Test entity non-existent-entity not found");
         });
-        it('should handle performance metrics for non-existent tests', async () => {
-            await expect(testEngine.getPerformanceMetrics('non-existent-test')).rejects.toThrow('Test entity non-existent-test not found');
+        it("should handle performance metrics for non-existent tests", async () => {
+            await expect(testEngine.getPerformanceMetrics("non-existent-test")).rejects.toThrow("Test entity non-existent-test not found");
         });
-        it('should handle unsupported test formats', async () => {
-            const unsupportedFile = path.join(testDir, 'unsupported.txt');
-            await fs.writeFile(unsupportedFile, 'unsupported format content');
-            await expect(testEngine.parseTestResults(unsupportedFile, 'unsupported')).rejects.toThrow('Unsupported test format');
+        it("should handle unsupported test formats", async () => {
+            const unsupportedFile = path.join(testDir, "unsupported.txt");
+            await fs.writeFile(unsupportedFile, "unsupported format content");
+            await expect(testEngine.parseTestResults(unsupportedFile, "unsupported")).rejects.toThrow("Unsupported test format");
         });
     });
 });

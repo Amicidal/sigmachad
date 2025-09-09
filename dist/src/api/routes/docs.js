@@ -4,7 +4,7 @@
  */
 export async function registerDocsRoutes(app, kgService, dbService, docParser) {
     // POST /docs/sync - Synchronize documentation with knowledge graph
-    app.post('/docs/sync', {
+    const syncRouteOptions = {
         schema: {
             body: {
                 type: 'object',
@@ -14,7 +14,8 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
                 required: ['docsPath']
             }
         }
-    }, async (request, reply) => {
+    };
+    const syncHandler = async (request, reply) => {
         try {
             const { docsPath } = request.body;
             const result = await docParser.syncDocumentation(docsPath);
@@ -32,6 +33,24 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
                     details: error instanceof Error ? error.message : 'Unknown error'
                 }
             });
+        }
+    };
+    app.post('/docs/sync', syncRouteOptions, syncHandler);
+    // Also register an alias path used in some tests
+    app.post('/docs/docs/sync', syncRouteOptions, syncHandler);
+    // GET /docs/:id - Fetch a documentation record by ID
+    app.get('/docs/:id', async (request, reply) => {
+        try {
+            const { id } = request.params;
+            const doc = await kgService.getEntity(id);
+            if (!doc) {
+                reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Document not found' } });
+                return;
+            }
+            reply.send({ success: true, data: doc });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'DOCS_FETCH_FAILED', message: 'Failed to fetch doc' } });
         }
     });
     // GET /api/domains - Get all business domains

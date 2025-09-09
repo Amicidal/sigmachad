@@ -61,21 +61,6 @@ export async function registerDocsRoutes(
   // Also register an alias path used in some tests
   app.post('/docs/docs/sync', syncRouteOptions, syncHandler);
 
-  // GET /docs/search - Basic documentation search endpoint
-  app.get('/docs/search', async (request, reply) => {
-    try {
-      const { q } = request.query as { q?: string };
-      const results = await kgService.search({
-        query: q || '',
-        searchType: 'structural',
-        entityTypes: ['documentation' as any],
-        limit: 20,
-      });
-      reply.send({ success: true, data: results });
-    } catch (error) {
-      reply.status(500).send({ success: false, error: { code: 'DOCS_SEARCH_FAILED', message: 'Failed to search docs' } });
-    }
-  });
 
   // GET /docs/:id - Fetch a documentation record by ID
   app.get('/docs/:id', async (request, reply) => {

@@ -67,6 +67,19 @@ export async function registerSecurityRoutes(app, kgService, dbService, security
             });
         }
     });
+    // POST /api/security/fix - Apply automated fixes for known issues (stub)
+    app.post('/security/fix', async (request, reply) => {
+        try {
+            // In a real system, this would trigger remediation workflows
+            reply.send({ success: true, data: { fixed: 0, actions: [] } });
+        }
+        catch (error) {
+            reply.status(500).send({
+                success: false,
+                error: { code: 'FIX_FAILED', message: 'Failed to apply security fixes' }
+            });
+        }
+    });
     // POST /api/security/audit - Perform security audit
     app.post('/security/audit', {
         schema: {

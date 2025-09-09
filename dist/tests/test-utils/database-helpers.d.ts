@@ -2,7 +2,7 @@
  * Database test utilities and helpers
  * Provides common setup and teardown functions for database tests
  */
-import { DatabaseService, DatabaseConfig } from '../../src/services/DatabaseService';
+import { DatabaseService, DatabaseConfig } from "../../src/services/DatabaseService";
 export declare const TEST_DATABASE_CONFIG: DatabaseConfig;
 /**
  * Setup database service for testing
@@ -121,6 +121,13 @@ export declare const TEST_FIXTURES: {
         performance: null;
         timestamp: Date;
     })[];
+    testPerformance: {
+        test_id: string;
+        memory_usage: number;
+        cpu_usage: number;
+        network_requests: number;
+        timestamp: Date;
+    }[];
     flakyAnalyses: {
         testId: string;
         testName: string;

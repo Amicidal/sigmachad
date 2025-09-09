@@ -22,18 +22,13 @@ vi.mock('../../../src/services/MaintenanceService.js');
 vi.mock('../../../src/services/ConfigurationService.js');
 vi.mock('../../../src/api/mcp-router.js');
 vi.mock('../../../src/api/websocket-router.js');
+import { makeRealisticKgService } from '../../test-utils/kg-realistic';
 describe('APIGateway', () => {
     let mockKgService;
     let mockDbService;
     beforeEach(() => {
-        mockKgService = {
-            createEntity: vi.fn().mockResolvedValue(undefined),
-            updateEntity: vi.fn().mockResolvedValue(undefined),
-            search: vi.fn().mockResolvedValue([]),
-            getRelationships: vi.fn().mockResolvedValue([]),
-            getEntity: vi.fn().mockResolvedValue(null),
-            createRelationship: vi.fn().mockResolvedValue(undefined),
-        };
+        // Use realistic defaults; individual tests can override as needed
+        mockKgService = makeRealisticKgService();
         mockDbService = {
             healthCheck: vi.fn().mockResolvedValue({
                 database: 'healthy',

@@ -46,7 +46,8 @@ export interface SystemConfiguration {
 export class ConfigurationService {
   constructor(
     private dbService: DatabaseService,
-    private syncCoordinator?: SynchronizationCoordinator
+    private syncCoordinator?: SynchronizationCoordinator,
+    private testWorkingDir?: string
   ) {}
 
   async getSystemConfiguration(): Promise<SystemConfiguration> {
@@ -66,7 +67,8 @@ export class ConfigurationService {
   private async getVersion(): Promise<string> {
     try {
       // Read version from package.json
-      const packageJsonPath = path.join(process.cwd(), "package.json");
+      const workingDir = this.testWorkingDir || process.cwd();
+      const packageJsonPath = path.join(workingDir, "package.json");
       const packageJson = await fs.readFile(packageJsonPath, "utf-8");
       const pkg = JSON.parse(packageJson);
       return pkg.version || "0.1.0";
@@ -84,6 +86,11 @@ export class ConfigurationService {
       qdrant: "unavailable",
       postgres: "unavailable",
     };
+
+    // If database service is not available, return unavailable status
+    if (!this.dbService) {
+      return status;
+    }
 
     try {
       // Check FalkorDB
@@ -161,17 +168,19 @@ export class ConfigurationService {
     SystemConfiguration["performance"]
   > {
     return {
-      maxConcurrentSync: this.syncCoordinator ? 5 : 1, // Default values
-      cacheSize: 1000,
-      requestTimeout: 30000,
+      maxConcurrentSync:
+        parseInt(process.env.MAX_CONCURRENT_SYNC || "") ||
+        (this.syncCoordinator ? 5 : 1),
+      cacheSize: parseInt(process.env.CACHE_SIZE || "") || 1000,
+      requestTimeout: parseInt(process.env.REQUEST_TIMEOUT || "") || 30000,
     };
   }
 
   private async getSecurityConfig(): Promise<SystemConfiguration["security"]> {
     return {
-      rateLimiting: true, // Rate limiting is implemented
-      authentication: false, // Not implemented yet
-      auditLogging: false, // Not implemented yet
+      rateLimiting: process.env.ENABLE_RATE_LIMITING === "true",
+      authentication: process.env.ENABLE_AUTHENTICATION === "true",
+      auditLogging: process.env.ENABLE_AUDIT_LOGGING === "true",
     };
   }
 

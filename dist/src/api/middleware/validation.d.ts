@@ -2,9 +2,9 @@
  * Validation Middleware for API Requests
  * Provides reusable validation functions and middleware
  */
-import { FastifyRequest, FastifyReply } from 'fastify';
-import { ZodSchema } from 'zod';
-import { z } from 'zod';
+import { FastifyRequest, FastifyReply } from "fastify";
+import { ZodSchema } from "zod";
+import { z } from "zod";
 export declare const uuidSchema: z.ZodString;
 export declare const paginationSchema: z.ZodObject<{
     limit: z.ZodDefault<z.ZodNumber>;

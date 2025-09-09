@@ -20,7 +20,7 @@ describe('API Types and Interfaces', () => {
                         executionTime: 150,
                     },
                 };
-                expect(response.success).toBe(true);
+                expect(response).toEqual(expect.objectContaining({ success: true }));
                 expect(response.data).toBe('test data');
                 expect(response.error).toBeUndefined();
                 expect(response.metadata?.requestId).toBe('req-123');
@@ -42,7 +42,7 @@ describe('API Types and Interfaces', () => {
                         executionTime: 50,
                     },
                 };
-                expect(response.success).toBe(false);
+                expect(response).toEqual(expect.objectContaining({ success: false }));
                 expect(response.data).toBeNull();
                 expect(response.error?.code).toBe('VALIDATION_ERROR');
                 expect(response.error?.message).toBe('Invalid input provided');
@@ -53,7 +53,7 @@ describe('API Types and Interfaces', () => {
                     success: true,
                     data: 42,
                 };
-                expect(response.success).toBe(true);
+                expect(response).toEqual(expect.objectContaining({ success: true }));
                 expect(response.data).toBe(42);
                 expect(response.metadata).toBeUndefined();
             });
@@ -84,7 +84,7 @@ describe('API Types and Interfaces', () => {
                         hasMore: true,
                     },
                 };
-                expect(paginatedResponse.success).toBe(true);
+                expect(paginatedResponse).toEqual(expect.objectContaining({ success: true }));
                 expect(paginatedResponse.data).toEqual(['item1', 'item2', 'item3']);
                 expect(paginatedResponse.pagination.page).toBe(1);
                 expect(paginatedResponse.pagination.pageSize).toBe(10);

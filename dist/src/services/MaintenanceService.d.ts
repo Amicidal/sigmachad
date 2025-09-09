@@ -27,6 +27,7 @@ export declare class MaintenanceService {
     private dbService;
     private kgService;
     private activeTasks;
+    private completedTasks;
     constructor(dbService: DatabaseService, kgService: KnowledgeGraphService);
     runMaintenanceTask(taskType: string): Promise<MaintenanceResult>;
     private runCleanup;

@@ -70,7 +70,7 @@ describe('MCP Server Integration', () => {
             expect(response.statusCode).toBe(200);
             const body = JSON.parse(response.payload);
             expect(body).toBeDefined();
-            expect(Array.isArray(body.tools)).toBe(true);
+            expect(body.tools).toEqual(expect.any(Array));
             // Verify tool structure
             if (body.tools.length > 0) {
                 const tool = body.tools[0];
