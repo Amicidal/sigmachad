@@ -1,5 +1,5 @@
 import type { Pool as PgPool } from "pg";
-import { IPostgreSQLService } from "./interfaces";
+import { IPostgreSQLService } from "./interfaces.js";
 
 export class PostgreSQLService implements IPostgreSQLService {
   private postgresPool!: PgPool;

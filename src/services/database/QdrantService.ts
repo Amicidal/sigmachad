@@ -1,5 +1,5 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
-import { IQdrantService } from "./interfaces";
+import { IQdrantService } from "./interfaces.js";
 
 export class QdrantService implements IQdrantService {
   private qdrantClient!: QdrantClient;

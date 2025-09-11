@@ -3,9 +3,9 @@
  * Tests parsing various documentation formats and sync functionality with real database operations
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { DocumentationParser, } from "../../../src/services/DocumentationParser";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers";
+import { DocumentationParser, } from "../../../src/services/DocumentationParser.js";
+import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";

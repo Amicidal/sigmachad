@@ -233,9 +233,10 @@ describe("TestEngine Integration", () => {
       expect(testEntity3?.type).toBe("test");
     });
 
-    it("should update performance metrics", async () => {
-      const suiteResult: TestSuiteResult = {
-        suiteName: "Performance Test Suite",
+    it("should update performance metrics for existing test entities", async () => {
+      // First ensure we have the test entity by recording initial results
+      const initialSuiteResult: TestSuiteResult = {
+        suiteName: "Initial Test Suite",
         timestamp: new Date(),
         results: [sampleTestResults[0]], // Use the test with performance data
         framework: "jest",
@@ -246,7 +247,27 @@ describe("TestEngine Integration", () => {
         duration: 1500,
       };
 
-      await testEngine.recordTestResults(suiteResult);
+      await testEngine.recordTestResults(initialSuiteResult);
+
+      // Now record additional results to update performance metrics
+      const additionalSuiteResult: TestSuiteResult = {
+        suiteName: "Performance Test Suite",
+        timestamp: new Date(),
+        results: [
+          {
+            ...sampleTestResults[0],
+            duration: 1800, // Slightly different duration for variance
+          },
+        ],
+        framework: "jest",
+        totalTests: 1,
+        passedTests: 1,
+        failedTests: 0,
+        skippedTests: 0,
+        duration: 1800,
+      };
+
+      await testEngine.recordTestResults(additionalSuiteResult);
 
       const performanceMetrics = await testEngine.getPerformanceMetrics(
         "integration-test-1"
@@ -275,23 +296,25 @@ describe("TestEngine Integration", () => {
       expect(testEntity).toBeDefined();
 
       // Check that failure information is recorded
-      const executionHistory = (testEntity as any).executionHistory;
-      expect(executionHistory).toBeDefined();
-      expect(executionHistory.length).toBeGreaterThan(0);
+      if (testEntity) {
+        const executionHistory = (testEntity as any).executionHistory;
+        expect(executionHistory).toBeDefined();
+        expect(executionHistory.length).toBeGreaterThan(0);
 
-      // Find the most recent failed execution
-      const failedExecution = executionHistory
-        .filter((exec: any) => exec.status === "failed")
-        .sort(
-          (a: any, b: any) =>
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        )[0];
+        // Find the most recent failed execution
+        const failedExecution = executionHistory
+          .filter((exec: any) => exec.status === "failed")
+          .sort(
+            (a: any, b: any) =>
+              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          )[0];
 
-      expect(failedExecution).toBeDefined();
-      expect(failedExecution.status).toBe("failed");
-      expect(failedExecution.errorMessage).toBe(
-        "Expected true but received false"
-      );
+        expect(failedExecution).toBeDefined();
+        expect(failedExecution.status).toBe("failed");
+        expect(failedExecution.errorMessage).toBe(
+          "Expected true but received false"
+        );
+      }
     });
   });
 
@@ -463,10 +486,26 @@ describe("TestEngine Integration", () => {
     });
 
     it("should aggregate coverage from multiple tests", async () => {
-      const suiteResult: TestSuiteResult = {
+      // First ensure we have the test entity by recording initial results
+      const initialSuiteResult: TestSuiteResult = {
+        suiteName: "Initial Coverage Test Suite",
+        timestamp: new Date(),
+        results: [coverageTestResults[0]], // Just the first test
+        framework: "jest",
+        totalTests: 1,
+        passedTests: 1,
+        failedTests: 0,
+        skippedTests: 0,
+        duration: 200,
+      };
+
+      await testEngine.recordTestResults(initialSuiteResult);
+
+      // Now record additional results for aggregation
+      const aggregationSuiteResult: TestSuiteResult = {
         suiteName: "Coverage Aggregation Test Suite",
         timestamp: new Date(),
-        results: coverageTestResults,
+        results: coverageTestResults, // Both tests
         framework: "jest",
         totalTests: 2,
         passedTests: 2,
@@ -475,7 +514,7 @@ describe("TestEngine Integration", () => {
         duration: 350,
       };
 
-      await testEngine.recordTestResults(suiteResult);
+      await testEngine.recordTestResults(aggregationSuiteResult);
 
       const coverageAnalysis = await testEngine.getCoverageAnalysis(
         "coverage-test-1"

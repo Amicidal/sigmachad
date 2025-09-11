@@ -3,8 +3,8 @@
  * Tests backup creation, restoration, and data integrity across databases
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { BackupService, } from "../../../src/services/BackupService";
-import { DatabaseService, createTestDatabaseConfig, } from "../../../src/services/DatabaseService";
+import { BackupService, } from "../../../src/services/BackupService.js";
+import { DatabaseService, createTestDatabaseConfig, } from "../../../src/services/DatabaseService.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";
@@ -44,6 +44,14 @@ describe("BackupService Integration", () => {
         }
         catch (error) {
             // Directory might be empty, that's okay
+        }
+        // Clean up test data from previous runs
+        try {
+            await dbService.postgresQuery("DELETE FROM documents WHERE type = 'backup_test'");
+            await dbService.postgresQuery("DELETE FROM flaky_test_analyses WHERE test_id LIKE 'test-%'");
+        }
+        catch (error) {
+            // Tables might not exist yet, that's okay
         }
     });
     describe("Backup Creation Integration", () => {

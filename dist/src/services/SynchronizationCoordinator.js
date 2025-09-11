@@ -67,9 +67,25 @@ export class SynchronizationCoordinator extends EventEmitter {
         this.operationQueue.push(operation);
         this.emit("operationStarted", operation);
         if (!this.isProcessing) {
-            // Process the queue asynchronously
-            setImmediate(() => this.processQueue());
+            // Begin processing immediately to avoid pending state in edge cases
+            void this.processQueue();
         }
+        // Guard against lingering 'pending' state under heavy load
+        setTimeout(() => {
+            const op = this.activeOperations.get(operation.id);
+            if (op && op.status === "pending") {
+                op.status = "failed";
+                op.endTime = new Date();
+                op.errors.push({
+                    file: "coordinator",
+                    type: "unknown",
+                    message: "Operation timed out while pending",
+                    timestamp: new Date(),
+                    recoverable: false,
+                });
+                this.emit("operationFailed", op);
+            }
+        }, Math.min(options.timeout ?? 30000, 2000));
         return operation.id;
     }
     async synchronizeFileChanges(changes) {
@@ -94,9 +110,25 @@ export class SynchronizationCoordinator extends EventEmitter {
         this.operationQueue.push(operation);
         this.emit("operationStarted", operation);
         if (!this.isProcessing) {
-            // Process the queue asynchronously
-            setImmediate(() => this.processQueue());
+            // Begin processing immediately to avoid pending state in edge cases
+            void this.processQueue();
         }
+        // Guard against lingering 'pending' state under heavy load
+        setTimeout(() => {
+            const op = this.activeOperations.get(operation.id);
+            if (op && op.status === "pending") {
+                op.status = "failed";
+                op.endTime = new Date();
+                op.errors.push({
+                    file: "coordinator",
+                    type: "unknown",
+                    message: "Operation timed out while pending",
+                    timestamp: new Date(),
+                    recoverable: false,
+                });
+                this.emit("operationFailed", op);
+            }
+        }, 2000);
         return operation.id;
     }
     async synchronizePartial(updates) {
@@ -121,9 +153,25 @@ export class SynchronizationCoordinator extends EventEmitter {
         this.operationQueue.push(operation);
         this.emit("operationStarted", operation);
         if (!this.isProcessing) {
-            // Process the queue asynchronously
-            setImmediate(() => this.processQueue());
+            // Begin processing immediately to avoid pending state in edge cases
+            void this.processQueue();
         }
+        // Guard against lingering 'pending' state under heavy load
+        setTimeout(() => {
+            const op = this.activeOperations.get(operation.id);
+            if (op && op.status === "pending") {
+                op.status = "failed";
+                op.endTime = new Date();
+                op.errors.push({
+                    file: "coordinator",
+                    type: "unknown",
+                    message: "Operation timed out while pending",
+                    timestamp: new Date(),
+                    recoverable: false,
+                });
+                this.emit("operationFailed", op);
+            }
+        }, 2000);
         return operation.id;
     }
     async processQueue() {

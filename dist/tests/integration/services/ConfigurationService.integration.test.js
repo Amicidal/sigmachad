@@ -3,9 +3,9 @@
  * Tests system configuration detection, health monitoring, and feature status
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { ConfigurationService, } from "../../../src/services/ConfigurationService";
-import { DatabaseService, createTestDatabaseConfig, } from "../../../src/services/DatabaseService";
-import { SynchronizationCoordinator } from "../../../src/services/SynchronizationCoordinator";
+import { ConfigurationService, } from "../../../src/services/ConfigurationService.js";
+import { DatabaseService, createTestDatabaseConfig, } from "../../../src/services/DatabaseService.js";
+import { SynchronizationCoordinator } from "../../../src/services/SynchronizationCoordinator.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";

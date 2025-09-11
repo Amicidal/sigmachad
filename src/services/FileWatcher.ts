@@ -3,16 +3,16 @@
  * Monitors filesystem changes and triggers graph updates
  */
 
-import chokidar, { FSWatcher } from 'chokidar';
-import { EventEmitter } from 'events';
-import * as path from 'path';
-import { promises as fs } from 'fs';
-import * as crypto from 'crypto';
+import chokidar, { FSWatcher } from "chokidar";
+import { EventEmitter } from "events";
+import * as path from "path";
+import { promises as fs } from "fs";
+import * as crypto from "crypto";
 
 export interface FileChange {
   path: string;
   absolutePath: string;
-  type: 'create' | 'modify' | 'delete' | 'rename';
+  type: "create" | "modify" | "delete" | "rename";
   oldPath?: string;
   stats?: {
     size: number;
@@ -40,18 +40,18 @@ export class FileWatcher extends EventEmitter {
     super();
 
     this.config = {
-      watchPaths: config.watchPaths || ['src', 'lib', 'packages'],
+      watchPaths: config.watchPaths || ["src", "lib", "packages"],
       ignorePatterns: config.ignorePatterns || [
-        '**/node_modules/**',
-        '**/dist/**',
-        '**/build/**',
-        '**/.git/**',
-        '**/coverage/**',
-        '**/*.log',
-        '**/.DS_Store',
-        '**/package-lock.json',
-        '**/yarn.lock',
-        '**/pnpm-lock.yaml',
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.git/**",
+        "**/coverage/**",
+        "**/*.log",
+        "**/.DS_Store",
+        "**/package-lock.json",
+        "**/yarn.lock",
+        "**/pnpm-lock.yaml",
       ],
       debounceMs: config.debounceMs || 500,
       maxConcurrent: config.maxConcurrent || 10,
@@ -68,47 +68,79 @@ export class FileWatcher extends EventEmitter {
       await this.stop();
     }
 
-    console.log('🔍 Starting file watcher...');
+    console.log("🔍 Starting file watcher...");
 
     // Initialize file hashes for existing files
     await this.initializeFileHashes();
 
-    // Create watcher
+    // Create watcher with polling fallback for unreliable environments
+    // Force polling on macOS due to SIP limitations
+    const isMacOS = process.platform === "darwin";
+    const usePolling =
+      process.env.USE_POLLING === "true" ||
+      process.env.NODE_ENV === "test" ||
+      isMacOS; // Force polling on macOS for reliability
+
+    console.log(
+      `${usePolling ? "🔄" : "👁️ "} Using ${
+        usePolling ? "polling" : "native"
+      } file watching mode`
+    );
+
     this.watcher = chokidar.watch(this.config.watchPaths, {
-      ignored: this.config.ignorePatterns,
+      ignored: (filePath: string) => this.shouldIgnore(filePath),
       persistent: true,
       ignoreInitial: true,
+      usePolling: usePolling, // Force polling in test environments or when requested
       awaitWriteFinish: {
-        stabilityThreshold: 100,
-        pollInterval: 50,
+        stabilityThreshold: usePolling ? 5 : 50, // Very fast stability threshold for tests
+        pollInterval: usePolling ? 5 : 25, // Very fast polling for better test responsiveness
       },
+      interval: usePolling ? 5 : undefined, // Very fast polling interval when using polling
     });
 
     // Bind event handlers
-    this.watcher.on('add', (filePath) => this.handleFileChange(filePath, 'create'));
-    this.watcher.on('change', (filePath) => this.handleFileChange(filePath, 'modify'));
-    this.watcher.on('unlink', (filePath) => this.handleFileChange(filePath, 'delete'));
-    this.watcher.on('addDir', (dirPath) => this.handleDirectoryChange(dirPath, 'create'));
-    this.watcher.on('unlinkDir', (dirPath) => this.handleDirectoryChange(dirPath, 'delete'));
+    this.watcher.on("add", (filePath) =>
+      this.handleFileChange(filePath, "create")
+    );
+    this.watcher.on("change", (filePath) =>
+      this.handleFileChange(filePath, "modify")
+    );
+    this.watcher.on("unlink", (filePath) =>
+      this.handleFileChange(filePath, "delete")
+    );
+    this.watcher.on("addDir", (dirPath) =>
+      this.handleDirectoryChange(dirPath, "create")
+    );
+    this.watcher.on("unlinkDir", (dirPath) =>
+      this.handleDirectoryChange(dirPath, "delete")
+    );
 
     // Handle watcher errors
-    this.watcher.on('error', (error) => {
-      console.error('File watcher error:', error);
-      this.emit('error', error);
+    this.watcher.on("error", (error) => {
+      console.error("File watcher error:", error);
+      this.emit("error", error);
     });
 
-    console.log(`✅ File watcher started, monitoring: ${this.config.watchPaths.join(', ')}`);
+    console.log(
+      `✅ File watcher started, monitoring: ${this.config.watchPaths.join(
+        ", "
+      )}`
+    );
   }
 
   async stop(): Promise<void> {
     if (this.watcher) {
       await this.watcher.close();
       this.watcher = null;
-      console.log('🛑 File watcher stopped');
+      console.log("🛑 File watcher stopped");
     }
   }
 
-  private async handleFileChange(filePath: string, type: 'create' | 'modify' | 'delete'): Promise<void> {
+  private async handleFileChange(
+    filePath: string,
+    type: "create" | "modify" | "delete"
+  ): Promise<void> {
     try {
       const absolutePath = path.resolve(filePath);
       const relativePath = path.relative(process.cwd(), filePath);
@@ -119,7 +151,7 @@ export class FileWatcher extends EventEmitter {
         type,
       };
 
-      if (type !== 'delete') {
+      if (type !== "delete") {
         const stats = await fs.stat(absolutePath);
         change.stats = {
           size: stats.size,
@@ -130,20 +162,23 @@ export class FileWatcher extends EventEmitter {
         // Calculate file hash for change detection
         if (!stats.isDirectory()) {
           const content = await fs.readFile(absolutePath);
-          change.hash = crypto.createHash('sha256').update(content).digest('hex');
+          change.hash = crypto
+            .createHash("sha256")
+            .update(content)
+            .digest("hex");
         }
       }
 
       // Check if file actually changed
       const previousHash = this.fileHashes.get(relativePath);
-      if (change.hash && previousHash === change.hash && type === 'modify') {
+      if (change.hash && previousHash === change.hash && type === "modify") {
         return; // No actual change
       }
 
       // Update hash cache
       if (change.hash) {
         this.fileHashes.set(relativePath, change.hash);
-      } else if (type === 'delete') {
+      } else if (type === "delete") {
         this.fileHashes.delete(relativePath);
       }
 
@@ -153,7 +188,10 @@ export class FileWatcher extends EventEmitter {
     }
   }
 
-  private async handleDirectoryChange(dirPath: string, type: 'create' | 'delete'): Promise<void> {
+  private async handleDirectoryChange(
+    dirPath: string,
+    type: "create" | "delete"
+  ): Promise<void> {
     const absolutePath = path.resolve(dirPath);
     const relativePath = path.relative(process.cwd(), dirPath);
 
@@ -197,17 +235,17 @@ export class FileWatcher extends EventEmitter {
       const batches = this.chunkArray(changes, this.config.maxConcurrent);
 
       for (const batch of batches) {
-        const promises = batch.map(change => this.processChange(change));
+        const promises = batch.map((change) => this.processChange(change));
         await Promise.allSettled(promises);
       }
 
       // Emit batch completion
       if (changes.length > 0) {
-        this.emit('batchComplete', changes);
+        this.emit("batchComplete", changes);
       }
     } catch (error) {
-      console.error('Error processing changes:', error);
-      this.emit('error', error);
+      console.error("Error processing changes:", error);
+      this.emit("error", error);
     } finally {
       this.processing = false;
 
@@ -221,64 +259,83 @@ export class FileWatcher extends EventEmitter {
   private async processChange(change: FileChange): Promise<void> {
     try {
       // Emit individual change event
-      this.emit('change', change);
+      this.emit("change", change);
 
       // Determine change priority
       const priority = this.getChangePriority(change);
 
       // Emit typed events
       switch (change.type) {
-        case 'create':
-          this.emit('fileCreated', change);
+        case "create":
+          this.emit("fileCreated", change);
           break;
-        case 'modify':
-          this.emit('fileModified', change);
+        case "modify":
+          this.emit("fileModified", change);
           break;
-        case 'delete':
-          this.emit('fileDeleted', change);
+        case "delete":
+          this.emit("fileDeleted", change);
           break;
-        case 'rename':
-          this.emit('fileRenamed', change);
+        case "rename":
+          this.emit("fileRenamed", change);
           break;
       }
 
-      console.log(`${this.getChangeIcon(change.type)} ${change.path} (${priority} priority)`);
+      console.log(
+        `${this.getChangeIcon(change.type)} ${
+          change.path
+        } (${priority} priority)`
+      );
     } catch (error) {
       console.error(`Error processing change ${change.path}:`, error);
-      this.emit('changeError', change, error);
+      this.emit("changeError", change, error);
     }
   }
 
-  private getChangePriority(change: FileChange): 'high' | 'medium' | 'low' {
+  private getChangePriority(change: FileChange): "high" | "medium" | "low" {
     const path = change.path.toLowerCase();
 
     // Low priority: Generated files, build artifacts, logs
-    if (path.includes('dist/') || path.includes('build/') || path.includes('coverage/') ||
-        path.includes('logs/') || path.includes('.log') || path.includes('node_modules/')) {
-      return 'low';
+    if (
+      path.includes("dist/") ||
+      path.includes("build/") ||
+      path.includes("coverage/") ||
+      path.includes("logs/") ||
+      path.includes(".log") ||
+      path.includes("node_modules/")
+    ) {
+      return "low";
     }
 
     // High priority: Core source files
-    if (/\.(ts|tsx|js|jsx)$/.test(path) && !path.includes('test') && !path.includes('spec')) {
-      return 'high';
+    if (
+      /\.(ts|tsx|js|jsx)$/.test(path) &&
+      !path.includes("test") &&
+      !path.includes("spec")
+    ) {
+      return "high";
     }
 
     // Medium priority: Config files, documentation
-    if (/\.(json|yaml|yml|md|config)$/.test(path) || path.includes('readme')) {
-      return 'medium';
+    if (/\.(json|yaml|yml|md|config)$/.test(path) || path.includes("readme")) {
+      return "medium";
     }
 
     // Low priority: Everything else
-    return 'low';
+    return "low";
   }
 
   private getChangeIcon(type: string): string {
     switch (type) {
-      case 'create': return '📄';
-      case 'modify': return '✏️';
-      case 'delete': return '🗑️';
-      case 'rename': return '🏷️';
-      default: return '📝';
+      case "create":
+        return "📄";
+      case "modify":
+        return "✏️";
+      case "delete":
+        return "🗑️";
+      case "rename":
+        return "🏷️";
+      default:
+        return "📝";
     }
   }
 
@@ -291,7 +348,7 @@ export class FileWatcher extends EventEmitter {
   }
 
   private async initializeFileHashes(): Promise<void> {
-    console.log('🔄 Initializing file hashes...');
+    console.log("🔄 Initializing file hashes...");
 
     const scanPromises: Promise<void>[] = [];
 
@@ -321,7 +378,10 @@ export class FileWatcher extends EventEmitter {
         } else if (entry.isFile()) {
           try {
             const content = await fs.readFile(fullPath);
-            const hash = crypto.createHash('sha256').update(content).digest('hex');
+            const hash = crypto
+              .createHash("sha256")
+              .update(content)
+              .digest("hex");
             this.fileHashes.set(relativePath, hash);
           } catch (error) {
             // Skip files that can't be read
@@ -336,7 +396,57 @@ export class FileWatcher extends EventEmitter {
   }
 
   private shouldIgnore(filePath: string): boolean {
-    return this.config.ignorePatterns.some(pattern => this.globToRegex(pattern).test(filePath));
+    // Convert absolute path to relative path from cwd for consistent pattern matching
+    const relativePath = path.relative(process.cwd(), path.resolve(filePath));
+
+    // Check if the file path matches any ignore pattern relative to any watch path
+    for (const watchPath of this.config.watchPaths) {
+      const watchPathResolved = path.resolve(watchPath);
+
+      // Check if file is within this watch path
+      if (path.resolve(filePath).startsWith(watchPathResolved)) {
+        const relativeToWatch = path.relative(
+          watchPathResolved,
+          path.resolve(filePath)
+        );
+
+        // Test ignore patterns against the path relative to watch directory
+        for (const pattern of this.config.ignorePatterns) {
+          const regex = this.globToRegex(pattern);
+          if (regex.test(relativeToWatch)) {
+            // Debug logging for test debugging
+            if (
+              relativeToWatch.includes("node_modules") &&
+              process.env.NODE_ENV === "test"
+            ) {
+              console.log(
+                `🛑 Ignoring ${relativeToWatch} (matches pattern: ${pattern})`
+              );
+            }
+            return true;
+          }
+        }
+      }
+    }
+
+    // Also check patterns against the full relative path for backward compatibility
+    for (const pattern of this.config.ignorePatterns) {
+      const regex = this.globToRegex(pattern);
+      if (regex.test(relativePath)) {
+        // Debug logging for test debugging
+        if (
+          relativePath.includes("node_modules") &&
+          process.env.NODE_ENV === "test"
+        ) {
+          console.log(
+            `🛑 Ignoring ${relativePath} (matches pattern: ${pattern})`
+          );
+        }
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // Convert a minimal glob to a RegExp supporting:
@@ -344,30 +454,30 @@ export class FileWatcher extends EventEmitter {
   // - "*" for any number of non-separator chars within a path segment
   // Other characters are treated literally.
   private globToRegex(pattern: string): RegExp {
-    let out = '';
+    let out = "";
     for (let i = 0; i < pattern.length; ) {
       // Handle **/
-      if (pattern.startsWith('**/', i)) {
-        out += '(?:.*/)?';
+      if (pattern.startsWith("**/", i)) {
+        out += "(?:.*/)?";
         i += 3;
         continue;
       }
       // Handle /**/
-      if (pattern.startsWith('/**/', i)) {
-        out += '(?:/.*/)?';
+      if (pattern.startsWith("/**/", i)) {
+        out += "(?:/.*/)?";
         i += 4;
         continue;
       }
       // Handle ** (any path including separators)
-      if (pattern.startsWith('**', i)) {
-        out += '.*';
+      if (pattern.startsWith("**", i)) {
+        out += ".*";
         i += 2;
         continue;
       }
       const ch = pattern[i];
-      if (ch === '*') {
+      if (ch === "*") {
         // Any chars except path separator
-        out += '[^/]*';
+        out += "[^/]*";
         i += 1;
         continue;
       }
@@ -399,6 +509,6 @@ export class FileWatcher extends EventEmitter {
   async rescan(): Promise<void> {
     this.fileHashes.clear();
     await this.initializeFileHashes();
-    console.log('🔄 File rescan complete');
+    console.log("🔄 File rescan complete");
   }
 }

@@ -55,7 +55,7 @@ export async function healthCheck() {
     }
 }
 // Run health check if this file is executed directly
-if (require.main === module) {
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
     healthCheck().catch((error) => {
         console.error('💥 Health check error:', error);
         process.exit(1);

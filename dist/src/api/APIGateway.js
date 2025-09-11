@@ -231,7 +231,7 @@ export class APIGateway {
                 if (this.healthCheckCache &&
                     now - this.healthCheckCache.timestamp < this.HEALTH_CACHE_TTL &&
                     // Skip cache if this is a health check test (indicated by request header)
-                    !request.headers['x-test-health-check']) {
+                    !request.headers["x-test-health-check"]) {
                     const isHealthy = Object.values(this.healthCheckCache.data.services).every((s) => s?.status !== "unhealthy");
                     reply.status(isHealthy ? 200 : 503).send(this.healthCheckCache.data);
                     return;

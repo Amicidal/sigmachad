@@ -4,15 +4,15 @@
  */
 /// <reference types="node" />
 import { describe, it, expect, beforeEach, afterEach, vi, } from "vitest";
-import { BackupService, } from "../../../src/services/BackupService";
-import { DatabaseService, } from "../../../src/services/DatabaseService";
+import { BackupService, } from "../../../src/services/BackupService.js";
+import { DatabaseService, } from "../../../src/services/DatabaseService.js";
 import * as fs from "fs/promises";
 import * as crypto from "crypto";
 import archiver from "archiver";
 import { pipeline } from "stream/promises";
 import { createWriteStream, createReadStream } from "fs";
 // Import realistic mocks
-import { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock, RealisticRedisMock, } from "../../test-utils/realistic-mocks";
+import { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock, RealisticRedisMock, } from "../../test-utils/realistic-mocks.js";
 // Mock file system operations
 vi.mock("fs/promises");
 vi.mock("fs");

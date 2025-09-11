@@ -3,7 +3,7 @@
  * Tests complete user workflows combining multiple API components
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { expectSuccess } from "../../test-utils/assertions";
+import { expectSuccess } from "../../test-utils/assertions.js";
 import { APIGateway } from "../../../src/api/APIGateway.js";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
 import { TestEngine } from "../../../src/services/TestEngine.js";

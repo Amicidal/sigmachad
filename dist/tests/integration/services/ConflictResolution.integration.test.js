@@ -3,9 +3,9 @@
  * Tests conflict detection, resolution strategies, and listener functionality with real database operations
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { ConflictResolution, } from "../../../src/services/ConflictResolution";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers";
+import { ConflictResolution, } from "../../../src/services/ConflictResolution.js";
+import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers.js";
 describe("ConflictResolution Integration", () => {
     let dbService;
     let kgService;

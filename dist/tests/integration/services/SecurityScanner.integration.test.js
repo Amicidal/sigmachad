@@ -3,9 +3,9 @@
  * Tests security dependencynning, vulnerability detection, and security monitoring
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { SecurityScanner } from "../../../src/services/SecurityScanner";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { setupTestDatabase, cleanupTestDatabase, clearTestData, } from "../../test-utils/database-helpers";
+import { SecurityScanner } from "../../../src/services/SecurityScanner.js";
+import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, } from "../../test-utils/database-helpers.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 describe("SecurityScanner Integration", () => {

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { randomUUID } from "crypto";
-import { setupTestDatabase, cleanupTestDatabase, clearTestData, insertTestFixtures, checkDatabaseHealth, } from "../../test-utils/database-helpers";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, insertTestFixtures, checkDatabaseHealth, } from "../../test-utils/database-helpers.js";
 describe("DatabaseService Integration", () => {
     let dbService;
     beforeAll(async () => {

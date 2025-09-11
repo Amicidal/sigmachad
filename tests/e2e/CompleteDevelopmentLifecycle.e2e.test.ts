@@ -6,19 +6,19 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { v4 as uuidv4 } from "uuid";
-import { expectSuccess } from "../../test-utils/assertions";
+import { expectSuccess } from "../test-utils/assertions";
 import { FastifyInstance } from "fastify";
-import { APIGateway } from "../../../src/api/APIGateway.js";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
-import { DatabaseService } from "../../../src/services/DatabaseService.js";
-import { TestEngine } from "../../../src/services/TestEngine.js";
+import { APIGateway } from "@/api/APIGateway";
+import { KnowledgeGraphService } from "@/services/KnowledgeGraphService";
+import { DatabaseService } from "@/services/DatabaseService";
+import { TestEngine } from "@/services/TestEngine";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
   checkDatabaseHealth,
-} from "../../test-utils/database-helpers.js";
-import { CodebaseEntity } from "../../../src/models/entities.js";
+} from "../test-utils/database-helpers";
+import { CodebaseEntity } from "@/models/entities";
 
 describe("Complete Development Lifecycle E2E", () => {
   let dbService: DatabaseService;

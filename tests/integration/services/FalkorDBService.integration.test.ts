@@ -711,7 +711,13 @@ describe("FalkorDBService Integration", () => {
 
       expect(avgDuration).toBeLessThan(1000); // Average < 1000ms (more realistic for test environments)
       // Allow higher variance in shared CI/dev environments - use a more lenient threshold
-      expect(maxDuration - minDuration).toBeLessThan(avgDuration * 3);
+      // If avgDuration is 0 (very fast queries), variance should also be 0
+      // Otherwise, variance should be less than 3x the average duration
+      if (avgDuration === 0) {
+        expect(maxDuration - minDuration).toBe(0);
+      } else {
+        expect(maxDuration - minDuration).toBeLessThan(avgDuration * 3);
+      }
     });
   });
 

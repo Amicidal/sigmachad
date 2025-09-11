@@ -5,9 +5,9 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { randomUUID } from "crypto";
-import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers.js";
 // Import all entity types and related utilities
-import { isFile, isDirectory, isSymbol, isFunction, isClass, isTest, isSpec, } from "../../../src/models/entities";
+import { isFile, isDirectory, isSymbol, isFunction, isClass, isTest, isSpec, } from "../../../src/models/entities.js";
 describe("Models Integration Tests", () => {
     let dbService;
     beforeAll(async () => {

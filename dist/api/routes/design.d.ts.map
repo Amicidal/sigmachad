@@ -1,0 +1,1 @@
+{"version":3,"file":"design.d.ts","sourceRoot":"","sources":["../../../src/api/routes/design.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAEH,OAAO,EAAE,eAAe,EAAE,MAAM,SAAS,CAAC;AAE1C,OAAO,EAAE,qBAAqB,EAAE,MAAM,yCAAyC,CAAC;AAChF,OAAO,EAAE,eAAe,EAAE,MAAM,mCAAmC,CAAC;AAYpE,wBAAgB,oBAAoB,CAClC,GAAG,EAAE,eAAe,EACpB,SAAS,EAAE,qBAAqB,EAChC,SAAS,EAAE,eAAe,GACzB,IAAI,CAiMN"}

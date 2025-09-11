@@ -485,12 +485,23 @@ export async function insertTestFixtures(
     }
   }
 
-  // Insert flaky analyses
+  // Insert flaky analyses (idempotent to avoid unique constraint violations between runs)
   for (const analysis of TEST_FIXTURES.flakyAnalyses) {
     await dbService.postgresQuery(
       `
       INSERT INTO flaky_test_analyses (test_id, test_name, failure_count, flaky_score, total_runs, failure_rate, success_rate, recent_failures, patterns, recommendations, analyzed_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ON CONFLICT (test_id) DO UPDATE SET
+        test_name = EXCLUDED.test_name,
+        failure_count = EXCLUDED.failure_count,
+        flaky_score = EXCLUDED.flaky_score,
+        total_runs = EXCLUDED.total_runs,
+        failure_rate = EXCLUDED.failure_rate,
+        success_rate = EXCLUDED.success_rate,
+        recent_failures = EXCLUDED.recent_failures,
+        patterns = EXCLUDED.patterns,
+        recommendations = EXCLUDED.recommendations,
+        analyzed_at = EXCLUDED.analyzed_at
     `,
       [
         analysis.testId,

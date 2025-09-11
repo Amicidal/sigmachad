@@ -94,6 +94,12 @@ class SimpleCache<T> {
       }
     }
   }
+
+  // Invalidate a specific entry using the same key normalization used internally
+  invalidateKey(key: any): void {
+    const cacheKey = this.generateKey(key);
+    this.invalidate((k) => k === cacheKey);
+  }
 }
 
 export class KnowledgeGraphService extends EventEmitter {
@@ -327,7 +333,10 @@ export class KnowledgeGraphService extends EventEmitter {
     const params = { id: entityId, ...falkorCompatibleUpdates };
     await this.db.falkordbQuery(query, params);
 
-    // Update vector embedding
+    // Invalidate cache before fetching the updated entity to avoid stale reads
+    this.invalidateEntityCache(entityId);
+
+    // Update vector embedding based on the freshly fetched entity
     const updatedEntity = await this.getEntity(entityId);
     if (updatedEntity) {
       await this.updateEmbedding(updatedEntity);
@@ -340,8 +349,7 @@ export class KnowledgeGraphService extends EventEmitter {
       });
     }
 
-    // Invalidate cache since entity was updated
-    this.invalidateEntityCache(entityId);
+    // Cache already invalidated above
   }
 
   async createOrUpdateEntity(entity: Entity): Promise<void> {
@@ -354,16 +362,16 @@ export class KnowledgeGraphService extends EventEmitter {
   }
 
   async deleteEntity(entityId: string): Promise<void> {
-    // Get relationships before deleting them for event emission
+    // Get relationships before deletion for event emission
     const relationships = await this.getRelationships({
       fromEntityId: entityId,
     });
 
-    // Delete relationships first
+    // Delete node and any attached relationships in one operation
     await this.db.falkordbQuery(
       `
-      MATCH (n {id: $id})-[r]-()
-      DELETE r
+      MATCH (n {id: $id})
+      DETACH DELETE n
     `,
       { id: entityId }
     );
@@ -372,15 +380,6 @@ export class KnowledgeGraphService extends EventEmitter {
     for (const relationship of relationships) {
       this.emit("relationshipDeleted", relationship.id);
     }
-
-    // Delete node
-    await this.db.falkordbQuery(
-      `
-      MATCH (n {id: $id})
-      DELETE n
-    `,
-      { id: entityId }
-    );
 
     // Delete vector embedding
     await this.deleteEmbedding(entityId);
@@ -525,6 +524,13 @@ export class KnowledgeGraphService extends EventEmitter {
       whereClause.push("r.created >= $since");
       params.since = query.since.toISOString();
     }
+    if ((query as any).until) {
+      const until = (query as any).until as Date;
+      if (until instanceof Date) {
+        whereClause.push("r.created <= $until");
+        params.until = until.toISOString();
+      }
+    }
 
     const fullQuery = `
       ${matchClause}
@@ -594,7 +600,7 @@ export class KnowledgeGraphService extends EventEmitter {
    */
   private invalidateEntityCache(entityId: string): void {
     // Remove the specific entity from cache
-    this.entityCache.invalidate((key) => key === entityId);
+    this.entityCache.invalidateKey(entityId);
 
     // Also clear search cache as searches might be affected
     // This could be optimized to only clear relevant searches
@@ -615,6 +621,18 @@ export class KnowledgeGraphService extends EventEmitter {
   }
 
   private async semanticSearch(request: GraphSearchRequest): Promise<Entity[]> {
+    // Validate limit parameter
+    if (
+      request.limit !== undefined &&
+      (typeof request.limit !== "number" ||
+        request.limit < 0 ||
+        !Number.isInteger(request.limit))
+    ) {
+      throw new Error(
+        `Invalid limit parameter: ${request.limit}. Must be a positive integer.`
+      );
+    }
+
     try {
       // Get vector embeddings for the query
       const embeddings = await this.generateEmbedding(
@@ -680,6 +698,18 @@ export class KnowledgeGraphService extends EventEmitter {
   private async structuralSearch(
     request: GraphSearchRequest
   ): Promise<Entity[]> {
+    // Validate limit parameter
+    if (
+      request.limit !== undefined &&
+      (typeof request.limit !== "number" ||
+        request.limit < 0 ||
+        !Number.isInteger(request.limit))
+    ) {
+      throw new Error(
+        `Invalid limit parameter: ${request.limit}. Must be a positive integer.`
+      );
+    }
+
     let query = "MATCH (n)";
     const whereClause = [];
     const params: any = {};

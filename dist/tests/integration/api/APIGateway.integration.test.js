@@ -122,7 +122,7 @@ describe("APIGateway Integration", () => {
                     method: "GET",
                     url: "/health",
                     headers: {
-                        'x-test-health-check': 'true',
+                        "x-test-health-check": "true",
                     },
                 });
                 expect(response.statusCode).toBe(503);
@@ -190,6 +190,9 @@ describe("APIGateway Integration", () => {
             const response = await app.inject({
                 method: "GET",
                 url: "/health",
+                headers: {
+                    "x-test-health-check": "true",
+                },
             });
             expect(response.statusCode).toBe(200);
             // Logging is handled by Fastify's built-in logging, so we just verify the request succeeds

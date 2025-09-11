@@ -4,11 +4,11 @@
  */
 /// <reference types="node" />
 import { describe, it, expect, beforeEach, afterEach, vi, } from "vitest";
-import { ConfigurationService, } from "../../../src/services/ConfigurationService";
+import { ConfigurationService, } from "../../../src/services/ConfigurationService.js";
 // Import DatabaseService for mocking
-import { DatabaseService } from "../../../src/services/DatabaseService";
+import { DatabaseService } from "../../../src/services/DatabaseService.js";
 // Import realistic mocks
-import { RealisticFalkorDBMock, RealisticPostgreSQLMock, RealisticQdrantMock, RealisticRedisMock, } from "../../test-utils/realistic-mocks";
+import { RealisticFalkorDBMock, RealisticPostgreSQLMock, RealisticQdrantMock, RealisticRedisMock, } from "../../test-utils/realistic-mocks.js";
 class MockSynchronizationCoordinator {
     constructor() {
         // Mock constructor

@@ -12,10 +12,10 @@ import {
   IRedisService,
   IDatabaseHealthCheck,
 } from "./database";
-import { FalkorDBService } from "./database/FalkorDBService";
-import { QdrantService } from "./database/QdrantService";
-import { PostgreSQLService } from "./database/PostgreSQLService";
-import { RedisService } from "./database/RedisService";
+import { FalkorDBService } from "./database/FalkorDBService.js";
+import { QdrantService } from "./database/QdrantService.js";
+import { PostgreSQLService } from "./database/PostgreSQLService.js";
+import { RedisService } from "./database/RedisService.js";
 
 // Type definitions for better type safety
 export interface DatabaseQueryResult {
@@ -572,8 +572,7 @@ export class DatabaseService {
   }
 }
 
-// Re-export the DatabaseConfig from interfaces for backward compatibility
-export { DatabaseConfig } from "./database";
+// DatabaseConfig is already imported above and used throughout the file
 
 // Singleton instance
 let databaseService: DatabaseService | null = null;

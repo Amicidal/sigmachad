@@ -3,7 +3,7 @@
  * Tests specific methods for coverage without full integration setup
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { DatabaseService, createTestDatabaseConfig, } from "../../../src/services/DatabaseService";
+import { DatabaseService, createTestDatabaseConfig, } from "../../../src/services/DatabaseService.js";
 import { v4 as uuidv4 } from "uuid";
 describe("DatabaseService Methods Coverage", () => {
     let dbService;

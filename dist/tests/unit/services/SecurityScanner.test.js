@@ -22,7 +22,7 @@ vi.mock("fs", () => ({
         return "";
     }),
 }));
-import { SecurityScanner, } from "../../../src/services/SecurityScanner";
+import { SecurityScanner, } from "../../../src/services/SecurityScanner.js";
 import { EventEmitter } from "events";
 // Mock classes for testing
 class MockDatabaseService {

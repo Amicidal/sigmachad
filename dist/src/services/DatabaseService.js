@@ -2,10 +2,10 @@
  * Database Service for Memento
  * Orchestrates specialized database services for FalkorDB, Qdrant, PostgreSQL, and Redis
  */
-import { FalkorDBService } from "./database/FalkorDBService";
-import { QdrantService } from "./database/QdrantService";
-import { PostgreSQLService } from "./database/PostgreSQLService";
-import { RedisService } from "./database/RedisService";
+import { FalkorDBService } from "./database/FalkorDBService.js";
+import { QdrantService } from "./database/QdrantService.js";
+import { PostgreSQLService } from "./database/PostgreSQLService.js";
+import { RedisService } from "./database/RedisService.js";
 export class DatabaseService {
     config;
     falkorDBService;

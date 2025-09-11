@@ -3,9 +3,9 @@
  * Tests graph operations, Cypher queries, performance, and error handling with real database operations
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { FalkorDBService } from "../../../src/services/database/FalkorDBService";
-import { createTestDatabaseConfig, } from "../../../src/services/DatabaseService";
-import { setupTestDatabase, cleanupTestDatabase, checkDatabaseHealth, } from "../../test-utils/database-helpers";
+import { FalkorDBService } from "../../../src/services/database/FalkorDBService.js";
+import { createTestDatabaseConfig, } from "../../../src/services/DatabaseService.js";
+import { setupTestDatabase, cleanupTestDatabase, checkDatabaseHealth, } from "../../test-utils/database-helpers.js";
 describe("FalkorDBService Integration", () => {
     let dbService;
     let falkorService;
@@ -520,7 +520,14 @@ describe("FalkorDBService Integration", () => {
             const minDuration = Math.min(...performanceResults);
             expect(avgDuration).toBeLessThan(1000); // Average < 1000ms (more realistic for test environments)
             // Allow higher variance in shared CI/dev environments - use a more lenient threshold
-            expect(maxDuration - minDuration).toBeLessThan(avgDuration * 3);
+            // If avgDuration is 0 (very fast queries), variance should also be 0
+            // Otherwise, variance should be less than 3x the average duration
+            if (avgDuration === 0) {
+                expect(maxDuration - minDuration).toBe(0);
+            }
+            else {
+                expect(maxDuration - minDuration).toBeLessThan(avgDuration * 3);
+            }
         });
     });
     describe("Index and Optimization Integration", () => {

@@ -1,0 +1,1 @@
+{"version":3,"file":"openapi.d.ts","sourceRoot":"","sources":["../../../src/api/trpc/openapi.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAEH,OAAO,EAAE,uBAAuB,EAAE,MAAM,cAAc,CAAC;AAIvD,eAAO,MAAM,eAAe,EAAE,UAAU,CAAC,OAAO,uBAAuB,CAYrE,CAAC;AAGH,OAAO,EAAE,eAAe,IAAI,WAAW,EAAE,CAAC"}

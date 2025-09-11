@@ -4,11 +4,11 @@
  */
 /// <reference types="node" />
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi, } from "vitest";
-import { MaintenanceService, } from "../../../src/services/MaintenanceService";
-import { DatabaseService, } from "../../../src/services/DatabaseService";
+import { MaintenanceService, } from "../../../src/services/MaintenanceService.js";
+import { DatabaseService, } from "../../../src/services/DatabaseService.js";
 import * as crypto from "crypto";
 // Import realistic mocks
-import { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock, RealisticRedisMock, } from "../../test-utils/realistic-mocks";
+import { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock, RealisticRedisMock, } from "../../test-utils/realistic-mocks.js";
 // Mock crypto
 vi.mock("crypto");
 // Mock console methods for cleaner test output

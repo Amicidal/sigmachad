@@ -804,10 +804,13 @@ export class MCPRouter {
                         const oldLines = change.oldContent.split("\n").length;
                         const newLines = change.newContent.split("\n").length;
                         // Check for signature changes (simple heuristic)
-                        if (change.oldContent.includes("function") && change.newContent.includes("function")) {
+                        if (change.oldContent.includes("function") &&
+                            change.newContent.includes("function")) {
                             const oldSignature = change.oldContent.match(/function\s+\w+\([^)]*\)/)?.[0];
                             const newSignature = change.newContent.match(/function\s+\w+\([^)]*\)/)?.[0];
-                            if (oldSignature && newSignature && oldSignature !== newSignature) {
+                            if (oldSignature &&
+                                newSignature &&
+                                oldSignature !== newSignature) {
                                 breakingChanges.push({
                                     severity: "breaking",
                                     description: `Function signature changed in ${change.file}`,
@@ -873,10 +876,7 @@ export class MCPRouter {
                 recommendations.push({
                     type: "info",
                     message: "No breaking changes detected",
-                    actions: [
-                        "Run tests to verify changes",
-                        "Review code for quality",
-                    ],
+                    actions: ["Run tests to verify changes", "Review code for quality"],
                 });
             }
             // Create comprehensive impact analysis
@@ -1441,7 +1441,10 @@ export class MCPRouter {
                     },
                     relationship: "USES",
                     confidence: 0.8,
-                    path: [params.changes[0].entityId, `dependent_${params.changes[0].entityId}`],
+                    path: [
+                        params.changes[0].entityId,
+                        `dependent_${params.changes[0].entityId}`,
+                    ],
                 });
             }
             // Generate recommendations based on impact analysis
@@ -2254,7 +2257,7 @@ export class MCPRouter {
             // For backward compatibility with tests, check if result already has 'result' property
             // If the handler returns the data directly, wrap it in result
             // If it already has a result property, return as is
-            if (result && typeof result === 'object' && 'result' in result) {
+            if (result && typeof result === "object" && "result" in result) {
                 return result;
             }
             return { result };
@@ -2271,33 +2274,33 @@ export class MCPRouter {
      */
     validateParameterType(paramName, value, schema) {
         const errors = [];
-        if (!schema || typeof schema !== 'object') {
+        if (!schema || typeof schema !== "object") {
             return errors;
         }
         const expectedType = schema.type;
         // Handle different types
         switch (expectedType) {
-            case 'string':
-                if (typeof value !== 'string') {
+            case "string":
+                if (typeof value !== "string") {
                     errors.push(`${paramName} must be a string, got ${typeof value}`);
                 }
                 break;
-            case 'number':
-                if (typeof value !== 'number' || isNaN(value)) {
+            case "number":
+                if (typeof value !== "number" || isNaN(value)) {
                     errors.push(`${paramName} must be a valid number, got ${typeof value}: ${value}`);
                 }
                 break;
-            case 'integer':
-                if (typeof value !== 'number' || !Number.isInteger(value)) {
+            case "integer":
+                if (typeof value !== "number" || !Number.isInteger(value)) {
                     errors.push(`${paramName} must be an integer, got ${typeof value}: ${value}`);
                 }
                 break;
-            case 'boolean':
-                if (typeof value !== 'boolean') {
+            case "boolean":
+                if (typeof value !== "boolean") {
                     errors.push(`${paramName} must be a boolean, got ${typeof value}`);
                 }
                 break;
-            case 'array':
+            case "array":
                 if (!Array.isArray(value)) {
                     errors.push(`${paramName} must be an array, got ${typeof value}`);
                 }
@@ -2309,8 +2312,10 @@ export class MCPRouter {
                     }
                 }
                 break;
-            case 'object':
-                if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+            case "object":
+                if (typeof value !== "object" ||
+                    value === null ||
+                    Array.isArray(value)) {
                     errors.push(`${paramName} must be an object, got ${typeof value}`);
                 }
                 break;

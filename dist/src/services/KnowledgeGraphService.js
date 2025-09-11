@@ -52,6 +52,11 @@ class SimpleCache {
             }
         }
     }
+    // Invalidate a specific entry using the same key normalization used internally
+    invalidateKey(key) {
+        const cacheKey = this.generateKey(key);
+        this.invalidate((k) => k === cacheKey);
+    }
 }
 export class KnowledgeGraphService extends EventEmitter {
     db;
@@ -232,7 +237,9 @@ export class KnowledgeGraphService extends EventEmitter {
     `;
         const params = { id: entityId, ...falkorCompatibleUpdates };
         await this.db.falkordbQuery(query, params);
-        // Update vector embedding
+        // Invalidate cache before fetching the updated entity to avoid stale reads
+        this.invalidateEntityCache(entityId);
+        // Update vector embedding based on the freshly fetched entity
         const updatedEntity = await this.getEntity(entityId);
         if (updatedEntity) {
             await this.updateEmbedding(updatedEntity);
@@ -243,8 +250,7 @@ export class KnowledgeGraphService extends EventEmitter {
                 timestamp: new Date().toISOString(),
             });
         }
-        // Invalidate cache since entity was updated
-        this.invalidateEntityCache(entityId);
+        // Cache already invalidated above
     }
     async createOrUpdateEntity(entity) {
         const existing = await this.getEntity(entity.id);
@@ -256,24 +262,19 @@ export class KnowledgeGraphService extends EventEmitter {
         }
     }
     async deleteEntity(entityId) {
-        // Get relationships before deleting them for event emission
+        // Get relationships before deletion for event emission
         const relationships = await this.getRelationships({
             fromEntityId: entityId,
         });
-        // Delete relationships first
+        // Delete node and any attached relationships in one operation
         await this.db.falkordbQuery(`
-      MATCH (n {id: $id})-[r]-()
-      DELETE r
+      MATCH (n {id: $id})
+      DETACH DELETE n
     `, { id: entityId });
         // Emit events for deleted relationships
         for (const relationship of relationships) {
             this.emit("relationshipDeleted", relationship.id);
         }
-        // Delete node
-        await this.db.falkordbQuery(`
-      MATCH (n {id: $id})
-      DELETE n
-    `, { id: entityId });
         // Delete vector embedding
         await this.deleteEmbedding(entityId);
         // Invalidate cache
@@ -383,6 +384,13 @@ export class KnowledgeGraphService extends EventEmitter {
             whereClause.push("r.created >= $since");
             params.since = query.since.toISOString();
         }
+        if (query.until) {
+            const until = query.until;
+            if (until instanceof Date) {
+                whereClause.push("r.created <= $until");
+                params.until = until.toISOString();
+            }
+        }
         const fullQuery = `
       ${matchClause}
       ${whereClause.length > 0 ? "WHERE " + whereClause.join(" AND ") : ""}
@@ -442,7 +450,7 @@ export class KnowledgeGraphService extends EventEmitter {
      */
     invalidateEntityCache(entityId) {
         // Remove the specific entity from cache
-        this.entityCache.invalidate((key) => key === entityId);
+        this.entityCache.invalidateKey(entityId);
         // Also clear search cache as searches might be affected
         // This could be optimized to only clear relevant searches
         this.clearSearchCache();
@@ -460,6 +468,13 @@ export class KnowledgeGraphService extends EventEmitter {
         return this.structuralSearch(request);
     }
     async semanticSearch(request) {
+        // Validate limit parameter
+        if (request.limit !== undefined &&
+            (typeof request.limit !== "number" ||
+                request.limit < 0 ||
+                !Number.isInteger(request.limit))) {
+            throw new Error(`Invalid limit parameter: ${request.limit}. Must be a positive integer.`);
+        }
         try {
             // Get vector embeddings for the query
             const embeddings = await this.generateEmbedding(String(request.query || ""));
@@ -511,6 +526,13 @@ export class KnowledgeGraphService extends EventEmitter {
         }
     }
     async structuralSearch(request) {
+        // Validate limit parameter
+        if (request.limit !== undefined &&
+            (typeof request.limit !== "number" ||
+                request.limit < 0 ||
+                !Number.isInteger(request.limit))) {
+            throw new Error(`Invalid limit parameter: ${request.limit}. Must be a positive integer.`);
+        }
         let query = "MATCH (n)";
         const whereClause = [];
         const params = {};

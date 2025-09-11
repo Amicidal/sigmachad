@@ -325,4 +325,4 @@ export const isSpec = (entity: Entity | null | undefined): entity is Spec =>
   entity != null && entity.type === "spec";
 
 // Re-export RelationshipType from relationships module
-export { RelationshipType } from "./relationships";
+export { RelationshipType } from "./relationships.js";

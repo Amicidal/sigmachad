@@ -1,5 +1,5 @@
 import { createClient as createRedisClient, RedisClientType } from "redis";
-import { IFalkorDBService } from "./interfaces";
+import { IFalkorDBService } from "./interfaces.js";
 
 export class FalkorDBService implements IFalkorDBService {
   private falkordbClient!: RedisClientType;

@@ -3,7 +3,7 @@
  * Tests comprehensive monitoring, metrics collection, and alerting functionality
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi, } from "vitest";
-import { SynchronizationMonitoring, } from "../../../src/services/SynchronizationMonitoring";
+import { SynchronizationMonitoring, } from "../../../src/services/SynchronizationMonitoring.js";
 describe("SynchronizationMonitoring Integration", () => {
     let monitoring;
     beforeAll(async () => {

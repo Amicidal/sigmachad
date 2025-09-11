@@ -296,8 +296,8 @@ export class WebSocketRouter extends EventEmitter {
         console.log(`📡 Connection ${connection.id} subscribed to: ${event}`);
         // Confirmation ack expected by tests
         this.sendMessage(connection, {
-            // @ts-ignore additional type for compatibility
-            type: "subscription_confirmed",
+            // match tests that expect "subscribed"
+            type: "subscribed",
             id: message.id,
             // Promote event to top-level for tests that expect it
             // @ts-ignore include for tests
@@ -359,7 +359,7 @@ export class WebSocketRouter extends EventEmitter {
             }
             connection.subscriptions.clear();
             this.sendMessage(connection, {
-                type: "unsubscription_all_confirmed",
+                type: "unsubscribed",
                 id: message.id,
             });
             return;
@@ -367,7 +367,7 @@ export class WebSocketRouter extends EventEmitter {
         // If no event provided, still acknowledge using subscriptionId for compatibility
         if (!event) {
             this.sendMessage(connection, {
-                type: "unsubscription_confirmed",
+                type: "unsubscribed",
                 id: message.id,
                 // @ts-ignore include for tests
                 subscriptionId,

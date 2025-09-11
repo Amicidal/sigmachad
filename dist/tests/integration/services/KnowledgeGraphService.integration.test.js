@@ -3,9 +3,9 @@
  * Tests graph operations, vector embeddings, and entity relationships across databases
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { setupTestDatabase, cleanupTestDatabase, clearTestData, } from "../../test-utils/database-helpers";
-import { RelationshipType } from "../../../src/models/entities";
+import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, } from "../../test-utils/database-helpers.js";
+import { RelationshipType } from "../../../src/models/entities.js";
 describe("KnowledgeGraphService Integration", () => {
     let kgService;
     let dbService;

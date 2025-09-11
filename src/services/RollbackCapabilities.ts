@@ -3,10 +3,10 @@
  * Handles reverting changes when synchronization operations fail
  */
 
-import { KnowledgeGraphService } from "./KnowledgeGraphService.ts";
-import { DatabaseService } from "./DatabaseService.ts";
-import { Entity } from "../models/entities.ts";
-import { GraphRelationship } from "../models/relationships.ts";
+import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
+import { DatabaseService } from "./DatabaseService.js";
+import { Entity } from "../models/entities.js";
+import { GraphRelationship } from "../models/relationships.js";
 
 export interface RollbackPoint {
   id: string;

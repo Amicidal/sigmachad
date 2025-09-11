@@ -3,10 +3,10 @@
  * Tests database operations, transactions, connection handling, and schema management with real database operations
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { PostgreSQLService } from "../../../src/services/database/PostgreSQLService";
+import { PostgreSQLService } from "../../../src/services/database/PostgreSQLService.js";
 import { v4 as uuidv4 } from "uuid";
-import { createTestDatabaseConfig, } from "../../../src/services/DatabaseService";
-import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers";
+import { createTestDatabaseConfig, } from "../../../src/services/DatabaseService.js";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers.js";
 describe("PostgreSQLService Integration", () => {
     let dbService;
     let pgService;

@@ -4,7 +4,7 @@
  */
 /// <reference types="node" />
 import { describe, it, expect, beforeEach, afterEach, vi, } from "vitest";
-import { FalkorDBService } from "../../../src/services/database/FalkorDBService";
+import { FalkorDBService } from "../../../src/services/database/FalkorDBService.js";
 // Mock the redis module
 vi.mock("redis", () => ({
     createClient: vi.fn(),

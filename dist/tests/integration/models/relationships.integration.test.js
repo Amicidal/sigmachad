@@ -4,7 +4,7 @@
  * Covers complex relationship networks and traversal algorithms
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers";
+import { setupTestDatabase, cleanupTestDatabase, clearTestData, checkDatabaseHealth, } from "../../test-utils/database-helpers.js";
 describe("Relationships Integration Tests", () => {
     let dbService;
     beforeAll(async () => {

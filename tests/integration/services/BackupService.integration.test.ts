@@ -59,6 +59,18 @@ describe("BackupService Integration", () => {
     } catch (error) {
       // Directory might be empty, that's okay
     }
+
+    // Clean up test data from previous runs
+    try {
+      await dbService.postgresQuery(
+        "DELETE FROM documents WHERE type = 'backup_test'"
+      );
+      await dbService.postgresQuery(
+        "DELETE FROM flaky_test_analyses WHERE test_id LIKE 'test-%'"
+      );
+    } catch (error) {
+      // Tables might not exist yet, that's okay
+    }
   });
 
   describe("Backup Creation Integration", () => {
