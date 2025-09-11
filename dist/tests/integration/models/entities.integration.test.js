@@ -210,7 +210,7 @@ describe("Models Integration Tests", () => {
                 await dbService.redisDel(`entity:${testFileId}:metadata`);
                 // Verify deletions
                 const deletedPgResult = await dbService.postgresQuery("SELECT COUNT(*) as count FROM documents WHERE id = $1", [testFileId]);
-                expect(deletedPgResult.rows[0].count).toBe("0");
+                expect(deletedPgResult.rows[0].count).toBe(0);
                 const deletedFalkorResult = await dbService.falkordbQuery("MATCH (n:Entity {id: $id}) RETURN count(n) as count", { id: testFileId });
                 expect(deletedFalkorResult[0].count).toBe(0);
                 const deletedRedisResult = await dbService.redisGet(`entity:${testFileId}:metadata`);

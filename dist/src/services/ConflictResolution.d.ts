@@ -2,12 +2,12 @@
  * Conflict Resolution Service
  * Handles conflicts during graph synchronization operations
  */
-import { Entity } from '../models/entities.js';
-import { GraphRelationship } from '../models/relationships.js';
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
+import { Entity } from "../models/entities.js";
+import { GraphRelationship } from "../models/relationships.js";
+import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
 export interface Conflict {
     id: string;
-    type: 'entity_version' | 'entity_deletion' | 'relationship_conflict' | 'concurrent_modification';
+    type: "entity_version" | "entity_deletion" | "relationship_conflict" | "concurrent_modification";
     entityId?: string;
     relationshipId?: string;
     description: string;
@@ -18,10 +18,10 @@ export interface Conflict {
     timestamp: Date;
     resolved: boolean;
     resolution?: ConflictResolutionResult;
-    resolutionStrategy?: 'overwrite' | 'merge' | 'skip' | 'manual';
+    resolutionStrategy?: "overwrite" | "merge" | "skip" | "manual";
 }
 export interface ConflictResolution {
-    strategy: 'overwrite' | 'merge' | 'skip' | 'manual';
+    strategy: "overwrite" | "merge" | "skip" | "manual";
     resolvedValue?: any;
     manualResolution?: string;
     timestamp: Date;
@@ -34,7 +34,7 @@ export interface MergeStrategy {
     resolve: (conflict: Conflict) => Promise<ConflictResolutionResult>;
 }
 export interface ConflictResolutionResult {
-    strategy: 'overwrite' | 'merge' | 'skip' | 'manual';
+    strategy: "overwrite" | "merge" | "skip" | "manual";
     resolvedValue?: any;
     manualResolution?: string;
     timestamp: Date;

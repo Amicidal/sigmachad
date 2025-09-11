@@ -180,7 +180,7 @@ describe("DatabaseService Integration", () => {
             expect(redisKeySet).toBe(true);
             // Verify PostgreSQL transaction was rolled back
             const pgResult = await dbService.postgresQuery("SELECT COUNT(*) as count FROM documents WHERE id = $1", [testDocId]);
-            expect(pgResult.rows[0]?.count).toBe("0");
+            expect(pgResult.rows[0]?.count).toBe(0);
             // Verify FalkorDB node still exists (not affected by PostgreSQL transaction)
             const falkorResult = await dbService.falkordbQuery("MATCH (n:Entity {id: $id}) RETURN count(n) as count", { id: testEntityId });
             expect(falkorResult[0]?.count).toBe(1);
@@ -530,12 +530,12 @@ describe("DatabaseService Integration", () => {
             ]);
             // Verify new data exists
             const newDataCheck = await dbService.postgresQuery("SELECT COUNT(*) as count FROM documents WHERE type = 'backup_test'");
-            expect(newDataCheck.rows[0]?.count).toBe("1");
+            expect(newDataCheck.rows[0]?.count).toBe(1);
             // Simulate "recovery" by clearing and restoring
             await clearTestData(dbService);
             // Verify data was cleared
             const clearedCheck = await dbService.postgresQuery("SELECT COUNT(*) as count FROM documents");
-            expect(clearedCheck.rows[0]?.count).toBe("0");
+            expect(clearedCheck.rows[0]?.count).toBe(0);
             // Restore from snapshot (simplified - in real scenario would use actual backup)
             for (const doc of snapshot.documents.rows) {
                 await dbService.postgresQuery(`
@@ -553,7 +553,7 @@ describe("DatabaseService Integration", () => {
             }
             // Verify restoration
             const restoredCount = await dbService.postgresQuery("SELECT COUNT(*) as count FROM documents");
-            expect(restoredCount.rows[0]?.count).toBe(snapshot.documents.rows.length.toString());
+            expect(restoredCount.rows[0]?.count.toString()).toBe(snapshot.documents.rows.length.toString());
         });
     });
     describe("Error Scenarios and Edge Cases", () => {

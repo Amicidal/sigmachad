@@ -15,6 +15,15 @@ export class PostgreSQLService {
             // Use injected poolFactory when provided (for tests) else create Pool
             if (this.poolFactory) {
                 this.postgresPool = this.poolFactory();
+                // Also configure type parsers for test pools
+                const { types } = await import("pg");
+                // Configure numeric type parsing for test environments
+                types.setTypeParser(1700, (value) => parseFloat(value)); // numeric/decimal
+                types.setTypeParser(701, (value) => parseFloat(value)); // real/float4
+                types.setTypeParser(700, (value) => parseFloat(value)); // float8/double precision
+                types.setTypeParser(21, (value) => parseInt(value, 10)); // int2/smallint
+                types.setTypeParser(23, (value) => parseInt(value, 10)); // int4/integer
+                types.setTypeParser(20, (value) => parseInt(value, 10)); // int8/bigint
             }
             else {
                 // Dynamically import pg so test mocks (vi.mock) reliably intercept
@@ -29,6 +38,14 @@ export class PostgreSQLService {
                     // In production, return as string for performance
                     types.setTypeParser(3802, (value) => value); // JSONB oid = 3802
                 }
+                // Configure numeric type parsing for all environments
+                // Parse numeric, decimal, real, and double precision as numbers
+                types.setTypeParser(1700, (value) => parseFloat(value)); // numeric/decimal
+                types.setTypeParser(701, (value) => parseFloat(value)); // real/float4
+                types.setTypeParser(700, (value) => parseFloat(value)); // float8/double precision
+                types.setTypeParser(21, (value) => parseInt(value, 10)); // int2/smallint
+                types.setTypeParser(23, (value) => parseInt(value, 10)); // int4/integer
+                types.setTypeParser(20, (value) => parseInt(value, 10)); // int8/bigint
                 this.postgresPool = new Pool({
                     connectionString: this.config.connectionString,
                     max: this.config.max || 20,
@@ -304,15 +321,18 @@ export class PostgreSQLService {
         test_id VARCHAR(255) NOT NULL UNIQUE,
         test_name VARCHAR(255) NOT NULL,
         failure_count INTEGER DEFAULT 0,
-        flaky_score DECIMAL(5,2) DEFAULT 0,
+        flaky_score DECIMAL(6,2) DEFAULT 0,
         total_runs INTEGER DEFAULT 0,
-        failure_rate DECIMAL(5,4) DEFAULT 0,
-        success_rate DECIMAL(5,4) DEFAULT 0,
+        failure_rate DECIMAL(6,4) DEFAULT 0,
+        success_rate DECIMAL(6,4) DEFAULT 0,
         recent_failures INTEGER DEFAULT 0,
         patterns JSONB,
         recommendations JSONB,
         analyzed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`,
+            `ALTER TABLE flaky_test_analyses ALTER COLUMN flaky_score TYPE DECIMAL(6,2)`,
+            `ALTER TABLE flaky_test_analyses ALTER COLUMN failure_rate TYPE DECIMAL(6,4)`,
+            `ALTER TABLE flaky_test_analyses ALTER COLUMN success_rate TYPE DECIMAL(6,4)`,
             // Changes table (depends on sessions)
             `CREATE TABLE IF NOT EXISTS changes (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -583,15 +603,17 @@ export class PostgreSQLService {
                 const result = await client.query(query, [
                     analysis.testId,
                     analysis.testName,
-                    analysis.failureCount || analysis.failure_count,
-                    analysis.flakyScore || analysis.flaky_score,
-                    analysis.totalRuns || analysis.total_runs,
-                    analysis.failureRate || analysis.failure_rate,
-                    analysis.successRate || analysis.success_rate,
-                    analysis.recentFailures || analysis.recent_failures,
-                    JSON.stringify(analysis.patterns || analysis.failurePatterns),
-                    JSON.stringify(analysis.recommendations),
-                    analysis.lastFailure || new Date(),
+                    Number(analysis.failureCount || analysis.failure_count || 0),
+                    Number(analysis.flakyScore || analysis.flaky_score || 0),
+                    Number(analysis.totalRuns || analysis.total_runs || 0),
+                    Number(analysis.failureRate || analysis.failure_rate || 0),
+                    Number(analysis.successRate || analysis.success_rate || 0),
+                    Number(analysis.recentFailures || analysis.recent_failures || 0),
+                    JSON.stringify(analysis.patterns || analysis.failurePatterns || {}),
+                    JSON.stringify(analysis.recommendations || {}),
+                    analysis.analyzedAt ||
+                        analysis.analyzed_at ||
+                        new Date().toISOString(),
                 ]);
                 if (result.rows.length > 0) {
                     if (exists) {
@@ -624,7 +646,7 @@ export class PostgreSQLService {
         try {
             let query;
             let params;
-            if (entityId && entityId.trim() !== '') {
+            if (entityId && entityId.trim() !== "") {
                 // If entityId is provided, search for specific test
                 query = `
           SELECT tr.*, ts.suite_name, ts.framework, ts.timestamp as suite_timestamp

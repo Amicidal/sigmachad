@@ -57,7 +57,7 @@ export declare const TEST_FIXTURES: {
     sessions: {
         agent_type: string;
         user_id: string;
-        start_time: Date;
+        start_time: string;
         end_time: null;
         status: string;
         metadata: {
@@ -68,7 +68,7 @@ export declare const TEST_FIXTURES: {
         change_type: string;
         entity_type: string;
         entity_id: string;
-        timestamp: Date;
+        timestamp: string;
         author: string;
         commit_hash: string;
         diff: string;
@@ -81,7 +81,7 @@ export declare const TEST_FIXTURES: {
     }[];
     testSuites: {
         suiteName: string;
-        timestamp: Date;
+        timestamp: string;
         framework: string;
         totalTests: number;
         passedTests: number;
@@ -108,7 +108,7 @@ export declare const TEST_FIXTURES: {
             cpuUsage: number;
             networkRequests: number;
         };
-        timestamp: Date;
+        timestamp: string;
     } | {
         test_id: string;
         test_suite: string;
@@ -119,14 +119,14 @@ export declare const TEST_FIXTURES: {
         stack_trace: string;
         coverage: null;
         performance: null;
-        timestamp: Date;
+        timestamp: string;
     })[];
     testPerformance: {
         test_id: string;
         memory_usage: number;
         cpu_usage: number;
         network_requests: number;
-        timestamp: Date;
+        timestamp: string;
     }[];
     flakyAnalyses: {
         testId: string;

@@ -3,8 +3,8 @@
  * Implements token bucket algorithm for rate limiting
  */
 
-import { FastifyRequest, FastifyReply } from 'fastify';
-import { createRateLimitKey } from './validation.js';
+import { FastifyRequest, FastifyReply } from "fastify";
+import { createRateLimitKey } from "./validation.js";
 
 interface RateLimitConfig {
   maxRequests: number;
@@ -24,7 +24,10 @@ const bucketStores = new Set<Map<string, TokenBucket>>();
 const DEFAULT_CONFIGS: Record<string, RateLimitConfig> = {
   search: { maxRequests: 100, windowMs: 60000 }, // 100 requests per minute for search
   admin: { maxRequests: 50, windowMs: 60000 }, // 50 requests per minute for admin
-  default: { maxRequests: 1000, windowMs: 3600000 }, // 1000 requests per hour default
+  default:
+    process.env.NODE_ENV === "test" || process.env.RUN_INTEGRATION === "1"
+      ? { maxRequests: 10000, windowMs: 60000 } // 10000 requests per minute for tests
+      : { maxRequests: 1000, windowMs: 3600000 }, // 1000 requests per hour default
 };
 
 // Rate limiting middleware factory
@@ -56,8 +59,13 @@ export function createRateLimit(config: Partial<RateLimitConfig> = {}) {
 
     // Refill tokens based on time elapsed
     const timeElapsed = now - bucket.lastRefill;
-    const tokensToAdd = Math.floor(timeElapsed / finalConfig.windowMs * finalConfig.maxRequests);
-    bucket.tokens = Math.min(finalConfig.maxRequests, bucket.tokens + tokensToAdd);
+    const tokensToAdd = Math.floor(
+      (timeElapsed / finalConfig.windowMs) * finalConfig.maxRequests
+    );
+    bucket.tokens = Math.min(
+      finalConfig.maxRequests,
+      bucket.tokens + tokensToAdd
+    );
     bucket.lastRefill = now;
 
     // Check if request should be skipped
@@ -75,16 +83,16 @@ export function createRateLimit(config: Partial<RateLimitConfig> = {}) {
       const retryAfter = Math.ceil((resetTime - now) / 1000);
 
       // Ensure rate limit headers are present on 429 responses
-      reply.header('X-RateLimit-Limit', finalConfig.maxRequests.toString());
-      reply.header('X-RateLimit-Remaining', '0');
-      reply.header('X-RateLimit-Reset', resetTime.toString());
-      reply.header('Retry-After', retryAfter.toString());
+      reply.header("X-RateLimit-Limit", finalConfig.maxRequests.toString());
+      reply.header("X-RateLimit-Remaining", "0");
+      reply.header("X-RateLimit-Reset", resetTime.toString());
+      reply.header("Retry-After", retryAfter.toString());
 
       reply.status(429).send({
         success: false,
         error: {
-          code: 'RATE_LIMIT_EXCEEDED',
-          message: 'Too many requests',
+          code: "RATE_LIMIT_EXCEEDED",
+          message: "Too many requests",
           details: {
             retryAfter,
             limit: finalConfig.maxRequests,
@@ -99,9 +107,12 @@ export function createRateLimit(config: Partial<RateLimitConfig> = {}) {
     bucket.tokens--;
 
     // Add rate limit headers
-    reply.header('X-RateLimit-Limit', finalConfig.maxRequests.toString());
-    reply.header('X-RateLimit-Remaining', bucket.tokens.toString());
-    reply.header('X-RateLimit-Reset', (bucket.lastRefill + finalConfig.windowMs).toString());
+    reply.header("X-RateLimit-Limit", finalConfig.maxRequests.toString());
+    reply.header("X-RateLimit-Remaining", bucket.tokens.toString());
+    reply.header(
+      "X-RateLimit-Reset",
+      (bucket.lastRefill + finalConfig.windowMs).toString()
+    );
   };
 }
 
@@ -155,6 +166,7 @@ export function getRateLimitStats() {
 }
 
 // Start cleanup interval (should be called when app starts)
-export function startCleanupInterval(intervalMs: number = 300000) { // 5 minutes
+export function startCleanupInterval(intervalMs: number = 300000) {
+  // 5 minutes
   globalThis.setInterval(cleanupBuckets, intervalMs);
 }

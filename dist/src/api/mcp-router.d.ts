@@ -75,6 +75,10 @@ export declare class MCPRouter {
     private generatePerformanceRecommendations;
     private determineHealthStatus;
     private handleSimpleToolCall;
+    /**
+     * Validate parameter type against JSON schema
+     */
+    private validateParameterType;
     private processMCPRequest;
     validateServer(): Promise<{
         isValid: boolean;

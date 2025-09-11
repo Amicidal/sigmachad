@@ -613,7 +613,9 @@ export function createDatabaseConfig(): DatabaseConfig {
           : "postgresql://memento:memento@localhost:5432/memento"),
       max: parseInt(process.env.DB_MAX_CONNECTIONS || (isTest ? "10" : "30")), // Increased pool size for better concurrency
       idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || "30000"),
-      connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT || "5000") // Add connection timeout
+      connectionTimeoutMillis: parseInt(
+        process.env.DB_CONNECTION_TIMEOUT || "5000"
+      ), // Add connection timeout
     },
     redis: process.env.REDIS_URL
       ? {
@@ -640,7 +642,7 @@ export function createTestDatabaseConfig(): DatabaseConfig {
         "postgresql://memento_test:memento_test@localhost:5433/memento_test",
       max: 10, // Increased for better performance test concurrency
       idleTimeoutMillis: 5000, // Reduced for tests
-      connectionTimeoutMillis: 5000 // Add connection timeout
+      connectionTimeoutMillis: 5000, // Add connection timeout
     },
     redis: {
       url: "redis://localhost:6381",

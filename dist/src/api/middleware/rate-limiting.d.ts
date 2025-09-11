@@ -2,7 +2,7 @@
  * Rate Limiting Middleware for API Requests
  * Implements token bucket algorithm for rate limiting
  */
-import { FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyRequest, FastifyReply } from "fastify";
 interface RateLimitConfig {
     maxRequests: number;
     windowMs: number;

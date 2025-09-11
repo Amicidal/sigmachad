@@ -239,7 +239,7 @@ export const TEST_FIXTURES = {
         {
             agent_type: "test_agent",
             user_id: "test_user",
-            start_time: new Date(),
+            start_time: new Date().toISOString(),
             end_time: null,
             status: "active",
             metadata: { test: true },
@@ -250,7 +250,7 @@ export const TEST_FIXTURES = {
             change_type: "create",
             entity_type: "file",
             entity_id: "test.ts",
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
             author: "test_author",
             commit_hash: "abc123",
             diff: '+ console.log("hello");',
@@ -263,7 +263,7 @@ export const TEST_FIXTURES = {
     testSuites: [
         {
             suiteName: "unit_tests",
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
             framework: "vitest",
             totalTests: 5,
             passedTests: 4,
@@ -283,7 +283,7 @@ export const TEST_FIXTURES = {
             stack_trace: null,
             coverage: { lines: 85, branches: 80, functions: 90, statements: 85 },
             performance: { memoryUsage: 1024000, cpuUsage: 15, networkRequests: 2 },
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
         },
         {
             test_id: "test_2",
@@ -295,7 +295,7 @@ export const TEST_FIXTURES = {
             stack_trace: "Error: Assertion failed\n    at test",
             coverage: null,
             performance: null,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
         },
     ],
     testPerformance: [
@@ -304,14 +304,14 @@ export const TEST_FIXTURES = {
             memory_usage: 1024000,
             cpu_usage: 15,
             network_requests: 2,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
         },
         {
             test_id: "test_2",
             memory_usage: 2048000,
             cpu_usage: 25,
             network_requests: 5,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
         },
     ],
     flakyAnalyses: [
@@ -414,19 +414,20 @@ export async function insertTestFixtures(dbService) {
     // Insert flaky analyses
     for (const analysis of TEST_FIXTURES.flakyAnalyses) {
         await dbService.postgresQuery(`
-      INSERT INTO flaky_test_analyses (test_id, test_name, flaky_score, total_runs, failure_rate, success_rate, recent_failures, patterns, recommendations, analyzed_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      INSERT INTO flaky_test_analyses (test_id, test_name, failure_count, flaky_score, total_runs, failure_rate, success_rate, recent_failures, patterns, recommendations, analyzed_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `, [
             analysis.testId,
             analysis.testName,
-            analysis.flakyScore,
-            analysis.totalRuns,
-            analysis.failureRate,
-            analysis.successRate,
-            analysis.recentFailures,
-            JSON.stringify(analysis.patterns),
-            JSON.stringify(analysis.recommendations),
-            new Date(),
+            Number(analysis.failureCount || analysis.failure_count || 0),
+            Number(analysis.flakyScore || 0),
+            Number(analysis.totalRuns || 0),
+            Number(analysis.failureRate || 0),
+            Number(analysis.successRate || 0),
+            Number(analysis.recentFailures || 0),
+            JSON.stringify(analysis.patterns || {}),
+            JSON.stringify(analysis.recommendations || {}),
+            analysis.analyzedAt || analysis.analyzed_at || new Date().toISOString(),
         ]);
     }
     // Insert test performance data
@@ -436,10 +437,10 @@ export async function insertTestFixtures(dbService) {
       VALUES ($1, $2, $3, $4, $5)
     `, [
             perf.test_id,
-            perf.memory_usage,
-            perf.cpu_usage,
-            perf.network_requests,
-            perf.timestamp,
+            Number(perf.memory_usage || 0),
+            Number(perf.cpu_usage || 0),
+            Number(perf.network_requests || 0),
+            perf.timestamp || new Date().toISOString(),
         ]);
     }
     // Insert FalkorDB entities for testing

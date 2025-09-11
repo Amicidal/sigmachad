@@ -237,7 +237,6 @@ describe("ConflictResolution Integration", () => {
             expect(storedConflict.resolution).toEqual(resolution);
             // Verify entity was updated in knowledge graph
             const updatedEntity = await kgService.getEntity("resolve-test-entity");
-            console.log("Updated entity:", updatedEntity);
             expect(updatedEntity?.hash).toBe("newhash");
             expect(updatedEntity?.lastModified).toEqual(new Date("2024-01-02T00:00:00Z"));
         });
@@ -290,8 +289,6 @@ describe("ConflictResolution Integration", () => {
             expect(result).toBe(true);
             // Verify merged entity was updated
             const updatedEntity = await kgService.getEntity("merge-test-entity");
-            console.log("Merged entity:", updatedEntity);
-            console.log("Merged entity metadata:", updatedEntity?.metadata);
             expect(updatedEntity?.metadata?.author).toBe("user1"); // From existing
             expect(updatedEntity?.metadata?.description).toBe("updated file"); // From incoming
             expect(updatedEntity?.metadata?.version).toBe(2); // From incoming (overwrites existing)

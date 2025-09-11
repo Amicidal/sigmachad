@@ -2232,6 +2232,21 @@ export class MCPRouter {
                 throw new Error(`Missing required parameters: ${missing.join(", ")}`);
             }
         }
+        // Type validation against JSON schema
+        if (schema?.properties && args) {
+            const validationErrors = [];
+            for (const [paramName, paramSchema] of Object.entries(schema.properties)) {
+                const paramValue = args[paramName];
+                if (paramValue !== undefined) {
+                    const typeErrors = this.validateParameterType(paramName, paramValue, paramSchema);
+                    validationErrors.push(...typeErrors);
+                }
+            }
+            if (validationErrors.length > 0) {
+                this.recordExecution(toolName, startTime, new Date(), false, `Parameter validation errors: ${validationErrors.join(", ")}`, args);
+                throw new Error(`Parameter validation errors: ${validationErrors.join(", ")}`);
+            }
+        }
         try {
             const result = await tool.handler(args || {});
             const endTime = new Date();
@@ -2250,6 +2265,60 @@ export class MCPRouter {
             this.recordExecution(toolName, startTime, endTime, false, errorMessage, args);
             throw error; // Re-throw to be handled by the main handler
         }
+    }
+    /**
+     * Validate parameter type against JSON schema
+     */
+    validateParameterType(paramName, value, schema) {
+        const errors = [];
+        if (!schema || typeof schema !== 'object') {
+            return errors;
+        }
+        const expectedType = schema.type;
+        // Handle different types
+        switch (expectedType) {
+            case 'string':
+                if (typeof value !== 'string') {
+                    errors.push(`${paramName} must be a string, got ${typeof value}`);
+                }
+                break;
+            case 'number':
+                if (typeof value !== 'number' || isNaN(value)) {
+                    errors.push(`${paramName} must be a valid number, got ${typeof value}: ${value}`);
+                }
+                break;
+            case 'integer':
+                if (typeof value !== 'number' || !Number.isInteger(value)) {
+                    errors.push(`${paramName} must be an integer, got ${typeof value}: ${value}`);
+                }
+                break;
+            case 'boolean':
+                if (typeof value !== 'boolean') {
+                    errors.push(`${paramName} must be a boolean, got ${typeof value}`);
+                }
+                break;
+            case 'array':
+                if (!Array.isArray(value)) {
+                    errors.push(`${paramName} must be an array, got ${typeof value}`);
+                }
+                else if (schema.items && schema.items.type) {
+                    // Validate array items
+                    for (let i = 0; i < value.length; i++) {
+                        const itemErrors = this.validateParameterType(`${paramName}[${i}]`, value[i], schema.items);
+                        errors.push(...itemErrors);
+                    }
+                }
+                break;
+            case 'object':
+                if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+                    errors.push(`${paramName} must be an object, got ${typeof value}`);
+                }
+                break;
+            default:
+                // For complex types or when no type is specified, skip validation
+                break;
+        }
+        return errors;
     }
     // Process MCP JSON-RPC requests
     async processMCPRequest(request) {

@@ -14,50 +14,62 @@ export class ConflictResolution {
     initializeDefaultStrategies() {
         // Strategy 1: Last Write Wins (highest priority)
         this.addMergeStrategy({
-            name: 'last_write_wins',
+            name: "last_write_wins",
             priority: 100,
             canHandle: () => true,
             resolve: async (conflict) => ({
-                strategy: 'overwrite',
+                strategy: "overwrite",
                 resolvedValue: conflict.conflictingValues.incoming,
                 timestamp: new Date(),
-                resolvedBy: 'system',
+                resolvedBy: "system",
             }),
         });
         // Strategy 2: Merge properties (for entity conflicts)
         this.addMergeStrategy({
-            name: 'property_merge',
+            name: "property_merge",
             priority: 50,
-            canHandle: (conflict) => conflict.type === 'entity_version',
+            canHandle: (conflict) => conflict.type === "entity_version",
             resolve: async (conflict) => {
                 const current = conflict.conflictingValues.current;
                 const incoming = conflict.conflictingValues.incoming;
                 const merged = { ...current };
+                // Update hash to the newer one if available
+                if (incoming.hash) {
+                    merged.hash = incoming.hash;
+                }
                 // Merge metadata if both have it
                 if (incoming.metadata && current.metadata) {
                     merged.metadata = { ...current.metadata, ...incoming.metadata };
                 }
+                else if (incoming.metadata) {
+                    merged.metadata = incoming.metadata;
+                }
                 // Use newer lastModified if both have it
-                if (incoming.lastModified && current.lastModified && incoming.lastModified > current.lastModified) {
+                if (incoming.lastModified &&
+                    current.lastModified &&
+                    incoming.lastModified > current.lastModified) {
+                    merged.lastModified = incoming.lastModified;
+                }
+                else if (incoming.lastModified) {
                     merged.lastModified = incoming.lastModified;
                 }
                 return {
-                    strategy: 'merge',
+                    strategy: "merge",
                     resolvedValue: merged,
                     timestamp: new Date(),
-                    resolvedBy: 'system',
+                    resolvedBy: "system",
                 };
             },
         });
         // Strategy 3: Skip on deletion conflicts
         this.addMergeStrategy({
-            name: 'skip_deletions',
+            name: "skip_deletions",
             priority: 25,
-            canHandle: (conflict) => conflict.type === 'entity_deletion',
+            canHandle: (conflict) => conflict.type === "entity_deletion",
             resolve: async (conflict) => ({
-                strategy: 'skip',
+                strategy: "skip",
                 timestamp: new Date(),
-                resolvedBy: 'system',
+                resolvedBy: "system",
             }),
         });
     }
@@ -78,7 +90,7 @@ export class ConflictResolution {
                     // Always detect conflict if there's a timestamp difference (for testing)
                     conflicts.push({
                         id: `conflict_entity_${incomingEntity.id}_${Date.now()}`,
-                        type: 'entity_version',
+                        type: "entity_version",
                         entityId: incomingEntity.id,
                         description: `Entity ${incomingEntity.id} has been modified more recently`,
                         conflictingValues: {
@@ -96,7 +108,7 @@ export class ConflictResolution {
             // For testing, always detect relationship conflicts if we have incoming relationships
             conflicts.push({
                 id: `conflict_rel_${incomingRel.id}_${Date.now()}`,
-                type: 'relationship_conflict',
+                type: "relationship_conflict",
                 relationshipId: incomingRel.id,
                 description: `Relationship ${incomingRel.id} has conflict`,
                 conflictingValues: {
@@ -124,20 +136,20 @@ export class ConflictResolution {
         // Apply resolution
         try {
             switch (resolution.strategy) {
-                case 'overwrite':
+                case "overwrite":
                     if (conflict.entityId) {
                         await this.kgService.updateEntity(conflict.entityId, resolution.resolvedValue);
                     }
                     break;
-                case 'merge':
+                case "merge":
                     if (conflict.entityId) {
                         await this.kgService.updateEntity(conflict.entityId, resolution.resolvedValue);
                     }
                     break;
-                case 'skip':
+                case "skip":
                     // Do nothing - skip the conflicting change
                     break;
-                case 'manual':
+                case "manual":
                     // Store for manual resolution
                     break;
             }
@@ -177,16 +189,16 @@ export class ConflictResolution {
         return null;
     }
     getUnresolvedConflicts() {
-        return Array.from(this.conflicts.values()).filter(c => !c.resolved);
+        return Array.from(this.conflicts.values()).filter((c) => !c.resolved);
     }
     getResolvedConflicts() {
-        return Array.from(this.conflicts.values()).filter(c => c.resolved);
+        return Array.from(this.conflicts.values()).filter((c) => c.resolved);
     }
     getConflict(conflictId) {
         return this.conflicts.get(conflictId) || null;
     }
     getConflictsForEntity(entityId) {
-        return Array.from(this.conflicts.values()).filter(c => c.entityId === entityId && !c.resolved);
+        return Array.from(this.conflicts.values()).filter((c) => c.entityId === entityId && !c.resolved);
     }
     addConflictListener(listener) {
         this.conflictListeners.add(listener);
@@ -200,7 +212,7 @@ export class ConflictResolution {
                 listener(conflict);
             }
             catch (error) {
-                console.error('Error in conflict listener:', error);
+                console.error("Error in conflict listener:", error);
             }
         }
     }
@@ -213,8 +225,8 @@ export class ConflictResolution {
     }
     getConflictStatistics() {
         const allConflicts = Array.from(this.conflicts.values());
-        const resolved = allConflicts.filter(c => c.resolved);
-        const unresolved = allConflicts.filter(c => !c.resolved);
+        const resolved = allConflicts.filter((c) => c.resolved);
+        const unresolved = allConflicts.filter((c) => !c.resolved);
         const byType = {};
         for (const conflict of allConflicts) {
             byType[conflict.type] = (byType[conflict.type] || 0) + 1;

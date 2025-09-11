@@ -911,7 +911,9 @@ export class MCPRouter {
         relatedPatterns: [],
         totalExamples: 0,
         totalTestExamples: 0,
-        message: `Error retrieving examples: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Error retrieving examples: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
       };
     }
   }
@@ -927,10 +929,10 @@ export class MCPRouter {
       // Analyze each proposed change
       for (let i = 0; i < params.changes.length; i++) {
         const change = params.changes[i];
-        
+
         // Create unique IDs for each change
         const entityId = `entity_${Date.now()}_${i}`;
-        
+
         // Simple analysis based on change type
         if (change.type === "modify") {
           affectedEntities.push({
@@ -945,13 +947,24 @@ export class MCPRouter {
           if (change.oldContent && change.newContent) {
             const oldLines = change.oldContent.split("\n").length;
             const newLines = change.newContent.split("\n").length;
-            
+
             // Check for signature changes (simple heuristic)
-            if (change.oldContent.includes("function") && change.newContent.includes("function")) {
-              const oldSignature = change.oldContent.match(/function\s+\w+\([^)]*\)/)?.[0];
-              const newSignature = change.newContent.match(/function\s+\w+\([^)]*\)/)?.[0];
-              
-              if (oldSignature && newSignature && oldSignature !== newSignature) {
+            if (
+              change.oldContent.includes("function") &&
+              change.newContent.includes("function")
+            ) {
+              const oldSignature = change.oldContent.match(
+                /function\s+\w+\([^)]*\)/
+              )?.[0];
+              const newSignature = change.newContent.match(
+                /function\s+\w+\([^)]*\)/
+              )?.[0];
+
+              if (
+                oldSignature &&
+                newSignature &&
+                oldSignature !== newSignature
+              ) {
                 breakingChanges.push({
                   severity: "breaking",
                   description: `Function signature changed in ${change.file}`,
@@ -959,7 +972,7 @@ export class MCPRouter {
                 });
               }
             }
-            
+
             if (Math.abs(oldLines - newLines) > 10) {
               breakingChanges.push({
                 severity: "potentially-breaking",
@@ -1018,10 +1031,7 @@ export class MCPRouter {
         recommendations.push({
           type: "info",
           message: "No breaking changes detected",
-          actions: [
-            "Run tests to verify changes",
-            "Review code for quality",
-          ],
+          actions: ["Run tests to verify changes", "Review code for quality"],
         });
       }
 
@@ -1057,7 +1067,9 @@ export class MCPRouter {
         },
         recommendations: [],
         changes: params.changes || [],
-        message: `Analysis failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Analysis failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
       };
     }
   }
@@ -1090,7 +1102,8 @@ export class MCPRouter {
       if (includeTypes.includes("typescript")) {
         result.typescript = {
           errors: 0,
-          warnings: params.files?.length > 0 ? Math.floor(Math.random() * 3) : 0,
+          warnings:
+            params.files?.length > 0 ? Math.floor(Math.random() * 3) : 0,
           issues: [],
         };
       }
@@ -1099,7 +1112,8 @@ export class MCPRouter {
       if (includeTypes.includes("eslint")) {
         result.eslint = {
           errors: 0,
-          warnings: params.files?.length > 0 ? Math.floor(Math.random() * 5) : 0,
+          warnings:
+            params.files?.length > 0 ? Math.floor(Math.random() * 5) : 0,
           issues: [],
         };
       }
@@ -1113,7 +1127,7 @@ export class MCPRouter {
           low: 0,
           issues: [],
         };
-        
+
         if (params.files?.length > 0 && Math.random() > 0.8) {
           result.security.medium = 1;
           result.security.issues.push({
@@ -1129,7 +1143,8 @@ export class MCPRouter {
       // Tests validation
       if (includeTypes.includes("tests")) {
         result.tests = {
-          passed: params.files?.length > 0 ? Math.floor(Math.random() * 10) + 5 : 0,
+          passed:
+            params.files?.length > 0 ? Math.floor(Math.random() * 10) + 5 : 0,
           failed: 0,
           skipped: 0,
           coverage: {
@@ -1143,14 +1158,15 @@ export class MCPRouter {
 
       // Coverage validation
       if (includeTypes.includes("coverage")) {
-        const baseCoverage = params.files?.length > 0 ? 70 + Math.random() * 20 : 0;
+        const baseCoverage =
+          params.files?.length > 0 ? 70 + Math.random() * 20 : 0;
         result.coverage = {
           lines: baseCoverage,
           branches: baseCoverage - 5,
           functions: baseCoverage + 5,
           statements: baseCoverage,
         };
-        
+
         // Also update tests.coverage if tests are included
         if (result.tests) {
           result.tests.coverage = result.coverage;
@@ -1182,7 +1198,7 @@ export class MCPRouter {
 
       result.overall.score = Math.max(0, 100 - totalIssues * 2);
       result.overall.passed = !params.failOnWarnings
-        ? (!result.typescript || result.typescript.errors === 0) && 
+        ? (!result.typescript || result.typescript.errors === 0) &&
           (!result.eslint || result.eslint.errors === 0)
         : totalIssues === 0;
       result.overall.duration = Date.now() - startTime;
@@ -1205,7 +1221,9 @@ export class MCPRouter {
         tests: { passed: 0, failed: 0, skipped: 0, coverage: {} },
         coverage: { lines: 0, branches: 0, functions: 0, statements: 0 },
         security: { critical: 0, high: 0, medium: 0, low: 0, issues: [] },
-        message: `Validation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Validation failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
       };
     }
   }
@@ -1605,7 +1623,7 @@ export class MCPRouter {
       for (const change of params.changes) {
         // Get the entity from the knowledge graph (or create mock data for testing)
         let entity = await this.kgService.getEntity(change.entityId);
-        
+
         // If entity doesn't exist, create a mock entity for testing
         if (!entity) {
           entity = {
@@ -1659,9 +1677,10 @@ export class MCPRouter {
             type: "symbol",
           },
           severity: params.changes[0].signatureChange ? "high" : "medium",
-          reason: params.changes[0].changeType === "delete" 
-            ? "Entity is being deleted" 
-            : params.changes[0].signatureChange 
+          reason:
+            params.changes[0].changeType === "delete"
+              ? "Entity is being deleted"
+              : params.changes[0].signatureChange
               ? "Signature change detected"
               : "Entity is being modified",
           relationship: "DIRECT",
@@ -1681,7 +1700,10 @@ export class MCPRouter {
           },
           relationship: "USES",
           confidence: 0.8,
-          path: [params.changes[0].entityId, `dependent_${params.changes[0].entityId}`],
+          path: [
+            params.changes[0].entityId,
+            `dependent_${params.changes[0].entityId}`,
+          ],
         });
       }
 
@@ -1733,7 +1755,9 @@ export class MCPRouter {
           riskLevel: "low",
           estimatedEffort: "low",
         },
-        message: `Impact analysis failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Impact analysis failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
       };
     }
   }
@@ -2707,15 +2731,48 @@ export class MCPRouter {
       }
     }
 
+    // Type validation against JSON schema
+    if (schema?.properties && args) {
+      const validationErrors: string[] = [];
+
+      for (const [paramName, paramSchema] of Object.entries(
+        schema.properties
+      )) {
+        const paramValue = args[paramName];
+        if (paramValue !== undefined) {
+          const typeErrors = this.validateParameterType(
+            paramName,
+            paramValue,
+            paramSchema as any
+          );
+          validationErrors.push(...typeErrors);
+        }
+      }
+
+      if (validationErrors.length > 0) {
+        this.recordExecution(
+          toolName,
+          startTime,
+          new Date(),
+          false,
+          `Parameter validation errors: ${validationErrors.join(", ")}`,
+          args
+        );
+        throw new Error(
+          `Parameter validation errors: ${validationErrors.join(", ")}`
+        );
+      }
+    }
+
     try {
       const result = await tool.handler(args || {});
       const endTime = new Date();
       this.recordExecution(toolName, startTime, endTime, true, undefined, args);
-      
+
       // For backward compatibility with tests, check if result already has 'result' property
       // If the handler returns the data directly, wrap it in result
       // If it already has a result property, return as is
-      if (result && typeof result === 'object' && 'result' in result) {
+      if (result && typeof result === "object" && "result" in result) {
         return result;
       }
       return { result };
@@ -2733,6 +2790,86 @@ export class MCPRouter {
       );
       throw error; // Re-throw to be handled by the main handler
     }
+  }
+
+  /**
+   * Validate parameter type against JSON schema
+   */
+  private validateParameterType(
+    paramName: string,
+    value: any,
+    schema: any
+  ): string[] {
+    const errors: string[] = [];
+
+    if (!schema || typeof schema !== "object") {
+      return errors;
+    }
+
+    const expectedType = schema.type;
+
+    // Handle different types
+    switch (expectedType) {
+      case "string":
+        if (typeof value !== "string") {
+          errors.push(`${paramName} must be a string, got ${typeof value}`);
+        }
+        break;
+
+      case "number":
+        if (typeof value !== "number" || isNaN(value)) {
+          errors.push(
+            `${paramName} must be a valid number, got ${typeof value}: ${value}`
+          );
+        }
+        break;
+
+      case "integer":
+        if (typeof value !== "number" || !Number.isInteger(value)) {
+          errors.push(
+            `${paramName} must be an integer, got ${typeof value}: ${value}`
+          );
+        }
+        break;
+
+      case "boolean":
+        if (typeof value !== "boolean") {
+          errors.push(`${paramName} must be a boolean, got ${typeof value}`);
+        }
+        break;
+
+      case "array":
+        if (!Array.isArray(value)) {
+          errors.push(`${paramName} must be an array, got ${typeof value}`);
+        } else if (schema.items && schema.items.type) {
+          // Validate array items
+          for (let i = 0; i < value.length; i++) {
+            const itemErrors = this.validateParameterType(
+              `${paramName}[${i}]`,
+              value[i],
+              schema.items
+            );
+            errors.push(...itemErrors);
+          }
+        }
+        break;
+
+      case "object":
+        if (
+          typeof value !== "object" ||
+          value === null ||
+          Array.isArray(value)
+        ) {
+          errors.push(`${paramName} must be an object, got ${typeof value}`);
+        }
+        break;
+
+      default:
+        // For complex types or when no type is specified, skip validation
+        break;
+    }
+
+    return errors;
   }
 
   // Process MCP JSON-RPC requests

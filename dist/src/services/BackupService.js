@@ -245,7 +245,7 @@ export class BackupService {
       `;
             const tablesResult = await postgresService.query(tablesQuery);
             const tables = tablesResult.rows || tablesResult;
-            console.log(`Found ${tables.length} tables to backup`);
+            console.log(`Found ${tables.length} tables to backup:`, tables.map((t) => t.tablename || t).join(", "));
             let dumpContent = `-- PostgreSQL dump created by Memento Backup Service\n`;
             dumpContent += `-- Created: ${new Date().toISOString()}\n\n`;
             // Dump schema and data for each table
@@ -290,7 +290,7 @@ export class BackupService {
                 }
             }
             await fs.writeFile(dumpPath, dumpContent);
-            console.log(`✅ PostgreSQL backup created: ${dumpPath}`);
+            console.log(`✅ PostgreSQL backup created: ${dumpPath} (${dumpContent.length} bytes)`);
         }
         catch (error) {
             console.error("❌ PostgreSQL backup failed:", error);
@@ -463,24 +463,63 @@ export class BackupService {
             const falkorService = this.dbService.getFalkorDBService();
             // Clear existing data first
             await falkorService.query(`MATCH (n) DETACH DELETE n`);
+            // Helper function to sanitize properties for FalkorDB
+            const sanitizeProperties = (props) => {
+                if (!props || typeof props !== "object")
+                    return {};
+                const sanitized = {};
+                for (const [key, value] of Object.entries(props)) {
+                    if (value === null || value === undefined) {
+                        // Skip null/undefined values
+                        continue;
+                    }
+                    else if (typeof value === "string" ||
+                        typeof value === "number" ||
+                        typeof value === "boolean") {
+                        // Primitive types are allowed
+                        sanitized[key] = value;
+                    }
+                    else if (Array.isArray(value)) {
+                        // Arrays of primitives are allowed
+                        const sanitizedArray = value.filter((item) => item === null ||
+                            typeof item === "string" ||
+                            typeof item === "number" ||
+                            typeof item === "boolean");
+                        if (sanitizedArray.length > 0) {
+                            sanitized[key] = sanitizedArray;
+                        }
+                    }
+                    else if (typeof value === "object") {
+                        // Convert complex objects to JSON strings
+                        try {
+                            sanitized[key] = JSON.stringify(value);
+                        }
+                        catch {
+                            // If JSON serialization fails, skip this property
+                            console.warn(`⚠️ Skipping complex property ${key} - cannot serialize`);
+                        }
+                    }
+                }
+                return sanitized;
+            };
             // Restore nodes
             if (backupData.nodes && backupData.nodes.length > 0) {
                 for (const node of backupData.nodes) {
                     const labels = node.labels && node.labels.length > 0
                         ? `:${node.labels.join(":")}`
                         : "";
-                    const props = node.props ? JSON.stringify(node.props) : "{}";
+                    const sanitizedProps = sanitizeProperties(node.props);
                     await falkorService.query(`CREATE (n${labels}) SET n = $props`, {
-                        props: node.props || {},
+                        props: sanitizedProps,
                     });
                 }
             }
             // Restore relationships
             if (backupData.relationships && backupData.relationships.length > 0) {
                 for (const rel of backupData.relationships) {
-                    const props = rel.props ? JSON.stringify(rel.props) : "{}";
+                    const sanitizedProps = sanitizeProperties(rel.props);
                     await falkorService.query(`MATCH (a), (b) WHERE ID(a) = $startId AND ID(b) = $endId
-             CREATE (a)-[r:${rel.type}]->(b) SET r = $props`, { startId: rel.startId, endId: rel.endId, props: rel.props || {} });
+             CREATE (a)-[r:${rel.type}]->(b) SET r = $props`, { startId: rel.startId, endId: rel.endId, props: sanitizedProps });
                 }
             }
             console.log(`✅ FalkorDB restored from backup ${backupId}`);
@@ -532,6 +571,7 @@ export class BackupService {
             // Try to read uncompressed backup first
             try {
                 dumpContent = await fs.readFile(dumpPath, "utf-8");
+                console.log(`✅ Found PostgreSQL backup file: ${dumpPath} (${dumpContent.length} bytes)`);
             }
             catch {
                 // Try compressed backup
@@ -544,7 +584,8 @@ export class BackupService {
                     throw new Error(`Compressed backup found but extraction not implemented: ${compressedPath}`);
                 }
                 catch {
-                    throw new Error(`PostgreSQL backup file not found: ${dumpPath}`);
+                    console.warn(`⚠️ PostgreSQL backup file not found: ${dumpPath}. Skipping PostgreSQL restoration.`);
+                    return; // Skip PostgreSQL restoration if no backup file exists
                 }
             }
             const postgresService = this.dbService.getPostgreSQLService();

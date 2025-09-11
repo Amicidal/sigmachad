@@ -565,8 +565,8 @@ describe("Types Integration Tests", () => {
           (r) => r.severity === "warning"
         );
 
-        expect(errorCount?.count).toBe("1");
-        expect(warningCount?.count).toBe("2");
+        expect(errorCount?.count).toBe(1);
+        expect(warningCount?.count).toBe(2);
       });
 
       it("should handle impact analysis for code changes", async () => {

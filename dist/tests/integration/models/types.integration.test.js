@@ -448,8 +448,8 @@ describe("Types Integration Tests", () => {
                 expect(severityAnalysis.rows.length).toBe(2); // error and warning
                 const errorCount = severityAnalysis.rows.find((r) => r.severity === "error");
                 const warningCount = severityAnalysis.rows.find((r) => r.severity === "warning");
-                expect(errorCount?.count).toBe("1");
-                expect(warningCount?.count).toBe("2");
+                expect(errorCount?.count).toBe(1);
+                expect(warningCount?.count).toBe(2);
             });
             it("should handle impact analysis for code changes", async () => {
                 // Create a complex codebase for impact analysis

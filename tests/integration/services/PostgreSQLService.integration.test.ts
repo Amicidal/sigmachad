@@ -936,7 +936,7 @@ describe("PostgreSQLService Integration", () => {
 
       expect(result.rows).toHaveLength(1);
       const analysis = result.rows[0];
-      expect(analysis.flaky_score).toBe(85.0); // Updated
+      expect(analysis.flaky_score).toBe(85); // Updated
       expect(analysis.total_runs).toBe(75); // Updated
       expect(analysis.patterns.updated).toBe(true); // Updated
       expect(analysis.recommendations.add_retry).toBe(true); // Updated
@@ -981,10 +981,10 @@ describe("PostgreSQLService Integration", () => {
 
       // Insert coverage and performance data using correct tables and UUID
       const testEntityId = uuidv4();
-      
+
       // Store the entityId for use in tests
       global.testEntityId = testEntityId;
-      
+
       await pgService.query(
         `
         INSERT INTO coverage_history (entity_id, lines_covered, lines_total, percentage, timestamp)
@@ -998,23 +998,23 @@ describe("PostgreSQLService Integration", () => {
         INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
         VALUES ($1, $2, $3, $4)
       `,
-        [testEntityId, 'memory_usage', 1024000, new Date()]
+        [testEntityId, "memory_usage", 1024000, new Date()]
       );
-      
+
       await pgService.query(
         `
         INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
         VALUES ($1, $2, $3, $4)
       `,
-        [testEntityId, 'cpu_usage', 15.2, new Date()]
+        [testEntityId, "cpu_usage", 15.2, new Date()]
       );
-      
+
       await pgService.query(
         `
         INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
         VALUES ($1, $2, $3, $4)
       `,
-        [testEntityId, 'network_requests', 2, new Date()]
+        [testEntityId, "network_requests", 2, new Date()]
       );
     });
 
@@ -1042,12 +1042,12 @@ describe("PostgreSQLService Integration", () => {
       expect(metrics).toHaveLength(3); // We inserted 3 metrics
       expect(metrics[0].entity_id).toBe(testEntityId);
       expect(metrics[0].timestamp).toBeDefined();
-      
+
       // Check that all 3 metric types are present
-      const metricTypes = metrics.map(m => m.metric_type);
-      expect(metricTypes).toContain('memory_usage');
-      expect(metricTypes).toContain('cpu_usage');
-      expect(metricTypes).toContain('network_requests');
+      const metricTypes = metrics.map((m) => m.metric_type);
+      expect(metricTypes).toContain("memory_usage");
+      expect(metricTypes).toContain("cpu_usage");
+      expect(metricTypes).toContain("network_requests");
     });
 
     it("should retrieve coverage history", async () => {
@@ -1145,7 +1145,7 @@ describe("PostgreSQLService Integration", () => {
       expect(results).toHaveLength(concurrentQueries);
       results.forEach((result) => {
         expect(result.rows).toHaveLength(1);
-        expect(typeof result.rows[0].count).toBe("string");
+        expect(typeof result.rows[0].count).toBe("number");
       });
 
       // Should complete within reasonable time

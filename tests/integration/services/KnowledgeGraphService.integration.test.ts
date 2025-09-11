@@ -122,6 +122,9 @@ describe("KnowledgeGraphService Integration", () => {
 
       await kgService.createOrUpdateEntity({ ...originalEntity, ...updates });
 
+      // Add a small delay to ensure the update is committed
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
       const updated = await kgService.getEntity(originalEntity.id);
       expect(updated?.size).toBe(2048);
       expect(updated?.lines).toBe(100);
@@ -166,6 +169,9 @@ describe("KnowledgeGraphService Integration", () => {
 
       // Delete entity and check relationships are also deleted
       await kgService.deleteEntity(entity1.id);
+
+      // Add a small delay to ensure the deletion is committed
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const deletedEntity = await kgService.getEntity(entity1.id);
       expect(deletedEntity).toBeNull();

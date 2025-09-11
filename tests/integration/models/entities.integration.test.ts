@@ -321,7 +321,7 @@ describe("Models Integration Tests", () => {
           "SELECT COUNT(*) as count FROM documents WHERE id = $1",
           [testFileId]
         );
-        expect(deletedPgResult.rows[0].count).toBe("0");
+        expect(deletedPgResult.rows[0].count).toBe(0);
 
         const deletedFalkorResult = await dbService.falkordbQuery(
           "MATCH (n:Entity {id: $id}) RETURN count(n) as count",

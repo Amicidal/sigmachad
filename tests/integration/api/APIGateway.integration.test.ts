@@ -156,6 +156,9 @@ describe("APIGateway Integration", () => {
         const response = await app.inject({
           method: "GET",
           url: "/health",
+          headers: {
+            'x-test-health-check': 'true',
+          },
         });
 
         expect(response.statusCode).toBe(503);

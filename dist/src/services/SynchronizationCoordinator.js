@@ -67,7 +67,8 @@ export class SynchronizationCoordinator extends EventEmitter {
         this.operationQueue.push(operation);
         this.emit("operationStarted", operation);
         if (!this.isProcessing) {
-            this.processQueue();
+            // Process the queue asynchronously
+            setImmediate(() => this.processQueue());
         }
         return operation.id;
     }
@@ -93,7 +94,8 @@ export class SynchronizationCoordinator extends EventEmitter {
         this.operationQueue.push(operation);
         this.emit("operationStarted", operation);
         if (!this.isProcessing) {
-            this.processQueue();
+            // Process the queue asynchronously
+            setImmediate(() => this.processQueue());
         }
         return operation.id;
     }
@@ -119,7 +121,8 @@ export class SynchronizationCoordinator extends EventEmitter {
         this.operationQueue.push(operation);
         this.emit("operationStarted", operation);
         if (!this.isProcessing) {
-            this.processQueue();
+            // Process the queue asynchronously
+            setImmediate(() => this.processQueue());
         }
         return operation.id;
     }
