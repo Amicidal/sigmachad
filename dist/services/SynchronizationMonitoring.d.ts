@@ -54,13 +54,28 @@ export declare class SynchronizationMonitoring extends EventEmitter {
     private alerts;
     private logs;
     private healthCheckInterval?;
+    private opPhases;
     constructor();
     private setupEventHandlers;
     private startHealthMonitoring;
     stopHealthMonitoring(): void;
     recordOperationStart(operation: SyncOperation): void;
     recordOperationComplete(operation: SyncOperation): void;
-    recordOperationFailed(operation: SyncOperation, error: Error): void;
+    recordOperationFailed(operation: SyncOperation, error?: any): void;
+    /**
+     * Record in-progress phase updates for an operation
+     */
+    recordProgress(operation: SyncOperation, data: {
+        phase: string;
+        progress?: number;
+    }): void;
+    /**
+     * Return current phases map for active operations
+     */
+    getOperationPhases(): Record<string, {
+        phase: string;
+        progress: number;
+    }>;
     recordConflict(conflict: SyncConflict | Conflict): void;
     recordError(operationId: string, error: SyncError | string | unknown): void;
     private updateSyncMetrics;

@@ -4,6 +4,7 @@
  */
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { DatabaseConfig, IFalkorDBService, IQdrantService, IPostgreSQLService, IRedisService, IDatabaseHealthCheck } from "./database";
+export type { DatabaseConfig } from "./database";
 export interface DatabaseQueryResult {
     rows?: any[];
     rowCount?: number;

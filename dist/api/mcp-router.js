@@ -5,7 +5,39 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ErrorCode, ListResourcesRequestSchema, ListToolsRequestSchema, McpError, ReadResourceRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
+import { spawn } from "child_process";
+import { existsSync } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { Project } from "ts-morph";
 export class MCPRouter {
+    // Resolve absolute path to the project's src directory, regardless of CWD
+    getSrcRoot() {
+        try {
+            const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+            // Handle both src/api and dist/api execution
+            let root = path.resolve(moduleDir, "..", "..");
+            // If a package.json exists at this level, assume project root
+            if (existsSync(path.join(root, "package.json"))) {
+                const candidate = path.join(root, "src");
+                if (existsSync(candidate))
+                    return candidate;
+            }
+            // Walk up a few levels to find a package.json with a src directory
+            let cur = moduleDir;
+            for (let i = 0; i < 5; i++) {
+                cur = path.resolve(cur, "..");
+                if (existsSync(path.join(cur, "package.json"))) {
+                    const candidate = path.join(cur, "src");
+                    if (existsSync(candidate))
+                        return candidate;
+                }
+            }
+        }
+        catch (_a) { }
+        // Fallback: relative src (may fail if CWD not at project root)
+        return "src";
+    }
     constructor(kgService, dbService, astParser, testEngine, securityScanner) {
         this.kgService = kgService;
         this.dbService = dbService;
@@ -96,6 +128,159 @@ export class MCPRouter {
                 required: ["query"],
             },
             handler: this.handleGraphSearch.bind(this),
+        });
+        // AST-Grep search tool: structure-aware code queries
+        this.registerTool({
+            name: "code.ast_grep.search",
+            description: "Run ast-grep to search code by AST pattern (structure-aware)",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    pattern: { type: "string", description: "AST-Grep pattern" },
+                    name: { type: "string", description: "Convenience: symbol name to find" },
+                    kinds: {
+                        type: "array",
+                        items: { type: "string", enum: ["function", "method"] },
+                        description: "Convenience: which declaration kinds to search",
+                        default: ["function", "method"],
+                    },
+                    lang: {
+                        type: "string",
+                        enum: ["ts", "tsx", "js", "jsx"],
+                        description: "Language for the pattern",
+                        default: "ts",
+                    },
+                    selector: {
+                        type: "string",
+                        description: "Optional AST kind selector (e.g., function_declaration)",
+                    },
+                    strictness: {
+                        type: "string",
+                        enum: [
+                            "cst",
+                            "smart",
+                            "ast",
+                            "relaxed",
+                            "signature",
+                            "template",
+                        ],
+                        description: "Match strictness",
+                    },
+                    globs: {
+                        type: "array",
+                        items: { type: "string" },
+                        description: "Include/exclude file globs",
+                    },
+                    limit: { type: "number", description: "Max matches to return" },
+                    timeoutMs: { type: "number", description: "Max runtime in ms" },
+                    includeText: {
+                        type: "boolean",
+                        description: "Include matched text snippet",
+                        default: false,
+                    },
+                    noFallback: {
+                        type: "boolean",
+                        description: "If true, do not fall back to ts-morph or ripgrep",
+                        default: false,
+                    },
+                },
+                // pattern is optional if 'name' is provided
+                required: [],
+            },
+            handler: async (params) => {
+                return this.handleAstGrepSearch(params);
+            },
+        });
+        // Ripgrep tool removed: ts-morph and ast-grep cover typical use cases
+        // ts-morph only search
+        this.registerTool({
+            name: "code.search.ts_morph",
+            description: "Find function/method declarations by name using ts-morph",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    name: { type: "string" },
+                    kinds: {
+                        type: "array",
+                        items: { type: "string", enum: ["function", "method"] },
+                        default: ["function", "method"],
+                    },
+                    globs: { type: "array", items: { type: "string" } },
+                    limit: { type: "number" },
+                },
+                required: ["name"],
+            },
+            handler: async (params) => {
+                var _a;
+                const name = String(params.name);
+                const kinds = Array.isArray(params.kinds) && params.kinds.length ? params.kinds : ["function", "method"];
+                const rawGlobs = Array.isArray(params.globs) ? params.globs : ["src/**/*.ts", "src/**/*.tsx"];
+                const globs = rawGlobs.filter((g) => typeof g === "string" && !g.includes(".."));
+                const limit = Math.max(1, Math.min(500, Number((_a = params.limit) !== null && _a !== void 0 ? _a : 200)));
+                const matches = await this.searchWithTsMorph(name, kinds, globs, limit);
+                return { success: true, count: matches.length, matches };
+            },
+        });
+        // Aggregate compare search across engines
+        this.registerTool({
+            name: "code.search.aggregate",
+            description: "Run graph, ast-grep, and ts-morph to compare results",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    name: { type: "string", description: "Symbol name to search" },
+                    engines: {
+                        type: "array",
+                        items: { type: "string", enum: ["graph", "ast-grep", "ts-morph"] },
+                        default: ["graph", "ast-grep", "ts-morph"],
+                    },
+                    limit: { type: "number" },
+                },
+                required: ["name"],
+            },
+            handler: async (params) => {
+                var _a;
+                const name = String(params.name);
+                const engines = Array.isArray(params.engines) && params.engines.length ? params.engines : ["graph", "ast-grep", "ts-morph"];
+                const limit = Math.max(1, Math.min(500, Number((_a = params.limit) !== null && _a !== void 0 ? _a : 200)));
+                const results = {};
+                if (engines.includes("graph")) {
+                    try {
+                        const entities = await this.kgService.search({ query: name, searchType: "structural", entityTypes: ["function"], limit });
+                        const dedup = Array.from(new Map(entities.map((e) => [e.path, e])).values());
+                        results.graph = { count: dedup.length, items: dedup.map((e) => ({ file: String((e.path || "").split(":")[0]), symbol: e.name, path: e.path })) };
+                    }
+                    catch (e) {
+                        results.graph = { error: e.message };
+                    }
+                }
+                if (engines.includes("ast-grep")) {
+                    const ag = await this.runAstGrepOne({ pattern: `function ${name}($P, ...) { ... }`, selector: "function_declaration", lang: "ts", globs: [], includeText: false, timeoutMs: 5000, limit });
+                    // Attempt a method match using property_identifier within a class context
+                    const ag2 = await this.runAstGrepOne({ pattern: `class $C { ${name}($P, ...) { ... } }`, selector: "property_identifier", lang: "ts", globs: [], includeText: false, timeoutMs: 5000, limit });
+                    const all = [...ag.matches, ...ag2.matches];
+                    const dedupFiles = Array.from(new Set(all.map((m) => m.file)));
+                    results["ast-grep"] = { count: all.length, files: dedupFiles, items: all };
+                }
+                if (engines.includes("ts-morph")) {
+                    const tm = await this.searchWithTsMorph(name, ["function", "method"], ["src/**/*.ts", "src/**/*.tsx"], limit);
+                    const dedupFiles = Array.from(new Set(tm.map((m) => m.file)));
+                    results["ts-morph"] = { count: tm.length, files: dedupFiles, items: tm };
+                }
+                // ripgrep engine removed
+                // Simple union summary by files
+                const fileSets = Object.entries(results).reduce((acc, [k, v]) => {
+                    if (v && Array.isArray(v.files))
+                        acc[k] = new Set(v.files);
+                    return acc;
+                }, {});
+                const unionFiles = new Set();
+                for (const s of Object.values(fileSets))
+                    for (const f of s)
+                        unionFiles.add(f);
+                results.summary = { unionFileCount: unionFiles.size };
+                return results;
+            },
         });
         this.registerTool({
             name: "graph.examples",
@@ -1048,15 +1233,17 @@ export class MCPRouter {
         }
     }
     async handlePlanTests(params) {
+        var _a;
         console.log("MCP Tool called: tests.plan_and_generate", params);
         try {
             // Try to load the specification, but don't fail hard if missing in tests
             let spec;
             try {
                 const result = await this.dbService.postgresQuery("SELECT content FROM documents WHERE id = $1 AND type = $2", [params.specId, "spec"]);
-                spec = result.length > 0 ? JSON.parse(result[0].content) : undefined;
+                const rows = (_a = result === null || result === void 0 ? void 0 : result.rows) !== null && _a !== void 0 ? _a : [];
+                spec = rows.length > 0 ? JSON.parse(rows[0].content) : undefined;
             }
-            catch (_a) {
+            catch (_b) {
                 spec = undefined;
             }
             if (!spec) {
@@ -1792,7 +1979,7 @@ export class MCPRouter {
                 id: `rel_${docEntity.id}_${domainEntity.id}`,
                 fromEntityId: docEntity.id,
                 toEntityId: domainEntity.id,
-                type: "BELONGS_TO",
+                type: "DESCRIBES_DOMAIN",
                 created: new Date(),
                 lastModified: new Date(),
                 version: 1,
@@ -1838,13 +2025,32 @@ export class MCPRouter {
                     lastModified: new Date(),
                     version: 1,
                 });
+                // Also link cluster to any business domains described by this document
+                try {
+                    const domainRels = await this.kgService.getRelationships({
+                        fromEntityId: docEntity.id,
+                        type: "DESCRIBES_DOMAIN",
+                    });
+                    for (const rel of domainRels) {
+                        await this.kgService.createRelationship({
+                            id: `rel_${clusterId}_${rel.toEntityId}_BELONGS_TO_DOMAIN`,
+                            fromEntityId: clusterId,
+                            toEntityId: rel.toEntityId,
+                            type: "BELONGS_TO_DOMAIN",
+                            created: new Date(),
+                            lastModified: new Date(),
+                            version: 1,
+                        });
+                    }
+                }
+                catch (_a) { }
                 // Link entities to cluster
                 for (const entity of entities) {
                     await this.kgService.createRelationship({
                         id: `rel_${entity.id}_${clusterId}`,
                         fromEntityId: entity.id,
                         toEntityId: clusterId,
-                        type: "BELONGS_TO",
+                        type: "CLUSTER_MEMBER",
                         created: new Date(),
                         lastModified: new Date(),
                         version: 1,
@@ -1886,6 +2092,43 @@ export class MCPRouter {
                         version: 1,
                     });
                     updates++;
+                    // If doc looks like a specification/design, also mark implements-spec
+                    try {
+                        const docType = docEntity.docType || '';
+                        const isSpec = ["design-doc", "api-docs", "architecture"].includes(String(docType));
+                        if (isSpec) {
+                            await this.kgService.createRelationship({
+                                id: `rel_${codeEntity.id}_${docEntity.id}_IMPLEMENTS_SPEC`,
+                                fromEntityId: codeEntity.id,
+                                toEntityId: docEntity.id,
+                                type: "IMPLEMENTS_SPEC",
+                                created: new Date(),
+                                lastModified: new Date(),
+                                version: 1,
+                            });
+                            updates++;
+                        }
+                    }
+                    catch (_a) { }
+                    // If the documentation describes business domains, link the code entity to those domains
+                    try {
+                        const domainRels = await this.kgService.getRelationships({
+                            fromEntityId: docEntity.id,
+                            type: "DESCRIBES_DOMAIN",
+                        });
+                        for (const rel of domainRels) {
+                            await this.kgService.createRelationship({
+                                id: `rel_${codeEntity.id}_${rel.toEntityId}_BELONGS_TO_DOMAIN`,
+                                fromEntityId: codeEntity.id,
+                                toEntityId: rel.toEntityId,
+                                type: "BELONGS_TO_DOMAIN",
+                                created: new Date(),
+                                lastModified: new Date(),
+                                version: 1,
+                            });
+                        }
+                    }
+                    catch (_b) { }
                 }
             }
         }
@@ -1946,9 +2189,10 @@ export class MCPRouter {
                         });
                     }
                     // Default to 500 for other errors
+                    const reqBody = request.body;
                     return reply.status(500).send({
                         jsonrpc: "2.0",
-                        id: body === null || body === void 0 ? void 0 : body.id,
+                        id: reqBody === null || reqBody === void 0 ? void 0 : reqBody.id,
                         error: {
                             code: -32603,
                             message: "Internal error",
@@ -2102,6 +2346,399 @@ export class MCPRouter {
             this.executionHistory.shift();
         }
     }
+    // Locate ast-grep binary and execute a search; supports convenience name/kinds mode
+    async handleAstGrepSearch(params) {
+        var _a, _b;
+        const lang = params.lang || "ts";
+        const selector = params.selector;
+        const strictness = params.strictness;
+        const includeText = Boolean(params.includeText);
+        const timeoutMs = Math.max(1000, Math.min(20000, Number((_a = params.timeoutMs) !== null && _a !== void 0 ? _a : 5000)));
+        const limit = Math.max(1, Math.min(500, Number((_b = params.limit) !== null && _b !== void 0 ? _b : 200)));
+        // Determine search root and optional user-provided globs
+        const srcRoot = this.getSrcRoot();
+        const userProvidedGlobs = Array.isArray(params.globs);
+        const rawGlobs = userProvidedGlobs ? params.globs : [];
+        const globs = rawGlobs
+            .filter((g) => typeof g === "string" && g.length > 0)
+            .map((g) => g.trim());
+        // Convenience: if name provided and no custom pattern, try function+method by name
+        if (!params.pattern && params.name) {
+            const name = String(params.name);
+            const kinds = Array.isArray(params.kinds) && params.kinds.length ? params.kinds : ["function", "method"];
+            let matches = [];
+            // Try ast-grep first
+            if (kinds.includes("function")) {
+                const res = await this.runAstGrepOne({
+                    pattern: `function ${name}($P, ...) { ... }`,
+                    lang,
+                    selector: "function_declaration",
+                    strictness,
+                    globs,
+                    includeText,
+                    timeoutMs,
+                    limit,
+                });
+                matches = matches.concat(res.matches);
+            }
+            if (kinds.includes("method")) {
+                // Use a class context and pick the method's name token; avoids invalid snippet parsing
+                const res = await this.runAstGrepOne({
+                    pattern: `class $C { ${name}($P, ...) { ... } }`,
+                    lang,
+                    selector: "property_identifier",
+                    strictness,
+                    globs,
+                    includeText,
+                    timeoutMs,
+                    limit,
+                });
+                matches = matches.concat(res.matches);
+            }
+            // Fallback to ts-morph if nothing found
+            if (matches.length === 0) {
+                const fallback = await this.searchWithTsMorph(name, kinds, globs, limit);
+                matches = matches.concat(fallback);
+            }
+            return { success: true, count: Math.min(matches.length, limit), matches: matches.slice(0, limit) };
+        }
+        const pattern = String(params.pattern || "");
+        if (!pattern.trim())
+            throw new Error("Pattern must be a non-empty string");
+        // Resolve ast-grep binary
+        const cwd = process.cwd();
+        const binCandidates = [
+            path.join(cwd, "node_modules", ".bin", process.platform === "win32" ? "sg.cmd" : "sg"),
+            process.platform === "win32" ? "sg.cmd" : "sg", // if globally available in PATH
+        ];
+        const sgLocalBin = binCandidates[0];
+        const hasLocalSg = existsSync(sgLocalBin);
+        const brewCandidates = [
+            process.platform === "darwin" ? "/opt/homebrew/bin/sg" : "",
+            "/usr/local/bin/sg",
+            "/usr/bin/sg",
+        ].filter(Boolean);
+        const brewSg = brewCandidates.find((p) => existsSync(p));
+        // Small helper to execute the actual search with a chosen binary
+        const runWith = (bin) => new Promise((resolve, reject) => {
+            const args = [];
+            if (bin === "npx") {
+                // Use a remote package explicitly to avoid local broken binaries
+                args.push("-y", "-p", "@ast-grep/cli@0.39.5", "sg");
+            }
+            args.push("run", "-l", String(lang), "-p", String(pattern));
+            if (selector) {
+                args.push("--selector", selector);
+            }
+            if (strictness) {
+                args.push("--strictness", strictness);
+            }
+            // Always ask for JSON stream for structured results
+            args.push("--json=stream");
+            // Supply globs only if provided explicitly
+            for (const g of globs) {
+                // Restrict to repo files: if a glob tries to escape, ignore it
+                if (g.includes(".."))
+                    continue;
+                args.push("--globs", g);
+            }
+            // Search root
+            args.push(srcRoot);
+            // Filter PATH to avoid local node_modules/.bin shadowing npx-installed binaries
+            const filteredPath = (process.env.PATH || '')
+                .split(path.delimiter)
+                .filter((p) => !p.endsWith(path.join('node_modules', '.bin')))
+                .join(path.delimiter);
+            const child = spawn(bin, args, {
+                cwd,
+                env: { ...process.env, PATH: filteredPath },
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+            const timer = setTimeout(() => {
+                child.kill("SIGKILL");
+            }, timeoutMs);
+            let stdout = "";
+            let stderr = "";
+            child.stdout.on("data", (d) => (stdout += d.toString()));
+            child.stderr.on("data", (d) => (stderr += d.toString()));
+            child.on("close", (code) => {
+                clearTimeout(timer);
+                // Parse JSONL
+                const matches = [];
+                const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+                for (const line of lines) {
+                    try {
+                        const obj = JSON.parse(line);
+                        matches.push({
+                            file: obj.file,
+                            range: obj.range,
+                            text: includeText ? obj.text : undefined,
+                            metavariables: obj.metavariables,
+                        });
+                    }
+                    catch (_a) { }
+                    if (matches.length >= limit)
+                        break;
+                }
+                const warn = stderr.trim();
+                const suspicious = code !== 0 ||
+                    /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(warn);
+                if (matches.length === 0 && suspicious) {
+                    // Treat as a failure to allow fallback to another binary strategy
+                    return reject(new Error(warn.slice(0, 2000) || "ast-grep execution failed"));
+                }
+                // Empty matches but no error is a valid result
+                if (matches.length === 0) {
+                    return resolve({ success: true, count: 0, matches: [], warning: warn.slice(0, 2000) || undefined });
+                }
+                return resolve({ success: true, count: matches.length, matches });
+            });
+            child.on("error", (err) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+        });
+        // Try binaries in order: Homebrew -> PATH -> local -> npx
+        const attempts = [];
+        if (brewSg)
+            attempts.push(brewSg);
+        attempts.push(process.platform === "win32" ? "sg.cmd" : "sg");
+        if (hasLocalSg)
+            attempts.push(sgLocalBin);
+        attempts.push("npx");
+        let lastErr = null;
+        for (const bin of attempts) {
+            try {
+                return await runWith(bin);
+            }
+            catch (e) {
+                lastErr = e; // try next
+            }
+        }
+        return {
+            success: false,
+            count: 0,
+            matches: [],
+            error: `ast-grep unavailable. Install '@ast-grep/cli' (sg). Reason: ${(lastErr === null || lastErr === void 0 ? void 0 : lastErr.message) || lastErr}`,
+        };
+    }
+    async runAstGrepOne(opts) {
+        const cwd = process.cwd();
+        const srcRoot = this.getSrcRoot();
+        const { pattern, selector, lang, strictness, globs, includeText, timeoutMs, limit, } = opts;
+        // Helper to run ast-grep with a given binary name/path
+        const runWith = () => new Promise((resolve, reject) => {
+            const baseArgs = ["run", "-l", String(lang), "-p", String(pattern)];
+            if (selector)
+                baseArgs.push("--selector", selector);
+            if (strictness)
+                baseArgs.push("--strictness", strictness);
+            baseArgs.push("--json=stream");
+            // Only add globs if provided
+            for (const g of globs)
+                baseArgs.push("--globs", g);
+            baseArgs.push(srcRoot);
+            const filteredPath = (process.env.PATH || "")
+                .split(path.delimiter)
+                .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
+                .join(path.delimiter);
+            // We'll choose the command outside in a loop; default to PATH sg here
+            const cmd = process.platform === "win32" ? "sg.cmd" : "sg";
+            const args = baseArgs;
+            const child = spawn(cmd, args, { cwd, env: { ...process.env, PATH: filteredPath }, stdio: ["ignore", "pipe", "pipe"] });
+            const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+            let stdout = "";
+            let stderr = "";
+            child.stdout.on("data", (d) => (stdout += d.toString()));
+            child.stderr.on("data", (d) => (stderr += d.toString()));
+            child.on("close", (code) => {
+                clearTimeout(timer);
+                const matches = [];
+                const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+                for (const line of lines) {
+                    try {
+                        const obj = JSON.parse(line);
+                        matches.push({
+                            file: obj.file,
+                            range: obj.range,
+                            text: includeText ? obj.text : undefined,
+                            metavariables: obj.metavariables,
+                        });
+                    }
+                    catch (_a) { }
+                    if (matches.length >= limit)
+                        break;
+                }
+                const warn = stderr.trim();
+                const suspicious = code !== 0 ||
+                    /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(warn);
+                if (matches.length === 0 && suspicious) {
+                    return reject(new Error(warn.slice(0, 2000) || "ast-grep execution failed"));
+                }
+                resolve({ matches, warning: warn.slice(0, 2000) || undefined });
+            });
+            child.on("error", (e) => {
+                clearTimeout(timer);
+                reject(e);
+            });
+        });
+        // Attempt binaries in order
+        const localSg = path.join(cwd, "node_modules", ".bin", process.platform === "win32" ? "sg.cmd" : "sg");
+        const hasLocal = existsSync(localSg);
+        const brewCandidates = [
+            process.platform === "darwin" ? "/opt/homebrew/bin/sg" : "",
+            "/usr/local/bin/sg",
+            "/usr/bin/sg",
+        ].filter(Boolean);
+        const haveBrew = brewCandidates.find((p) => existsSync(p));
+        const filteredPath = (process.env.PATH || "")
+            .split(path.delimiter)
+            .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
+            .join(path.delimiter);
+        const attempt = (cmd) => new Promise((resolve, reject) => {
+            const args = ["run", "-l", String(lang), "-p", String(pattern)];
+            if (selector)
+                args.push("--selector", selector);
+            if (strictness)
+                args.push("--strictness", strictness);
+            args.push("--json=stream");
+            for (const g of globs)
+                args.push("--globs", g);
+            args.push(srcRoot);
+            const child = spawn(cmd, args, { cwd, env: { ...process.env, PATH: filteredPath }, stdio: ["ignore", "pipe", "pipe"] });
+            const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+            let stdout = "";
+            let stderr = "";
+            child.stdout.on("data", (d) => (stdout += d.toString()));
+            child.stderr.on("data", (d) => (stderr += d.toString()));
+            child.on("close", (code) => {
+                clearTimeout(timer);
+                const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+                const matches = [];
+                for (const line of lines) {
+                    try {
+                        const obj = JSON.parse(line);
+                        matches.push({ file: obj.file, range: obj.range, text: includeText ? obj.text : undefined, metavariables: obj.metavariables });
+                    }
+                    catch (_a) { }
+                    if (matches.length >= limit)
+                        break;
+                }
+                const warn = stderr.trim();
+                const suspicious = code !== 0 || /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(warn);
+                if (matches.length === 0 && suspicious)
+                    return reject(new Error(warn.slice(0, 2000) || "ast-grep execution failed"));
+                return resolve({ matches, warning: warn.slice(0, 2000) || undefined });
+            });
+            child.on("error", (e) => { clearTimeout(timer); reject(e); });
+        });
+        const attempts = [];
+        if (haveBrew)
+            attempts.push(haveBrew);
+        attempts.push(process.platform === "win32" ? "sg.cmd" : "sg");
+        if (hasLocal)
+            attempts.push(localSg);
+        // npx as a last resort
+        let lastErr = null;
+        for (const bin of attempts) {
+            try {
+                return await attempt(bin);
+            }
+            catch (e) {
+                lastErr = e;
+            }
+        }
+        // npx
+        try {
+            return await new Promise((resolve, reject) => {
+                const args = ["-y", "-p", "@ast-grep/cli@0.39.5", "sg", "run", "-l", String(lang), "-p", String(pattern)];
+                if (selector)
+                    args.push("--selector", selector);
+                if (strictness)
+                    args.push("--strictness", strictness);
+                args.push("--json=stream");
+                for (const g of globs)
+                    args.push("--globs", g);
+                args.push(srcRoot);
+                const child = spawn("npx", args, { cwd, env: { ...process.env, PATH: filteredPath }, stdio: ["ignore", "pipe", "pipe"] });
+                const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+                let stdout = "";
+                let stderr = "";
+                child.stdout.on("data", (d) => (stdout += d.toString()));
+                child.stderr.on("data", (d) => (stderr += d.toString()));
+                child.on("close", (code) => {
+                    clearTimeout(timer);
+                    const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+                    const matches = [];
+                    for (const line of lines) {
+                        try {
+                            const obj = JSON.parse(line);
+                            matches.push({ file: obj.file, range: obj.range, text: includeText ? obj.text : undefined, metavariables: obj.metavariables });
+                        }
+                        catch (_a) { }
+                        if (matches.length >= limit)
+                            break;
+                    }
+                    const warn = stderr.trim();
+                    const suspicious = code !== 0 || /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(warn);
+                    if (matches.length === 0 && suspicious)
+                        return reject(new Error(warn.slice(0, 2000) || "ast-grep execution failed"));
+                    return resolve({ matches, warning: warn.slice(0, 2000) || undefined });
+                });
+                child.on("error", (e) => { clearTimeout(timer); reject(e); });
+            });
+        }
+        catch (e) {
+            return { matches: [], warning: String((e === null || e === void 0 ? void 0 : e.message) || e) };
+        }
+    }
+    async searchWithTsMorph(name, kinds, globs, limit) {
+        try {
+            const project = new Project({ useInMemoryFileSystem: false, skipAddingFilesFromTsConfig: true });
+            // Ensure absolute globs
+            const srcRoot = this.getSrcRoot();
+            const absGlobs = globs && globs.length ? globs : [path.join(srcRoot, "**/*.ts"), path.join(srcRoot, "**/*.tsx")];
+            project.addSourceFilesAtPaths(absGlobs);
+            const sourceFiles = project.getSourceFiles();
+            const results = [];
+            for (const sf of sourceFiles) {
+                if (kinds.includes("function")) {
+                    for (const fn of sf.getFunctions()) {
+                        if (fn.getName() === name && fn.getBody()) {
+                            results.push({
+                                file: sf.getFilePath(),
+                                range: { start: fn.getStartLinePos(), end: fn.getEndLinePos() },
+                                metavariables: { NAME: { text: name } },
+                            });
+                            if (results.length >= limit)
+                                return results;
+                        }
+                    }
+                }
+                if (kinds.includes("method")) {
+                    for (const cls of sf.getClasses()) {
+                        for (const m of cls.getMethods()) {
+                            if (m.getName() === name && m.getBody()) {
+                                results.push({
+                                    file: sf.getFilePath(),
+                                    range: { start: m.getStartLinePos(), end: m.getEndLinePos() },
+                                    metavariables: { NAME: { text: name } },
+                                });
+                                if (results.length >= limit)
+                                    return results;
+                            }
+                        }
+                    }
+                }
+            }
+            return results;
+        }
+        catch (_a) {
+            // On failure, return empty; ripgrep fallback removed
+            return [];
+        }
+    }
+    // ripgrep search removed
     // Get monitoring metrics
     getMetrics() {
         var _a;

@@ -61,6 +61,7 @@ export class SynchronizationMonitoring extends EventEmitter {
   private alerts: MonitoringAlert[] = [];
   private logs: SyncLogEntry[] = [];
   private healthCheckInterval?: NodeJS.Timeout;
+  private opPhases: Map<string, { phase: string; progress: number; timestamp: Date }> = new Map();
 
   constructor() {
     super();
@@ -130,6 +131,9 @@ export class SynchronizationMonitoring extends EventEmitter {
       op.endTime = new Date();
       this.metrics.operationsSuccessful++;
 
+      // Clear phase tracking on completion
+      this.opPhases.delete(operation.id);
+
       // Update metrics
       this.updateSyncMetrics(operation);
       this.updatePerformanceMetrics(operation);
@@ -145,17 +149,24 @@ export class SynchronizationMonitoring extends EventEmitter {
     }
   }
 
-  recordOperationFailed(operation: SyncOperation, error: Error): void {
+  recordOperationFailed(operation: SyncOperation, error?: any): void {
     const op = this.operations.get(operation.id);
     if (op) {
       op.status = 'failed';
       op.endTime = new Date();
       this.metrics.operationsFailed++;
 
+      // Clear phase tracking on failure
+      this.opPhases.delete(operation.id);
+
       this.updateSyncMetrics(operation);
 
+      const errMsg = (error && typeof error === 'object' && 'message' in error)
+        ? String((error as any).message)
+        : (operation.errors?.[0]?.message || 'Unknown error');
+
       this.log('error', operation.id, 'Operation failed', {
-        error: error.message,
+        error: errMsg,
         duration: op.endTime.getTime() - op.startTime.getTime(),
         errors: operation.errors.length,
       });
@@ -163,12 +174,36 @@ export class SynchronizationMonitoring extends EventEmitter {
       // Trigger alert for failed operations
       this.triggerAlert({
         type: 'error',
-        message: `Sync operation ${operation.id} failed: ${error.message}`,
+        message: `Sync operation ${operation.id} failed: ${errMsg}`,
         operationId: operation.id,
       });
 
       this.emit('operationFailed', operation, error);
     }
+  }
+
+  /**
+   * Record in-progress phase updates for an operation
+   */
+  recordProgress(operation: SyncOperation, data: { phase: string; progress?: number }): void {
+    const prog = typeof data.progress === 'number' && isFinite(data.progress) ? data.progress : 0;
+    this.opPhases.set(operation.id, { phase: data.phase, progress: prog, timestamp: new Date() });
+
+    this.log('info', operation.id, 'Phase update', {
+      phase: data.phase,
+      progress: prog,
+    });
+  }
+
+  /**
+   * Return current phases map for active operations
+   */
+  getOperationPhases(): Record<string, { phase: string; progress: number }> {
+    const out: Record<string, { phase: string; progress: number }> = {};
+    for (const [id, v] of this.opPhases.entries()) {
+      out[id] = { phase: v.phase, progress: v.progress };
+    }
+    return out;
   }
 
   recordConflict(conflict: SyncConflict | Conflict): void {

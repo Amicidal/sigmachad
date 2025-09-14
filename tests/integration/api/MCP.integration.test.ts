@@ -71,9 +71,12 @@ describe('MCP Server Integration', () => {
 
     it('should validate MCP server on startup', async () => {
       const validation = await mcpRouter.validateServer();
-      expect(validation).toBeDefined();
-      expect(typeof validation.isValid).toBe('boolean');
-      expect(Array.isArray(validation.errors)).toBe(true);
+      expect(validation).toEqual(
+        expect.objectContaining({
+          isValid: expect.any(Boolean),
+          errors: expect.any(Array),
+        })
+      );
     });
 
     it('should provide tool count', () => {
@@ -93,8 +96,9 @@ describe('MCP Server Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
-      expect(body.tools).toEqual(expect.any(Array));
+      expect(body).toEqual(
+        expect.objectContaining({ tools: expect.any(Array) })
+      );
 
       // Verify tool structure
       if (body.tools.length > 0) {
@@ -154,12 +158,18 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(toolRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; basic invocation requires implementation');
+      }
+      // Valid arguments should succeed deterministically
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
-        const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
+      const body = JSON.parse(response.payload);
+      expect(body).toEqual(expect.objectContaining({ result: expect.any(Object) }));
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
 
@@ -191,12 +201,22 @@ describe('MCP Server Integration', () => {
             payload: JSON.stringify(toolRequest),
           });
 
-          expect([200, 400, 404]).toContain(response.statusCode);
+          if (response.statusCode === 404) {
+            throw new Error('MCP endpoint missing; batch invocation requires implementation');
+          }
+          // With valid entityId, expect success
+          expect(response.statusCode).toBe(200);
 
           if (response.statusCode === 200) {
             const body = JSON.parse(response.payload);
-            expect(body).toBeDefined();
-            expect(body.result).toBeDefined();
+            expect(body).toEqual(
+              expect.objectContaining({
+                result: expect.anything(),
+              })
+            );
+          } else if (response.statusCode === 400) {
+            const body = JSON.parse(response.payload || '{}');
+            expect(body).toHaveProperty('error');
           }
         }
       }
@@ -225,13 +245,22 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(toolRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; invalid tool handling requires implementation');
+      }
+      // Valid spec creation should succeed
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
-        expect(body.result.specId).toBeDefined();
+        expect(body).toEqual(
+          expect.objectContaining({
+            result: expect.objectContaining({ specId: expect.any(String) }),
+          })
+        );
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
 
@@ -250,11 +279,15 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(toolRequest),
       });
 
-      expect([400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; invalid input test requires implementation');
+      }
+      expect(response.statusCode).toBe(400);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
-      expect(body.error).toBeDefined();
+      expect(body).toEqual(
+        expect.objectContaining({ error: expect.any(Object) })
+      );
     });
 
     it('should validate tool arguments', async () => {
@@ -272,11 +305,15 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(toolRequest),
       });
 
-      expect([400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; invalid structure test requires implementation');
+      }
+      expect(response.statusCode).toBe(400);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
-      expect(body.error).toBeDefined();
+      expect(body).toEqual(
+        expect.objectContaining({ error: expect.any(Object) })
+      );
     });
   });
 
@@ -305,17 +342,21 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(handshakeRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; tool discovery requires implementation');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.jsonrpc).toBe('2.0');
-        expect(body.id).toBe(1);
-        expect(body.result).toBeDefined();
-        expect(body.result.protocolVersion).toBeDefined();
-        expect(body.result.capabilities).toBeDefined();
-        expect(body.result.serverInfo).toBeDefined();
+        expect(body).toEqual(expect.objectContaining({ jsonrpc: '2.0', id: 1 }));
+        expect(body.result).toEqual(
+          expect.objectContaining({
+            protocolVersion: expect.any(String),
+            capabilities: expect.any(Object),
+            serverInfo: expect.any(Object),
+          })
+        );
       }
     });
 
@@ -336,14 +377,17 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(toolListRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; tool info requires implementation');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
+        expect(body).toEqual(expect.any(Object));
         expect(body.jsonrpc).toBe('2.0');
         expect(body.id).toBe(2);
-        expect(body.result).toBeDefined();
+        expect(body.result).toEqual(expect.any(Object));
         expect(Array.isArray(body.result.tools)).toBe(true);
       }
     });
@@ -371,17 +415,21 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(toolCallRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; execution error cases require implementation');
+      }
+      // Valid tool call should succeed
+      expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
+      expect(body).toEqual(expect.any(Object));
       expect(body.jsonrpc).toBe('2.0');
       expect(body.id).toBe(3);
 
       if (response.statusCode === 200) {
-        expect(body.result).toBeDefined();
+        expect(body.result).toEqual(expect.any(Object));
       } else {
-        expect(body.error).toBeDefined();
+        expect(body.error).toEqual(expect.any(Object));
       }
     });
 
@@ -402,14 +450,16 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      expect([200, 400]).toContain(response.statusCode);
+      // Invalid JSON-RPC should be rejected
+      expect(response.statusCode).toBe(400);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
+      expect(body).toEqual(expect.any(Object));
 
       if (body.error) {
-        expect(body.error.code).toBeDefined();
-        expect(body.error.message).toBeDefined();
+        expect(body.error).toEqual(
+          expect.objectContaining({ code: expect.any(Number), message: expect.any(String) })
+        );
       }
     });
   });
@@ -424,11 +474,16 @@ describe('MCP Server Integration', () => {
       const body = JSON.parse(response.payload);
 
       body.tools.forEach((tool: any) => {
-        expect(tool.name).toBeDefined();
-        expect(tool.description).toBeDefined();
-        expect(tool.inputSchema).toBeDefined();
-        expect(tool.inputSchema.type).toBe('object');
-        expect(tool.inputSchema.properties).toBeDefined();
+        expect(tool).toEqual(
+          expect.objectContaining({
+            name: expect.any(String),
+            description: expect.any(String),
+            inputSchema: expect.objectContaining({
+              type: 'object',
+              properties: expect.any(Object),
+            }),
+          })
+        );
       });
     });
 
@@ -446,7 +501,11 @@ describe('MCP Server Integration', () => {
         }),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; streaming requires implementation');
+      }
+      // Valid direct tool call should succeed
+      expect(response.statusCode).toBe(200);
     });
   });
 
@@ -469,17 +528,20 @@ describe('MCP Server Integration', () => {
         payload: JSON.stringify(toolRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; auth scenarios require implementation');
+      }
+      // Invalid/edge arguments should be rejected with a client error
+      expect(response.statusCode).toBe(400);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
+      expect(body).toEqual(expect.any(Object));
 
       // Either successful result or error response
       if (body.error) {
-        expect(body.error.code).toBeDefined();
-        expect(body.error.message).toBeDefined();
+        expect(body.error).toEqual(expect.objectContaining({ code: expect.anything(), message: expect.any(String) }));
       } else {
-        expect(body.result).toBeDefined();
+        expect(body.result).toEqual(expect.any(Object));
       }
     });
 
@@ -496,8 +558,8 @@ describe('MCP Server Integration', () => {
       expect(response.statusCode).toBe(400);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
-      expect(body.error).toBeDefined();
+      expect(body).toEqual(expect.any(Object));
+        expect(body.error).toEqual(expect.any(Object));
     });
 
     it('should handle missing request body', async () => {
@@ -510,7 +572,10 @@ describe('MCP Server Integration', () => {
         payload: '',
       });
 
-      expect([400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP endpoint missing; malformed request test requires implementation');
+      }
+      expect(response.statusCode).toBe(400);
     });
   });
 
@@ -570,7 +635,10 @@ describe('MCP Server Integration', () => {
           payload: JSON.stringify(toolRequest),
         });
 
-        expect([200, 400, 404]).toContain(response.statusCode);
+        if (response.statusCode === 404) {
+          throw new Error('MCP endpoint missing; concurrent requests require implementation');
+        }
+        expect(response.statusCode).toBe(200);
       }
 
       const endTime = Date.now();

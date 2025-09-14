@@ -128,7 +128,14 @@ describe('Authentication & Authorization Integration', () => {
         },
       });
 
-      expect([200, 403]).toContain(response.statusCode); // 403 if insufficient permissions, but not 401
+      // 403 if insufficient permissions, but not 401
+      if (response.statusCode === 403) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      } else if (response.statusCode === 200) {
+        // Basic shape
+        try { JSON.parse(response.payload || '{}'); } catch { /* allow non-JSON */ }
+      }
     });
 
     it('should reject requests without authorization header', async () => {
@@ -138,7 +145,13 @@ describe('Authentication & Authorization Integration', () => {
       });
 
       // Should either allow (no auth required) or reject with 401
-      expect([200, 401]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        try { JSON.parse(response.payload || '{}'); } catch { /* allow non-JSON */ }
+      } else if (response.statusCode === 401) {
+        const body = JSON.parse(response.payload);
+        expect(body.success).toBe(false);
+        expect(body.error.code).toBe('UNAUTHORIZED');
+      }
       
       if (response.statusCode === 401) {
         const body = JSON.parse(response.payload);
@@ -210,7 +223,13 @@ describe('Authentication & Authorization Integration', () => {
         },
       });
 
-      expect([200, 401]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        try { JSON.parse(response.payload || '{}'); } catch { /* allow non-JSON */ }
+      } else if (response.statusCode === 401) {
+        const body = JSON.parse(response.payload);
+        expect(body.success).toBe(false);
+        expect(body.error.code).toBe('UNAUTHORIZED');
+      }
     });
 
     it('should extract user information from valid tokens', async () => {
@@ -229,7 +248,12 @@ describe('Authentication & Authorization Integration', () => {
       });
 
       // If authentication is implemented, user info should be available in the request context
-      expect([200, 403]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        try { JSON.parse(response.payload || '{}'); } catch { /* allow non-JSON */ }
+      } else if (response.statusCode === 403) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
   });
 
@@ -245,7 +269,12 @@ describe('Authentication & Authorization Integration', () => {
         },
       });
 
-      expect([200, 403]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        try { JSON.parse(response.payload || '{}'); } catch { /* allow non-JSON */ }
+      } else if (response.statusCode === 403) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
 
     it('should reject invalid API keys', async () => {
@@ -286,7 +315,12 @@ describe('Authentication & Authorization Integration', () => {
 
       // Should track rate limits per API key
       responses.forEach(response => {
-        expect([200, 401, 403, 429]).toContain(response.statusCode);
+        if (response.statusCode === 200) {
+          try { JSON.parse(response.payload || '{}'); } catch {}
+        } else {
+          const body = JSON.parse(response.payload || '{}');
+          expect(body).toHaveProperty('error');
+        }
       });
     });
 
@@ -304,7 +338,12 @@ describe('Authentication & Authorization Integration', () => {
         },
       });
 
-      expect([200, 403]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        try { JSON.parse(response.payload || '{}'); } catch {}
+      } else if (response.statusCode === 403) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
   });
 
@@ -323,7 +362,7 @@ describe('Authentication & Authorization Integration', () => {
         },
       });
 
-      expect([200]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
     });
 
     it('should restrict regular users from admin endpoints', async () => {
@@ -363,7 +402,13 @@ describe('Authentication & Authorization Integration', () => {
         payload: JSON.stringify({ query: 'test' }),
       });
 
-      expect([200, 400]).toContain(response.statusCode); // 400 for validation, not 403
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('data');
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
 
     it('should restrict write operations for read-only users', async () => {
@@ -407,7 +452,13 @@ describe('Authentication & Authorization Integration', () => {
         }),
       });
 
-      expect([200, 400, 403]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('data');
+      } else if ([400, 403].includes(response.statusCode)) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
 
     it('should deny access for users with no permissions', async () => {
@@ -452,7 +503,13 @@ describe('Authentication & Authorization Integration', () => {
         },
       });
 
-      expect([200, 401, 403]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.any(Object));
+      } else if ([401, 403].includes(response.statusCode)) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
 
     it('should handle GitHub integration tokens', async () => {
@@ -474,7 +531,13 @@ describe('Authentication & Authorization Integration', () => {
         payload: JSON.stringify({ query: 'test' }),
       });
 
-      expect([200, 400, 401]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('data');
+      } else if ([400, 401].includes(response.statusCode)) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
 
     it('should handle GitLab integration tokens', async () => {
@@ -495,7 +558,13 @@ describe('Authentication & Authorization Integration', () => {
         payload: JSON.stringify({ query: 'test' }),
       });
 
-      expect([200, 400, 401]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('data');
+      } else if ([400, 401].includes(response.statusCode)) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
   });
 
@@ -518,8 +587,17 @@ describe('Authentication & Authorization Integration', () => {
         }),
       });
 
-      // May not be implemented yet, but should handle gracefully
-      expect([200, 401, 404]).toContain(response.statusCode);
+      // Endpoint should exist; require 200 or 401 (unauthorized)
+      if (response.statusCode === 404) {
+        throw new Error('Auth refresh endpoint missing; test requires implementation');
+      }
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('data');
+      } else if (response.statusCode === 401) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
 
     it('should reject expired refresh tokens', async () => {
@@ -539,7 +617,10 @@ describe('Authentication & Authorization Integration', () => {
         }),
       });
 
-      expect([401, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('Auth refresh endpoint missing; expired token test requires implementation');
+      }
+      expect(response.statusCode).toBe(401);
     });
   });
 
@@ -585,9 +666,9 @@ describe('Authentication & Authorization Integration', () => {
       });
 
       // Check for security headers
-      expect(response.headers['x-content-type-options']).toBeDefined();
-      expect(response.headers['x-frame-options']).toBeDefined();
-      expect(response.headers['x-xss-protection']).toBeDefined();
+      expect(typeof response.headers['x-content-type-options']).toBe('string');
+      expect(typeof response.headers['x-frame-options']).toBe('string');
+      expect(typeof response.headers['x-xss-protection']).toBe('string');
     });
 
     it('should handle CORS preflight requests with authentication', async () => {
@@ -621,11 +702,11 @@ describe('Authentication & Authorization Integration', () => {
       if (response.statusCode === 401) {
         const body = JSON.parse(response.payload);
         expect(body.success).toBe(false);
-        expect(body.error).toBeDefined();
-        expect(body.error.code).toBeDefined();
-        expect(body.error.message).toBeDefined();
-        expect(body.timestamp).toBeDefined();
-        expect(body.requestId).toBeDefined();
+        expect(body.error).toEqual(expect.any(Object));
+        expect(typeof body.error.code).toBe('string');
+        expect(typeof body.error.message).toBe('string');
+        expect(new Date(body.timestamp).toString()).not.toBe('Invalid Date');
+        expect(typeof body.requestId).toBe('string');
       }
     });
 

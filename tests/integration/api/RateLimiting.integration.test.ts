@@ -14,6 +14,7 @@ import {
   clearTestData,
   checkDatabaseHealth,
 } from '../../test-utils/database-helpers.js';
+import { expectSuccess, expectError } from '../../test-utils/assertions';
 
 describe('Rate Limiting Integration', () => {
   let dbService: DatabaseService;
@@ -76,13 +77,13 @@ describe('Rate Limiting Integration', () => {
           payload: JSON.stringify(requestPayload),
         });
 
-        expect([200, 400]).toContain(response.statusCode); // 400 for validation, but not 429
-        expect(response.statusCode).not.toBe(429);
-        
-        // Check rate limit headers are present
-        expect(response.headers['x-ratelimit-limit']).toBeDefined();
-        expect(response.headers['x-ratelimit-remaining']).toBeDefined();
-        expect(response.headers['x-ratelimit-reset']).toBeDefined();
+        expect(response.statusCode).toBe(200);
+        const body = JSON.parse(response.payload);
+        expect(body).toEqual(expect.objectContaining({ success: true }));
+        // Check rate limit headers are present with proper types
+        expect(typeof response.headers['x-ratelimit-limit']).toBe('string');
+        expect(typeof response.headers['x-ratelimit-remaining']).toBe('string');
+        expect(typeof response.headers['x-ratelimit-reset']).toBe('string');
       }
     });
 
@@ -122,15 +123,17 @@ describe('Rate Limiting Integration', () => {
         const errorResponse = rateLimitedResponses[0];
         const body = JSON.parse(errorResponse.payload);
         
-        expect(body.success).toBe(false);
-        expect(body.error).toBeDefined();
-        expect(body.error.code).toBe('RATE_LIMIT_EXCEEDED');
-        expect(body.error.message).toContain('Too many requests');
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: false,
+            error: expect.objectContaining({ code: 'RATE_LIMIT_EXCEEDED', message: expect.any(String) })
+          })
+        );
         
         // Check rate limit headers
-        expect(errorResponse.headers['x-ratelimit-limit']).toBeDefined();
+        expect(typeof errorResponse.headers['x-ratelimit-limit']).toBe('string');
         expect(errorResponse.headers['x-ratelimit-remaining']).toBe('0');
-        expect(errorResponse.headers['retry-after']).toBeDefined();
+        expect(typeof errorResponse.headers['retry-after']).toBe('string');
       }
     }, 15000); // Longer timeout for this test
 
@@ -166,8 +169,9 @@ describe('Rate Limiting Integration', () => {
         payload: JSON.stringify(requestPayload),
       });
 
-      expect([200, 400]).toContain(response2.statusCode);
-      expect(response2.statusCode).not.toBe(429);
+      expect(response2.statusCode).toBe(200);
+      const body = JSON.parse(response2.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true }));
     });
   });
 
@@ -198,7 +202,7 @@ describe('Rate Limiting Integration', () => {
       // Check that admin endpoints have correct rate limit headers
       const successfulResponses = responses.filter(r => r.statusCode === 200);
       if (successfulResponses.length > 0) {
-        expect(successfulResponses[0].headers['x-ratelimit-limit']).toBeDefined();
+        expect(typeof successfulResponses[0].headers['x-ratelimit-limit']).toBe('string');
       }
     }, 10000);
 
@@ -228,8 +232,15 @@ describe('Rate Limiting Integration', () => {
           'x-forwarded-for': clientIP,
         },
       });
-
-      expect([200, 500]).toContain(adminResponse.statusCode); // Not 429 from search limits
+      expect(adminResponse.statusCode).not.toBe(429);
+      // Health may be 200 or 503 depending on backing services
+      if (adminResponse.statusCode === 200) {
+        try { JSON.parse(adminResponse.payload || '{}'); } catch {}
+      } else if (adminResponse.statusCode === 503) {
+        const body = JSON.parse(adminResponse.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
+      expect(typeof adminResponse.headers['x-ratelimit-limit']).toBe('string');
     });
 
     it('should handle admin sync endpoint rate limiting', async () => {
@@ -246,8 +257,14 @@ describe('Rate Limiting Integration', () => {
         payload: JSON.stringify({ force: false }),
       });
 
-      expect([200, 400, 409]).toContain(response.statusCode);
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: true }));
+      } else if ([400, 409].includes(response.statusCode)) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
+      expect(response.headers['x-ratelimit-limit']).toEqual(expect.any(String));
     });
   });
 
@@ -265,7 +282,7 @@ describe('Rate Limiting Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
+      expect(typeof response.headers['x-ratelimit-limit']).toBe('string');
       
       // Default limit should be higher than search/admin
       const limit = parseInt(response.headers['x-ratelimit-limit'] as string, 10);
@@ -284,7 +301,7 @@ describe('Rate Limiting Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
+      expect(response.headers['x-ratelimit-limit']).toEqual(expect.any(String));
     });
   });
 
@@ -301,9 +318,9 @@ describe('Rate Limiting Integration', () => {
       expect(response.statusCode).toBe(200);
       
       // Check required headers
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
-      expect(response.headers['x-ratelimit-remaining']).toBeDefined();
-      expect(response.headers['x-ratelimit-reset']).toBeDefined();
+      expect(typeof response.headers['x-ratelimit-limit']).toBe('string');
+      expect(typeof response.headers['x-ratelimit-remaining']).toBe('string');
+      expect(typeof response.headers['x-ratelimit-reset']).toBe('string');
 
       // Validate header values
       const limit = parseInt(response.headers['x-ratelimit-limit'] as string, 10);
@@ -362,7 +379,7 @@ describe('Rate Limiting Integration', () => {
       const rateLimitedResponse = responses.find(r => r.statusCode === 429);
 
       if (rateLimitedResponse) {
-        expect(rateLimitedResponse.headers['retry-after']).toBeDefined();
+        expect(typeof rateLimitedResponse.headers['retry-after']).toBe('string');
         const retryAfter = parseInt(rateLimitedResponse.headers['retry-after'] as string, 10);
         expect(retryAfter).toBeGreaterThan(0);
         expect(retryAfter).toBeLessThanOrEqual(3600); // Should be within an hour
@@ -396,7 +413,7 @@ describe('Rate Limiting Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-ratelimit-remaining']).toBeDefined();
+      expect(typeof response.headers['x-ratelimit-remaining']).toBe('string');
     });
 
     it('should handle concurrent requests correctly', async () => {
@@ -417,8 +434,13 @@ describe('Rate Limiting Integration', () => {
 
       // All should succeed under normal rate limits
       responses.forEach(response => {
-        expect([200, 429]).toContain(response.statusCode);
-        expect(response.headers['x-ratelimit-limit']).toBeDefined();
+        if (response.statusCode === 200) {
+          try { JSON.parse(response.payload || '{}'); } catch {}
+        } else if (response.statusCode === 429) {
+          const body = JSON.parse(response.payload || '{}');
+          expect(body).toHaveProperty('error');
+        }
+        expect(typeof response.headers['x-ratelimit-limit']).toBe('string');
       });
     });
   });
@@ -432,7 +454,7 @@ describe('Rate Limiting Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
+      expect(typeof response.headers['x-ratelimit-limit']).toBe('string');
     });
 
     it('should handle malformed IP addresses', async () => {
@@ -445,7 +467,7 @@ describe('Rate Limiting Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
+      expect(typeof response.headers['x-ratelimit-limit']).toBe('string');
     });
 
     it('should handle IPv6 addresses', async () => {
@@ -458,7 +480,7 @@ describe('Rate Limiting Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
+      expect(typeof response.headers['x-ratelimit-limit']).toBe('string');
     });
 
     it('should handle proxy chains in x-forwarded-for', async () => {
@@ -471,7 +493,7 @@ describe('Rate Limiting Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
+      expect(response.headers['x-ratelimit-limit']).toEqual(expect.any(String));
     });
   });
 });

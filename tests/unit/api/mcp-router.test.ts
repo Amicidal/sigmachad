@@ -140,7 +140,7 @@ describe('MCPRouter', () => {
     it('should have required design tools', () => {
       // Test that tools are registered by checking if they exist
       const server = mcpRouter.getServer();
-      expect(server).toBeDefined();
+      expect(server).toEqual(expect.any(Object));
     });
   });
 
@@ -153,9 +153,9 @@ describe('MCPRouter', () => {
         params: {}
       });
 
-      expect(response.result.tools).toBeDefined();
+      expect(response.result.tools).toEqual(expect.any(Array));
       const createSpecTool = response.result.tools.find((tool: any) => tool.name === 'design.create_spec');
-      expect(createSpecTool).toBeDefined();
+      expect(createSpecTool).toEqual(expect.any(Object));
       expect(createSpecTool.inputSchema.required).toContain('title');
       expect(createSpecTool.inputSchema.required).toContain('description');
       expect(createSpecTool.inputSchema.required).toContain('acceptanceCriteria');
@@ -170,8 +170,8 @@ describe('MCPRouter', () => {
       });
 
       const graphSearchTool = response.result.tools.find((tool: any) => tool.name === 'graph.search');
-      expect(graphSearchTool).toBeDefined();
-      expect(graphSearchTool.inputSchema.properties.query).toBeDefined();
+      expect(graphSearchTool).toEqual(expect.any(Object));
+      expect(graphSearchTool.inputSchema.properties.query).toEqual(expect.anything());
       expect(graphSearchTool.inputSchema.required).toContain('query');
     });
 
@@ -419,11 +419,16 @@ describe('MCPRouter', () => {
 
         const result = JSON.parse(response.result.content[0].text);
         expect(result.specId).toBe(params.specId);
-        expect(result.testPlan).toBeDefined();
-        expect(result.testPlan.unitTests).toBeDefined();
-        expect(result.testPlan.integrationTests).toBeDefined();
-        expect(result.testPlan.performanceTests).toBeDefined();
-        expect(result.estimatedCoverage).toBeDefined();
+        expect(result).toEqual(
+          expect.objectContaining({
+            testPlan: expect.objectContaining({
+              unitTests: expect.any(Array),
+              integrationTests: expect.any(Array),
+              performanceTests: expect.any(Array),
+            }),
+            estimatedCoverage: expect.any(Object),
+          })
+        );
       });
 
       it('should handle non-existent specification', async () => {
@@ -458,8 +463,7 @@ describe('MCPRouter', () => {
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe('test-12');
-      expect(response.result.tools).toBeDefined();
-      expect(Array.isArray(response.result.tools)).toBe(true);
+      expect(response.result.tools).toEqual(expect.any(Array));
       expect(response.result.tools.length).toBeGreaterThan(0);
 
       // Check tool structure
@@ -482,8 +486,7 @@ describe('MCPRouter', () => {
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe('test-13');
-      expect(response.result.content).toBeDefined();
-      expect(Array.isArray(response.result.content)).toBe(true);
+      expect(response.result.content).toEqual(expect.any(Array));
       expect(response.result.content[0]).toHaveProperty('type', 'text');
     });
 

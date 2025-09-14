@@ -125,50 +125,106 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
     app.post('/admin/admin/sync', forwardTo('POST', '/admin/admin/sync', '/sync'));
     // GET /api/admin/sync-status - Get synchronization status
     app.get('/sync-status', async (request, reply) => {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
         try {
             let status;
             if (syncMonitor) {
                 const metrics = syncMonitor.getSyncMetrics();
                 const health = syncMonitor.getHealthMetrics();
                 const activeOps = syncMonitor.getActiveOperations();
-                status = {
-                    isActive: activeOps.length > 0,
-                    lastSync: health.lastSyncTime,
-                    queueDepth: syncCoordinator ? syncCoordinator.getQueueLength() : 0,
-                    processingRate: metrics.throughput,
-                    errors: {
-                        count: metrics.operationsFailed,
-                        recent: metrics.operationsFailed > 0 ? [`${metrics.operationsFailed} sync operations failed`] : []
-                    },
-                    performance: {
-                        syncLatency: metrics.averageSyncTime,
-                        throughput: metrics.throughput,
-                        successRate: metrics.operationsTotal > 0 ?
-                            (metrics.operationsSuccessful / metrics.operationsTotal) : 1.0
+                const phases = (_b = (_a = syncMonitor).getOperationPhases) === null || _b === void 0 ? void 0 : _b.call(_a);
+                // Optional coordinator statistics for richer status
+                const coordStats = syncCoordinator === null || syncCoordinator === void 0 ? void 0 : syncCoordinator.getOperationStatistics();
+                const active = activeOps.map((op) => {
+                    var _a, _b, _c, _d;
+                    return ({
+                        id: op.id,
+                        type: op.type,
+                        status: op.status,
+                        filesProcessed: op.filesProcessed,
+                        phase: (_a = phases === null || phases === void 0 ? void 0 : phases[op.id]) === null || _a === void 0 ? void 0 : _a.phase,
+                        progress: (_b = phases === null || phases === void 0 ? void 0 : phases[op.id]) === null || _b === void 0 ? void 0 : _b.progress,
+                        entities: {
+                            created: op.entitiesCreated,
+                            updated: op.entitiesUpdated,
+                            deleted: op.entitiesDeleted,
+                        },
+                        relationships: {
+                            created: op.relationshipsCreated,
+                            updated: op.relationshipsUpdated,
+                            deleted: op.relationshipsDeleted,
+                        },
+                        errors: ((_c = op.errors) === null || _c === void 0 ? void 0 : _c.length) || 0,
+                        conflicts: ((_d = op.conflicts) === null || _d === void 0 ? void 0 : _d.length) || 0,
+                        startTime: op.startTime,
+                        endTime: op.endTime || null,
+                    });
+                });
+                const totals = coordStats
+                    ? {
+                        totalOperations: coordStats.totalOperations,
+                        completedOperations: coordStats.completedOperations,
+                        failedOperations: coordStats.failedOperations,
+                        totalFilesProcessed: coordStats.totalFilesProcessed,
+                        totalEntitiesCreated: coordStats.totalEntitiesCreated,
+                        totalErrors: coordStats.totalErrors,
                     }
-                };
+                    : undefined;
+                // Compute instantaneous throughput based on active operations
+                let itemsProcessed = 0;
+                let earliestStart = Date.now();
+                for (const op of activeOps) {
+                    const st = (op.startTime instanceof Date ? op.startTime : new Date(op.startTime)).getTime();
+                    if (st < earliestStart)
+                        earliestStart = st;
+                    const eCreated = (_e = (_c = op.entitiesCreated) !== null && _c !== void 0 ? _c : (_d = op.entities) === null || _d === void 0 ? void 0 : _d.created) !== null && _e !== void 0 ? _e : 0;
+                    const rCreated = (_h = (_f = op.relationshipsCreated) !== null && _f !== void 0 ? _f : (_g = op.relationships) === null || _g === void 0 ? void 0 : _g.created) !== null && _h !== void 0 ? _h : 0;
+                    itemsProcessed += (eCreated || 0) + (rCreated || 0);
+                }
+                const elapsedSec = Math.max((Date.now() - earliestStart) / 1000, 0.001);
+                const instantaneousThroughput = itemsProcessed / elapsedSec;
+                reply.send({
+                    success: true,
+                    data: {
+                        isActive: activeOps.length > 0,
+                        paused: !!((_j = syncCoordinator === null || syncCoordinator === void 0 ? void 0 : syncCoordinator.isPaused) === null || _j === void 0 ? void 0 : _j.call(syncCoordinator)),
+                        lastSync: health.lastSyncTime,
+                        queueDepth: syncCoordinator ? syncCoordinator.getQueueLength() : 0,
+                        processingRate: instantaneousThroughput,
+                        errors: {
+                            count: metrics.operationsFailed,
+                            recent: metrics.operationsFailed > 0
+                                ? [`${metrics.operationsFailed} sync operations failed`]
+                                : [],
+                        },
+                        performance: {
+                            syncLatency: metrics.averageSyncTime,
+                            throughput: instantaneousThroughput,
+                            successRate: metrics.operationsTotal > 0
+                                ? metrics.operationsSuccessful / metrics.operationsTotal
+                                : 1.0,
+                        },
+                        operations: {
+                            active,
+                            totals,
+                        },
+                    },
+                });
+                return;
             }
-            else {
-                // Fallback when sync services not available
-                status = {
+            // Fallback when sync services not available
+            reply.send({
+                success: true,
+                data: {
                     isActive: false,
+                    paused: false,
                     lastSync: new Date(),
                     queueDepth: 0,
                     processingRate: 0,
-                    errors: {
-                        count: 0,
-                        recent: []
-                    },
-                    performance: {
-                        syncLatency: 0,
-                        throughput: 0,
-                        successRate: 1.0
-                    }
-                };
-            }
-            reply.send({
-                success: true,
-                data: status
+                    errors: { count: 0, recent: [] },
+                    performance: { syncLatency: 0, throughput: 0, successRate: 1.0 },
+                    operations: { active: [], totals: undefined },
+                },
             });
         }
         catch (error) {
@@ -182,17 +238,139 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
             });
         }
     });
+    // GET /api/v1/admin/metrics - System and history metrics summary
+    app.get('/metrics', async (request, reply) => {
+        try {
+            const history = await kgService.getHistoryMetrics();
+            const syncSummary = syncMonitor ? {
+                sync: syncMonitor.getSyncMetrics(),
+                health: syncMonitor.getHealthMetrics(),
+            } : undefined;
+            reply.send({
+                success: true,
+                data: {
+                    graph: {
+                        nodes: history.totals.nodes,
+                        relationships: history.totals.relationships,
+                    },
+                    history: {
+                        versions: history.versions,
+                        checkpoints: history.checkpoints,
+                        checkpointMembers: history.checkpointMembers,
+                        temporalEdges: history.temporalEdges,
+                        lastPrune: history.lastPrune || undefined,
+                    },
+                    ...(syncSummary ? { synchronization: {
+                            operations: syncSummary.sync,
+                            health: syncSummary.health,
+                        } } : {}),
+                    timestamp: new Date().toISOString(),
+                }
+            });
+        }
+        catch (error) {
+            reply.status(500).send({
+                success: false,
+                error: { code: 'METRICS_FAILED', message: error instanceof Error ? error.message : 'Failed to collect metrics' }
+            });
+        }
+    });
+    // Admin alias
+    app.get('/admin/metrics', forwardTo('GET', '/admin/metrics', '/metrics'));
+    // GET /api/v1/admin/index-health - Graph index presence and expected coverage
+    app.get('/index-health', async (_request, reply) => {
+        try {
+            const health = await kgService.getIndexHealth();
+            reply.send({ success: true, data: health });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'INDEX_HEALTH_FAILED', message: error instanceof Error ? error.message : 'Failed to fetch index health' } });
+        }
+    });
+    app.get('/admin/index-health', forwardTo('GET', '/admin/index-health', '/index-health'));
+    // GET /api/v1/admin/benchmarks - Run preliminary graph benchmarks
+    app.get('/benchmarks', async (request, reply) => {
+        try {
+            const q = request.query || {};
+            const mode = (q.mode === 'full' ? 'full' : 'quick');
+            const results = await kgService.runBenchmarks({ mode });
+            reply.send({ success: true, data: results });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'BENCHMARKS_FAILED', message: error instanceof Error ? error.message : 'Failed to run benchmarks' } });
+        }
+    });
+    app.get('/admin/benchmarks', forwardTo('GET', '/admin/benchmarks', '/benchmarks'));
+    // POST /api/v1/admin/indexes/ensure - Best-effort creation of recommended indexes
+    app.post('/indexes/ensure', async (_request, reply) => {
+        try {
+            await kgService.ensureGraphIndexes();
+            const health = await kgService.getIndexHealth();
+            reply.send({ success: true, data: { ensured: true, health } });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'INDEX_ENSURE_FAILED', message: error instanceof Error ? error.message : 'Failed to ensure indexes' } });
+        }
+    });
+    app.post('/admin/indexes/ensure', forwardTo('POST', '/admin/indexes/ensure', '/indexes/ensure'));
     app.get('/admin/sync-status', forwardTo('GET', '/admin/sync-status', '/sync-status'));
+    // POST /api/admin/sync/pause - Pause synchronization queue (non-destructive)
+    app.post('/sync/pause', async (request, reply) => {
+        try {
+            if (!syncCoordinator) {
+                reply.status(409).send({ success: false, error: { code: 'SYNC_UNAVAILABLE', message: 'Synchronization coordinator not available' } });
+                return;
+            }
+            if (typeof syncCoordinator.pauseSync === 'function') {
+                syncCoordinator.pauseSync();
+            }
+            else {
+                reply.status(501).send({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Pause not supported in this build' } });
+                return;
+            }
+            reply.send({ success: true, data: { paused: true, message: 'Synchronization paused' } });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'SYNC_PAUSE_FAILED', message: error instanceof Error ? error.message : 'Failed to pause sync' } });
+        }
+    });
+    // POST /api/admin/sync/resume - Resume synchronization queue
+    app.post('/sync/resume', async (request, reply) => {
+        try {
+            if (!syncCoordinator) {
+                reply.status(409).send({ success: false, error: { code: 'SYNC_UNAVAILABLE', message: 'Synchronization coordinator not available' } });
+                return;
+            }
+            if (typeof syncCoordinator.resumeSync === 'function') {
+                syncCoordinator.resumeSync();
+            }
+            else {
+                reply.status(501).send({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Resume not supported in this build' } });
+                return;
+            }
+            reply.send({ success: true, data: { paused: false, message: 'Synchronization resumed' } });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'SYNC_RESUME_FAILED', message: error instanceof Error ? error.message : 'Failed to resume sync' } });
+        }
+    });
+    // Admin-prefixed aliases for pause/resume
+    app.post('/admin/sync/pause', forwardTo('POST', '/admin/sync/pause', '/sync/pause'));
+    app.post('/admin/sync/resume', forwardTo('POST', '/admin/sync/resume', '/sync/resume'));
     // POST /api/admin/sync - Trigger full synchronization
     app.post('/sync', {
         schema: {
             body: {
                 type: 'object',
+                additionalProperties: true,
                 properties: {
                     force: { type: 'boolean' },
                     includeEmbeddings: { type: 'boolean' },
                     includeTests: { type: 'boolean' },
-                    includeSecurity: { type: 'boolean' }
+                    includeSecurity: { type: 'boolean' },
+                    maxConcurrency: { type: 'number', minimum: 1, maximum: 32 },
+                    timeout: { type: 'number', minimum: 1000 },
+                    batchSize: { type: 'number', minimum: 1, maximum: 1000 }
                 }
             }
         }
@@ -231,6 +409,38 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                     message: 'Failed to trigger synchronization'
                 }
             });
+        }
+    });
+    // POST /api/admin/sync/tune - Update tuning for an active sync (batchSize, maxConcurrency)
+    app.post('/sync/tune', {
+        schema: {
+            body: {
+                type: 'object',
+                required: ['jobId'],
+                properties: {
+                    jobId: { type: 'string' },
+                    batchSize: { type: 'number', minimum: 1, maximum: 5000 },
+                    maxConcurrency: { type: 'number', minimum: 1, maximum: 64 }
+                }
+            }
+        }
+    }, async (request, reply) => {
+        var _a, _b;
+        try {
+            if (!syncCoordinator) {
+                reply.status(409).send({ success: false, error: { code: 'SYNC_UNAVAILABLE', message: 'Synchronization coordinator not available' } });
+                return;
+            }
+            const { jobId, batchSize, maxConcurrency } = request.body;
+            const ok = (_b = (_a = syncCoordinator).updateTuning) === null || _b === void 0 ? void 0 : _b.call(_a, jobId, { batchSize, maxConcurrency });
+            if (!ok) {
+                reply.status(404).send({ success: false, error: { code: 'OP_NOT_FOUND', message: 'Operation not active or not found' } });
+                return;
+            }
+            reply.send({ success: true, data: { jobId, batchSize, maxConcurrency } });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'SYNC_TUNE_FAILED', message: error instanceof Error ? error.message : 'Failed to update tuning' } });
         }
     });
     app.post('/admin/sync', forwardTo('POST', '/admin/sync', '/sync'));
@@ -328,6 +538,98 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
         }
     });
     app.get('/admin/analytics', forwardTo('GET', '/admin/analytics', '/analytics'));
+    // GET /api/v1/history/config - Retrieve history configuration
+    app.get('/history/config', async (_request, reply) => {
+        var _a;
+        try {
+            const enabledFeature = ((configurationService === null || configurationService === void 0 ? void 0 : configurationService.getSystemConfiguration)
+                ? (await configurationService.getSystemConfiguration()).features.history
+                : ((process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false'));
+            const hc = ((_a = configurationService === null || configurationService === void 0 ? void 0 : configurationService.getHistoryConfig) === null || _a === void 0 ? void 0 : _a.call(configurationService))
+                || {
+                    enabled: enabledFeature,
+                    retentionDays: parseInt(process.env.HISTORY_RETENTION_DAYS || '30', 10),
+                    checkpoint: {
+                        hops: parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '2', 10),
+                        embedVersions: (process.env.HISTORY_EMBED_VERSIONS || 'false').toLowerCase() === 'true',
+                    }
+                };
+            reply.send({ success: true, data: { ...hc, featureEnabled: enabledFeature } });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'HISTORY_CONFIG_FAILED', message: error instanceof Error ? error.message : 'Failed to read history config' } });
+        }
+    });
+    // PUT /api/v1/history/config - Update history configuration
+    app.put('/history/config', {
+        schema: {
+            body: {
+                type: 'object',
+                properties: {
+                    enabled: { type: 'boolean' },
+                    retentionDays: { type: 'number', minimum: 1 },
+                    checkpoint: {
+                        type: 'object',
+                        properties: {
+                            hops: { type: 'number', minimum: 1, maximum: 5 },
+                            embedVersions: { type: 'boolean' }
+                        }
+                    },
+                    incident: {
+                        type: 'object',
+                        properties: {
+                            enabled: { type: 'boolean' },
+                            hops: { type: 'number', minimum: 1, maximum: 5 }
+                        }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
+        try {
+            if (!(configurationService === null || configurationService === void 0 ? void 0 : configurationService.updateHistoryConfig)) {
+                reply.status(501).send({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Runtime config updates not supported in this build' } });
+                return;
+            }
+            const updates = request.body;
+            const updated = configurationService.updateHistoryConfig(updates);
+            reply.send({ success: true, data: updated });
+        }
+        catch (error) {
+            reply.status(400).send({ success: false, error: { code: 'HISTORY_CONFIG_UPDATE_FAILED', message: error instanceof Error ? error.message : 'Failed to update history config' } });
+        }
+    });
+    // Admin aliases
+    app.get('/admin/history/config', forwardTo('GET', '/admin/history/config', '/history/config'));
+    app.put('/admin/history/config', forwardTo('POST', '/admin/history/config', '/history/config'));
+    // POST /api/v1/admin/history/prune - Trigger history pruning
+    app.post('/history/prune', {
+        schema: {
+            body: {
+                type: 'object',
+                properties: {
+                    retentionDays: { type: 'number', minimum: 1, default: 30 },
+                    dryRun: { type: 'boolean', default: false }
+                },
+                required: []
+            }
+        }
+    }, async (request, reply) => {
+        try {
+            const { retentionDays, dryRun } = (request.body || {});
+            const days = typeof retentionDays === 'number' && retentionDays > 0 ? Math.floor(retentionDays) : 30;
+            const result = await kgService.pruneHistory(days, { dryRun: !!dryRun });
+            reply.send({ success: true, data: { ...result, retentionDays: days, dryRun: !!dryRun } });
+        }
+        catch (error) {
+            reply.status(500).send({
+                success: false,
+                error: { code: 'HISTORY_PRUNE_FAILED', message: error instanceof Error ? error.message : 'Failed to prune history' }
+            });
+        }
+    });
+    // Admin alias for prune endpoint
+    app.post('/admin/history/prune', forwardTo('POST', '/admin/history/prune', '/history/prune'));
     // POST /api/admin/backup - Create system backup
     app.post('/backup', {
         schema: {

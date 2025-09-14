@@ -202,13 +202,16 @@ describe("SynchronizationMonitoring Integration", () => {
 
       // Check performance metrics
       const perfMetrics = monitoring.getPerformanceMetrics();
-      expect(perfMetrics).toBeDefined();
-      expect(typeof perfMetrics.averageParseTime).toBe("number");
-      expect(typeof perfMetrics.averageGraphUpdateTime).toBe("number");
-      expect(typeof perfMetrics.averageEmbeddingTime).toBe("number");
-      expect(typeof perfMetrics.memoryUsage).toBe("number");
-      expect(typeof perfMetrics.cacheHitRate).toBe("number");
-      expect(typeof perfMetrics.ioWaitTime).toBe("number");
+      expect(perfMetrics).toEqual(
+        expect.objectContaining({
+          averageParseTime: expect.any(Number),
+          averageGraphUpdateTime: expect.any(Number),
+          averageEmbeddingTime: expect.any(Number),
+          memoryUsage: expect.any(Number),
+          cacheHitRate: expect.any(Number),
+          ioWaitTime: expect.any(Number),
+        })
+      );
 
       // Memory usage should be a reasonable number
       expect(perfMetrics.memoryUsage).toBeGreaterThan(0);
@@ -254,7 +257,16 @@ describe("SynchronizationMonitoring Integration", () => {
       vi.advanceTimersByTime(31000); // Fast-forward > 30 seconds
 
       const healthMetrics = monitoring.getHealthMetrics();
-      expect(healthMetrics).toBeDefined();
+      expect(healthMetrics).toEqual(
+        expect.objectContaining({
+          overallHealth: expect.any(String),
+          lastSyncTime: expect.any(Date),
+          consecutiveFailures: expect.any(Number),
+          queueDepth: expect.any(Number),
+          activeOperations: expect.any(Number),
+          systemLoad: expect.any(Number),
+        })
+      );
       expect(["healthy", "degraded", "unhealthy"]).toContain(
         healthMetrics.overallHealth
       );
@@ -398,7 +410,9 @@ describe("SynchronizationMonitoring Integration", () => {
 
       // Find the error alert
       const errorAlert = activeAlerts.find((alert) => alert.type === "error");
-      expect(errorAlert).toBeDefined();
+      expect(errorAlert).toEqual(
+        expect.objectContaining({ type: 'error', message: expect.any(String), operationId: 'alert-test-op', resolved: false })
+      );
       expect(errorAlert?.message).toContain("failed");
       expect(errorAlert?.operationId).toBe("alert-test-op");
       expect(errorAlert?.resolved).toBe(false);
@@ -627,13 +641,16 @@ describe("SynchronizationMonitoring Integration", () => {
       // Generate report
       const report = monitoring.generateReport();
 
-      // Verify report structure
-      expect(report).toBeDefined();
-      expect(report.summary).toBeDefined();
-      expect(report.performance).toBeDefined();
-      expect(report.health).toBeDefined();
-      expect(report.recentOperations).toBeDefined();
-      expect(report.activeAlerts).toBeDefined();
+      // Verify report structure with stronger shape checks
+      expect(report).toEqual(
+        expect.objectContaining({
+          summary: expect.any(Object),
+          performance: expect.any(Object),
+          health: expect.any(Object),
+          recentOperations: expect.any(Array),
+          activeAlerts: expect.any(Array),
+        })
+      );
 
       // Verify summary data
       expect(report.summary.operationsTotal).toBe(3);

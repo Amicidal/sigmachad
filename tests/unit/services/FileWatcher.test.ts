@@ -183,9 +183,9 @@ describeIfRun("FileWatcher", () => {
       const createEvent = events.find(
         (e) => e.type === "create" && e.path.includes("newfile.txt")
       );
-      expect(createEvent).toBeDefined();
-      expect(createEvent?.stats).toBeDefined();
-      expect(createEvent?.hash).toBeDefined();
+      expect(createEvent).toEqual(expect.any(Object));
+      expect(createEvent?.stats).toEqual(expect.any(Object));
+      expect(typeof createEvent?.hash).toBe('string');
     });
 
     it("should handle file modification", async () => {
@@ -219,7 +219,7 @@ describeIfRun("FileWatcher", () => {
 
       expect(events.length).toBeGreaterThanOrEqual(1);
       const modifyEvent = events.find((e) => e.type === "modify");
-      expect(modifyEvent).toBeDefined();
+      expect(modifyEvent).toEqual(expect.any(Object));
     });
 
     it("should handle file deletion", async () => {
@@ -255,7 +255,7 @@ describeIfRun("FileWatcher", () => {
 
       expect(events.length).toBeGreaterThanOrEqual(2); // create and delete events
       const deleteEvent = events.find((e) => e.type === "delete");
-      expect(deleteEvent).toBeDefined();
+      expect(deleteEvent).toEqual(expect.any(Object));
       expect(deleteEvent?.stats).toBeUndefined();
       expect(deleteEvent?.hash).toBeUndefined();
     });
@@ -323,7 +323,7 @@ describeIfRun("FileWatcher", () => {
       const createEvent = events.find(
         (e) => e.type === "create" && e.path.includes("newdir")
       );
-      expect(createEvent).toBeDefined();
+      expect(createEvent).toEqual(expect.any(Object));
       expect(createEvent?.stats?.isDirectory).toBe(true);
     });
 
@@ -361,7 +361,7 @@ describeIfRun("FileWatcher", () => {
       const deleteEvent = events.find(
         (e) => e.type === "delete" && e.path.includes("deletedir")
       );
-      expect(deleteEvent).toBeDefined();
+      expect(deleteEvent).toEqual(expect.any(Object));
       expect(deleteEvent?.stats?.isDirectory).toBe(true);
     });
   });
@@ -393,7 +393,7 @@ describeIfRun("FileWatcher", () => {
       // Verify we have the expected file creation events
       for (let i = 1; i <= 3; i++) {
         const event = events.find((e) => e.path.includes(`file${i}.txt`));
-        expect(event).toBeDefined();
+        expect(event).toEqual(expect.any(Object));
         expect(event?.type).toBe("create");
       }
     });
@@ -423,7 +423,7 @@ describeIfRun("FileWatcher", () => {
         const event = batchEvents[0].find((e) =>
           e.path.includes(`batchfile${i}.txt`)
         );
-        expect(event).toBeDefined();
+        expect(event).toEqual(expect.any(Object));
       }
     });
   });

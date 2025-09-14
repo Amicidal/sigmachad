@@ -19,6 +19,7 @@ interface GraphSearchRequest {
       since?: Date;
       until?: Date;
     };
+    checkpointId?: string;
   };
   includeRelated?: boolean;
   limit?: number;
@@ -82,6 +83,174 @@ export async function registerGraphRoutes(
   kgService: KnowledgeGraphService,
   dbService: DatabaseService
 ): Promise<void> {
+  // Simple redirect to the build-based graph UI if available
+  app.get('/graph/ui', async (_req, reply) => {
+    reply.redirect('/ui/graph/');
+  });
+  // GET /api/graph/entity/:entityId - Get single entity by ID
+  app.get(
+    "/graph/entity/:entityId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: { entityId: { type: "string" } },
+          required: ["entityId"],
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const { entityId } = request.params as { entityId: string };
+
+        if (!entityId || typeof entityId !== "string" || entityId.trim() === "") {
+          return reply.status(400).send({
+            success: false,
+            error: { code: "INVALID_REQUEST", message: "Entity ID must be a non-empty string" },
+          });
+        }
+
+        const entity = await kgService.getEntity(entityId);
+        if (!entity) {
+          return reply.status(404).send({
+            success: false,
+            error: { code: "ENTITY_NOT_FOUND", message: "Entity not found" },
+          });
+        }
+
+        reply.send({ success: true, data: entity });
+      } catch (error) {
+        reply.status(500).send({
+          success: false,
+          error: {
+            code: "ENTITY_FETCH_FAILED",
+            message: "Failed to fetch entity",
+            details: error instanceof Error ? error.message : "Unknown error",
+          },
+        });
+      }
+    }
+  );
+
+  // Alias: /graph/entities/:entityId -> /graph/entity/:entityId
+  app.get(
+    "/graph/entities/:entityId",
+    async (request, reply) => {
+      const params = request.params as { entityId: string };
+      const res = await (app as any).inject({
+        method: "GET",
+        url: `/graph/entity/${encodeURIComponent(params.entityId)}`,
+      });
+      reply.status(res.statusCode).send(res.body ?? res.payload);
+    }
+  );
+
+  // GET /api/graph/relationship/:relationshipId - Get single relationship by ID
+  app.get(
+    "/graph/relationship/:relationshipId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: { relationshipId: { type: "string" } },
+          required: ["relationshipId"],
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const { relationshipId } = request.params as { relationshipId: string };
+
+        if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
+          return reply.status(400).send({
+            success: false,
+            error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" },
+          });
+        }
+
+        const rel = await kgService.getRelationshipById(relationshipId);
+        if (!rel) {
+          return reply.status(404).send({
+            success: false,
+            error: { code: "RELATIONSHIP_NOT_FOUND", message: "Relationship not found" },
+          });
+        }
+
+        reply.send({ success: true, data: rel });
+      } catch (error) {
+        reply.status(500).send({
+          success: false,
+          error: {
+            code: "RELATIONSHIP_FETCH_FAILED",
+            message: "Failed to fetch relationship",
+            details: error instanceof Error ? error.message : "Unknown error",
+          },
+        });
+      }
+    }
+  );
+
+  // GET /api/graph/relationship/:relationshipId/full - Relationship with resolved endpoints
+  app.get(
+    "/graph/relationship/:relationshipId/full",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: { relationshipId: { type: "string" } },
+          required: ["relationshipId"],
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const { relationshipId } = request.params as { relationshipId: string };
+        if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
+          return reply.status(400).send({
+            success: false,
+            error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" },
+          });
+        }
+
+        const rel = await kgService.getRelationshipById(relationshipId);
+        if (!rel) {
+          return reply.status(404).send({
+            success: false,
+            error: { code: "RELATIONSHIP_NOT_FOUND", message: "Relationship not found" },
+          });
+        }
+
+        const [from, to] = await Promise.all([
+          kgService.getEntity(rel.fromEntityId),
+          kgService.getEntity(rel.toEntityId),
+        ]);
+
+        reply.send({ success: true, data: { relationship: rel, from, to } });
+      } catch (error) {
+        reply.status(500).send({
+          success: false,
+          error: {
+            code: "RELATIONSHIP_FULL_FETCH_FAILED",
+            message: "Failed to fetch relationship details",
+            details: error instanceof Error ? error.message : "Unknown error",
+          },
+        });
+      }
+    }
+  );
+
+  // Alias: /graph/relationships/:relationshipId -> /graph/relationship/:relationshipId
+  app.get(
+    "/graph/relationships/:relationshipId",
+    async (request, reply) => {
+      const params = request.params as { relationshipId: string };
+      const res = await (app as any).inject({
+        method: "GET",
+        url: `/graph/relationship/${encodeURIComponent(params.relationshipId)}`,
+      });
+      reply.status(res.statusCode).send(res.body ?? res.payload);
+    }
+  );
   // POST /api/graph/search - Perform semantic and structural searches
   app.post(
     "/graph/search",
@@ -126,6 +295,7 @@ export async function registerGraphRoutes(
                     until: { type: "string", format: "date-time" },
                   },
                 },
+                checkpointId: { type: "string" },
               },
             },
             includeRelated: { type: "boolean" },

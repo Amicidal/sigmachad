@@ -16,6 +16,7 @@ import { FalkorDBService } from "./database/FalkorDBService.js";
 import { QdrantService } from "./database/QdrantService.js";
 import { PostgreSQLService } from "./database/PostgreSQLService.js";
 import { RedisService } from "./database/RedisService.js";
+export type { DatabaseConfig } from "./database";
 
 // Type definitions for better type safety
 export interface DatabaseQueryResult {
@@ -233,9 +234,10 @@ export class DatabaseService {
           await this.redisService.initialize();
         }
         if (typeof (this.redisService as any)?.close === "function") {
+          const redisRef = this.redisService;
           initializedServices.push({
-            service: this.redisService,
-            close: () => this.redisService.close(),
+            service: redisRef as any,
+            close: () => (redisRef as any).close(),
           });
         }
       }

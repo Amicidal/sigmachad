@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { expectSuccess } from '../../test-utils/assertions';
+import { expectSuccess, expectError } from '../../test-utils/assertions';
 import { FastifyInstance } from 'fastify';
 import { APIGateway } from '../../../src/api/APIGateway.js';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
@@ -64,8 +64,8 @@ describe('API Middleware Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-ratelimit-limit']).toBeDefined();
-      expect(response.headers['x-ratelimit-remaining']).toBeDefined();
+      expect(response.headers['x-ratelimit-limit']).toEqual(expect.any(String));
+      expect(response.headers['x-ratelimit-remaining']).toEqual(expect.any(String));
     });
 
     it('should apply different limits to different endpoints', async () => {
@@ -86,7 +86,9 @@ describe('API Middleware Integration', () => {
       });
 
       expect(healthResponse.statusCode).toBe(200);
-      expect([200, 400]).toContain(searchResponse.statusCode); // Search might fail due to missing data, but rate limiting should work
+      expect(searchResponse.statusCode).toBe(200);
+      const body = JSON.parse(searchResponse.payload);
+      expectSuccess(body);
     });
 
     it('should handle rate limit exceeded gracefully', async () => {
@@ -157,7 +159,7 @@ describe('API Middleware Integration', () => {
         payload: JSON.stringify(searchRequest),
       });
 
-      expect([200, 400]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -184,7 +186,13 @@ describe('API Middleware Integration', () => {
         payload: JSON.stringify(searchRequest),
       });
 
-      expect([200, 400, 413]).toContain(response.statusCode); // 413 = Payload Too Large
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expectSuccess(body);
+      } else if (response.statusCode === 413) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
     });
 
     it('should validate content-type headers', async () => {
@@ -197,7 +205,13 @@ describe('API Middleware Integration', () => {
         payload: JSON.stringify({ query: 'test' }),
       });
 
-      expect([200, 400]).toContain(response.statusCode);
+      const bodyCT = JSON.parse(response.payload);
+      if (response.statusCode === 200) {
+        expectSuccess(bodyCT);
+      } else {
+        expect(response.statusCode).toBe(400);
+        expect(bodyCT).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: expect.any(String) }) }));
+      }
     });
   });
 
@@ -214,9 +228,9 @@ describe('API Middleware Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['access-control-allow-origin']).toBeDefined();
+      expect(response.headers['access-control-allow-origin']).toEqual(expect.any(String));
       expect(response.headers['access-control-allow-methods']).toContain('POST');
-      expect(response.headers['access-control-allow-headers']).toBeDefined();
+      expect(response.headers['access-control-allow-headers']).toEqual(expect.any(String));
       expect(response.headers['access-control-allow-credentials']).toBe('true');
     });
 
@@ -230,7 +244,7 @@ describe('API Middleware Integration', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['access-control-allow-origin']).toBeDefined();
+      expect(response.headers['access-control-allow-origin']).toEqual(expect.any(String));
       expect(response.headers['access-control-allow-credentials']).toBe('true');
     });
 
@@ -291,7 +305,7 @@ describe('API Middleware Integration', () => {
         payload: JSON.stringify({ query: 'test' }),
       });
 
-      expect([200, 400]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
       // Response logging should include status code and response time
     });
 
@@ -363,8 +377,7 @@ describe('API Middleware Integration', () => {
       const body = JSON.parse(response.payload);
       expect(body.error).toBe('Not Found');
       expect(body.message).toContain('not found');
-      expect(body.requestId).toBeDefined();
-      expect(body.timestamp).toBeDefined();
+      expect(body).toEqual(expect.objectContaining({ requestId: expect.any(String), timestamp: expect.any(String) }));
     });
 
     it('should handle server errors with proper format', async () => {
@@ -387,11 +400,10 @@ describe('API Middleware Integration', () => {
         expect(response.statusCode).toBe(500);
 
         const body = JSON.parse(response.payload);
-        expect(body.error).toBeDefined();
+        expect(body.error).toEqual(expect.any(Object));
         expect(body.error.code).toBe('GRAPH_SEARCH_FAILED');
-        expect(body.error.message).toBeDefined();
-        expect(body.requestId).toBeDefined();
-        expect(body.timestamp).toBeDefined();
+        expect(body.error.message).toEqual(expect.any(String));
+        expect(body).toEqual(expect.objectContaining({ requestId: expect.any(String), timestamp: expect.any(String) }));
 
         // In production, detailed error info should be hidden
         if (process.env.NODE_ENV === 'production') {
@@ -416,9 +428,7 @@ describe('API Middleware Integration', () => {
       expect(response.statusCode).toBe(400);
 
       const body = JSON.parse(response.payload);
-      expect(body.error).toBeDefined();
-      expect(body.error.code).toBeDefined();
-      expect(body.error.message).toBeDefined();
+      expect(body.error).toEqual(expect.objectContaining({ code: expect.anything(), message: expect.any(String) }));
     });
   });
 
@@ -437,7 +447,13 @@ describe('API Middleware Integration', () => {
       });
 
       // Should either succeed, fail with validation error, or timeout
-      expect([200, 400, 408, 504]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expectSuccess(body);
+      } else if ([400, 408, 504].includes(response.statusCode)) {
+        const body = JSON.parse(response.payload || '{}');
+        expectError(body);
+      }
     });
 
     it('should handle slow requests appropriately', async () => {
@@ -469,7 +485,7 @@ describe('API Middleware Integration', () => {
         payload: JSON.stringify(normalRequest),
       });
 
-      expect([200, 400]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
     });
 
     it('should reject requests exceeding size limits', async () => {
@@ -490,7 +506,13 @@ describe('API Middleware Integration', () => {
         payload: JSON.stringify(largeRequest),
       });
 
-      expect([200, 400, 413]).toContain(response.statusCode); // 413 = Payload Too Large
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expectSuccess(body);
+      } else if (response.statusCode === 413) {
+        const body = JSON.parse(response.payload || '{}');
+        expectError(body);
+      }
     });
   });
 

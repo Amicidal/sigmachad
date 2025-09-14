@@ -8,6 +8,7 @@ export type TRPCContext = {
     dbService: DatabaseService;
     astParser: ASTParser;
     fileWatcher: FileWatcher;
+    authToken?: string;
 };
 export declare const t: {
     _config: import("@trpc/server").RootConfig<{
@@ -90,6 +91,26 @@ export declare const publicProcedure: import("@trpc/server").ProcedureBuilder<{
     _output_in: typeof import("@trpc/server").unsetMarker;
     _output_out: typeof import("@trpc/server").unsetMarker;
     _meta: object;
+}>;
+export declare const adminProcedure: import("@trpc/server").ProcedureBuilder<{
+    _config: import("@trpc/server").RootConfig<{
+        ctx: TRPCContext;
+        meta: object;
+        errorShape: any;
+        transformer: typeof superjson;
+    }>;
+    _meta: object;
+    _ctx_out: {
+        kgService: KnowledgeGraphService;
+        dbService: DatabaseService;
+        astParser: ASTParser;
+        fileWatcher: FileWatcher;
+        authToken: string | undefined;
+    };
+    _input_in: typeof import("@trpc/server").unsetMarker;
+    _input_out: typeof import("@trpc/server").unsetMarker;
+    _output_in: typeof import("@trpc/server").unsetMarker;
+    _output_out: typeof import("@trpc/server").unsetMarker;
 }>;
 export declare const createTestContext: (opts?: Partial<TRPCContext>) => TRPCContext;
 //# sourceMappingURL=base.d.ts.map

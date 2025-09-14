@@ -139,7 +139,7 @@ export class MaintenanceService {
         };
     }
     async runReindexing(task) {
-        var _a;
+        var _a, _b;
         const changes = [];
         const stats = { indexesRebuilt: 0, collectionsReindexed: 0, tablesReindexed: 0 };
         try {
@@ -158,10 +158,11 @@ export class MaintenanceService {
                 }
             }
             // 2. Reindex PostgreSQL
-            const tables = await this.dbService.postgresQuery(`
+            const tablesResult = await this.dbService.postgresQuery(`
         SELECT tablename FROM pg_tables
         WHERE schemaname = 'public'
       `);
+            const tables = ((_a = tablesResult === null || tablesResult === void 0 ? void 0 : tablesResult.rows) !== null && _a !== void 0 ? _a : []);
             for (const table of tables) {
                 try {
                     await this.dbService.postgresQuery(`REINDEX TABLE ${table.tablename}`);
@@ -182,7 +183,7 @@ export class MaintenanceService {
         return {
             taskId: task.id,
             success: true,
-            duration: Date.now() - (((_a = task.startTime) === null || _a === void 0 ? void 0 : _a.getTime()) || 0),
+            duration: Date.now() - (((_b = task.startTime) === null || _b === void 0 ? void 0 : _b.getTime()) || 0),
             changes,
             statistics: stats
         };

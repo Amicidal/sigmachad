@@ -26,6 +26,12 @@ import { registerImpactRoutes } from "./routes/impact.js";
 import { registerSCMRoutes } from "./routes/scm.js";
 import { registerDocsRoutes } from "./routes/docs.js";
 import { registerSecurityRoutes } from "./routes/security.js";
+import { registerHistoryRoutes } from "./routes/history.js";
+import fastifyStatic from "@fastify/static";
+import path from "path";
+import { registerAdminUIRoutes } from "./routes/admin-ui.js";
+import { registerAssetsProxyRoutes } from "./routes/assets.js";
+import { registerGraphViewerRoutes } from "./routes/graph-subgraph.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { MCPRouter } from "./mcp-router.js";
 import { WebSocketRouter } from "./websocket-router.js";
@@ -36,6 +42,7 @@ export class APIGateway {
         var _a, _b, _c, _d, _e, _f;
         this.kgService = kgService;
         this.dbService = dbService;
+        this._historyIntervals = {};
         this.healthCheckCache = null;
         this.HEALTH_CACHE_TTL = 5000; // Cache health check for 5 seconds
         this.config = {
@@ -111,8 +118,12 @@ export class APIGateway {
                 }
                 try {
                     if (typeof anyApp.printRoutes === "function") {
-                        const routesStr = anyApp.printRoutes();
-                        return typeof routesStr === "string" && routesStr.includes(path);
+                        const routesStr = String(anyApp.printRoutes());
+                        const m = String(method || "").toUpperCase();
+                        // Build a conservative regex to find exact METHOD + SPACE + PATH on a single line
+                        const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                        const pattern = new RegExp(`(^|\n)\s*${escape(m)}\s+${escape(path)}(\s|$)`, "m");
+                        return pattern.test(routesStr);
                     }
                 }
                 catch (_b) {
@@ -161,6 +172,32 @@ export class APIGateway {
         this.app.addHook("onRequest", async (request, reply) => {
             if (request.url.includes("/admin")) {
                 await adminRateLimit(request, reply);
+            }
+        });
+        // Simple auth guard for admin/history endpoints (optional; enabled when ADMIN_API_TOKEN is set)
+        this.app.addHook("onRequest", async (request, reply) => {
+            try {
+                const needsAuth = request.url.startsWith("/api/v1/admin") ||
+                    request.url.startsWith("/api/v1/history");
+                const token = process.env.ADMIN_API_TOKEN || "";
+                if (needsAuth && token) {
+                    const headerKey = request.headers["x-api-key"] || "";
+                    const authz = request.headers["authorization"] || "";
+                    const bearer = authz.toLowerCase().startsWith("bearer ") ? authz.slice(7) : authz;
+                    const ok = headerKey === token || bearer === token;
+                    if (!ok) {
+                        reply.status(401).send({
+                            success: false,
+                            error: {
+                                code: "UNAUTHORIZED",
+                                message: "Missing or invalid API key for admin/history",
+                            },
+                        });
+                    }
+                }
+            }
+            catch (_a) {
+                // fail-open to avoid blocking dev if something goes wrong
             }
         });
         // Request ID middleware
@@ -257,6 +294,120 @@ export class APIGateway {
             const { openApiSpec } = await import("./trpc/openapi.js");
             reply.send(openApiSpec);
         });
+        // Convenience root aliases for common admin endpoints (no prefix)
+        // Forward POST /sync -> /api/v1/sync
+        this.app.post("/sync", async (request, reply) => {
+            var _a, _b;
+            const res = await this.app.inject({
+                method: "POST",
+                url: "/api/v1/sync",
+                headers: {
+                    "content-type": request.headers["content-type"] ||
+                        "application/json",
+                },
+                payload: typeof request.body === "string"
+                    ? request.body
+                    : JSON.stringify((_a = request.body) !== null && _a !== void 0 ? _a : {}),
+            });
+            reply.status(res.statusCode).send((_b = res.body) !== null && _b !== void 0 ? _b : res.payload);
+        });
+        // Forward GET /sync-status -> /api/v1/sync-status
+        this.app.get("/sync-status", async (_request, reply) => {
+            var _a;
+            const res = await this.app.inject({
+                method: "GET",
+                url: "/api/v1/sync-status",
+            });
+            reply.status(res.statusCode).send((_a = res.body) !== null && _a !== void 0 ? _a : res.payload);
+        });
+        // Forward POST /sync/pause -> /api/v1/sync/pause
+        this.app.post("/sync/pause", async (request, reply) => {
+            var _a, _b;
+            const res = await this.app.inject({
+                method: "POST",
+                url: "/api/v1/sync/pause",
+                headers: {
+                    "content-type": request.headers["content-type"] ||
+                        "application/json",
+                },
+                payload: typeof request.body === "string"
+                    ? request.body
+                    : JSON.stringify((_a = request.body) !== null && _a !== void 0 ? _a : {}),
+            });
+            reply.status(res.statusCode).send((_b = res.body) !== null && _b !== void 0 ? _b : res.payload);
+        });
+        // Forward POST /sync/resume -> /api/v1/sync/resume
+        this.app.post("/sync/resume", async (request, reply) => {
+            var _a, _b;
+            const res = await this.app.inject({
+                method: "POST",
+                url: "/api/v1/sync/resume",
+                headers: {
+                    "content-type": request.headers["content-type"] ||
+                        "application/json",
+                },
+                payload: typeof request.body === "string"
+                    ? request.body
+                    : JSON.stringify((_a = request.body) !== null && _a !== void 0 ? _a : {}),
+            });
+            reply.status(res.statusCode).send((_b = res.body) !== null && _b !== void 0 ? _b : res.payload);
+        });
+        // Forward admin-prefixed root aliases for compatibility
+        this.app.post("/admin/sync", async (request, reply) => {
+            var _a, _b;
+            const res = await this.app.inject({
+                method: "POST",
+                url: "/api/v1/sync",
+                headers: {
+                    "content-type": request.headers["content-type"] ||
+                        "application/json",
+                },
+                payload: typeof request.body === "string"
+                    ? request.body
+                    : JSON.stringify((_a = request.body) !== null && _a !== void 0 ? _a : {}),
+            });
+            reply.status(res.statusCode).send((_b = res.body) !== null && _b !== void 0 ? _b : res.payload);
+        });
+        this.app.get("/admin/sync-status", async (_request, reply) => {
+            var _a;
+            const res = await this.app.inject({
+                method: "GET",
+                url: "/api/v1/sync-status",
+            });
+            reply.status(res.statusCode).send((_a = res.body) !== null && _a !== void 0 ? _a : res.payload);
+        });
+        // Serve built Graph Viewer at /ui/graph if present
+        try {
+            const staticDir = path.resolve(process.cwd(), "web", "graph-viewer", "dist");
+            // Encapsulate under a prefix to avoid route collisions and enable SPA fallback
+            this.app.register(async (app) => {
+                // Register static assets within this scope
+                app.register(fastifyStatic, {
+                    root: staticDir,
+                    // No prefix here; the outer scope provides /ui/graph
+                });
+                // SPA fallback: for any not-found within /ui/graph, serve index.html
+                app.setNotFoundHandler(async (_req, reply) => {
+                    try {
+                        return reply.sendFile("index.html");
+                    }
+                    catch (_a) {
+                        reply.code(404).send({
+                            success: false,
+                            error: {
+                                code: "NOT_BUILT",
+                                message: "Graph viewer not built. Run web build.",
+                            },
+                        });
+                    }
+                });
+            }, { prefix: "/ui/graph" });
+        }
+        catch (e) {
+            console.warn("Graph viewer static not available at startup:", e);
+        }
+        registerAdminUIRoutes(this.app, this.kgService, this.dbService);
+        registerAssetsProxyRoutes(this.app);
         // Test route to verify registration is working
         this.app.get("/api/v1/test", async (request, reply) => {
             reply.send({
@@ -277,7 +428,15 @@ export class APIGateway {
                 // registerVDBRoutes(app, this.kgService, this.dbService); // Commented out - file removed
                 registerSCMRoutes(app, this.kgService, this.dbService);
                 registerDocsRoutes(app, this.kgService, this.dbService, this.docParser);
+                // History & Time-travel (stubs for now)
+                await registerHistoryRoutes(app, this.kgService, this.dbService);
                 registerSecurityRoutes(app, this.kgService, this.dbService, this.securityScanner);
+                // Graph Viewer API routes (subgraph + neighbors)
+                await registerGraphViewerRoutes(app, this.kgService, this.dbService);
+                // Admin UI (self-contained)
+                await registerAdminUIRoutes(app, this.kgService, this.dbService);
+                // Assets proxy (for CDN fallback)
+                await registerAssetsProxyRoutes(app);
                 registerAdminRoutes(app, this.kgService, this.dbService, this.fileWatcher || new FileWatcher(), (_a = this.syncServices) === null || _a === void 0 ? void 0 : _a.syncCoordinator, (_b = this.syncServices) === null || _b === void 0 ? void 0 : _b.syncMonitor, (_c = this.syncServices) === null || _c === void 0 ? void 0 : _c.conflictResolver, (_d = this.syncServices) === null || _d === void 0 ? void 0 : _d.rollbackCapabilities, this.backupService, this.loggingService, this.maintenanceService, this.configurationService);
                 console.log("✅ All route modules registered successfully");
             }
@@ -290,11 +449,12 @@ export class APIGateway {
             prefix: "/api/trpc",
             trpcOptions: {
                 router: appRouter,
-                createContext: () => createTRPCContext({
+                createContext: ({ req }) => createTRPCContext({
                     kgService: this.kgService,
                     dbService: this.dbService,
                     astParser: this.astParser,
                     fileWatcher: this.fileWatcher || new FileWatcher(),
+                    req,
                 }),
             },
         });
@@ -474,6 +634,13 @@ export class APIGateway {
             console.log(`🤖 MCP server available at http://${this.config.host}:${this.config.port}/mcp`);
             console.log(`📋 MCP tools: ${this.mcpRouter.getToolCount()} registered`);
             console.log(`🛡️  Rate limiting and validation middleware active`);
+            // Start history schedulers if enabled
+            try {
+                await this.startHistorySchedulers();
+            }
+            catch (e) {
+                console.warn('History schedulers could not be started:', e);
+            }
         }
         catch (error) {
             console.error("Failed to start API Gateway:", error);
@@ -486,6 +653,14 @@ export class APIGateway {
     async stop() {
         // Stop WebSocket router first
         await this.wsRouter.shutdown();
+        // Clear history schedulers
+        try {
+            if (this._historyIntervals.prune)
+                clearInterval(this._historyIntervals.prune);
+            if (this._historyIntervals.checkpoint)
+                clearInterval(this._historyIntervals.checkpoint);
+        }
+        catch (_a) { }
         await this.app.close();
         console.log("🛑 API Gateway stopped");
     }
@@ -505,6 +680,52 @@ export class APIGateway {
             anyApp.__injectWrapped = true;
         }
         return this.app;
+    }
+    // Schedulers for daily prune and daily checkpoint
+    async startHistorySchedulers() {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+        const cfg = (_b = (_a = this.configurationService) === null || _a === void 0 ? void 0 : _a.getHistoryConfig) === null || _b === void 0 ? void 0 : _b.call(_a);
+        const enabled = (_c = cfg === null || cfg === void 0 ? void 0 : cfg.enabled) !== null && _c !== void 0 ? _c : ((process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false');
+        if (!enabled) {
+            console.log('🕒 History disabled; schedulers not started');
+            return;
+        }
+        const retentionDays = (_d = cfg === null || cfg === void 0 ? void 0 : cfg.retentionDays) !== null && _d !== void 0 ? _d : (parseInt(process.env.HISTORY_RETENTION_DAYS || '30', 10) || 30);
+        const hops = (_f = (_e = cfg === null || cfg === void 0 ? void 0 : cfg.checkpoint) === null || _e === void 0 ? void 0 : _e.hops) !== null && _f !== void 0 ? _f : (parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '2', 10) || 2);
+        const pruneHours = (_h = (_g = cfg === null || cfg === void 0 ? void 0 : cfg.schedule) === null || _g === void 0 ? void 0 : _g.pruneIntervalHours) !== null && _h !== void 0 ? _h : (parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || '24', 10) || 24);
+        const checkpointHours = (_k = (_j = cfg === null || cfg === void 0 ? void 0 : cfg.schedule) === null || _j === void 0 ? void 0 : _j.checkpointIntervalHours) !== null && _k !== void 0 ? _k : (parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || '24', 10) || 24);
+        // Daily prune at interval (24h)
+        const dayMs = 24 * 60 * 60 * 1000;
+        const pruneMs = Math.max(1, pruneHours) * 60 * 60 * 1000;
+        const checkpointMs = Math.max(1, checkpointHours) * 60 * 60 * 1000;
+        const runPrune = async () => {
+            try {
+                const r = await this.kgService.pruneHistory(retentionDays);
+                console.log(`🧹 Daily prune completed: versions=${r.versionsDeleted}, edges=${r.edgesClosed}, checkpoints=${r.checkpointsDeleted}`);
+            }
+            catch (e) {
+                console.warn('Daily prune failed:', e);
+            }
+        };
+        this._historyIntervals.prune = setInterval(runPrune, pruneMs);
+        // Daily checkpoint: build seeds from last 24h modified entities (capped)
+        const runCheckpoint = async () => {
+            try {
+                const since = new Date(Date.now() - dayMs);
+                const seeds = await this.kgService.findRecentEntityIds(since, 200);
+                if (seeds.length === 0) {
+                    console.log('📌 Daily checkpoint skipped: no recent entities');
+                    return;
+                }
+                const { checkpointId } = await this.kgService.createCheckpoint(seeds, 'daily', hops);
+                console.log(`📌 Daily checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`);
+            }
+            catch (e) {
+                console.warn('Daily checkpoint failed:', e);
+            }
+        };
+        this._historyIntervals.checkpoint = setInterval(runCheckpoint, checkpointMs);
+        console.log(`🕒 History schedulers started (prune every ${pruneHours}h, checkpoint every ${checkpointHours}h)`);
     }
     // Method to get current configuration
     getConfig() {

@@ -812,7 +812,7 @@ describe('DatabaseService', () => {
     describe('Client Getter Operations', () => {
       it('should return falkordb client when initialized', () => {
         const client = mockDbService.getFalkorDBClient();
-        expect(client).toBeDefined();
+        expect(client).toEqual(expect.any(Object));
         expect(typeof (client as any).sendCommand).toBe('function');
       });
 
@@ -826,7 +826,7 @@ describe('DatabaseService', () => {
 
       it('should return qdrant client when initialized', () => {
         const client = mockDbService.getQdrantClient();
-        expect(client).toBeDefined();
+        expect(client).toEqual(expect.any(Object));
         expect(typeof (client as any).search).toBe('function');
       });
 
@@ -840,7 +840,7 @@ describe('DatabaseService', () => {
 
       it('should return postgres pool when initialized', () => {
         const pool = mockDbService.getPostgresPool();
-        expect(pool).toBeDefined();
+        expect(pool).toEqual(expect.any(Object));
         expect((pool as any).totalCount).toBeGreaterThanOrEqual(0);
       });
 

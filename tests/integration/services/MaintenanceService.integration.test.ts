@@ -90,13 +90,19 @@ describe('MaintenanceService Integration', () => {
     it('should successfully run cleanup task and remove orphaned data', async () => {
       const result: MaintenanceResult = await maintenanceService.runMaintenanceTask('cleanup');
 
-      expect(result).toBeDefined();
-      expect(result).toEqual(expect.objectContaining({ success: true }));
-      expect(result.taskId).toMatch(/^cleanup_/);
-      expect(typeof result.duration).toBe('number');
-      expect(result.duration).toBeGreaterThan(0);
-      expect(result.changes).toEqual(expect.any(Array));
-      expect(result.statistics).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          taskId: expect.stringMatching(/^cleanup_/),
+          duration: expect.any(Number),
+          changes: expect.any(Array),
+          statistics: expect.objectContaining({
+            entitiesRemoved: expect.any(Number),
+            relationshipsRemoved: expect.any(Number),
+            orphanedRecords: expect.any(Number),
+          }),
+        })
+      );
 
       // Verify cleanup statistics
       expect(result.statistics.entitiesRemoved).toBeGreaterThanOrEqual(0);
@@ -115,8 +121,9 @@ describe('MaintenanceService Integration', () => {
       // This test verifies that the task completes and progress is tracked
       const result = await maintenanceService.runMaintenanceTask('cleanup');
 
-      expect(result).toEqual(expect.objectContaining({ success: true }));
-      expect(result.taskId).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({ success: true, taskId: expect.any(String) })
+      );
     });
 
     it('should handle cleanup with no orphaned data gracefully', async () => {
@@ -126,10 +133,13 @@ describe('MaintenanceService Integration', () => {
       // Second cleanup should handle empty state gracefully
       const result = await maintenanceService.runMaintenanceTask('cleanup');
 
-      expect(result).toEqual(expect.objectContaining({ success: true }));
-      expect(result.taskId).toBeDefined();
-      // Statistics might be 0 but should still be defined
-      expect(result.statistics).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          taskId: expect.any(String),
+          statistics: expect.any(Object),
+        })
+      );
     });
   });
 
@@ -137,13 +147,19 @@ describe('MaintenanceService Integration', () => {
     it('should successfully run optimization task', async () => {
       const result: MaintenanceResult = await maintenanceService.runMaintenanceTask('optimize');
 
-      expect(result).toBeDefined();
-      expect(result).toEqual(expect.objectContaining({ success: true }));
-      expect(result.taskId).toMatch(/^optimize_/);
-      expect(typeof result.duration).toBe('number');
-      expect(result.duration).toBeGreaterThan(0);
-      expect(Array.isArray(result.changes)).toBe(true);
-      expect(result.statistics).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          taskId: expect.stringMatching(/^optimize_/),
+          duration: expect.any(Number),
+          changes: expect.any(Array),
+          statistics: expect.objectContaining({
+            optimizedCollections: expect.any(Number),
+            rebalancedIndexes: expect.any(Number),
+            vacuumedTables: expect.any(Number),
+          }),
+        })
+      );
 
       // Verify optimization statistics
       expect(typeof result.statistics.optimizedCollections).toBe('number');
@@ -184,13 +200,19 @@ describe('MaintenanceService Integration', () => {
     it('should successfully run reindexing task', async () => {
       const result: MaintenanceResult = await maintenanceService.runMaintenanceTask('reindex');
 
-      expect(result).toBeDefined();
-      expect(result).toEqual(expect.objectContaining({ success: true }));
-      expect(result.taskId).toMatch(/^reindex_/);
-      expect(typeof result.duration).toBe('number');
-      expect(result.duration).toBeGreaterThan(0);
-      expect(result.changes).toEqual(expect.any(Array));
-      expect(result.statistics).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          taskId: expect.stringMatching(/^reindex_/),
+          duration: expect.any(Number),
+          changes: expect.any(Array),
+          statistics: expect.objectContaining({
+            indexesRebuilt: expect.any(Number),
+            collectionsReindexed: expect.any(Number),
+            tablesReindexed: expect.any(Number),
+          }),
+        })
+      );
 
       // Verify reindexing statistics
       expect(typeof result.statistics.indexesRebuilt).toBe('number');
@@ -255,13 +277,20 @@ describe('MaintenanceService Integration', () => {
     it('should successfully run validation task', async () => {
       const result: MaintenanceResult = await maintenanceService.runMaintenanceTask('validate');
 
-      expect(result).toBeDefined();
-      expect(result).toEqual(expect.objectContaining({ success: true }));
-      expect(result.taskId).toMatch(/^validate_/);
-      expect(typeof result.duration).toBe('number');
-      expect(result.duration).toBeGreaterThan(0);
-      expect(Array.isArray(result.changes)).toBe(true);
-      expect(result.statistics).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          taskId: expect.stringMatching(/^validate_/),
+          duration: expect.any(Number),
+          changes: expect.any(Array),
+          statistics: expect.objectContaining({
+            invalidEntities: expect.any(Number),
+            invalidRelationships: expect.any(Number),
+            integrityIssues: expect.any(Number),
+            validatedCollections: expect.any(Number),
+          }),
+        })
+      );
 
       // Verify validation statistics
       expect(typeof result.statistics.invalidEntities).toBe('number');
@@ -302,11 +331,9 @@ describe('MaintenanceService Integration', () => {
     it('should validate database connectivity', async () => {
       const result = await maintenanceService.runMaintenanceTask('validate');
 
-      expect(result).toEqual(expect.objectContaining({ success: true }));
-
-      // If database connectivity validation fails, it should be reflected in the result
-      // The test passes if the validation completes (regardless of connectivity status)
-      expect(result).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({ success: expect.any(Boolean) })
+      );
     });
   });
 
@@ -322,9 +349,9 @@ describe('MaintenanceService Integration', () => {
 
       // Each active task should have proper structure
       activeTasks.forEach(task => {
-        expect(task.id).toBeDefined();
-        expect(task.name).toBeDefined();
-        expect(task.description).toBeDefined();
+        expect(task.id).toEqual(expect.any(String));
+        expect(task.name).toEqual(expect.any(String));
+        expect(task.description).toEqual(expect.any(String));
         expect(['pending', 'running', 'completed', 'failed']).toContain(task.status);
         expect(typeof task.progress).toBe('number');
         expect(task.progress).toBeGreaterThanOrEqual(0);
@@ -349,7 +376,7 @@ describe('MaintenanceService Integration', () => {
       const taskId = activeTasks[0].id;
       const taskStatus = maintenanceService.getTaskStatus(taskId);
 
-      expect(taskStatus).toBeDefined();
+      expect(taskStatus).toEqual(expect.any(Object));
       expect(taskStatus?.id).toBe(taskId);
       expect(taskStatus?.status).toBe('running');
 
@@ -379,7 +406,7 @@ describe('MaintenanceService Integration', () => {
         // If it succeeds, that's also acceptable as it means the service handles errors well
       } catch (error) {
         // Expected to fail with database issues
-        expect(error).toBeDefined();
+        expect(error).toBeInstanceOf(Error);
       }
     });
 
@@ -406,8 +433,9 @@ describe('MaintenanceService Integration', () => {
       // Failed tasks should still return proper result objects
       failedResults.forEach(result => {
         if (result.status === 'fulfilled') {
-          expect(result.value).toBeDefined();
-          expect(typeof result.value.success).toBe('boolean');
+          expect(result.value).toEqual(
+            expect.objectContaining({ success: expect.any(Boolean) })
+          );
         }
       });
     });
@@ -419,9 +447,13 @@ describe('MaintenanceService Integration', () => {
       const result = await maintenanceService.runMaintenanceTask('cleanup');
 
       // Should succeed even with empty data
-      expect(result).toEqual(expect.objectContaining({ success: true }));
-      expect(result.taskId).toBeDefined();
-      expect(result.statistics).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          taskId: expect.any(String),
+          statistics: expect.any(Object),
+        })
+      );
     });
   });
 

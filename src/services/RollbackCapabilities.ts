@@ -98,10 +98,14 @@ export class RollbackCapabilities {
         (Array.isArray(rollbackPoint.entities) &&
           rollbackPoint.entities.some((entity) => entity.id === entityId)) ||
         (Array.isArray(rollbackPoint.relationships) &&
-          rollbackPoint.relationships.some(
-            (rel) =>
-              rel.fromEntityId === entityId || rel.toEntityId === entityId
-          ));
+          rollbackPoint.relationships.some((rel) => {
+            const prev = rel.previousState as any;
+            const next = rel.newState as any;
+            return (
+              (!!prev && (prev.fromEntityId === entityId || prev.toEntityId === entityId)) ||
+              (!!next && (next.fromEntityId === entityId || next.toEntityId === entityId))
+            );
+          }));
 
       if (hasEntity) {
         entityRollbackPoints.push(rollbackPoint);

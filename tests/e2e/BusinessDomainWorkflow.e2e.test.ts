@@ -237,14 +237,10 @@ Payment processing requires the highest level of security to protect sensitive f
         headers: {
           "content-type": "application/json",
         },
+        payload: JSON.stringify({ docsPath: "docs" }),
       });
-
-      if (
-        docSyncResponse.statusCode === 200 ||
-        docSyncResponse.statusCode === 404
-      ) {
-        console.log("✅ Documentation sync completed");
-      }
+      expect(docSyncResponse.statusCode).toBe(200);
+      console.log("✅ Documentation sync completed");
 
       // ============================================================================
       // PHASE 2: Business Domain Analysis and Code Mapping
@@ -610,38 +606,24 @@ Payment processing requires the highest level of security to protect sensitive f
       // Get business domains (this would be populated by documentation sync)
       const domainsResponse = await app.inject({
         method: "GET",
-        url: "/api/v1/domains",
+        url: "/api/v1/docs/domains",
       });
-
-      if (
-        domainsResponse.statusCode === 200 ||
-        domainsResponse.statusCode === 404
-      ) {
-        if (domainsResponse.statusCode === 200) {
-          const domainsBody = JSON.parse(domainsResponse.payload);
-          console.log(
-            `📊 Found ${domainsBody.data?.length || 0} business domains`
-          );
-        }
-      }
+      expect(domainsResponse.statusCode).toBe(200);
+      const domainsBody = JSON.parse(domainsResponse.payload);
+      console.log(
+        `📊 Found ${domainsBody.data?.length || 0} business domains`
+      );
 
       // Query entities by business domain
       const customerDomainResponse = await app.inject({
         method: "GET",
-        url: "/api/v1/domains/customer-experience/entities",
+        url: "/api/v1/docs/domains/customer-experience/entities",
       });
-
-      if (
-        customerDomainResponse.statusCode === 200 ||
-        customerDomainResponse.statusCode === 404
-      ) {
-        if (customerDomainResponse.statusCode === 200) {
-          const customerBody = JSON.parse(customerDomainResponse.payload);
-          console.log(
-            `👥 Customer domain entities: ${customerBody.data?.length || 0}`
-          );
-        }
-      }
+      expect(customerDomainResponse.statusCode).toBe(200);
+      const customerBody = JSON.parse(customerDomainResponse.payload);
+      console.log(
+        `👥 Customer domain entities: ${customerBody.data?.length || 0}`
+      );
 
       // ============================================================================
       // PHASE 4: Business Impact Analysis
@@ -651,24 +633,17 @@ Payment processing requires the highest level of security to protect sensitive f
       // Simulate changes to customer domain
       const businessImpactResponse = await app.inject({
         method: "GET",
-        url: "/api/v1/business/impact/customer-experience",
+        url: "/api/v1/docs/business/impact/customer-experience",
       });
-
-      if (
-        businessImpactResponse.statusCode === 200 ||
-        businessImpactResponse.statusCode === 404
-      ) {
-        if (businessImpactResponse.statusCode === 200) {
-          const impactBody = JSON.parse(businessImpactResponse.payload);
-          console.log("✅ Business impact analysis completed");
-          console.log(
-            `🎯 Risk Level: ${impactBody.data?.riskLevel || "unknown"}`
-          );
-          console.log(
-            `📈 Change Velocity: ${impactBody.data?.changeVelocity || 0}`
-          );
-        }
-      }
+      expect(businessImpactResponse.statusCode).toBe(200);
+      const bizImpactBody = JSON.parse(businessImpactResponse.payload);
+      console.log("✅ Business impact analysis completed");
+      console.log(
+        `🎯 Risk Level: ${bizImpactBody.data?.riskLevel || "unknown"}`
+      );
+      console.log(
+        `📈 Change Velocity: ${bizImpactBody.data?.changeVelocity || 0}`
+      );
 
       // ============================================================================
       // PHASE 5: Domain-Specific Validation and Testing
@@ -689,14 +664,14 @@ Payment processing requires the highest level of security to protect sensitive f
         }),
       });
 
-      if (customerValidationResponse.statusCode === 200) {
-        const validationBody = JSON.parse(customerValidationResponse.payload);
-        console.log(
-          `🎯 Customer service validation score: ${
-            validationBody.data?.overall?.score || "N/A"
-          }/100`
-        );
-      }
+      expect(customerValidationResponse.statusCode).toBe(200);
+      const customerValidationBody = JSON.parse(customerValidationResponse.payload);
+      expectSuccess(customerValidationBody);
+      console.log(
+        `🎯 Customer service validation score: ${
+          customerValidationBody.data?.overall?.score || "N/A"
+        }/100`
+      );
 
       // Validate payment service (higher security requirements)
       const paymentValidationResponse = await app.inject({
@@ -712,19 +687,19 @@ Payment processing requires the highest level of security to protect sensitive f
         }),
       });
 
-      if (paymentValidationResponse.statusCode === 200) {
-        const validationBody = JSON.parse(paymentValidationResponse.payload);
-        console.log(
-          `🔒 Payment service validation score: ${
-            validationBody.data?.overall?.score || "N/A"
-          }/100`
-        );
-        console.log(
-          `🛡️ Security issues found: ${
-            validationBody.data?.security?.issues?.length || 0
-          }`
-        );
-      }
+      expect(paymentValidationResponse.statusCode).toBe(200);
+      const paymentValidationBody = JSON.parse(paymentValidationResponse.payload);
+      expectSuccess(paymentValidationBody);
+      console.log(
+        `🔒 Payment service validation score: ${
+          paymentValidationBody.data?.overall?.score || "N/A"
+        }/100`
+      );
+      console.log(
+        `🛡️ Security issues found: ${
+          paymentValidationBody.data?.security?.issues?.length || 0
+        }`
+      );
 
       // ============================================================================
       // VERIFICATION: Cross-Domain Analysis and Relationships
@@ -745,31 +720,30 @@ Payment processing requires the highest level of security to protect sensitive f
         }),
       });
 
-      if (domainSearchResponse.statusCode === 200) {
-        const searchBody = JSON.parse(domainSearchResponse.payload);
-        expectSuccess(searchBody);
+      expect(domainSearchResponse.statusCode).toBe(200);
+      const searchBody = JSON.parse(domainSearchResponse.payload);
+      expectSuccess(searchBody);
 
-        console.log(
-          `🔍 Found ${searchBody.data.entities.length} domain-related entities`
-        );
+      console.log(
+        `🔍 Found ${searchBody.data.entities.length} domain-related entities`
+      );
 
-        // Verify different domain implementations are found
-        const customerEntities = searchBody.data.entities.filter((e: any) =>
-          e.path.includes("Customer")
-        );
-        const paymentEntities = searchBody.data.entities.filter((e: any) =>
-          e.path.includes("Payment")
-        );
-        const inventoryEntities = searchBody.data.entities.filter((e: any) =>
-          e.path.includes("Inventory")
-        );
+      // Verify different domain implementations are found
+      const customerEntities = searchBody.data.entities.filter((e: any) =>
+        e.path.includes("Customer")
+      );
+      const paymentEntities = searchBody.data.entities.filter((e: any) =>
+        e.path.includes("Payment")
+      );
+      const inventoryEntities = searchBody.data.entities.filter((e: any) =>
+        e.path.includes("Inventory")
+      );
 
-        console.log(`👥 Customer domain: ${customerEntities.length} entities`);
-        console.log(`💳 Payment domain: ${paymentEntities.length} entities`);
-        console.log(
-          `📦 Inventory domain: ${inventoryEntities.length} entities`
-        );
-      }
+      console.log(`👥 Customer domain: ${customerEntities.length} entities`);
+      console.log(`💳 Payment domain: ${paymentEntities.length} entities`);
+      console.log(
+        `📦 Inventory domain: ${inventoryEntities.length} entities`
+      );
 
       // Verify system health after business domain workflow
       const healthResponse = await app.inject({
@@ -1100,17 +1074,15 @@ The Order Management domain orchestrates the complete order lifecycle from creat
         }),
       });
 
-      if (complexImpactResponse.statusCode === 200) {
-        const impactBody = JSON.parse(complexImpactResponse.payload);
-        expectSuccess(impactBody);
-
-        console.log("✅ Complex multi-domain impact analysis completed");
-        console.log(
-          `🌊 Cascading effects across ${
-            impactBody.data?.cascadingImpact?.length || 0
-          } levels`
-        );
-      }
+      expect(complexImpactResponse.statusCode).toBe(200);
+      const impactBody = JSON.parse(complexImpactResponse.payload);
+      expectSuccess(impactBody);
+      console.log("✅ Complex multi-domain impact analysis completed");
+      console.log(
+        `🌊 Cascading effects across ${
+          impactBody.data?.cascadingImpact?.length || 0
+        } levels`
+      );
 
       console.log("✅ Complex multi-domain relationships handled successfully");
     });
@@ -1423,6 +1395,7 @@ Advanced authentication with MFA, OAuth, and comprehensive security.
         url: "/api/v1/business/impact/user-authentication",
       });
 
+      // Evolution analysis endpoint may be optional; assert only if present
       if (evolutionAnalysisResponse.statusCode === 200) {
         const evolutionBody = JSON.parse(evolutionAnalysisResponse.payload);
         console.log("✅ Domain evolution analysis completed");
@@ -1447,26 +1420,22 @@ Advanced authentication with MFA, OAuth, and comprehensive security.
         }),
       });
 
-      if (comparisonSearchResponse.statusCode === 200) {
-        const comparisonBody = JSON.parse(comparisonSearchResponse.payload);
-        expectSuccess(comparisonBody);
+      expect(comparisonSearchResponse.statusCode).toBe(200);
+      const comparisonBody = JSON.parse(comparisonSearchResponse.payload);
+      expectSuccess(comparisonBody);
 
-        const authEntities = comparisonBody.data.entities.filter(
-          (e: any) => e.name?.includes("Auth") || e.path?.includes("Auth")
-        );
+      const authEntities = comparisonBody.data.entities.filter(
+        (e: any) => e.name?.includes("Auth") || e.path?.includes("Auth")
+      );
 
-        console.log(
-          `🔍 Found ${authEntities.length} authentication-related entities`
-        );
-        console.log("✅ Domain evolution tracking working correctly");
+      console.log(
+        `🔍 Found ${authEntities.length} authentication-related entities`
+      );
+      console.log("✅ Domain evolution tracking working correctly");
 
-        // Add actual test assertions
-        expect(comparisonBody.data.entities.length).toBeGreaterThan(0);
-        expect(authEntities.length).toBeGreaterThan(0);
-      } else {
-        // If search fails, that's also an assertion
-        expect(comparisonSearchResponse.statusCode).toBe(200);
-      }
+      // Add actual test assertions
+      expect(comparisonBody.data.entities.length).toBeGreaterThan(0);
+      expect(authEntities.length).toBeGreaterThan(0);
 
       console.log("✅ Business domain evolution tracking completed");
     });

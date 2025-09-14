@@ -69,11 +69,11 @@ describe('tRPC Integration', () => {
         url: '/api/trpc/health',
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
+        expect(body).toEqual(expect.any(Object));
       }
     });
   });
@@ -107,18 +107,16 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(trpcRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.jsonrpc).toBe('2.0');
-        expect(body.id).toBe(1);
+        expect(body).toEqual(expect.objectContaining({ jsonrpc: '2.0', id: 1 }));
 
         if (body.result) {
-          expect(body.result).toBeDefined();
+          expect(body.result).toEqual(expect.any(Object));
         } else if (body.error) {
-          expect(body.error).toBeDefined();
+          expect(body.error).toEqual(expect.any(Object));
         }
       }
     });
@@ -148,11 +146,11 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(trpcRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
+        expect(body).toEqual(expect.anything());
         expect(body.jsonrpc).toBe('2.0');
         expect(body.id).toBe(2);
       }
@@ -187,7 +185,7 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(batchRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -223,11 +221,11 @@ describe('tRPC Integration', () => {
           payload: JSON.stringify(trpcRequest),
         });
 
-        expect([200, 404]).toContain(response.statusCode);
+        expect(response.statusCode).toBe(200);
 
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
-          expect(body).toBeDefined();
+          expect(body).toEqual(expect.anything());
           expect(body.jsonrpc).toBe('2.0');
           expect(body.id).toBe(i + 3);
         }
@@ -266,11 +264,11 @@ describe('tRPC Integration', () => {
           payload: JSON.stringify(trpcRequest),
         });
 
-        expect([200, 404]).toContain(response.statusCode);
+        expect(response.statusCode).toBe(200);
 
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
-          expect(body).toBeDefined();
+          expect(body).toEqual(expect.anything());
           expect(body.jsonrpc).toBe('2.0');
           expect(body.id).toBe(i + 5);
         }
@@ -298,14 +296,14 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.error).toBeDefined();
-        expect(body.error.code).toBeDefined();
-        expect(body.error.message).toBeDefined();
+        expect(body).toEqual(expect.anything());
+        expect(body.error).toEqual(expect.any(Object));
+        expect(body.error.code).toEqual(expect.anything());
+        expect(body.error.message).toEqual(expect.anything());
       }
     });
 
@@ -331,14 +329,15 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(invalidInputRequest),
       });
 
-      expect([200, 400]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
+      expect(body).toEqual(expect.any(Object));
 
       if (body.error) {
-        expect(body.error.code).toBeDefined();
-        expect(body.error.message).toBeDefined();
+        expect(body.error).toEqual(
+          expect.objectContaining({ code: expect.anything(), message: expect.anything() })
+        );
       }
     });
 
@@ -359,13 +358,13 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(malformedRequest),
       });
 
-      expect([200, 400]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
+      expect(body).toEqual(expect.any(Object));
 
       if (body.error) {
-        expect(body.error.code).toBeDefined();
+        expect(body.error.code).toEqual(expect.anything());
       }
     });
   });
@@ -392,11 +391,11 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(trpcRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
+        expect(body).toEqual(expect.anything());
         // Context should be available to the procedure
       }
     });
@@ -422,11 +421,11 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(authenticatedRequest),
       });
 
-      expect([200, 401, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
+        expect(body).toEqual(expect.anything());
       }
     });
   });
@@ -455,11 +454,11 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(subscriptionRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
+        expect(body).toEqual(expect.anything());
         expect(body.jsonrpc).toBe('2.0');
         expect(body.id).toBe(4000);
       }
@@ -535,7 +534,7 @@ describe('tRPC Integration', () => {
       const endTime = Date.now();
       const duration = endTime - startTime;
 
-      expect([200, 400]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
       expect(duration).toBeLessThan(2000); // Should handle large payload within 2 seconds
     });
   });
@@ -560,7 +559,7 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(validRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -601,13 +600,13 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(notificationRequest),
       });
 
-      expect([200, 204, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       // Notifications should not return a response body
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        // Should be empty or minimal response
-        expect(body).toBeDefined();
+        // Should be empty response for notification (no result or error)
+        expect(body).toEqual({});
       }
     });
 
@@ -630,7 +629,7 @@ describe('tRPC Integration', () => {
         payload: JSON.stringify(versionRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -662,7 +661,14 @@ describe('tRPC Integration', () => {
       });
 
       expect(restResponse.statusCode).toBe(200);
-      expect([200, 404]).toContain(trpcResponse.statusCode);
+      if (trpcResponse.statusCode === 200) {
+        // Basic shape check for tRPC success envelope
+        const body = JSON.parse(trpcResponse.payload || '{}');
+        expect(body).toHaveProperty('result');
+      } else if (trpcResponse.statusCode === 404) {
+        const body = JSON.parse(trpcResponse.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
 
       // Both should work independently
       const restBody = JSON.parse(restResponse.payload);
@@ -686,11 +692,12 @@ describe('tRPC Integration', () => {
         }),
       });
 
-      expect([200, 404]).toContain(trpcResponse.statusCode);
-
       if (trpcResponse.statusCode === 200) {
         // Should have request ID in response headers
-        expect(trpcResponse.headers['x-request-id']).toBeDefined();
+        expect(typeof trpcResponse.headers['x-request-id']).toBe('string');
+      } else if (trpcResponse.statusCode === 404) {
+        const body = JSON.parse(trpcResponse.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
   });

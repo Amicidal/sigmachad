@@ -8,6 +8,8 @@ import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
 import { ASTParser } from "./ASTParser.js";
 import { DatabaseService } from "./DatabaseService.js";
 import { FileChange } from "./FileWatcher.js";
+import { RelationshipType } from "../models/relationships.js";
+import { GitService } from "./GitService.js";
 
 export interface SyncOperation {
   id: string;
@@ -50,6 +52,7 @@ export interface SyncOptions {
   timeout?: number;
   rollbackOnError?: boolean;
   conflictResolution?: "overwrite" | "merge" | "skip" | "manual";
+  batchSize?: number;
 }
 
 export class SynchronizationCoordinator extends EventEmitter {
@@ -57,12 +60,26 @@ export class SynchronizationCoordinator extends EventEmitter {
   private completedOperations = new Map<string, SyncOperation>();
   private operationQueue: SyncOperation[] = [];
   private isProcessing = false;
+  private paused = false;
+  private resumeWaiters: Array<() => void> = [];
   private retryQueue = new Map<
     string,
     { operation: SyncOperation; attempts: number }
   >();
   private maxRetryAttempts = 3;
   private retryDelay = 5000; // 5 seconds
+
+  // Collect relationships that couldn't be resolved during per-file processing
+  private unresolvedRelationships: Array<{
+    relationship: import("../models/relationships.js").GraphRelationship;
+    sourceFilePath?: string;
+  }> = [];
+
+  // Runtime tuning knobs per operation (can be updated during sync)
+  private tuning = new Map<string, { maxConcurrency?: number; batchSize?: number }>();
+
+  // Local symbol index to speed up same-file relationship resolution
+  private localSymbolIndex: Map<string, string> = new Map();
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -77,6 +94,26 @@ export class SynchronizationCoordinator extends EventEmitter {
     this.on("operationCompleted", this.handleOperationCompleted.bind(this));
     this.on("operationFailed", this.handleOperationFailed.bind(this));
     this.on("conflictDetected", this.handleConflictDetected.bind(this));
+  }
+
+  // Update tuning for an active operation; applies on next batch boundary
+  updateTuning(
+    operationId: string,
+    tuning: { maxConcurrency?: number; batchSize?: number }
+  ): boolean {
+    const op = this.activeOperations.get(operationId);
+    if (!op) return false;
+    const current = this.tuning.get(operationId) || {};
+    const merged = { ...current } as { maxConcurrency?: number; batchSize?: number };
+    if (typeof tuning.maxConcurrency === 'number' && isFinite(tuning.maxConcurrency)) {
+      merged.maxConcurrency = Math.max(1, Math.min(Math.floor(tuning.maxConcurrency), 64));
+    }
+    if (typeof tuning.batchSize === 'number' && isFinite(tuning.batchSize)) {
+      merged.batchSize = Math.max(1, Math.min(Math.floor(tuning.batchSize), 5000));
+    }
+    this.tuning.set(operationId, merged);
+    this.emit('syncProgress', op, { phase: 'tuning_updated', progress: 0 });
+    return true;
   }
 
   // Convenience methods used by integration tests
@@ -103,6 +140,10 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   async startFullSynchronization(options: SyncOptions = {}): Promise<string> {
+    // Default: do not include embeddings during full sync; generate them in background later
+    if (options.includeEmbeddings === undefined) {
+      options.includeEmbeddings = false;
+    }
     const operation: SyncOperation = {
       id: `full_sync_${Date.now()}`,
       type: "full",
@@ -118,6 +159,9 @@ export class SynchronizationCoordinator extends EventEmitter {
       errors: [],
       conflicts: [],
     };
+
+    // Attach options to the operation so workers can consult them
+    ;(operation as any).options = options;
 
     this.activeOperations.set(operation.id, operation);
     this.operationQueue.push(operation);
@@ -144,7 +188,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         });
         this.emit("operationFailed", op);
       }
-    }, Math.min(options.timeout ?? 30000, 2000));
+    }, options.timeout ?? 30000);
 
     return operation.id;
   }
@@ -194,7 +238,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         });
         this.emit("operationFailed", op);
       }
-    }, 2000);
+    }, 30000);
 
     return operation.id;
   }
@@ -244,7 +288,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         });
         this.emit("operationFailed", op);
       }
-    }, 2000);
+    }, 30000);
 
     return operation.id;
   }
@@ -257,6 +301,10 @@ export class SynchronizationCoordinator extends EventEmitter {
     this.isProcessing = true;
 
     while (this.operationQueue.length > 0) {
+      // Respect paused state before starting the next operation
+      if (this.paused) {
+        await new Promise<void>((resolve) => this.resumeWaiters.push(resolve));
+      }
       const operation = this.operationQueue.shift()!;
       operation.status = "running";
 
@@ -298,23 +346,70 @@ export class SynchronizationCoordinator extends EventEmitter {
     this.isProcessing = false;
   }
 
+  // Pause/resume controls
+  pauseSync(): void {
+    this.paused = true;
+  }
+
+  resumeSync(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    const waiters = this.resumeWaiters.splice(0);
+    for (const w of waiters) {
+      try { w(); } catch {}
+    }
+    // If there are queued operations and not currently processing, resume processing
+    if (!this.isProcessing && this.operationQueue.length > 0) {
+      void this.processQueue();
+    }
+  }
+
+  isPaused(): boolean {
+    return this.paused;
+  }
+
   private async performFullSync(operation: SyncOperation): Promise<void> {
     // Implementation for full synchronization
     this.emit("syncProgress", operation, { phase: "scanning", progress: 0 });
+
+    // Ensure a Module entity exists for the root package if applicable (best-effort)
+    try {
+      const { ModuleIndexer } = await import('./ModuleIndexer.js');
+      const mi = new ModuleIndexer(this.kgService);
+      await mi.indexRootPackage().catch(() => {});
+    } catch {}
 
     // Scan all source files
     const files = await this.scanSourceFiles();
 
     this.emit("syncProgress", operation, { phase: "parsing", progress: 0.2 });
 
-    // Process files in batches
-    const batchSize = 10;
-    for (let i = 0; i < files.length; i += batchSize) {
-      const batch = files.slice(i, i + batchSize);
+    // Local helper to cooperatively pause execution between units of work
+    const awaitIfPaused = async () => {
+      if (!this.paused) return;
+      await new Promise<void>((resolve) => this.resumeWaiters.push(resolve));
+    };
 
-      for (const file of batch) {
-        try {
-          const result = await this.astParser.parseFile(file);
+    // Process files in batches
+    const opts = ((operation as any).options || {}) as SyncOptions;
+    const includeEmbeddings = opts.includeEmbeddings === true; // default is false; only true when explicitly requested
+
+    // Helper to process a single file
+    const processFile = async (file: string) => {
+      try {
+        const result = await this.astParser.parseFile(file);
+
+          // Build local index for this file's symbols to avoid DB lookups
+          for (const ent of result.entities) {
+            if ((ent as any)?.type === 'symbol') {
+              const nm = (ent as any).name as string | undefined;
+              const p = (ent as any).path as string | undefined;
+              if (nm && p) {
+                const filePath = p.includes(":") ? p.split(":")[0] : p;
+                this.localSymbolIndex.set(`${filePath}:${nm}`, ent.id);
+              }
+            }
+          }
 
           // Detect and handle conflicts before creating entities
           if (result.entities.length > 0 || result.relationships.length > 0) {
@@ -347,44 +442,10 @@ export class SynchronizationCoordinator extends EventEmitter {
             }
           }
 
-          // Create/update entities and relationships
-          for (const entity of result.entities) {
-            try {
-              await this.kgService.createEntity(entity);
-              operation.entitiesCreated++;
-            } catch (entityError) {
-              operation.errors.push({
-                file,
-                type: "database",
-                message: `Failed to create entity ${entity.id}: ${
-                  entityError instanceof Error
-                    ? entityError.message
-                    : "Unknown error"
-                }`,
-                timestamp: new Date(),
-                recoverable: true,
-              });
-            }
-          }
-
-          for (const relationship of result.relationships) {
-            try {
-              await this.kgService.createRelationship(relationship);
-              operation.relationshipsCreated++;
-            } catch (relationshipError) {
-              operation.errors.push({
-                file,
-                type: "database",
-                message: `Failed to create relationship: ${
-                  relationshipError instanceof Error
-                    ? relationshipError.message
-                    : "Unknown error"
-                }`,
-                timestamp: new Date(),
-                recoverable: true,
-              });
-            }
-          }
+          // Accumulate entities and relationships for batch processing
+          (operation as any)._batchEntities = ((operation as any)._batchEntities || []).concat(result.entities);
+          const relsWithSource = result.relationships.map(r => ({ ...(r as any), __sourceFile: file }));
+          (operation as any)._batchRelationships = ((operation as any)._batchRelationships || []).concat(relsWithSource as any);
 
           operation.filesProcessed++;
         } catch (error) {
@@ -396,13 +457,168 @@ export class SynchronizationCoordinator extends EventEmitter {
             recoverable: true,
           });
         }
+      };
+
+    for (let i = 0; i < files.length; ) {
+      const tn = this.tuning.get(operation.id) || {};
+      const bsRaw = tn.batchSize ?? (opts as any).batchSize ?? 60;
+      const batchSize = Math.max(1, Math.min(Math.floor(bsRaw), 1000));
+      const mcRaw = tn.maxConcurrency ?? opts.maxConcurrency ?? 12;
+      const maxConcurrency = Math.max(1, Math.min(Math.floor(mcRaw), batchSize));
+
+      const batch = files.slice(i, i + batchSize);
+      i += batchSize;
+
+      // Run a simple worker pool to process this batch concurrently
+      let idx = 0;
+      const worker = async () => {
+        while (idx < batch.length) {
+          const current = idx++;
+          await awaitIfPaused();
+          await processFile(batch[current]);
+        }
+      };
+      const workers = Array.from({ length: Math.min(maxConcurrency, batch.length) }, () => worker());
+      await Promise.allSettled(workers);
+
+      // After parsing a batch of files, write entities in bulk, then relationships
+      const batchEntities: any[] = (operation as any)._batchEntities || [];
+      const batchRelationships: any[] = (operation as any)._batchRelationships || [];
+      (operation as any)._batchEntities = [];
+      (operation as any)._batchRelationships = [];
+
+      if (batchEntities.length > 0) {
+        try {
+          await this.kgService.createEntitiesBulk(batchEntities, { skipEmbedding: true });
+          operation.entitiesCreated += batchEntities.length;
+        } catch (e) {
+          // Fallback to per-entity creation
+          for (const ent of batchEntities) {
+            try {
+              await this.kgService.createEntity(ent, { skipEmbedding: true });
+              operation.entitiesCreated++;
+            } catch (err) {
+              operation.errors.push({
+                file: (ent as any).path || 'unknown',
+                type: "database",
+                message: `Entity create failed: ${err instanceof Error ? err.message : 'unknown'}`,
+                timestamp: new Date(),
+                recoverable: true,
+              });
+            }
+          }
+        }
+      }
+
+      if (batchRelationships.length > 0) {
+        // Resolve targets first, then create in bulk grouped by type
+        const resolved: any[] = [];
+        for (const relationship of batchRelationships) {
+          try {
+            // Fast path: if toEntityId points to an existing node, accept; else try to resolve
+            const toEntity = await this.kgService.getEntity((relationship as any).toEntityId);
+            if (toEntity) {
+              resolved.push(relationship);
+              continue;
+            }
+          } catch {}
+          try {
+            const resolvedId = await (this as any).resolveRelationshipTarget(
+              relationship,
+              (relationship as any).__sourceFile || undefined
+            );
+            if (resolvedId) {
+              resolved.push({ ...(relationship as any), toEntityId: resolvedId });
+            } else {
+              this.unresolvedRelationships.push({ relationship });
+            }
+          } catch (relationshipError) {
+            operation.errors.push({
+              file: "coordinator",
+              type: "database",
+              message: `Failed to resolve relationship: ${
+                relationshipError instanceof Error
+                  ? relationshipError.message
+                  : "Unknown error"
+              }`,
+              timestamp: new Date(),
+              recoverable: true,
+            });
+            this.unresolvedRelationships.push({ relationship });
+          }
+        }
+        if (resolved.length > 0) {
+          try {
+            await this.kgService.createRelationshipsBulk(resolved as any, { validate: false });
+            operation.relationshipsCreated += resolved.length;
+          } catch (e) {
+            // Fallback to per-relationship creation if bulk fails
+            for (const r of resolved) {
+              try {
+                await this.kgService.createRelationship(r as any, undefined, undefined, { validate: false });
+                operation.relationshipsCreated++;
+              } catch (err) {
+                operation.errors.push({
+                  file: "coordinator",
+                  type: "database",
+                  message: `Failed to create relationship: ${err instanceof Error ? err.message : 'unknown'}`,
+                  timestamp: new Date(),
+                  recoverable: true,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Batch embeddings after entities to avoid per-entity overhead
+      if (includeEmbeddings && batchEntities.length > 0) {
+        try {
+          await this.kgService.createEmbeddingsBatch(batchEntities);
+        } catch (e) {
+          operation.errors.push({
+            file: "coordinator",
+            type: "database",
+            message: `Batch embedding failed: ${e instanceof Error ? e.message : 'unknown'}`,
+            timestamp: new Date(),
+            recoverable: true,
+          });
+        }
+      } else if (!includeEmbeddings && batchEntities.length > 0) {
+        // Accumulate for background embedding after sync completes
+        (operation as any)._embedQueue = ((operation as any)._embedQueue || []).concat(batchEntities);
       }
 
       const progress = 0.2 + (i / files.length) * 0.8;
       this.emit("syncProgress", operation, { phase: "parsing", progress });
     }
 
+    // Post-pass: attempt to resolve and create any deferred relationships now that all entities exist
+    await this.runPostResolution(operation);
+
     this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
+
+    // Fire-and-forget background embeddings if they were skipped during full sync
+    const pendingToEmbed: any[] = (operation as any)._embedQueue || [];
+    if (pendingToEmbed.length > 0) {
+      // Run in background without blocking completion
+      const chunks: any[][] = [];
+      const chunkSize = 200;
+      for (let i = 0; i < pendingToEmbed.length; i += chunkSize) {
+        chunks.push(pendingToEmbed.slice(i, i + chunkSize));
+      }
+      (async () => {
+        for (const c of chunks) {
+          try {
+            await this.kgService.createEmbeddingsBatch(c);
+          } catch (e) {
+            // log and continue
+            try { console.warn("Background embedding batch failed:", e); } catch {}
+          }
+        }
+        try { console.log(`✅ Background embeddings created for ${pendingToEmbed.length} entities`); } catch {}
+      })().catch(() => {});
+    }
   }
 
   private async performIncrementalSync(
@@ -428,7 +644,59 @@ export class SynchronizationCoordinator extends EventEmitter {
     const totalChanges = changes.length;
     let processedChanges = 0;
 
+    // Local helper to cooperatively pause execution between units of work
+    const awaitIfPaused = async () => {
+      if (!this.paused) return;
+      await new Promise<void>((resolve) => this.resumeWaiters.push(resolve));
+    };
+
+    // Create or update a session entity for this incremental operation
+    const sessionId = `session_${operation.id}`;
+    try {
+      await this.kgService.createOrUpdateEntity({
+        id: sessionId,
+        type: "session",
+        startTime: operation.startTime,
+        status: "active",
+        agentType: "sync",
+        changes: [],
+        specs: [],
+      } as any);
+    } catch {}
+
+    // Track entities to embed in batch and session relationships buffer
+    const toEmbed: any[] = [];
+    const sessionRelBuffer: Array<import("../models/relationships.js").GraphRelationship> = [];
+    // Track changed entities for checkpointing and change metadata
+    const changedSeeds = new Set<string>();
+    // Create a Change entity to associate temporal edges for this batch
+    const changeId = `change_${operation.id}`;
+    try {
+      await this.kgService.createOrUpdateEntity({
+        id: changeId,
+        type: "change",
+        changeType: "update",
+        entityType: "batch",
+        entityId: operation.id,
+        timestamp: new Date(),
+        sessionId,
+      } as any);
+      // Link session to this change descriptor
+      try {
+        await this.kgService.createRelationship({
+          id: `rel_${sessionId}_${changeId}_DEPENDS_ON_CHANGE`,
+          fromEntityId: sessionId,
+          toEntityId: changeId,
+          type: RelationshipType.DEPENDS_ON_CHANGE as any,
+          created: new Date(),
+          lastModified: new Date(),
+          version: 1,
+        } as any, undefined, undefined, { validate: false });
+      } catch {}
+    } catch {}
+
     for (const change of changes) {
+      await awaitIfPaused();
       try {
         this.emit("syncProgress", operation, {
           phase: "processing_changes",
@@ -484,11 +752,13 @@ export class SynchronizationCoordinator extends EventEmitter {
                   parseResult.isIncremental &&
                   parseResult.updatedEntities?.includes(entity)
                 ) {
-                  await this.kgService.updateEntity(entity.id, entity);
+                  await this.kgService.updateEntity(entity.id, entity, { skipEmbedding: true });
                   operation.entitiesUpdated++;
+                  toEmbed.push(entity);
                 } else {
-                  await this.kgService.createEntity(entity);
+                  await this.kgService.createEntity(entity, { skipEmbedding: true });
                   operation.entitiesCreated++;
+                  toEmbed.push(entity);
                 }
               } catch (error) {
                 operation.errors.push({
@@ -503,11 +773,21 @@ export class SynchronizationCoordinator extends EventEmitter {
               }
             }
 
-            // Apply relationships
+            // Apply relationships (current layer). Keep for idempotency; uses MERGE semantics downstream.
             for (const relationship of parseResult.relationships) {
               try {
-                await this.kgService.createRelationship(relationship);
-                operation.relationshipsCreated++;
+                const created = await this.resolveAndCreateRelationship(
+                  relationship,
+                  change.path
+                );
+                if (created) {
+                  operation.relationshipsCreated++;
+                } else {
+                  this.unresolvedRelationships.push({
+                    relationship,
+                    sourceFilePath: change.path,
+                  });
+                }
               } catch (error) {
                 operation.errors.push({
                   file: change.path,
@@ -518,6 +798,11 @@ export class SynchronizationCoordinator extends EventEmitter {
                   timestamp: new Date(),
                   recoverable: true,
                 });
+                // Defer for post-pass resolution
+                this.unresolvedRelationships.push({
+                  relationship,
+                  sourceFilePath: change.path,
+                });
               }
             }
 
@@ -525,18 +810,304 @@ export class SynchronizationCoordinator extends EventEmitter {
             if (parseResult.isIncremental && parseResult.removedEntities) {
               for (const entity of parseResult.removedEntities) {
                 try {
+                  // Before deletion, attach temporal relationship to change and session impact
+                  const now2 = new Date();
+                  try {
+                    await this.kgService.createRelationship({
+                      id: `rel_${entity.id}_${changeId}_REMOVED_IN`,
+                      fromEntityId: entity.id,
+                      toEntityId: changeId,
+                      type: RelationshipType.REMOVED_IN as any,
+                      created: now2,
+                      lastModified: now2,
+                      version: 1,
+                    } as any, undefined, undefined, { validate: false });
+                  } catch {}
+                  // Attach MODIFIED_BY with git metadata (best-effort)
+                  try {
+                    const git = new GitService();
+                    const info = await git.getLastCommitInfo(change.path);
+                    await this.kgService.createRelationship({
+                      id: `rel_${entity.id}_${sessionId}_MODIFIED_BY`,
+                      fromEntityId: entity.id,
+                      toEntityId: sessionId,
+                      type: RelationshipType.MODIFIED_BY as any,
+                      created: now2,
+                      lastModified: now2,
+                      version: 1,
+                      metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
+                    } as any, undefined, undefined, { validate: false });
+                  } catch {}
+                  try {
+                    sessionRelBuffer.push({
+                      id: `rel_${sessionId}_${entity.id}_SESSION_IMPACTED`,
+                      fromEntityId: sessionId,
+                      toEntityId: entity.id,
+                      type: RelationshipType.SESSION_IMPACTED,
+                      created: now2,
+                      lastModified: now2,
+                      version: 1,
+                      metadata: { severity: 'high', file: change.path },
+                    } as any);
+                  } catch {}
+                  changedSeeds.add(entity.id);
                   await this.kgService.deleteEntity(entity.id);
                   operation.entitiesDeleted++;
                 } catch (error) {
+                  const label = (entity as any).path || (entity as any).name || (entity as any).title || entity.id;
                   operation.errors.push({
                     file: change.path,
                     type: "database",
-                    message: `Failed to delete entity ${entity.id}: ${
+                    message: `Failed to delete entity ${label}: ${
                       error instanceof Error ? error.message : "Unknown"
                     }`,
                     timestamp: new Date(),
                     recoverable: true,
                   });
+                }
+              }
+            }
+
+            // History layer (versions + validity intervals) when incremental
+            if (parseResult.isIncremental) {
+              const now = new Date();
+
+              // Append versions for updated entities
+              if (Array.isArray(parseResult.updatedEntities)) {
+                for (const ent of parseResult.updatedEntities) {
+                  try {
+                    await this.kgService.appendVersion(ent, { timestamp: now });
+                    operation.entitiesUpdated++;
+                    // Queue session relationship for modified entity
+                    try {
+                      const git = new GitService();
+                      const diff = await git.getUnifiedDiff(change.path, 3);
+                      // Extract small before/after snippets from first hunk
+                      let beforeSnippet = '';
+                      let afterSnippet = '';
+                      if (diff) {
+                        const lines = diff.split('\n');
+                        for (const ln of lines) {
+                          if (ln.startsWith('---') || ln.startsWith('+++') || ln.startsWith('@@')) continue;
+                          if (ln.startsWith('-') && beforeSnippet.length < 400) beforeSnippet += ln.substring(1) + '\n';
+                          if (ln.startsWith('+') && afterSnippet.length < 400) afterSnippet += ln.substring(1) + '\n';
+                          if (beforeSnippet.length >= 400 && afterSnippet.length >= 400) break;
+                        }
+                      }
+                      sessionRelBuffer.push({
+                        id: `rel_${sessionId}_${ent.id}_SESSION_MODIFIED`,
+                        fromEntityId: sessionId,
+                        toEntityId: ent.id,
+                        type: RelationshipType.SESSION_MODIFIED,
+                        created: now,
+                        lastModified: now,
+                        version: 1,
+                        metadata: {
+                          file: change.path,
+                          stateTransition: {
+                            from: 'unknown',
+                            to: 'working',
+                            verifiedBy: 'manual',
+                            confidence: 0.5,
+                            criticalChange: {
+                              entityId: ent.id,
+                              beforeSnippet: beforeSnippet.trim() || undefined,
+                              afterSnippet: afterSnippet.trim() || undefined,
+                            },
+                          },
+                        },
+                      } as any);
+                    } catch {
+                      sessionRelBuffer.push({
+                        id: `rel_${sessionId}_${ent.id}_SESSION_MODIFIED`,
+                        fromEntityId: sessionId,
+                        toEntityId: ent.id,
+                        type: RelationshipType.SESSION_MODIFIED,
+                        created: now,
+                        lastModified: now,
+                        version: 1,
+                        metadata: { file: change.path },
+                      } as any);
+                    }
+                    // Also mark session impacted and link entity to the change
+                    sessionRelBuffer.push({
+                      id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
+                      fromEntityId: sessionId,
+                      toEntityId: ent.id,
+                      type: RelationshipType.SESSION_IMPACTED,
+                      created: now,
+                      lastModified: now,
+                      version: 1,
+                      metadata: { severity: 'medium', file: change.path },
+                    } as any);
+                    try {
+                      await this.kgService.createRelationship({
+                        id: `rel_${ent.id}_${changeId}_MODIFIED_IN`,
+                        fromEntityId: ent.id,
+                        toEntityId: changeId,
+                        type: RelationshipType.MODIFIED_IN as any,
+                        created: now,
+                        lastModified: now,
+                        version: 1,
+                      } as any, undefined, undefined, { validate: false });
+                    } catch {}
+                    // Attach MODIFIED_BY with git metadata (best-effort)
+                    try {
+                      const git = new GitService();
+                      const info = await git.getLastCommitInfo(change.path);
+                      await this.kgService.createRelationship({
+                        id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
+                        fromEntityId: ent.id,
+                        toEntityId: sessionId,
+                        type: RelationshipType.MODIFIED_BY as any,
+                        created: now,
+                        lastModified: now,
+                        version: 1,
+                        metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
+                      } as any, undefined, undefined, { validate: false });
+                    } catch {}
+                    changedSeeds.add(ent.id);
+                  } catch (err) {
+                    operation.errors.push({
+                      file: change.path,
+                      type: "database",
+                      message: `appendVersion failed for ${ent.id}: ${err instanceof Error ? err.message : 'unknown'}`,
+                      timestamp: new Date(),
+                      recoverable: true,
+                    });
+                  }
+                }
+              }
+
+              // Open edges for added relationships (with resolution)
+              if (Array.isArray((parseResult as any).addedRelationships)) {
+                for (const rel of (parseResult as any).addedRelationships as GraphRelationship[]) {
+                  try {
+                    let toId = rel.toEntityId;
+                    // Resolve placeholder targets like kind:name or import:module:symbol
+                    if (!toId || String(toId).includes(":")) {
+                      const resolved = await (this as any).resolveRelationshipTarget(rel, change.path);
+                      if (resolved) toId = resolved;
+                    }
+                    if (toId && rel.fromEntityId) {
+                      await this.kgService.openEdge(rel.fromEntityId, toId as any, rel.type, now);
+                      operation.relationshipsUpdated++;
+                    }
+                  } catch (err) {
+                    operation.errors.push({
+                      file: change.path,
+                      type: "database",
+                      message: `openEdge failed: ${err instanceof Error ? err.message : 'unknown'}`,
+                      timestamp: new Date(),
+                      recoverable: true,
+                    });
+                  }
+                }
+              }
+
+              // Close edges for removed relationships (with resolution)
+              if (Array.isArray((parseResult as any).removedRelationships)) {
+                for (const rel of (parseResult as any).removedRelationships as GraphRelationship[]) {
+                  try {
+                    let toId = rel.toEntityId;
+                    if (!toId || String(toId).includes(":")) {
+                      const resolved = await (this as any).resolveRelationshipTarget(rel, change.path);
+                      if (resolved) toId = resolved;
+                    }
+                    if (toId && rel.fromEntityId) {
+                      await this.kgService.closeEdge(rel.fromEntityId, toId as any, rel.type, now);
+                      operation.relationshipsUpdated++;
+                    }
+                  } catch (err) {
+                    operation.errors.push({
+                      file: change.path,
+                      type: "database",
+                      message: `closeEdge failed: ${err instanceof Error ? err.message : 'unknown'}`,
+                      timestamp: new Date(),
+                      recoverable: true,
+                    });
+                  }
+                }
+              }
+
+              // Created entities: attach CREATED_IN and mark impacted
+              if (Array.isArray((parseResult as any).addedEntities)) {
+                for (const ent of (parseResult as any).addedEntities as any[]) {
+                  try {
+                    const now3 = new Date();
+                    await this.kgService.createRelationship({
+                      id: `rel_${ent.id}_${changeId}_CREATED_IN`,
+                      fromEntityId: ent.id,
+                      toEntityId: changeId,
+                      type: RelationshipType.CREATED_IN as any,
+                      created: now3,
+                      lastModified: now3,
+                      version: 1,
+                    } as any, undefined, undefined, { validate: false });
+                    // Also MODIFIED_BY with git metadata (best-effort)
+                    try {
+                      const git = new GitService();
+                      const info = await git.getLastCommitInfo(change.path);
+                      await this.kgService.createRelationship({
+                        id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
+                        fromEntityId: ent.id,
+                        toEntityId: sessionId,
+                        type: RelationshipType.MODIFIED_BY as any,
+                        created: now3,
+                        lastModified: now3,
+                        version: 1,
+                        metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
+                      } as any, undefined, undefined, { validate: false });
+                    } catch {}
+                    try {
+                      const git = new GitService();
+                      const diff = await git.getUnifiedDiff(change.path, 2);
+                      let afterSnippet = '';
+                      if (diff) {
+                        const lines = diff.split('\n');
+                        for (const ln of lines) {
+                          if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@')) continue;
+                          if (ln.startsWith('+') && afterSnippet.length < 300) afterSnippet += ln.substring(1) + '\n';
+                          if (afterSnippet.length >= 300) break;
+                        }
+                      }
+                      sessionRelBuffer.push({
+                        id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
+                        fromEntityId: sessionId,
+                        toEntityId: ent.id,
+                        type: RelationshipType.SESSION_IMPACTED,
+                        created: now3,
+                        lastModified: now3,
+                        version: 1,
+                        metadata: {
+                          severity: 'low',
+                          file: change.path,
+                          stateTransition: {
+                            from: 'unknown',
+                            to: 'working',
+                            verifiedBy: 'manual',
+                            confidence: 0.4,
+                            criticalChange: {
+                              entityId: ent.id,
+                              afterSnippet: afterSnippet.trim() || undefined,
+                            },
+                          },
+                        },
+                      } as any);
+                    } catch {
+                      sessionRelBuffer.push({
+                        id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
+                        fromEntityId: sessionId,
+                        toEntityId: ent.id,
+                        type: RelationshipType.SESSION_IMPACTED,
+                        created: now3,
+                        lastModified: now3,
+                        version: 1,
+                        metadata: { severity: 'low', file: change.path },
+                      } as any);
+                    }
+                    changedSeeds.add(ent.id);
+                  } catch {}
                 }
               }
             }
@@ -578,6 +1149,58 @@ export class SynchronizationCoordinator extends EventEmitter {
           file: change.path,
           type: "parse",
           message: error instanceof Error ? error.message : "Unknown error",
+          timestamp: new Date(),
+          recoverable: true,
+        });
+      }
+    }
+
+    // Post-pass for any unresolved relationships from this batch
+    await this.runPostResolution(operation);
+
+    // Bulk create session relationships
+    if (sessionRelBuffer.length > 0) {
+      try {
+        await this.kgService.createRelationshipsBulk(sessionRelBuffer, { validate: false });
+      } catch (e) {
+        operation.errors.push({
+          file: "coordinator",
+          type: "database",
+          message: `Bulk session rels failed: ${e instanceof Error ? e.message : 'unknown'}`,
+          timestamp: new Date(),
+          recoverable: true,
+        });
+      }
+    }
+
+    // Create a small checkpoint for changed neighborhood and link session -> checkpoint
+    try {
+      const seeds = Array.from(changedSeeds);
+      if (seeds.length > 0) {
+        const { checkpointId } = await this.kgService.createCheckpoint(seeds, "manual", 2);
+        try {
+          await this.kgService.createRelationship({
+            id: `rel_${sessionId}_${checkpointId}_SESSION_CHECKPOINT`,
+            fromEntityId: sessionId,
+            toEntityId: checkpointId,
+            type: RelationshipType.SESSION_CHECKPOINT as any,
+            created: new Date(),
+            lastModified: new Date(),
+            version: 1,
+          } as any, undefined, undefined, { validate: false });
+        } catch {}
+      }
+    } catch {}
+
+    // Batch-generate embeddings for affected entities
+    if (toEmbed.length > 0) {
+      try {
+        await this.kgService.createEmbeddingsBatch(toEmbed);
+      } catch (e) {
+        operation.errors.push({
+          file: "coordinator",
+          type: "database",
+          message: `Batch embedding failed: ${e instanceof Error ? e.message : 'unknown'}`,
           timestamp: new Date(),
           recoverable: true,
         });
@@ -916,10 +1539,12 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   private handleOperationFailed(operation: SyncOperation): void {
-    console.error(
-      `❌ Sync operation ${operation.id} failed:`,
-      operation.errors
-    );
+    try {
+      const msg = operation.errors?.map(e => `${e.type}:${e.message}`).join('; ');
+      console.error(`❌ Sync operation ${operation.id} failed: ${msg || 'unknown'}`);
+    } catch {
+      console.error(`❌ Sync operation ${operation.id} failed:`, operation.errors);
+    }
 
     // Check if operation has recoverable errors
     const hasRecoverableErrors = operation.errors.some((e) => e.recoverable);
@@ -981,6 +1606,29 @@ export class SynchronizationCoordinator extends EventEmitter {
     console.warn(`⚠️ Sync conflict detected:`, conflict);
     // Could implement conflict resolution logic here
   }
+
+  // Attempt to resolve and create deferred relationships
+  private async runPostResolution(operation: SyncOperation): Promise<void> {
+    if (this.unresolvedRelationships.length === 0) return;
+    this.emit("syncProgress", operation, { phase: "resolving_relationships", progress: 0.95 });
+
+    const pending = this.unresolvedRelationships.splice(0);
+    let createdCount = 0;
+    for (const item of pending) {
+      try {
+        const created = await (this as any).resolveAndCreateRelationship(
+          item.relationship,
+          item.sourceFilePath
+        );
+        if (created) createdCount++;
+      } catch {
+        // keep silent; will try in next sync if needed
+      }
+    }
+    if (createdCount > 0) {
+      operation.relationshipsCreated += createdCount;
+    }
+  }
 }
 
 export interface PartialUpdate {
@@ -989,3 +1637,143 @@ export interface PartialUpdate {
   type: "update" | "delete" | "create";
   newValue?: any;
 }
+
+// --- Resolution helpers ---
+import { GraphRelationship } from "../models/relationships.js";
+
+export interface FileLikeEntity { path?: string }
+
+declare module "./SynchronizationCoordinator" {
+  interface SynchronizationCoordinator {
+    resolveAndCreateRelationship(
+      relationship: GraphRelationship,
+      sourceFilePath?: string
+    ): Promise<boolean>;
+    resolveRelationshipTarget(
+      relationship: GraphRelationship,
+      sourceFilePath?: string
+    ): Promise<string | null>;
+  }
+}
+
+// Implement as prototype methods to avoid reordering class definitions
+(SynchronizationCoordinator as any).prototype.resolveAndCreateRelationship = async function (
+  this: SynchronizationCoordinator,
+  relationship: GraphRelationship,
+  sourceFilePath?: string
+): Promise<boolean> {
+  try {
+    const toEntity = await (this as any).kgService.getEntity(
+      relationship.toEntityId
+    );
+    if (toEntity) {
+      await (this as any).kgService.createRelationship(relationship, undefined, undefined, { validate: false });
+      return true;
+    }
+  } catch {}
+
+  const resolvedId = await (this as any).resolveRelationshipTarget(
+    relationship,
+    sourceFilePath
+  );
+  if (!resolvedId) return false;
+  const resolvedRel = { ...relationship, toEntityId: resolvedId } as GraphRelationship;
+  await (this as any).kgService.createRelationship(resolvedRel, undefined, undefined, { validate: false });
+  return true;
+};
+
+(SynchronizationCoordinator as any).prototype.resolveRelationshipTarget = async function (
+  this: SynchronizationCoordinator,
+  relationship: GraphRelationship,
+  sourceFilePath?: string
+): Promise<string | null> {
+  const to = (relationship.toEntityId as any) || "";
+
+  // Explicit file placeholder: file:<relPath>:<name>
+  {
+    const fileMatch = to.match(/^file:(.+?):(.+)$/);
+    if (fileMatch) {
+      const relPath = fileMatch[1];
+      const name = fileMatch[2];
+      try {
+        const ent = await (this as any).kgService.findSymbolInFile(relPath, name);
+        if (ent) return ent.id;
+      } catch {}
+      return null;
+    }
+  }
+
+  let currentFilePath = sourceFilePath;
+  if (!currentFilePath) {
+    try {
+      const fromEntity = await (this as any).kgService.getEntity(
+        relationship.fromEntityId
+      );
+      if (fromEntity && (fromEntity as any).path) {
+        const p = (fromEntity as any).path as string;
+        currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+      }
+    } catch {}
+  }
+
+  const kindMatch = to.match(/^(class|interface|function|typeAlias):(.+)$/);
+  if (kindMatch) {
+    const kind = kindMatch[1];
+    const name = kindMatch[2];
+    if (currentFilePath) {
+      // Use local index first to avoid DB roundtrips
+      const key = `${currentFilePath}:${name}`;
+      const localId = (this as any).localSymbolIndex?.get?.(key);
+      if (localId) return localId;
+      const local = await (this as any).kgService.findSymbolInFile(currentFilePath, name);
+      if (local) return local.id;
+      // Prefer nearby directory symbols if available
+      const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 3);
+      if (near && near.length > 0) return near[0].id;
+    }
+    const candidates = await (this as any).kgService.findSymbolByKindAndName(
+      kind,
+      name
+    );
+    if (candidates.length > 0) return candidates[0].id;
+    return null;
+  }
+
+  const importMatch = to.match(/^import:(.+?):(.+)$/);
+  if (importMatch) {
+    const name = importMatch[2];
+    if (currentFilePath) {
+      const local = await (this as any).kgService.findSymbolInFile(
+        currentFilePath,
+        name
+      );
+      if (local) return local.id;
+      // Prefer nearby directory symbols for imported names
+      const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 5);
+      if (near && near.length > 0) return near[0].id;
+    }
+    const candidates = await (this as any).kgService.findSymbolsByName(name);
+    if (candidates.length > 0) return candidates[0].id;
+    return null;
+  }
+
+  const externalMatch = to.match(/^external:(.+)$/);
+  if (externalMatch) {
+    const name = externalMatch[1];
+    if (currentFilePath) {
+      const local = await (this as any).kgService.findSymbolInFile(
+        currentFilePath,
+        name
+      );
+      if (local) return local.id;
+      // Prefer nearby matches
+      const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 5);
+      if (near && near.length > 0) return near[0].id;
+    }
+    const candidates = await (this as any).kgService.findSymbolsByName(name);
+    if (candidates.length > 0) return candidates[0].id;
+    return null;
+  }
+
+  return null;
+};

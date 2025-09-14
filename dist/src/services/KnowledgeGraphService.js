@@ -183,6 +183,68 @@ export class KnowledgeGraphService extends EventEmitter {
         }
         return entity;
     }
+
+    // Batch-create entities in a single GRAPH.QUERY for higher throughput
+    async createEntitiesBatch(entities, options) {
+        if (!entities || entities.length === 0)
+            return;
+        // Build a combined CREATE statement with unique parameter names per entity
+        const segments = [];
+        const params = {};
+        const toParam = (key, idx) => `${key}_${idx}`;
+        entities.forEach((entity, idx) => {
+            const labels = this.getEntityLabels(entity).join(":");
+            const properties = this.sanitizeProperties(entity);
+            const keys = ["id", "type", ...Object.keys(properties).filter(k => k !== "id" && k !== "type")];
+            const assignments = keys.map((k) => `${k}: $${toParam(k, idx)}`).join(", ");
+            segments.push(`CREATE (n_${idx}:${labels} { ${assignments} })`);
+            // Fill params (coerce Dates/objects like in single create)
+            const base = { id: entity.id, type: entity.type };
+            for (const [key, value] of Object.entries({ ...base, ...properties })) {
+                let v = value;
+                if (v instanceof Date) v = v.toISOString();
+                else if (Array.isArray(v) || (typeof v === "object" && v !== null)) v = JSON.stringify(v);
+                params[toParam(key, idx)] = v;
+            }
+        });
+        const query = segments.join("\n");
+        await this.db.falkordbQuery(query, params);
+        // Batch-embed if requested
+        if (!(options?.skipEmbedding)) {
+            try {
+                await this.createEmbeddingsBatch(entities);
+            } catch { /* ignore embedding batch errors */ }
+        }
+        // Invalidate caches for created entities
+        for (const e of entities) this.invalidateEntityCache(e.id);
+    }
+
+    // Batch-create relationships with MATCH+CREATE chains
+    async createRelationshipsBatch(relationships) {
+        if (!relationships || relationships.length === 0)
+            return;
+        const segments = [];
+        const params = {};
+        relationships.forEach((rel, idx) => {
+            const fromK = `from_${idx}`;
+            const toK = `to_${idx}`;
+            const idK = `rid_${idx}`;
+            const createdK = `rcreated_${idx}`;
+            const modifiedK = `rmodified_${idx}`;
+            const versionK = `rversion_${idx}`;
+            const metaK = `rmeta_${idx}`;
+            segments.push(`MATCH (a_${idx} {id: $${fromK}}), (b_${idx} {id: $${toK}}) CREATE (a_${idx})-[:${rel.type} { id: $${idK}, created: $${createdK}, lastModified: $${modifiedK}, version: $${versionK}, metadata: $${metaK} }]->(b_${idx})`);
+            params[fromK] = rel.fromEntityId;
+            params[toK] = rel.toEntityId;
+            params[idK] = rel.id;
+            params[createdK] = rel.created instanceof Date ? rel.created.toISOString() : (rel.created || new Date()).toISOString?.() || String(rel.created);
+            params[modifiedK] = rel.lastModified instanceof Date ? rel.lastModified.toISOString() : (rel.lastModified || new Date()).toISOString?.() || String(rel.lastModified);
+            params[versionK] = rel.version ?? 1;
+            params[metaK] = JSON.stringify(rel.metadata || {});
+        });
+        const query = segments.join("\n");
+        await this.db.falkordbQuery(query, params);
+    }
     async updateEntity(entityId, updates) {
         // Convert dates to ISO strings for FalkorDB
         const sanitizedUpdates = { ...updates };

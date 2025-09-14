@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { v4 as uuidv4 } from "uuid";
-import { expectSuccess } from "../../test-utils/assertions";
+import { expectSuccess, expectError } from "../../test-utils/assertions";
 import { FastifyInstance } from "fastify";
 import { APIGateway } from "../../../src/api/APIGateway.js";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
@@ -138,7 +138,7 @@ describe("Vector Database API Integration", () => {
         payload: JSON.stringify(searchRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode); // 404 if endpoint not implemented yet
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -238,7 +238,10 @@ describe("Vector Database API Integration", () => {
         payload: JSON.stringify(highSimilarityRequest),
       });
 
-      expect([200, 404]).toContain(highSimilarityResponse.statusCode);
+      if (highSimilarityResponse.statusCode === 404) {
+        throw new Error('Vector DB search endpoint missing; similarity thresholds test requires implementation');
+      }
+      expect(highSimilarityResponse.statusCode).toBe(200);
 
       if (highSimilarityResponse.statusCode === 200) {
         const highBody = JSON.parse(highSimilarityResponse.payload);
@@ -280,6 +283,9 @@ describe("Vector Database API Integration", () => {
         lowBody.data.results.forEach((result: any) => {
           expect(result.similarity).toBeGreaterThanOrEqual(0.1);
         });
+      } else {
+        const highBody = JSON.parse(highSimilarityResponse.payload || '{}');
+        expectError(highBody);
       }
     });
 
@@ -344,7 +350,10 @@ describe("Vector Database API Integration", () => {
         payload: JSON.stringify(functionSearchRequest),
       });
 
-      expect([200, 404]).toContain(functionResponse.statusCode);
+      if (functionResponse.statusCode === 404) {
+        throw new Error('Vector DB search endpoint missing; entity type filtering test requires implementation');
+      }
+      expect(functionResponse.statusCode).toBe(200);
 
       if (functionResponse.statusCode === 200) {
         const functionBody = JSON.parse(functionResponse.payload);
@@ -379,6 +388,9 @@ describe("Vector Database API Integration", () => {
         classBody.data.results.forEach((result: any) => {
           expect(result.entity.kind).toBe("class");
         });
+      } else {
+        const body = JSON.parse(functionResponse.payload || '{}');
+        expectError(body);
       }
     });
 
@@ -397,7 +409,7 @@ describe("Vector Database API Integration", () => {
         payload: JSON.stringify(searchRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -423,12 +435,12 @@ describe("Vector Database API Integration", () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      expect([400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(400);
 
       if (response.statusCode === 400) {
         const body = JSON.parse(response.payload);
         expect(body.success).toBe(false);
-        expect(body.error).toBeDefined();
+        expect(body.error).toEqual(expect.any(Object));
       }
     });
 
@@ -485,7 +497,7 @@ describe("Vector Database API Integration", () => {
         payload: JSON.stringify(filteredSearchRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -544,7 +556,7 @@ describe("Vector Database API Integration", () => {
 
       // All requests should succeed
       responses.forEach((response) => {
-        expect([200, 404]).toContain(response.statusCode);
+        expect(response.statusCode).toBe(200);
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
           expectSuccess(body);

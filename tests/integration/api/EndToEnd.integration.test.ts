@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { expectSuccess } from "../../test-utils/assertions";
+import { expectSuccess, expectError } from "../../test-utils/assertions";
 import { FastifyInstance } from "fastify";
 import { APIGateway } from "../../../src/api/APIGateway.js";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
@@ -91,7 +91,7 @@ describe("API End-to-End Integration", () => {
         payload: JSON.stringify(designRequest),
       });
 
-      expect([200, 201]).toContain(designResponse.statusCode);
+      expect(designResponse.statusCode).toBe(200);
 
       if (
         designResponse.statusCode === 200 ||
@@ -151,12 +151,10 @@ describe("API End-to-End Integration", () => {
           url: `/api/v1/graph/dependencies/${specId}`,
         });
 
-        expect([200, 404]).toContain(dependencyResponse.statusCode);
-
-        if (dependencyResponse.statusCode === 200) {
-          const dependencyBody = JSON.parse(dependencyResponse.payload);
-          expectSuccess(dependencyBody);
-        }
+        // Newly created spec typically has no dependencies yet
+        expect(dependencyResponse.statusCode).toBe(404);
+        const dependencyBody = JSON.parse(dependencyResponse.payload || '{}');
+        expectError(dependencyBody);
 
         // Step 5: Record some test execution results
         const testResults = [
@@ -197,7 +195,10 @@ describe("API End-to-End Integration", () => {
           url: `/api/v1/tests/performance/${specId}`,
         });
 
-        expect([200, 404]).toContain(performanceResponse.statusCode);
+        // No performance data is expected for a new spec
+        expect(performanceResponse.statusCode).toBe(404);
+        const perfBody = JSON.parse(performanceResponse.payload || '{}');
+        expectError(perfBody);
 
         // Step 7: Verify overall system health
         const healthResponse = await app.inject({
@@ -279,7 +280,12 @@ describe("API End-to-End Integration", () => {
         url: `/api/v1/graph/examples/${codeEntity.id}`,
       });
 
-      expect([200, 404]).toContain(examplesResponse.statusCode);
+      // No examples are expected without relationships
+      expect(examplesResponse.statusCode).toBe(404);
+      {
+        const body = JSON.parse(examplesResponse.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
 
       // Step 4: Analyze dependencies
       const dependencyResponse = await app.inject({
@@ -287,7 +293,11 @@ describe("API End-to-End Integration", () => {
         url: `/api/v1/graph/dependencies/${codeEntity.id}`,
       });
 
-      expect([200, 404]).toContain(dependencyResponse.statusCode);
+      expect(dependencyResponse.statusCode).toBe(404);
+      {
+        const body = JSON.parse(dependencyResponse.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
 
       // Step 5: Generate tests for this function
       const testSpec = {
@@ -356,7 +366,11 @@ describe("API End-to-End Integration", () => {
         url: `/api/v1/tests/coverage/${codeEntity.id}`,
       });
 
-      expect([200, 404]).toContain(coverageResponse.statusCode);
+      expect(coverageResponse.statusCode).toBe(200);
+      if (coverageResponse.statusCode === 404) {
+        const body = JSON.parse(coverageResponse.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
     });
   });
 
@@ -485,7 +499,7 @@ describe("API End-to-End Integration", () => {
         payload: JSON.stringify(specRequest),
       });
 
-      expect([200, 201]).toContain(specResponse.statusCode);
+      expect(specResponse.statusCode).toBe(200);
 
       if (specResponse.statusCode === 200 || specResponse.statusCode === 201) {
         const specBody = JSON.parse(specResponse.payload);
@@ -652,7 +666,7 @@ describe("API End-to-End Integration", () => {
         payload: JSON.stringify(specRequest),
       });
 
-      expect([200, 201]).toContain(createResponse.statusCode);
+      expect(createResponse.statusCode).toBe(200);
 
       if (
         createResponse.statusCode === 200 ||
@@ -679,7 +693,7 @@ describe("API End-to-End Integration", () => {
         const foundSpec = searchBody.data.entities.find(
           (e: any) => e.id === specId
         );
-        expect(foundSpec).toBeDefined();
+        expect(foundSpec).toEqual(expect.any(Object));
         expect(foundSpec.title).toBe(specRequest.title);
 
         // Step 3: Generate tests for the specification
@@ -737,7 +751,7 @@ describe("API End-to-End Integration", () => {
         const finalSpec = finalSearchBody.data.entities.find(
           (e: any) => e.id === specId
         );
-        expect(finalSpec).toBeDefined();
+        expect(finalSpec).toEqual(expect.any(Object));
         expect(finalSpec.title).toBe(specRequest.title);
 
         // Step 6: Get performance metrics (should work even if no data)
@@ -746,7 +760,11 @@ describe("API End-to-End Integration", () => {
           url: `/api/v1/tests/performance/${specId}`,
         });
 
-        expect([200, 404]).toContain(performanceResponse.statusCode);
+        expect(performanceResponse.statusCode).toBe(200);
+        if (performanceResponse.statusCode === 404) {
+          const body = JSON.parse(performanceResponse.payload || '{}');
+          expect(body).toEqual(expect.objectContaining({ success: false }));
+        }
       }
     });
   });

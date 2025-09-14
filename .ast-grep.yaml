@@ -1,0 +1,120 @@
+rules:
+  - id: no-focused-tests
+    message: "Do not commit focused tests (describe/it/test.only)."
+    severity: error
+    language: ts
+    rule:
+      any:
+        - pattern: describe.only($A)
+        - pattern: it.only($A)
+        - pattern: test.only($A)
+    constraints:
+      filepath: "/tests/"
+
+  - id: no-skipped-tests
+    message: "Avoid committed skipped tests (describe/it/test.skip)."
+    severity: warning
+    language: ts
+    rule:
+      any:
+        - pattern: describe.skip($A)
+        - pattern: it.skip($A)
+        - pattern: test.skip($A)
+    constraints:
+      filepath: "/tests/"
+
+  - id: test-must-have-expect
+    message: "Test callback should include at least one expect()."
+    severity: warning
+    language: ts
+    rule:
+      any:
+        - pattern: it($NAME, $FN)
+        - pattern: test($NAME, $FN)
+    constraints:
+      filepath: "/tests/"
+      metavars:
+        FN:
+          kind: [function, arrow_function]
+          not:
+            has:
+              pattern: expect($X)
+
+  - id: existence-only-assertions-in-test
+    message: "Test uses only existence assertions; add shape/value checks."
+    severity: info
+    language: ts
+    rule:
+      any:
+        - pattern: it($NAME, $FN)
+        - pattern: test($NAME, $FN)
+    constraints:
+      filepath: "/tests/"
+      metavars:
+        FN:
+          kind: [function, arrow_function]
+          has:
+            any:
+              - pattern: expect($X).toBeDefined()
+              - pattern: expect($X).toBeTruthy()
+          not:
+            has:
+              any:
+                - pattern: expect($X).toEqual($Y)
+                - pattern: expect($X).toStrictEqual($Y)
+                - pattern: expect.objectContaining($Y)
+                - pattern: expect.arrayContaining($Y)
+                - pattern: expect($X).toContain($Y)
+                - pattern: expect($X).toHaveProperty($Y)
+                - pattern: expect($X).toBe($Y)
+                - pattern: expect($X).toMatch($Y)
+                - pattern: expect($X).toBeGreaterThan($Y)
+                - pattern: expect($X).toBeLessThan($Y)
+                - pattern: expect($X).toThrow($Y)
+
+  - id: status-code-only-assertion
+    message: "Assert response body shape/fields alongside statusCode checks."
+    severity: warning
+    language: ts
+    rule:
+      any:
+        - pattern: it($NAME, $FN)
+        - pattern: test($NAME, $FN)
+    constraints:
+      filepath: "/tests/"
+      metavars:
+        FN:
+          kind: [function, arrow_function]
+          has:
+            any:
+              - pattern: expect($R.statusCode).toBe(200)
+              - pattern: expect($R.statusCode).toBe(201)
+          not:
+            has:
+              any:
+                - pattern: JSON.parse($R.payload)
+                - pattern: expectSuccess($BODY)
+                - pattern: expect($BODY).toEqual(expect.objectContaining($OBJ))
+                - pattern: expect($BODY.success).toBe(true)
+                - pattern: expect($BODY.data)
+
+  - id: lax-statuscode-assertion
+    message: "Avoid expect([codes]).toContain(response.statusCode); assert explicit branches with payload checks."
+    language: ts
+    severity: warning
+    rule:
+      any:
+        - pattern: expect([$A, $B]).toContain($RESP.statusCode)
+        - pattern: expect([$A, $B, $C]).toContain($RESP.statusCode)
+        - pattern: expect([$A, $B, $C, $D]).toContain($RESP.statusCode)
+    constraints:
+      filepath: "/tests/"
+
+  - id: resolves-not-to-throw-only
+    message: "Prefer asserting outputs/state in addition to .resolves.not.toThrow()."
+    language: ts
+    severity: info
+    rule:
+      pattern: await expect($CALL).resolves.not.toThrow()
+    constraints:
+      filepath: "/tests/"

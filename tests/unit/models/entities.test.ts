@@ -1865,7 +1865,7 @@ describe('Entity Types and Interfaces', () => {
 
       if (isSymbol(entity)) {
         // This should not execute for file entity
-        expect(true).toBe(false); // Should not reach here
+        throw new Error('Unexpected code path: isSymbol branch for file entity');
       }
     });
   });

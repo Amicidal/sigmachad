@@ -11,9 +11,10 @@ export interface Relationship {
     lastModified: Date;
     version: number;
     metadata?: Record<string, any>;
+    validFrom?: Date;
+    validTo?: Date | null;
 }
 export declare enum RelationshipType {
-    BELONGS_TO = "BELONGS_TO",
     CONTAINS = "CONTAINS",
     DEFINES = "DEFINES",
     EXPORTS = "EXPORTS",
@@ -23,58 +24,60 @@ export declare enum RelationshipType {
     IMPLEMENTS = "IMPLEMENTS",
     EXTENDS = "EXTENDS",
     DEPENDS_ON = "DEPENDS_ON",
-    USES = "USES",
     TESTS = "TESTS",
     VALIDATES = "VALIDATES",
-    LOCATED_IN = "LOCATED_IN",
     REQUIRES = "REQUIRES",
     IMPACTS = "IMPACTS",
-    LINKED_TO = "LINKED_TO",
+    IMPLEMENTS_SPEC = "IMPLEMENTS_SPEC",
     PREVIOUS_VERSION = "PREVIOUS_VERSION",
-    CHANGED_AT = "CHANGED_AT",
     MODIFIED_BY = "MODIFIED_BY",
     CREATED_IN = "CREATED_IN",
-    INTRODUCED_IN = "INTRODUCED_IN",
     MODIFIED_IN = "MODIFIED_IN",
     REMOVED_IN = "REMOVED_IN",
+    OF = "OF",
     DESCRIBES_DOMAIN = "DESCRIBES_DOMAIN",
     BELONGS_TO_DOMAIN = "BELONGS_TO_DOMAIN",
     DOCUMENTED_BY = "DOCUMENTED_BY",
     CLUSTER_MEMBER = "CLUSTER_MEMBER",
-    DOMAIN_RELATED = "DOMAIN_RELATED",
     HAS_SECURITY_ISSUE = "HAS_SECURITY_ISSUE",
     DEPENDS_ON_VULNERABLE = "DEPENDS_ON_VULNERABLE",
     SECURITY_IMPACTS = "SECURITY_IMPACTS",
     PERFORMANCE_IMPACT = "PERFORMANCE_IMPACT",
-    COVERAGE_PROVIDES = "COVERAGE_PROVIDES",
-    PERFORMANCE_REGRESSION = "PERFORMANCE_REGRESSION"
+    PERFORMANCE_REGRESSION = "PERFORMANCE_REGRESSION",
+    SESSION_MODIFIED = "SESSION_MODIFIED",
+    SESSION_IMPACTED = "SESSION_IMPACTED",
+    SESSION_CHECKPOINT = "SESSION_CHECKPOINT",
+    BROKE_IN = "BROKE_IN",
+    FIXED_IN = "FIXED_IN",
+    DEPENDS_ON_CHANGE = "DEPENDS_ON_CHANGE",
+    CHECKPOINT_INCLUDES = "CHECKPOINT_INCLUDES"
 }
 export interface StructuralRelationship extends Relationship {
-    type: RelationshipType.BELONGS_TO | RelationshipType.CONTAINS | RelationshipType.DEFINES | RelationshipType.EXPORTS | RelationshipType.IMPORTS;
+    type: RelationshipType.CONTAINS | RelationshipType.DEFINES | RelationshipType.EXPORTS | RelationshipType.IMPORTS;
 }
 export interface CodeRelationship extends Relationship {
-    type: RelationshipType.CALLS | RelationshipType.REFERENCES | RelationshipType.IMPLEMENTS | RelationshipType.EXTENDS | RelationshipType.DEPENDS_ON | RelationshipType.USES;
+    type: RelationshipType.CALLS | RelationshipType.REFERENCES | RelationshipType.IMPLEMENTS | RelationshipType.EXTENDS | RelationshipType.DEPENDS_ON;
     strength?: number;
     context?: string;
 }
 export interface TestRelationship extends Relationship {
-    type: RelationshipType.TESTS | RelationshipType.VALIDATES | RelationshipType.LOCATED_IN;
+    type: RelationshipType.TESTS | RelationshipType.VALIDATES;
     testType?: 'unit' | 'integration' | 'e2e';
     coverage?: number;
 }
 export interface SpecRelationship extends Relationship {
-    type: RelationshipType.REQUIRES | RelationshipType.IMPACTS | RelationshipType.LINKED_TO;
+    type: RelationshipType.REQUIRES | RelationshipType.IMPACTS | RelationshipType.IMPLEMENTS_SPEC;
     impactLevel?: 'high' | 'medium' | 'low';
     priority?: 'critical' | 'high' | 'medium' | 'low';
 }
 export interface TemporalRelationship extends Relationship {
-    type: RelationshipType.PREVIOUS_VERSION | RelationshipType.CHANGED_AT | RelationshipType.MODIFIED_BY | RelationshipType.CREATED_IN | RelationshipType.INTRODUCED_IN | RelationshipType.MODIFIED_IN | RelationshipType.REMOVED_IN;
+    type: RelationshipType.PREVIOUS_VERSION | RelationshipType.MODIFIED_BY | RelationshipType.CREATED_IN | RelationshipType.MODIFIED_IN | RelationshipType.REMOVED_IN | RelationshipType.OF;
     changeType?: 'create' | 'update' | 'delete' | 'rename' | 'move';
     author?: string;
     commitHash?: string;
 }
 export interface DocumentationRelationship extends Relationship {
-    type: RelationshipType.DESCRIBES_DOMAIN | RelationshipType.BELONGS_TO_DOMAIN | RelationshipType.DOCUMENTED_BY | RelationshipType.CLUSTER_MEMBER | RelationshipType.DOMAIN_RELATED;
+    type: RelationshipType.DESCRIBES_DOMAIN | RelationshipType.BELONGS_TO_DOMAIN | RelationshipType.DOCUMENTED_BY | RelationshipType.CLUSTER_MEMBER;
     confidence?: number;
     inferred?: boolean;
     source?: string;
@@ -86,13 +89,44 @@ export interface SecurityRelationship extends Relationship {
     cvssScore?: number;
 }
 export interface PerformanceRelationship extends Relationship {
-    type: RelationshipType.PERFORMANCE_IMPACT | RelationshipType.COVERAGE_PROVIDES | RelationshipType.PERFORMANCE_REGRESSION;
+    type: RelationshipType.PERFORMANCE_IMPACT | RelationshipType.PERFORMANCE_REGRESSION;
     executionTime?: number;
     memoryUsage?: number;
     coveragePercentage?: number;
     benchmarkValue?: number;
 }
-export type GraphRelationship = StructuralRelationship | CodeRelationship | TestRelationship | SpecRelationship | TemporalRelationship | DocumentationRelationship | SecurityRelationship | PerformanceRelationship;
+export interface SessionRelationship extends Relationship {
+    type: RelationshipType.SESSION_MODIFIED | RelationshipType.SESSION_IMPACTED | RelationshipType.SESSION_CHECKPOINT | RelationshipType.BROKE_IN | RelationshipType.FIXED_IN | RelationshipType.DEPENDS_ON_CHANGE;
+    sessionId: string;
+    timestamp: Date;
+    sequenceNumber: number;
+    changeInfo?: {
+        elementType: 'function' | 'class' | 'import' | 'test';
+        elementName: string;
+        operation: 'added' | 'modified' | 'deleted' | 'renamed';
+        semanticHash?: string;
+        affectedLines?: number;
+    };
+    stateTransition?: {
+        from: 'working' | 'broken' | 'unknown';
+        to: 'working' | 'broken' | 'unknown';
+        verifiedBy: 'test' | 'build' | 'manual';
+        confidence: number;
+        criticalChange?: {
+            entityId: string;
+            beforeSnippet?: string;
+            afterSnippet?: string;
+        };
+    };
+    impact?: {
+        severity: 'high' | 'medium' | 'low';
+        testsFailed?: string[];
+        testsFixed?: string[];
+        buildError?: string;
+        performanceImpact?: number;
+    };
+}
+export type GraphRelationship = StructuralRelationship | CodeRelationship | TestRelationship | SpecRelationship | TemporalRelationship | DocumentationRelationship | SecurityRelationship | PerformanceRelationship | SessionRelationship;
 export interface RelationshipQuery {
     fromEntityId?: string;
     toEntityId?: string;

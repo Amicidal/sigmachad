@@ -93,18 +93,20 @@ describe('Admin API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.success).toBe(true);
-      expect(body.data).toBeDefined();
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
       
       const health = body.data;
       expect(health.overall).toBe('healthy');
-      expect(health.components).toBeDefined();
-      expect(health.components.graphDatabase).toBeDefined();
-      expect(health.components.vectorDatabase).toBeDefined();
-      expect(health.components.fileWatcher).toBeDefined();
+      expect(health.components).toEqual(
+        expect.objectContaining({
+          graphDatabase: expect.any(Object),
+          vectorDatabase: expect.any(Object),
+          fileWatcher: expect.any(Object),
+        })
+      );
       expect(health.components.apiServer).toEqual({ status: 'healthy' });
       
-      expect(health.metrics).toBeDefined();
+      expect(health.metrics).toEqual(expect.any(Object));
       expect(health.metrics.uptime).toBeGreaterThan(0);
       expect(typeof health.metrics.totalEntities).toBe('number');
       expect(typeof health.metrics.totalRelationships).toBe('number');
@@ -187,20 +189,19 @@ describe('Admin API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.success).toBe(true);
-      expect(body.data).toBeDefined();
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
 
       const status = body.data;
       expect(typeof status.isActive).toBe('boolean');
-      expect(status.lastSync).toBeDefined();
+      expect(status.lastSync).toEqual(expect.any(String));
       expect(typeof status.queueDepth).toBe('number');
       expect(typeof status.processingRate).toBe('number');
       
-      expect(status.errors).toBeDefined();
+      expect(status.errors).toEqual(expect.any(Object));
       expect(typeof status.errors.count).toBe('number');
       expect(Array.isArray(status.errors.recent)).toBe(true);
       
-      expect(status.performance).toBeDefined();
+      expect(status.performance).toEqual(expect.any(Object));
       expect(typeof status.performance.syncLatency).toBe('number');
       expect(typeof status.performance.throughput).toBe('number');
       expect(typeof status.performance.successRate).toBe('number');
@@ -218,7 +219,7 @@ describe('Admin API Endpoints Integration', () => {
       });
 
       const body = JSON.parse(response.payload);
-      expect(body.data.isActive).toBeDefined();
+      expect(body.data.isActive).toEqual(expect.any(Boolean));
       
       // Stop sync
       if (syncCoordinator) {
@@ -254,23 +255,22 @@ describe('Admin API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.success).toBe(true);
-      expect(body.data).toBeDefined();
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
 
       const analytics = body.data;
-      expect(analytics.period).toBeDefined();
+      expect(analytics.period).toEqual(expect.any(Object));
       
-      expect(analytics.usage).toBeDefined();
+      expect(analytics.usage).toEqual(expect.any(Object));
       expect(typeof analytics.usage.apiCalls).toBe('number');
       expect(typeof analytics.usage.uniqueUsers).toBe('number');
       expect(typeof analytics.usage.popularEndpoints).toBe('object');
       
-      expect(analytics.performance).toBeDefined();
+      expect(analytics.performance).toEqual(expect.any(Object));
       expect(typeof analytics.performance.averageResponseTime).toBe('number');
       expect(typeof analytics.performance.p95ResponseTime).toBe('number');
       expect(typeof analytics.performance.errorRate).toBe('number');
       
-      expect(analytics.content).toBeDefined();
+      expect(analytics.content).toEqual(expect.any(Object));
       expect(typeof analytics.content.totalEntities).toBe('number');
       expect(typeof analytics.content.totalRelationships).toBe('number');
       expect(typeof analytics.content.growthRate).toBe('number');
@@ -289,8 +289,9 @@ describe('Admin API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.period.since).toBeDefined();
-      expect(body.data.period.until).toBeDefined();
+      expect(body.data.period).toEqual(
+        expect.objectContaining({ since: expect.any(String), until: expect.any(String) })
+      );
     });
 
     it('should track popular endpoints correctly', async () => {
@@ -305,8 +306,7 @@ describe('Admin API Endpoints Integration', () => {
       });
 
       const body = JSON.parse(response.payload);
-      expect(body.data.usage.popularEndpoints).toBeDefined();
-      expect(typeof body.data.usage.popularEndpoints).toBe('object');
+      expect(body.data.usage.popularEndpoints).toEqual(expect.any(Object));
     });
   });
 
@@ -324,8 +324,7 @@ describe('Admin API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.success).toBe(true);
-      expect(body.data).toBeDefined();
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
       expect(body.data.message).toContain('Synchronization');
     });
 
@@ -396,9 +395,10 @@ describe('Admin API Endpoints Integration', () => {
       });
 
       // Should either queue or reject with appropriate message
-      expect([200, 409]).toContain(secondResponse.statusCode);
-      
-      if (secondResponse.statusCode === 409) {
+      if (secondResponse.statusCode === 200) {
+        const body = JSON.parse(secondResponse.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: true }));
+      } else if (secondResponse.statusCode === 409) {
         const body = JSON.parse(secondResponse.payload);
         expect(body.error.message).toContain('already in progress');
       }
@@ -417,7 +417,13 @@ describe('Admin API Endpoints Integration', () => {
       });
 
       // Should accept but ignore invalid fields or reject with 400
-      expect([200, 400]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: true }));
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
     });
   });
 
@@ -435,13 +441,14 @@ describe('Admin API Endpoints Integration', () => {
           url: '/api/v1/admin-health',
         });
 
-        expect([200, 500, 503]).toContain(response.statusCode);
-        
-        if (response.statusCode !== 200) {
-          const body = JSON.parse(response.payload);
-          expect(body.success).toBe(false);
-          expect(body.error).toBeDefined();
-        }
+      if (response.statusCode === 200) {
+        const ok = JSON.parse(response.payload || '{}');
+        expect(ok).toEqual(expect.any(Object));
+      } else {
+        const body = JSON.parse(response.payload);
+        expect(body.success).toBe(false);
+        expect(body.error).toEqual(expect.any(Object));
+      }
       } finally {
         dbService.healthCheck = originalHealthCheck;
       }
@@ -455,7 +462,13 @@ describe('Admin API Endpoints Integration', () => {
       });
 
       // Should still return a response even if sync services are not available
-      expect([200, 503]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.any(Object));
+      } else if (response.statusCode === 503) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
     });
   });
 });

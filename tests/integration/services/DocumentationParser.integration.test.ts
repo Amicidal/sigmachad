@@ -1000,7 +1000,7 @@ Our system implements comprehensive security measures.
         (d as any).name?.toLowerCase().includes("security")
       );
 
-      expect(securityDomain).toBeDefined();
+      expect(securityDomain).toEqual(expect.any(Object));
       expect((securityDomain as any).criticality).toBe("core");
     });
   });
@@ -1111,8 +1111,8 @@ This section is valid.
       const filePath = path.join(testDocsDir, "malformed.md");
       await fs.writeFile(filePath, malformedContent);
 
-      // Should not throw
-      await expect(docParser.parseFile(filePath)).resolves.toBeDefined();
+      // Should not throw and return a parsed object
+      await expect(docParser.parseFile(filePath)).resolves.toEqual(expect.any(Object));
 
       const parsedDoc = await docParser.parseFile(filePath);
       expect(parsedDoc.title).toBe("Incomplete Header");

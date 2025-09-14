@@ -163,13 +163,13 @@ describe("FalkorDBService", () => {
     it("should handle configuration with database number", () => {
       const configWithDb = { url: "redis://localhost:6379", database: 5 };
       const service = new FalkorDBService(configWithDb);
-      expect(service).toBeDefined();
+      expect(service).toBeInstanceOf(FalkorDBService);
     });
 
     it("should handle configuration without database number", () => {
       const configWithoutDb = { url: "redis://localhost:6379" };
       const service = new FalkorDBService(configWithoutDb);
-      expect(service).toBeDefined();
+      expect(service).toBeInstanceOf(FalkorDBService);
     });
 
     it("should accept different Redis URLs", () => {
@@ -182,7 +182,7 @@ describe("FalkorDBService", () => {
 
       urls.forEach((url) => {
         const service = new FalkorDBService({ url });
-        expect(service).toBeDefined();
+        expect(service).toBeInstanceOf(FalkorDBService);
       });
     });
   });
@@ -267,7 +267,7 @@ describe("FalkorDBService", () => {
     it("should return client after initialization", async () => {
       await falkorService.initialize();
       const client = falkorService.getClient();
-      expect(client).toBeDefined();
+      expect(client).toEqual(expect.any(Object));
       expect(client).toBe(mockClient);
     });
 
@@ -295,7 +295,7 @@ describe("FalkorDBService", () => {
       const query = "MATCH (n) RETURN n";
       const result = await falkorService.query(query);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Array));
       expect(Array.isArray(result)).toBe(true);
       expect(result).toHaveLength(1);
 
@@ -322,8 +322,7 @@ describe("FalkorDBService", () => {
       const params = { id: "test-node" };
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
-      expect(Array.isArray(result)).toBe(true);
+      expect(result).toEqual(expect.any(Array));
     });
 
     it("should handle empty query results", async () => {
@@ -383,7 +382,7 @@ describe("FalkorDBService", () => {
       const params = { name: "test node" };
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle numeric parameters", async () => {
@@ -391,7 +390,7 @@ describe("FalkorDBService", () => {
       const params = { id: 123 };
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle boolean parameters", async () => {
@@ -399,7 +398,7 @@ describe("FalkorDBService", () => {
       const params = { active: true };
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle null and undefined parameters", async () => {
@@ -408,7 +407,7 @@ describe("FalkorDBService", () => {
       const params = { nullVal: null, undefinedVal: undefined };
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle array parameters", async () => {
@@ -416,7 +415,7 @@ describe("FalkorDBService", () => {
       const params = { tags: ["tag1", "tag2", "tag3"] };
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle object parameters", async () => {
@@ -430,7 +429,7 @@ describe("FalkorDBService", () => {
       };
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should sanitize dangerous characters in string parameters", async () => {
@@ -438,7 +437,7 @@ describe("FalkorDBService", () => {
       const params = { name: 'test" OR 1=1 --' }; // SQL injection attempt
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
       // The dangerous characters should be escaped
     });
 
@@ -456,7 +455,7 @@ describe("FalkorDBService", () => {
       };
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
   });
 
@@ -474,7 +473,7 @@ describe("FalkorDBService", () => {
 
     it("should execute single command successfully", async () => {
       const result = await falkorService.command("PING");
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result).toHaveProperty("command", "PING");
       expect(result).toHaveProperty("result", "success");
     });
@@ -483,7 +482,7 @@ describe("FalkorDBService", () => {
       const args = ["GRAPH.QUERY", "memento", "MATCH (n) RETURN count(n)"];
       const result = await falkorService.command(...args);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Array));
       // Command returns the raw result from sendCommand, which is the mock response
       expect(Array.isArray(result)).toBe(true);
       expect(result).toHaveLength(3); // [headers, data, statistics]
@@ -594,7 +593,7 @@ describe("FalkorDBService", () => {
       ]);
 
       const result = await falkorService.query("MATCH (n) RETURN n");
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle result parsing errors gracefully", async () => {
@@ -608,7 +607,7 @@ describe("FalkorDBService", () => {
       ]);
 
       const result = await falkorService.query("MATCH (n) RETURN n");
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
       expect(Array.isArray(result)).toBe(true);
     });
   });
@@ -628,7 +627,7 @@ describe("FalkorDBService", () => {
 
       expect(results).toHaveLength(3);
       results.forEach((result) => {
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.anything());
       });
     });
 
@@ -646,7 +645,7 @@ describe("FalkorDBService", () => {
 
       expect(results).toHaveLength(3);
       results.forEach((result) => {
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.anything());
       });
     });
   });
@@ -684,9 +683,9 @@ describe("FalkorDBService", () => {
       // The ongoing operation should either complete or fail gracefully
       try {
         const result = await queryPromise;
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.anything());
       } catch (error) {
-        expect(error).toBeDefined();
+        expect(error as any).toEqual(expect.anything());
       }
 
       // Service should be closed
@@ -700,7 +699,7 @@ describe("FalkorDBService", () => {
 
       const longQuery = "MATCH " + "(n)".repeat(1000) + " RETURN n";
       const result = await falkorService.query(longQuery);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle queries with many parameters", async () => {
@@ -718,21 +717,21 @@ describe("FalkorDBService", () => {
       query += " RETURN n";
 
       const result = await falkorService.query(query, params);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle empty parameter objects", async () => {
       await falkorService.initialize();
 
       const result = await falkorService.query("MATCH (n) RETURN n", {});
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
 
     it("should handle undefined parameters", async () => {
       await falkorService.initialize();
 
       const result = await falkorService.query("MATCH (n) RETURN n", undefined);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
     });
   });
 });

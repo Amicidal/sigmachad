@@ -129,18 +129,31 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 const metrics = syncMonitor.getSyncMetrics();
                 const health = syncMonitor.getHealthMetrics();
                 const activeOps = syncMonitor.getActiveOperations();
+                // Compute instantaneous throughput from active ops (entities+relationships per second)
+                let itemsProcessed = 0;
+                let earliestStart = Date.now();
+                for (const op of activeOps) {
+                    const st = new Date(op.startTime).getTime();
+                    if (st < earliestStart) earliestStart = st;
+                    const eCreated = (op.entitiesCreated ?? (op.entities?.created ?? 0)) || 0;
+                    const rCreated = (op.relationshipsCreated ?? (op.relationships?.created ?? 0)) || 0;
+                    itemsProcessed += eCreated + rCreated;
+                }
+                const elapsedSec = Math.max((Date.now() - earliestStart) / 1000, 0.001);
+                const instThroughput = itemsProcessed / elapsedSec;
+
                 status = {
                     isActive: activeOps.length > 0,
                     lastSync: health.lastSyncTime,
                     queueDepth: syncCoordinator ? syncCoordinator.getQueueLength() : 0,
-                    processingRate: metrics.throughput,
+                    processingRate: instThroughput,
                     errors: {
                         count: metrics.operationsFailed,
                         recent: metrics.operationsFailed > 0 ? [`${metrics.operationsFailed} sync operations failed`] : []
                     },
                     performance: {
                         syncLatency: metrics.averageSyncTime,
-                        throughput: metrics.throughput,
+                        throughput: instThroughput,
                         successRate: metrics.operationsTotal > 0 ?
                             (metrics.operationsSuccessful / metrics.operationsTotal) : 1.0
                     }
@@ -190,7 +203,9 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                     force: { type: 'boolean' },
                     includeEmbeddings: { type: 'boolean' },
                     includeTests: { type: 'boolean' },
-                    includeSecurity: { type: 'boolean' }
+                    includeSecurity: { type: 'boolean' },
+                    maxConcurrency: { type: 'number', minimum: 1, maximum: 32 },
+                    timeout: { type: 'number', minimum: 1000 }
                 }
             }
         }

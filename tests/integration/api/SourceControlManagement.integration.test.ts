@@ -143,9 +143,16 @@ describe("Source Control Management API Integration", () => {
         payload: JSON.stringify(commitRequest),
       });
 
-      expect([200, 201, 404]).toContain(response.statusCode); // 404 if endpoint not implemented yet
+      if (response.statusCode === 404) {
+        throw new Error('SCM endpoints must be implemented for this test');
+      }
+      expect(response.statusCode).toBe(200);
+      if (response.statusCode === 200) {
+        const ok = JSON.parse(response.payload || '{}');
+        expectSuccess(ok);
+      }
 
-      if (response.statusCode === 200 || response.statusCode === 201) {
+      if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         expectSuccess(body);
 
@@ -159,7 +166,7 @@ describe("Source Control Management API Integration", () => {
         );
 
         if (commitRequest.createPR) {
-          expect(body.data.prUrl).toBeDefined();
+          expect(body.data.prUrl).toEqual(expect.any(String));
         }
 
         // Validate linked artifacts
@@ -210,14 +217,21 @@ describe("Source Control Management API Integration", () => {
         payload: JSON.stringify(commitOnlyRequest),
       });
 
-      expect([200, 201, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('SCM endpoints missing; scenario requires implementation');
+      }
+      expect(response.statusCode).toBe(200);
+      if (response.statusCode === 200) {
+        const ok = JSON.parse(response.payload || '{}');
+        expectSuccess(ok);
+      }
 
-      if (response.statusCode === 200 || response.statusCode === 201) {
+      if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         expectSuccess(body);
 
         // Should have commit hash but no PR URL
-        expect(body.data.commitHash).toBeDefined();
+        expect(body.data.commitHash).toEqual(expect.any(String));
         expect(body.data.prUrl).toBeUndefined();
         expect(body.data.branch).toBe(commitOnlyRequest.branchName);
       }
@@ -239,12 +253,15 @@ describe("Source Control Management API Integration", () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      expect([400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('SCM validation requires implemented endpoint');
+      }
+      expect(response.statusCode).toBe(400);
 
       if (response.statusCode === 400) {
         const body = JSON.parse(response.payload);
         expect(body.success).toBe(false);
-        expect(body.error).toBeDefined();
+        expect(body.error).toEqual(expect.any(Object));
         expect(body.error.code).toBe("VALIDATION_ERROR");
       }
     });
@@ -334,9 +351,12 @@ describe("Source Control Management API Integration", () => {
         payload: JSON.stringify(commitWithValidationRequest),
       });
 
-      expect([200, 201, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('SCM endpoints missing; commit scenario requires implementation');
+      }
+      expect(response.statusCode).toBe(200);
 
-      if (response.statusCode === 200 || response.statusCode === 201) {
+      if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         expectSuccess(body);
 
@@ -397,17 +417,24 @@ describe("Source Control Management API Integration", () => {
 
       // All requests should succeed
       responses.forEach((response) => {
-        expect([200, 201, 404]).toContain(response.statusCode);
-        if (response.statusCode === 200 || response.statusCode === 201) {
+        if (response.statusCode === 404) {
+          throw new Error('SCM endpoints missing; batch scenario requires implementation');
+        }
+        expect(response.statusCode).toBe(200);
+        if (response.statusCode === 200) {
+          const ok = JSON.parse(response.payload || '{}');
+          expectSuccess(ok);
+        }
+        if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
           expectSuccess(body);
-          expect(body.data.commitHash).toBeDefined();
+          expect(body.data.commitHash).toEqual(expect.any(String));
         }
       });
 
       // All commits should have unique hashes
       const commitHashes = responses
-        .filter((r) => r.statusCode === 200 || r.statusCode === 201)
+        .filter((r) => r.statusCode === 200)
         .map((r) => JSON.parse(r.payload).data.commitHash);
 
       const uniqueHashes = new Set(commitHashes);
@@ -449,7 +476,10 @@ describe("Source Control Management API Integration", () => {
         payload: JSON.stringify(firstCommitRequest),
       });
 
-      expect([200, 201, 404]).toContain(firstResponse.statusCode);
+      if (firstResponse.statusCode === 404) {
+        throw new Error('SCM commit endpoint missing; branch conflict test requires implementation');
+      }
+      expect(firstResponse.statusCode).toBe(200);
 
       if (
         firstResponse.statusCode === 200 ||
@@ -473,7 +503,10 @@ describe("Source Control Management API Integration", () => {
           payload: JSON.stringify(secondCommitRequest),
         });
 
-        expect([200, 201, 404]).toContain(secondResponse.statusCode);
+        if (secondResponse.statusCode === 404) {
+          throw new Error('SCM commit endpoint missing; branch conflict test requires implementation');
+        }
+        expect(secondResponse.statusCode).toBe(200);
 
         if (
           secondResponse.statusCode === 200 ||
@@ -547,8 +580,15 @@ describe("Source Control Management API Integration", () => {
       );
 
       responses.forEach((response) => {
-        expect([200, 201, 404]).toContain(response.statusCode);
-        if (response.statusCode === 200 || response.statusCode === 201) {
+        if (response.statusCode === 404) {
+          throw new Error('SCM endpoints missing; revert scenario requires implementation');
+        }
+      expect(response.statusCode).toBe(200);
+      if (response.statusCode === 200) {
+        const ok = JSON.parse(response.payload || '{}');
+        expectSuccess(ok);
+      }
+        if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
           expectSuccess(body);
         }

@@ -102,12 +102,15 @@ describe('EmbeddingService', () => {
       const content = 'This is a test document for embedding';
       const result = await embeddingService.generateEmbedding(content);
 
-      expect(result).toBeDefined();
-      expect(result.embedding).toBeInstanceOf(Array);
+      expect(result).toEqual(
+        expect.objectContaining({
+          embedding: expect.any(Array),
+          content: content,
+          model: 'text-embedding-3-small',
+        })
+      );
       expect(result.embedding.length).toBe(1536);
-      expect(result.content).toBe(content);
-      expect(result.model).toBe('text-embedding-3-small');
-      expect(result.usage).toBeDefined();
+      expect(result.usage).toEqual(expect.any(Object));
       expect(typeof result.usage?.prompt_tokens).toBe('number');
       expect(typeof result.usage?.total_tokens).toBe('number');
     });
@@ -130,8 +133,13 @@ describe('EmbeddingService', () => {
       const content = 'Test content';
       const result = await mockService.generateEmbedding(content);
 
-      expect(result).toBeDefined();
-      expect(result.embedding).toBeInstanceOf(Array);
+      expect(result).toEqual(
+        expect.objectContaining({
+          embedding: expect.any(Array),
+          model: 'text-embedding-3-small',
+          content,
+        })
+      );
       expect(result.embedding.length).toBe(1536);
       expect(result.model).toBe('text-embedding-3-small');
       expect(result.content).toBe(content);
@@ -170,7 +178,14 @@ describe('EmbeddingService', () => {
 
       const result = await embeddingService.generateEmbeddingsBatch(inputs);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          results: expect.any(Array),
+          totalTokens: expect.any(Number),
+          totalCost: expect.any(Number),
+          processingTime: expect.any(Number),
+        })
+      );
       expect(result.results).toHaveLength(3);
       expect(typeof result.totalTokens).toBe('number');
       expect(typeof result.totalCost).toBe('number');
@@ -493,7 +508,15 @@ describe('EmbeddingService', () => {
     it('should return correct statistics for service with real embeddings', () => {
       const stats = embeddingService.getStats();
 
-      expect(stats).toBeDefined();
+      expect(stats).toEqual(
+        expect.objectContaining({
+          hasRealEmbeddings: true,
+          model: 'text-embedding-3-small',
+          cacheSize: expect.any(Number),
+          cacheHitRate: expect.any(Number),
+          totalRequests: expect.any(Number),
+        })
+      );
       expect(stats.hasRealEmbeddings).toBe(true);
       expect(stats.model).toBe('text-embedding-3-small');
       expect(typeof stats.cacheSize).toBe('number');
@@ -516,7 +539,9 @@ describe('EmbeddingService', () => {
     it('should return cache statistics', () => {
       const cacheStats = embeddingService.getCacheStats();
 
-      expect(cacheStats).toBeDefined();
+      expect(cacheStats).toEqual(
+        expect.objectContaining({ size: expect.any(Number) })
+      );
       expect(typeof cacheStats.size).toBe('number');
       expect(typeof cacheStats.hitRate).toBe('number');
       expect(typeof cacheStats.totalRequests).toBe('number');
@@ -574,7 +599,7 @@ describe('EmbeddingService', () => {
       const content = 'Test content with specific length';
       const result = await mockService.generateEmbedding(content);
 
-      expect(result.usage).toBeDefined();
+      expect(result.usage).toEqual(expect.anything());
       expect(result.usage?.prompt_tokens).toBeGreaterThan(0);
       expect(result.usage?.total_tokens).toBeGreaterThan(0);
       expect(result.usage?.total_tokens).toBe(result.usage?.prompt_tokens);
@@ -635,7 +660,7 @@ describe('EmbeddingService', () => {
       const result = await embeddingService.generateEmbedding(content);
 
       // Should fall back to mock embedding
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
       expect(result.embedding).toBeInstanceOf(Array);
     });
 
@@ -681,7 +706,7 @@ describe('EmbeddingService', () => {
       const largeContent = 'A'.repeat(10000); // 10KB of content
       const result = await embeddingService.generateEmbedding(largeContent);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
       expect(result.embedding).toBeInstanceOf(Array);
       expect(result.content).toBe(largeContent);
     });
@@ -690,7 +715,7 @@ describe('EmbeddingService', () => {
       const specialContent = 'Content with special chars: áéíóú ñ @#$%^&*()[]{}';
       const result = await embeddingService.generateEmbedding(specialContent);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
       expect(result.content).toBe(specialContent);
     });
   });
@@ -764,12 +789,12 @@ describe('EmbeddingService', () => {
 
       // Generate content from entity
       const content = embeddingService.generateEntityContent(entity);
-      expect(content).toBeDefined();
+      expect(content).toEqual(expect.anything());
 
       // Generate embedding from content
       const result = await embeddingService.generateEmbedding(content, entity.id);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.anything());
       expect(result.entityId).toBe(entity.id);
       expect(result.embedding.length).toBe(1536);
     });

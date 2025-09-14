@@ -17,6 +17,7 @@ import {
   VulnerabilityReport,
 } from "../models/types.js";
 import { EventEmitter } from "events";
+import { noiseConfig } from "../config/noise.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -56,6 +57,19 @@ export class SecurityScanner extends EventEmitter {
   private rules: SecurityRule[] = [];
   private monitoringConfig: SecurityMonitoringConfig | null = null;
   private scanHistory: Map<string, SecurityScanResult> = new Map();
+  private osvCache: Map<string, Vulnerability[]> = new Map();
+  private suppressionRules: Array<{
+    package?: string; // exact name or '*' wildcard
+    id?: string; // exact id or regex (if starts and ends with '/')
+    until?: string; // ISO date; if in past, rule ignored
+    reason?: string;
+  }> = [];
+  private issueSuppressionRules: Array<{
+    ruleId?: string; // exact or regex literal '/.../'
+    path?: string;   // exact, substring, or '*' wildcard (basic)
+    until?: string;  // ISO date
+    reason?: string;
+  }> = [];
 
   constructor(
     private db: DatabaseService,
@@ -73,6 +87,9 @@ export class SecurityScanner extends EventEmitter {
 
     // Load monitoring configuration if exists
     await this.loadMonitoringConfig();
+
+    // Load suppression list (optional)
+    await this.loadSuppressions();
 
     console.log("✅ Security Scanner initialized");
   }
@@ -402,43 +419,57 @@ export class SecurityScanner extends EventEmitter {
     entities: CodebaseEntity[],
     options: SecurityScanOptions
   ): Promise<Vulnerability[]> {
-    // For now, perform basic SCA on package.json files
-    const vulnerabilities: Vulnerability[] = [];
-
+    // Collect dependencies from package.json files and query OSV in batch
+    const depSet = new Map<string, string>(); // name -> version
     for (const entity of entities) {
-      // Type guard for File entities
-      if (
-        !("type" in entity) ||
-        entity.type !== "file" ||
-        !entity.path?.endsWith("package.json")
-      )
-        continue;
+      if (!("type" in entity) || entity.type !== "file" || !entity.path?.endsWith("package.json")) continue;
       const fileEntity = entity as File;
-
       try {
         const content = await this.readFileContent(fileEntity.path);
         if (!content) continue;
-
-        const deps = JSON.parse(content).dependencies || {};
-        const devDeps = JSON.parse(content).devDependencies || {};
-
-        const allDeps = { ...deps, ...devDeps };
-
-        for (const [packageName, version] of Object.entries(allDeps)) {
-          const vulns = await this.checkPackageVulnerabilities(
-            packageName as string,
-            version as string
-          );
-          vulnerabilities.push(...vulns);
+        const parsed = JSON.parse(content);
+        const deps = parsed.dependencies || {};
+        const devDeps = parsed.devDependencies || {};
+        const all = { ...deps, ...devDeps } as Record<string, string>;
+        for (const [name, version] of Object.entries(all)) {
+          const key = String(name).trim();
+          const ver = String(version).trim();
+          // Keep the highest-precision spec (prefer pinned versions); naive heuristic
+          if (!depSet.has(key) || (depSet.get(key) || '').split('.').length < ver.split('.').length) {
+            depSet.set(key, ver);
+          }
         }
-      } catch (error) {
-        console.warn(
-          `Failed to scan dependencies in ${fileEntity.path}:`,
-          error
-        );
+      } catch (e) {
+        console.warn(`Failed to parse ${fileEntity.path}:`, e);
       }
     }
 
+    const pairs = Array.from(depSet.entries()).map(([name, version]) => ({ name, version }));
+    const osvEnabled = (process.env.SECURITY_OSV_ENABLED || 'true').toLowerCase() !== 'false';
+    const batchEnabled = (process.env.SECURITY_OSV_BATCH || 'true').toLowerCase() !== 'false';
+    let vulnerabilities: Vulnerability[] = [];
+
+    if (osvEnabled && batchEnabled && pairs.length > 0) {
+      try {
+        const batch = await this.fetchOSVVulnerabilitiesBatch(pairs);
+        vulnerabilities.push(...batch);
+      } catch (e) {
+        console.warn('OSV batch failed; falling back to per-package:', e);
+      }
+    }
+
+    if (vulnerabilities.length === 0 && pairs.length > 0) {
+      // Fallback to individual lookups (OSV single or mock)
+      for (const p of pairs) {
+        try {
+          const vulns = await this.checkPackageVulnerabilities(p.name, p.version);
+          vulnerabilities.push(...vulns);
+        } catch {}
+      }
+    }
+
+    // Apply suppression rules
+    vulnerabilities = this.filterSuppressed(vulnerabilities);
     return vulnerabilities;
   }
 
@@ -509,12 +540,9 @@ export class SecurityScanner extends EventEmitter {
         const lineNumber = this.getLineNumber(lines, match.index || 0);
         const codeSnippet = this.getCodeSnippet(lines, lineNumber);
 
-        const timestamp = Date.now();
-        const uniqueId = `${entity.id}_${
-          rule.id
-        }_${lineNumber}_${timestamp}_${Math.random()
-          .toString(36)
-          .substr(2, 9)}`;
+        // Stable fingerprint: entity, rule, line, snippet hash
+        const fpInput = `${entity.id}|${rule.id}|${lineNumber}|${codeSnippet}`;
+        const uniqueId = `sec_${crypto.createHash('sha1').update(fpInput).digest('hex')}`;
 
         const issue: SecurityIssue = {
           id: uniqueId,
@@ -535,6 +563,11 @@ export class SecurityScanner extends EventEmitter {
           lastScanned: new Date(),
           confidence: 0.8, // Basic confidence score
         };
+
+        // Suppression for issues by ruleId/path
+        if (this.isIssueSuppressed(issue, fileEntity)) {
+          continue;
+        }
 
         issues.push(issue);
       }
@@ -608,10 +641,20 @@ export class SecurityScanner extends EventEmitter {
     packageName: string,
     version: string
   ): Promise<Vulnerability[]> {
-    // Mock vulnerability checking - in production, this would query vulnerability databases
-    const vulnerabilities: Vulnerability[] = [];
+    // Prefer OSV (can be disabled with SECURITY_OSV_ENABLED=false)
+    const osvEnabled = (process.env.SECURITY_OSV_ENABLED || 'true').toLowerCase() !== 'false';
+    if (osvEnabled) {
+      try {
+        const osv = await this.fetchOSVVulnerabilities(packageName, version);
+        if (osv.length > 0) return osv;
+      } catch (e) {
+        console.warn(`OSV lookup failed for ${packageName}@${version}:`, e);
+        // fall through to mock
+      }
+    }
 
-    // Example: Check for known vulnerable versions
+    // Fallback mock for offline/restricted environments
+    const vulnerabilities: Vulnerability[] = [];
     const knownVulnerabilities: Record<string, any[]> = {
       lodash: [
         {
@@ -623,21 +666,9 @@ export class SecurityScanner extends EventEmitter {
           fixedInVersion: "4.17.12",
         },
       ],
-      express: [
-        {
-          id: "CVE-2022-24999",
-          severity: "medium",
-          description: "Open redirect vulnerability",
-          affectedVersions: "<4.17.2",
-          cwe: "CWE-601",
-          fixedInVersion: "4.17.2",
-        },
-      ],
     };
-
     if (knownVulnerabilities[packageName]) {
       for (const vuln of knownVulnerabilities[packageName]) {
-        // Simple version comparison (in production, use proper semver)
         if (this.isVersionVulnerable(version, vuln.affectedVersions)) {
           vulnerabilities.push({
             id: `${packageName}_${vuln.id}`,
@@ -647,7 +678,7 @@ export class SecurityScanner extends EventEmitter {
             vulnerabilityId: vuln.id,
             severity: vuln.severity,
             description: vuln.description,
-            cvssScore: 7.5, // Mock CVSS score
+            cvssScore: 7.5,
             affectedVersions: vuln.affectedVersions,
             fixedInVersion: vuln.fixedInVersion || "",
             publishedAt: new Date(),
@@ -657,8 +688,232 @@ export class SecurityScanner extends EventEmitter {
         }
       }
     }
-
     return vulnerabilities;
+  }
+
+  // Query OSV.dev for real SCA results (npm ecosystem). Caches results.
+  private async fetchOSVVulnerabilities(packageName: string, version: string): Promise<Vulnerability[]> {
+    const cacheKey = `${packageName}@${version}`;
+    const cached = this.osvCache.get(cacheKey);
+    if (cached) return cached;
+
+    const payload = {
+      package: { name: packageName, ecosystem: 'npm' },
+      version,
+    };
+
+    const res = await this.httpPostJSON('https://api.osv.dev/v1/query', payload, 7000);
+    const out = this.mapOSVVulns(packageName, version, Array.isArray(res?.vulns) ? res.vulns : []);
+
+    this.osvCache.set(cacheKey, out);
+    return out;
+  }
+
+  private mapOSVVulns(packageName: string, version: string, vulns: any[]): Vulnerability[] {
+    const out: Vulnerability[] = [];
+    for (const v of vulns || []) {
+      try {
+        const id = String(v.id || v.database_specific?.cwe || (Array.isArray(v.aliases) && v.aliases[0]) || `${packageName}-${version}`);
+        const summary = String(v.summary || v.details || '');
+        const published = v.published || v.modified || new Date().toISOString();
+        const modified = v.modified || published;
+
+        // Derive severity from CVSS where possible
+        let cvssScore = 0;
+        let sev: Vulnerability['severity'] = 'medium';
+        const severities = Array.isArray(v.severity) ? v.severity : [];
+        for (const s of severities) {
+          const score = parseFloat(s.score || '');
+          if (Number.isFinite(score) && score > cvssScore) cvssScore = score;
+        }
+        if (cvssScore >= 9.0) sev = 'critical';
+        else if (cvssScore >= 7.0) sev = 'high';
+        else if (cvssScore >= 4.0) sev = 'medium';
+        else sev = 'low';
+
+        // Try to find fixed version from ranges
+        let fixedIn = '';
+        const affected = Array.isArray(v.affected) ? v.affected : [];
+        for (const a of affected) {
+          if ((a.package?.name || '').toLowerCase() !== packageName.toLowerCase()) continue;
+          const ranges = Array.isArray(a.ranges) ? a.ranges : [];
+          for (const r of ranges) {
+            const events = Array.isArray(r.events) ? r.events : [];
+            for (const ev of events) {
+              if (ev.fixed) fixedIn = ev.fixed;
+            }
+          }
+        }
+
+        out.push({
+          id: `${packageName}_${id}`,
+          type: 'vulnerability',
+          packageName,
+          version,
+          vulnerabilityId: id,
+          severity: sev,
+          description: summary,
+          cvssScore: cvssScore || 0,
+          affectedVersions: '',
+          fixedInVersion: fixedIn,
+          publishedAt: new Date(published),
+          lastUpdated: new Date(modified),
+          exploitability: cvssScore >= 7.0 ? 'high' : cvssScore >= 4.0 ? 'medium' : 'low',
+        });
+      } catch {}
+    }
+    return out;
+  }
+
+  private async fetchOSVVulnerabilitiesBatch(pairs: Array<{ name: string; version: string }>): Promise<Vulnerability[]> {
+    // Deduplicate and honor cache
+    const unique = new Map<string, { name: string; version: string }>();
+    for (const p of pairs) {
+      const key = `${p.name}@${p.version}`;
+      if (!unique.has(key)) unique.set(key, p);
+    }
+
+    const outputs: Vulnerability[] = [];
+    const toQuery: Array<{ name: string; version: string }> = [];
+    for (const p of unique.values()) {
+      const cacheKey = `${p.name}@${p.version}`;
+      const cached = this.osvCache.get(cacheKey);
+      if (cached) outputs.push(...cached);
+      else toQuery.push(p);
+    }
+
+    if (toQuery.length === 0) return outputs;
+
+    const body = {
+      queries: toQuery.map((p) => ({ package: { ecosystem: 'npm', name: p.name }, version: p.version })),
+    };
+    const res = await this.httpPostJSON('https://api.osv.dev/v1/querybatch', body, 10000);
+    const results: any[] = Array.isArray(res?.results) ? res.results : [];
+    for (let i = 0; i < toQuery.length; i++) {
+      const p = toQuery[i];
+      const vulns = this.mapOSVVulns(p.name, p.version, Array.isArray(results[i]?.vulns) ? results[i].vulns : []);
+      this.osvCache.set(`${p.name}@${p.version}`, vulns);
+      outputs.push(...vulns);
+    }
+
+    return outputs;
+  }
+
+  // Minimal HTTP POST helper avoiding extra deps; honors timeouts.
+  private async httpPostJSON(urlStr: string, body: any, timeoutMs: number): Promise<any> {
+    try {
+      // Prefer fetch if available (Node 18+). Fallback to https.
+      const g: any = global as any;
+      if (typeof g.fetch === 'function') {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), Math.max(1000, timeoutMs));
+        try {
+          const resp = await g.fetch(urlStr, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+          });
+          clearTimeout(t);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          return await resp.json();
+        } catch (e) {
+          clearTimeout(t);
+          throw e;
+        }
+      }
+    } catch {}
+
+    // https fallback
+    return await new Promise((resolve, reject) => {
+      try {
+        const { request } = require('https');
+        const { URL } = require('url');
+        const u = new URL(urlStr);
+        const req = request(
+          {
+            hostname: u.hostname,
+            path: u.pathname + (u.search || ''),
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+          },
+          (res: any) => {
+            const chunks: any[] = [];
+            res.on('data', (c: any) => chunks.push(c));
+            res.on('end', () => {
+              const text = Buffer.concat(chunks).toString('utf-8');
+              try { resolve(JSON.parse(text)); } catch { resolve({}); }
+            });
+          }
+        );
+        req.on('error', reject);
+        req.setTimeout(Math.max(1000, timeoutMs), () => {
+          try { req.destroy(new Error('timeout')); } catch {}
+          reject(new Error('timeout'));
+        });
+        req.write(JSON.stringify(body));
+        req.end();
+      } catch (e) { reject(e); }
+    });
+  }
+
+  // Suppress vulnerabilities using a local suppression list
+  private async loadSuppressions(): Promise<void> {
+    try {
+      const p = process.env.SECURITY_SUPPRESSIONS || '.security-suppressions.json';
+      if (!fs.existsSync(p)) return;
+      const raw = fs.readFileSync(p, 'utf-8');
+      const json = JSON.parse(raw);
+      const vulns = Array.isArray(json?.vulnerabilities) ? json.vulnerabilities : [];
+      this.suppressionRules = vulns.map((r: any) => ({
+        package: typeof r.package === 'string' ? r.package : undefined,
+        id: typeof r.id === 'string' ? r.id : undefined,
+        until: typeof r.until === 'string' ? r.until : undefined,
+        reason: typeof r.reason === 'string' ? r.reason : undefined,
+      }));
+      const issues = Array.isArray(json?.issues) ? json.issues : [];
+      this.issueSuppressionRules = issues.map((r: any) => ({
+        ruleId: typeof r.ruleId === 'string' ? r.ruleId : undefined,
+        path: typeof r.path === 'string' ? r.path : undefined,
+        until: typeof r.until === 'string' ? r.until : undefined,
+        reason: typeof r.reason === 'string' ? r.reason : undefined,
+      }));
+      console.log(`🛡️ Loaded ${this.suppressionRules.length} security suppressions from ${p}`);
+    } catch (e) {
+      console.warn('Failed to load suppression list:', e);
+    }
+  }
+
+  private filterSuppressed(vulns: Vulnerability[]): Vulnerability[] {
+    if (!this.suppressionRules || this.suppressionRules.length === 0) return vulns;
+    const now = Date.now();
+    const matches = (v: Vulnerability, r: { package?: string; id?: string; until?: string }): boolean => {
+      if (r.until) {
+        const ts = Date.parse(r.until);
+        if (Number.isFinite(ts) && ts < now) return false; // expired rule
+      }
+      // Package match
+      if (r.package && r.package !== '*') {
+        if (String(v.packageName).toLowerCase() !== String(r.package).toLowerCase()) return false;
+      }
+      // Id match (exact or regex literal like /pattern/)
+      if (r.id) {
+        const id = String(v.vulnerabilityId || v.id);
+        const s = String(r.id);
+        if (s.startsWith('/') && s.endsWith('/')) {
+          try {
+            const re = new RegExp(s.slice(1, -1));
+            if (!re.test(id)) return false;
+          } catch {
+            if (id !== s) return false;
+          }
+        } else if (id !== s) {
+          return false;
+        }
+      }
+      return true;
+    };
+    return vulns.filter((v) => !this.suppressionRules.some((r) => matches(v, r)));
   }
 
   private isVersionVulnerable(
@@ -675,6 +930,51 @@ export class SecurityScanner extends EventEmitter {
     }
     if (affectedVersions.includes("<1.0.0") && version.startsWith("0.")) {
       return true; // Mock: 0.x.x versions are vulnerable to <1.0.0
+    }
+    return false;
+  }
+
+  private pathMatches(pattern: string | undefined, filePath: string): boolean {
+    if (!pattern || pattern === '*') return true;
+    const p = pattern.replace(/\\/g, '/');
+    const f = filePath.replace(/\\/g, '/');
+    // glob-like '*' to regex
+    if (p.includes('*')) {
+      const reStr = '^' + p.split('*').map(s => s.replace(/[.+^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
+      try { return new RegExp(reStr, 'i').test(f); } catch { return f.toLowerCase().includes(p.toLowerCase()); }
+    }
+    // regex literal /.../
+    if (p.startsWith('/') && p.endsWith('/')) {
+      try { return new RegExp(p.slice(1, -1), 'i').test(f); } catch { /* fallthrough */ }
+    }
+    return f.toLowerCase().includes(p.toLowerCase()) || f.toLowerCase() === p.toLowerCase();
+  }
+
+  private isIssueSuppressed(issue: SecurityIssue, file: File): boolean {
+    if (!this.issueSuppressionRules || this.issueSuppressionRules.length === 0) return false;
+    const now = Date.now();
+    for (const r of this.issueSuppressionRules) {
+      if (r.until) {
+        const ts = Date.parse(r.until);
+        if (Number.isFinite(ts) && ts < now) continue; // expired rule
+      }
+      // ruleId match: exact or regex literal
+      if (r.ruleId) {
+        const s = String(r.ruleId);
+        const id = String(issue.ruleId);
+        let ok = false;
+        if (s.startsWith('/') && s.endsWith('/')) {
+          try { ok = new RegExp(s.slice(1, -1)).test(id); } catch { ok = (id === s); }
+        } else {
+          ok = (id === s);
+        }
+        if (!ok) continue;
+      }
+      // path match
+      if (r.path) {
+        if (!this.pathMatches(r.path, file.path)) continue;
+      }
+      return true;
     }
     return false;
   }
@@ -740,27 +1040,25 @@ export class SecurityScanner extends EventEmitter {
     for (const issue of result.issues) {
       await this.db.falkordbQuery(
         `
-        CREATE (i:SecurityIssue {
-          id: $id,
-          tool: $tool,
-          ruleId: $ruleId,
-          severity: $severity,
-          title: $title,
-          description: $description,
-          cwe: $cwe,
-          owasp: $owasp,
-          affectedEntityId: $affectedEntityId,
-          lineNumber: $lineNumber,
-          codeSnippet: $codeSnippet,
-          remediation: $remediation,
-          status: $status,
-          discoveredAt: $discoveredAt,
-          lastScanned: $lastScanned,
-          confidence: $confidence
-        })
+        MERGE (i:SecurityIssue { id: $id })
+        SET i.tool = $tool,
+            i.ruleId = $ruleId,
+            i.severity = $severity,
+            i.title = $title,
+            i.description = $description,
+            i.cwe = $cwe,
+            i.owasp = $owasp,
+            i.affectedEntityId = $affectedEntityId,
+            i.lineNumber = $lineNumber,
+            i.codeSnippet = $codeSnippet,
+            i.remediation = $remediation,
+            i.status = $status,
+            i.lastScanned = $lastScanned,
+            i.confidence = $confidence
+        SET i.discoveredAt = coalesce(i.discoveredAt, $discoveredAt)
         WITH i
         MATCH (s:SecurityScan {id: $scanId})
-        CREATE (i)-[:PART_OF_SCAN]->(s)
+        MERGE (i)-[:PART_OF_SCAN]->(s)
       `,
         {
           ...issue,
@@ -769,29 +1067,49 @@ export class SecurityScanner extends EventEmitter {
           lastScanned: issue.lastScanned.toISOString(),
         }
       );
+
+      // Link affected entity to the security issue (gated by severity)
+      try {
+        const min = (process.env.SECURITY_MIN_SEVERITY || 'medium').toLowerCase();
+        const order: Record<string, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
+        const meets = (order[(issue.severity || 'info').toLowerCase()] || 0) >= (order[min] || 0);
+        const confOk = (typeof issue.confidence === 'number' ? issue.confidence : 0.5) >= noiseConfig.SECURITY_MIN_CONFIDENCE;
+        if (issue.affectedEntityId && meets && confOk) {
+          await this.kgService.createRelationship({
+            id: `rel_${issue.affectedEntityId}_${issue.id}_HAS_SECURITY_ISSUE`,
+            fromEntityId: issue.affectedEntityId,
+            toEntityId: issue.id,
+            type: "HAS_SECURITY_ISSUE" as any,
+            created: new Date(),
+            lastModified: new Date(),
+            version: 1,
+            metadata: { severity: issue.severity, confidence: issue.confidence }
+          } as any);
+        }
+      } catch (e) {
+        // Non-fatal; continue storing results
+      }
     }
 
     // Store vulnerabilities
     for (const vuln of result.vulnerabilities) {
       await this.db.falkordbQuery(
         `
-        CREATE (v:Vulnerability {
-          id: $id,
-          packageName: $packageName,
-          version: $version,
-          vulnerabilityId: $vulnerabilityId,
-          severity: $severity,
-          description: $description,
-          cvssScore: $cvssScore,
-          affectedVersions: $affectedVersions,
-          fixedInVersion: $fixedInVersion,
-          publishedAt: $publishedAt,
-          lastUpdated: $lastUpdated,
-          exploitability: $exploitability
-        })
+        MERGE (v:Vulnerability { id: $id })
+        SET v.packageName = $packageName,
+            v.version = $version,
+            v.vulnerabilityId = $vulnerabilityId,
+            v.severity = $severity,
+            v.description = $description,
+            v.cvssScore = $cvssScore,
+            v.affectedVersions = $affectedVersions,
+            v.fixedInVersion = $fixedInVersion,
+            v.publishedAt = $publishedAt,
+            v.lastUpdated = $lastUpdated,
+            v.exploitability = $exploitability
         WITH v
         MATCH (s:SecurityScan {id: $scanId})
-        CREATE (v)-[:PART_OF_SCAN]->(s)
+        MERGE (v)-[:PART_OF_SCAN]->(s)
       `,
         {
           ...vuln,
@@ -800,6 +1118,48 @@ export class SecurityScanner extends EventEmitter {
           lastUpdated: vuln.lastUpdated.toISOString(),
         }
       );
+
+      // Link vulnerable dependencies to files that depend on the package
+      try {
+        // Find file entities and filter by dependency list
+        const files = await this.kgService.findEntitiesByType("file");
+        for (const f of files as any[]) {
+          const deps = Array.isArray((f as any).dependencies)
+            ? (f as any).dependencies
+            : [];
+          if (deps.includes(vuln.packageName)) {
+            const min = (process.env.SECURITY_MIN_SEVERITY || 'medium').toLowerCase();
+            const order: Record<string, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
+            const meets = (order[(vuln.severity || 'info').toLowerCase()] || 0) >= (order[min] || 0);
+            if (!meets) continue;
+            // File depends on vulnerable package
+            await this.kgService.createRelationship({
+              id: `rel_${f.id}_${vuln.id}_DEPENDS_ON_VULNERABLE`,
+              fromEntityId: f.id,
+              toEntityId: vuln.id,
+              type: "DEPENDS_ON_VULNERABLE" as any,
+              created: new Date(),
+              lastModified: new Date(),
+              version: 1,
+              metadata: { severity: vuln.severity, cvss: vuln.cvssScore }
+            } as any);
+
+            // Also record impact from vulnerability to the file
+            await this.kgService.createRelationship({
+              id: `rel_${vuln.id}_${f.id}_SECURITY_IMPACTS`,
+              fromEntityId: vuln.id,
+              toEntityId: f.id,
+              type: "SECURITY_IMPACTS" as any,
+              created: new Date(),
+              lastModified: new Date(),
+              version: 1,
+              metadata: { severity: vuln.severity, cvss: vuln.cvssScore }
+            } as any);
+          }
+        }
+      } catch (e) {
+        // Non-fatal
+      }
     }
   }
 
@@ -965,7 +1325,7 @@ export class SecurityScanner extends EventEmitter {
         ];
 
         for (const vuln of mockVulns) {
-          report.vulnerabilities.push(vuln);
+          report.vulnerabilities.push(vuln as any);
           report.summary.total++;
 
           // Update severity counts using proper property access
@@ -988,7 +1348,7 @@ export class SecurityScanner extends EventEmitter {
           if (!report.byPackage[vuln.packageName]) {
             report.byPackage[vuln.packageName] = [];
           }
-          report.byPackage[vuln.packageName].push(vuln);
+          report.byPackage[vuln.packageName].push(vuln as any);
 
           // Add remediation recommendations based on severity
           if (vuln.severity === "high") {

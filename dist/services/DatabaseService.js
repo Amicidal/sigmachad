@@ -140,9 +140,10 @@ export class DatabaseService {
                     await this.redisService.initialize();
                 }
                 if (typeof ((_j = this.redisService) === null || _j === void 0 ? void 0 : _j.close) === "function") {
+                    const redisRef = this.redisService;
                     initializedServices.push({
-                        service: this.redisService,
-                        close: () => this.redisService.close(),
+                        service: redisRef,
+                        close: () => redisRef.close(),
                     });
                 }
             }

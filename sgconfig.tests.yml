@@ -1,0 +1,29 @@
+rules:
+  - id: lax-statuscode-assertion
+    message: "Avoid expect([codes]).toContain(response.statusCode); assert explicit branches with payload checks."
+    language: ts
+    severity: warning
+    rule:
+      any:
+        - pattern: expect([$A, $B]).toContain($RESP.statusCode)
+        - pattern: expect([$A, $B, $C]).toContain($RESP.statusCode)
+        - pattern: expect([$A, $B, $C, $D]).toContain($RESP.statusCode)
+        - pattern: expect([$A, $B, $C, $D, $E]).toContain($RESP.statusCode)
+
+  - id: resolves-not-to-throw-only
+    message: "Prefer asserting outputs/state in addition to .resolves.not.toThrow()."
+    language: ts
+    severity: info
+    rule:
+      pattern: await expect($CALL).resolves.not.toThrow()
+
+  - id: existence-only-assertion
+    message: "Strengthen existence-only assertions with shape/type checks."
+    language: ts
+    severity: info
+    rule:
+      any:
+        - pattern: expect($X).toBeDefined()
+        - pattern: expect($X).toBeTruthy()
+    constraints:
+      filepath: "/tests/"

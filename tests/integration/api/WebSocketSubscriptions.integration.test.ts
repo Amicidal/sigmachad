@@ -573,7 +573,7 @@ describe("WebSocket Subscriptions Integration", () => {
       try {
         const errorMessage = await waitForMessage(ws);
         expect(errorMessage.type).toBe("error");
-        expect(errorMessage.error).toBeDefined();
+        expect(errorMessage.error).toEqual(expect.any(Object));
       } catch (error) {
         // Connection might be closed due to invalid message
         expect(error.message).toContain("Message timeout");

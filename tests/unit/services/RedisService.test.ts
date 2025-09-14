@@ -115,7 +115,7 @@ describe('RedisService', () => {
     it('should store configuration internally', () => {
       // We can't directly access private config, but we can verify it exists
       // by testing that the service behaves correctly with the configuration
-      expect(service).toBeDefined();
+      expect(service).toBeInstanceOf(RedisService);
     });
 
     it('should not modify original configuration object', () => {
@@ -127,7 +127,7 @@ describe('RedisService', () => {
 
       // The service should still have the original values
       // (This tests that we don't hold a reference to the original object)
-      expect(newService).toBeDefined();
+      expect(newService).toBeInstanceOf(RedisService);
     });
 
     it('should handle configuration with special characters', () => {
@@ -944,7 +944,7 @@ describe('RedisService', () => {
         await realisticService.initialize();
         // If it doesn't throw, that's also fine - the mock might not always fail
       } catch (error) {
-        expect(error).toBeDefined();
+        expect(error).toBeInstanceOf(Error);
       }
 
       // Even if we manually set initialized for testing
@@ -955,21 +955,21 @@ describe('RedisService', () => {
         await realisticService.set('fail:key', 'value');
         // If it doesn't throw, that's fine - the mock might have some success rate
       } catch (error) {
-        expect(error).toBeDefined();
+        expect(error).toBeInstanceOf(Error);
       }
 
       try {
         await realisticService.get('fail:key');
         // If it doesn't throw, that's fine
       } catch (error) {
-        expect(error).toBeDefined();
+        expect(error).toBeInstanceOf(Error);
       }
 
       try {
         await realisticService.del('fail:key');
         // If it doesn't throw, that's fine
       } catch (error) {
-        expect(error).toBeDefined();
+        expect(error).toBeInstanceOf(Error);
       }
     });
   });

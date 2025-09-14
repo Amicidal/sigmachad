@@ -154,7 +154,7 @@ describeIfRun("FileWatcher Integration", () => {
       const createEvents = events.filter((e) => e.type === "create");
       const dirEvent = createEvents.find((e) => e.stats?.isDirectory);
 
-      expect(dirEvent).toBeDefined();
+      expect(dirEvent).toEqual(expect.any(Object));
       expect(dirEvent?.path).toBe(path.relative(process.cwd(), newDir));
       expect(dirEvent?.stats?.isDirectory).toBe(true);
     });
@@ -188,7 +188,7 @@ describeIfRun("FileWatcher Integration", () => {
       const createEvent = events.find(
         (e) => e.type === "create" && e.path.endsWith("hash-test.txt")
       );
-      expect(createEvent?.hash).toBeDefined();
+      expect(typeof createEvent?.hash).toBe("string");
       expect(typeof createEvent?.hash).toBe("string");
       expect(createEvent?.hash?.length).toBeGreaterThan(0);
     });
@@ -326,7 +326,7 @@ describeIfRun("FileWatcher Integration", () => {
       );
 
       const modifyEvent = events.find((e) => e.type === "modify");
-      expect(modifyEvent?.hash).toBeDefined();
+      expect(typeof modifyEvent?.hash).toBe("string");
       expect(modifyEvent?.hash).not.toBe("");
     });
   });
@@ -426,7 +426,7 @@ describeIfRun("FileWatcher Integration", () => {
         e.path.endsWith("delete-dir")
       );
 
-      expect(dirDeleteEvent).toBeDefined();
+      expect(dirDeleteEvent).toEqual(expect.any(Object));
       expect(dirDeleteEvent?.type).toBe("delete");
     });
   });
@@ -488,7 +488,7 @@ describeIfRun("FileWatcher Integration", () => {
       // All files should be detected
       files.forEach((file) => {
         const event = createEvents.find((e) => e.path.endsWith(file));
-        expect(event).toBeDefined();
+        expect(event).toEqual(expect.any(Object));
       });
     });
   });
@@ -552,8 +552,7 @@ describeIfRun("FileWatcher Integration", () => {
       const regularEvent = createEvents.find((e) =>
         e.path.endsWith("regular-file.txt")
       );
-
-      expect(regularEvent).toBeDefined();
+      expect(regularEvent).toEqual(expect.any(Object));
       expect(regularEvent?.type).toBe("create");
     });
   });
@@ -860,7 +859,7 @@ describeIfRun("FileWatcher Integration", () => {
         if (!event) {
           console.log(`Missing event for file: ${fileName}`);
         }
-        expect(event).toBeDefined();
+        expect(event).toEqual(expect.any(Object));
       });
     });
 
@@ -885,7 +884,7 @@ describeIfRun("FileWatcher Integration", () => {
       );
 
       const createEvent = events.find((e) => e.path.endsWith("large-file.txt"));
-      expect(createEvent).toBeDefined();
+      expect(createEvent).toEqual(expect.any(Object));
       expect(createEvent?.stats?.size).toBe(largeContent.length);
     });
 
@@ -915,7 +914,7 @@ describeIfRun("FileWatcher Integration", () => {
       );
 
       const createEvent = events.find((e) => e.path.endsWith("cycle-test.txt"));
-      expect(createEvent).toBeDefined();
+      expect(createEvent).toEqual(expect.any(Object));
     });
   });
 });

@@ -103,12 +103,14 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode); // 404 if tool not implemented yet
+      if (response.statusCode === 404) {
+        throw new Error('MCP tool design.create_spec must be implemented for this test');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
-        const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
+      const body = JSON.parse(response.payload);
+      expect(body).toEqual(expect.objectContaining({ result: expect.anything() }));
 
         // Validate MCP tool response structure
         expect(body.result).toEqual(
@@ -140,9 +142,12 @@ describe("MCP Tool Integration", () => {
         const foundSpec = searchBody.data.entities.find(
           (e: any) => e.id === specId
         );
-        expect(foundSpec).toBeDefined();
+        expect(foundSpec).toEqual(expect.any(Object));
         expect(foundSpec.title).toBe(specRequest.title);
         expect(foundSpec.priority).toBe(specRequest.priority);
+      } else {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
 
@@ -166,15 +171,22 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP tool design.create_spec missing; validation test requires implementation');
+      }
+      // MCP create_spec currently accepts payload and returns 200 with result
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         // Should return validation errors
-        expect(body.result).toBeDefined();
-        expect(body.result.validationResults).toBeDefined();
+        expect(body.result).toEqual(expect.anything());
+        expect(body.result.validationResults).toEqual(expect.any(Object));
         expect(body.result.validationResults.isValid).toBe(false);
         expect(body.result.validationResults.issues).toEqual(expect.any(Array));
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
   });
@@ -229,12 +241,14 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP tool tests.plan_and_generate must be implemented for this test');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
+        expect(body).toEqual(expect.objectContaining({ result: expect.any(Object) }));
 
         // Validate test plan structure
         expect(body.result).toEqual(
@@ -284,12 +298,19 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP tool tests.plan_and_generate missing; non-existent spec handling requires implementation');
+      }
+      // MCP planner handles missing specs by generating a plan; expect success
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
+        expect(body).toEqual(expect.any(Object));
         // Should handle gracefully with appropriate error/result
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
   });
@@ -377,12 +398,12 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      // With prepared data, expect success
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
+        expect(body).toEqual(expect.objectContaining({ result: expect.any(Object) }));
 
         // Validate semantic search results
         expect(body.result).toEqual(
@@ -407,6 +428,12 @@ describe("MCP Tool Integration", () => {
             })
           );
         });
+      } else {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      } else {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
 
@@ -450,12 +477,14 @@ describe("MCP Tool Integration", () => {
           payload: JSON.stringify(mcpRequest),
         });
 
-        expect([200, 404]).toContain(response.statusCode);
+        if (response.statusCode === 404) {
+          throw new Error('MCP tool graph.search must be implemented for search scenarios');
+        }
+        expect(response.statusCode).toBe(200);
 
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
-          expect(body).toBeDefined();
-          expect(body.result).toBeDefined();
+          expect(body).toEqual(expect.objectContaining({ result: expect.any(Object) }));
           expect(Array.isArray(body.result.entities)).toBe(true);
         }
       }
@@ -615,12 +644,11 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
+        expect(body).toEqual(expect.objectContaining({ result: expect.any(Object) }));
 
         // Validate examples structure
         expect(body.result).toEqual(
@@ -682,12 +710,16 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      // MCP graph.examples returns a structured result even for non-existent entity
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
+        expect(body).toEqual(expect.any(Object));
         // Should handle gracefully
+      } else {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
   });
@@ -767,12 +799,14 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('MCP tool validate.run missing; validation pipeline test requires implementation');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
+        expect(body).toEqual(expect.objectContaining({ result: expect.anything() }));
 
         // Validate impact analysis structure
         expect(body.result).toEqual(
@@ -801,6 +835,9 @@ describe("MCP Tool Integration", () => {
 
         // Should provide recommendations
         expect(Array.isArray(body.result.recommendations)).toBe(true);
+      } else {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
 
@@ -826,11 +863,15 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      // MCP propose_diff returns structured result even for incomplete inputs
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         // Should handle validation gracefully
+      } else {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
   });
@@ -918,12 +959,11 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
+        expect(body).toEqual(expect.objectContaining({ result: expect.anything() }));
 
         // Validate comprehensive validation results
         expect(body.result).toEqual(
@@ -1004,13 +1044,15 @@ describe("MCP Tool Integration", () => {
           payload: JSON.stringify(mcpRequest),
         });
 
-        expect([200, 404]).toContain(response.statusCode);
+        expect(response.statusCode).toBe(200);
 
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
-          expect(body).toBeDefined();
-          expect(body.result).toBeDefined();
-          expect(body.result.overall).toBeDefined();
+          expect(body).toEqual(expect.objectContaining({ result: expect.any(Object) }));
+          expect(body.result).toEqual(expect.objectContaining({ overall: expect.anything() }));
+        } else {
+          const body = JSON.parse(response.payload || '{}');
+          expect(body).toHaveProperty('error');
         }
       }
     });
@@ -1099,12 +1141,11 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        expect(body).toBeDefined();
-        expect(body.result).toBeDefined();
+        expect(body).toEqual(expect.objectContaining({ result: expect.any(Object) }));
 
         // Validate impact analysis results
         expect(body.result).toEqual(
@@ -1121,6 +1162,9 @@ describe("MCP Tool Integration", () => {
 
         // Should provide actionable recommendations
         expect(body.result.recommendations.length).toBeGreaterThan(0);
+      } else {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
   });
@@ -1141,7 +1185,7 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      expect([400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(400);
     });
 
     it("should validate tool arguments", async () => {
@@ -1162,11 +1206,14 @@ describe("MCP Tool Integration", () => {
         payload: JSON.stringify(invalidArgsRequest),
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         // Should handle validation errors appropriately
+      } else {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
       }
     });
 
@@ -1206,13 +1253,11 @@ describe("MCP Tool Integration", () => {
         )
       );
 
-      // All requests should complete
+      // All requests should succeed deterministically
       responses.forEach((response) => {
-        expect([200, 404]).toContain(response.statusCode);
-        if (response.statusCode === 200) {
-          const body = JSON.parse(response.payload);
-          expect(body).toBeDefined();
-        }
+        expect(response.statusCode).toBe(200);
+        const body = JSON.parse(response.payload);
+        expect(body).toEqual(expect.any(Object));
       });
     });
 

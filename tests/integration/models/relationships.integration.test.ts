@@ -1182,7 +1182,7 @@ describe("Relationships Integration Tests", () => {
         `);
 
         criticalAsyncCalls.forEach((call) => {
-          expect(call.strength).toBeDefined();
+          expect(typeof call.strength).toBe('number');
           expect(typeof call.strength).toBe("number");
         });
 

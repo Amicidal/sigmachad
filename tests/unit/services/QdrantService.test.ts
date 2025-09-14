@@ -145,13 +145,13 @@ describe('QdrantService', () => {
     it('should handle configuration with API key', () => {
       const configWithKey = { url: 'http://localhost:6333', apiKey: 'test-key' };
       const service = new QdrantService(configWithKey);
-      expect(service).toBeDefined();
+      expect(service).toBeInstanceOf(QdrantService);
     });
 
     it('should handle configuration without API key', () => {
       const configWithoutKey = { url: 'http://localhost:6333' };
       const service = new QdrantService(configWithoutKey);
-      expect(service).toBeDefined();
+      expect(service).toBeInstanceOf(QdrantService);
     });
 
     it('should accept different Qdrant URLs', () => {
@@ -164,7 +164,7 @@ describe('QdrantService', () => {
 
       urls.forEach(url => {
         const service = new QdrantService({ url });
-        expect(service).toBeDefined();
+        expect(service).toBeInstanceOf(QdrantService);
       });
     });
 
@@ -295,10 +295,11 @@ describe('QdrantService', () => {
       expect(collections).toContain('code_embeddings');
 
       const config = mockClient.getCollectionConfig('code_embeddings');
-      expect(config).toBeDefined();
-      expect(config.vectors).toBeDefined();
-      expect(config.vectors.size).toBe(1536);
-      expect(config.vectors.distance).toBe('Cosine');
+      expect(config).toEqual(
+        expect.objectContaining({
+          vectors: expect.objectContaining({ size: 1536, distance: 'Cosine' })
+        })
+      );
     });
 
     it('should create documentation_embeddings collection successfully', async () => {
@@ -308,10 +309,11 @@ describe('QdrantService', () => {
       expect(collections).toContain('documentation_embeddings');
 
       const config = mockClient.getCollectionConfig('documentation_embeddings');
-      expect(config).toBeDefined();
-      expect(config.vectors).toBeDefined();
-      expect(config.vectors.size).toBe(1536);
-      expect(config.vectors.distance).toBe('Cosine');
+      expect(config).toEqual(
+        expect.objectContaining({
+          vectors: expect.objectContaining({ size: 1536, distance: 'Cosine' })
+        })
+      );
     });
 
     it('should create integration_test collection successfully', async () => {
@@ -321,10 +323,11 @@ describe('QdrantService', () => {
       expect(collections).toContain('integration_test');
 
       const config = mockClient.getCollectionConfig('integration_test');
-      expect(config).toBeDefined();
-      expect(config.vectors).toBeDefined();
-      expect(config.vectors.size).toBe(1536);
-      expect(config.vectors.distance).toBe('Cosine');
+      expect(config).toEqual(
+        expect.objectContaining({
+          vectors: expect.objectContaining({ size: 1536, distance: 'Cosine' })
+        })
+      );
     });
 
     it('should handle existing collections gracefully', async () => {

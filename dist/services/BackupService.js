@@ -650,7 +650,7 @@ export class BackupService {
                 }
                 catch (error) {
                     // Skip table already exists errors
-                    if (!((_a = error.message) === null || _a === void 0 ? void 0 : _a.includes("already exists"))) {
+                    if (!((_a = error === null || error === void 0 ? void 0 : error.message) === null || _a === void 0 ? void 0 : _a.includes("already exists"))) {
                         console.warn(`⚠️ Failed to create table: ${statement.substring(0, 50)}...`, error);
                     }
                 }

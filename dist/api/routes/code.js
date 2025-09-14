@@ -964,7 +964,6 @@ async function analyzeCodeDependencies(files, kgService) {
                         fromEntityId: entity.id,
                         type: [
                             RelationshipType.CALLS,
-                            RelationshipType.USES,
                             RelationshipType.IMPORTS,
                         ],
                     });

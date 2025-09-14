@@ -185,11 +185,11 @@ describe("MaintenanceService", () => {
 
         const result = await maintenanceService.runMaintenanceTask("cleanup");
 
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.any(Object));
         expect(result).toEqual(expect.objectContaining({ success: true }));
         expect(result.taskId).toMatch(/^cleanup_\d+$/);
-        expect(result.changes).toBeDefined();
-        expect(result.statistics).toBeDefined();
+        expect(result.changes).toEqual(expect.any(Object));
+        expect(result.statistics).toEqual(expect.any(Object));
         expect(result.statistics.entitiesRemoved).toBe(2);
         expect(result.statistics.relationshipsRemoved).toBe(1);
         expect(mockKgService.deleteEntity).toHaveBeenCalledWith("orphan1");
@@ -207,7 +207,7 @@ describe("MaintenanceService", () => {
 
         const result = await maintenanceService.runMaintenanceTask("cleanup");
 
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.any(Object));
         expect(result).toEqual(expect.objectContaining({ success: true })); // Service continues despite some failures
         expect(result.statistics.entitiesRemoved).toBe(0);
         expect(result.statistics.relationshipsRemoved).toBe(0);

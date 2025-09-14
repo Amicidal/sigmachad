@@ -55,7 +55,7 @@ describe('RedisService Integration', () => {
   describeIfRun('Initialization and Connection', () => {
     it('should initialize Redis service successfully when available', async () => {
       expect(redisService.isInitialized()).toBe(true);
-      expect(redisService.getClient()).toBeDefined();
+      expect(redisService.getClient()).toEqual(expect.any(Object));
     });
 
     it('should handle health checks', async () => {
@@ -111,11 +111,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle deletion of keys', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping key deletion test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKey = 'test_delete_key';
       const testValue = 'value to delete';
@@ -135,11 +130,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle deletion of non-existent keys', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping delete non-existent test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const nonExistentKey = 'test_delete_non_existent';
 
@@ -150,11 +140,6 @@ describe('RedisService Integration', () => {
 
   describeIfRun('TTL (Time-To-Live) Operations', () => {
     it('should set keys with TTL', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping TTL test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKey = 'test_ttl_key';
       const testValue = 'expires soon';
@@ -176,11 +161,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle TTL expiration timing', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping TTL timing test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKey = 'test_ttl_timing';
       const testValue = 'timing test';
@@ -211,11 +191,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should persist keys without TTL', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping persistence test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKey = 'test_persistent_key';
       const testValue = 'persistent value';
@@ -234,11 +209,6 @@ describe('RedisService Integration', () => {
 
   describeIfRun('Complex Data Types', () => {
     it('should handle JSON objects', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping JSON test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKey = 'test_json_key';
       const testObject = {
@@ -260,7 +230,8 @@ describe('RedisService Integration', () => {
 
       // Get and parse JSON object
       const retrievedValue = await redisService.get(testKey);
-      expect(retrievedValue).toBeTruthy();
+      expect(typeof retrievedValue).toBe('string');
+      expect(retrievedValue).not.toHaveLength(0);
 
       const parsedObject = JSON.parse(retrievedValue!);
       expect(parsedObject).toEqual(testObject);
@@ -268,11 +239,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle large values', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping large value test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKey = 'test_large_value';
       const largeValue = 'x'.repeat(100000); // 100KB string
@@ -285,11 +251,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle special characters and unicode', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping special characters test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKey = 'test_unicode_key';
       const unicodeValue = 'Hello 世界 🌍 émojis 🚀 and special chars: àáâãäåæçèéêë';
@@ -303,11 +264,6 @@ describe('RedisService Integration', () => {
 
   describeIfRun('Batch Operations', () => {
     it('should handle multiple key operations', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping batch operations test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKeys = ['batch_key_1', 'batch_key_2', 'batch_key_3', 'batch_key_4', 'batch_key_5'];
       const testValues = ['value1', 'value2', 'value3', 'value4', 'value5'];
@@ -342,11 +298,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle concurrent operations', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping concurrent operations test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const concurrentOperations = 10;
       const operations: Promise<any>[] = [];
@@ -386,11 +337,6 @@ describe('RedisService Integration', () => {
 
   describeIfRun('Cache-like Operations', () => {
     it('should implement cache set/get pattern', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping cache pattern test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const cacheKey = 'cache:user:123';
       const cacheValue = JSON.stringify({
@@ -414,11 +360,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle cache invalidation', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping cache invalidation test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const cacheKey = 'cache:product:456';
       const originalValue = JSON.stringify({
@@ -455,11 +396,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle cache with multiple keys', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping multi-key cache test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const cacheKeys = [
         'cache:users:list',
@@ -493,11 +429,6 @@ describe('RedisService Integration', () => {
 
   describeIfRun('Session-like Operations', () => {
     it('should handle session storage and retrieval', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping session test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const sessionId = 'session_abc123def456';
       const sessionData = {
@@ -518,7 +449,8 @@ describe('RedisService Integration', () => {
 
       // Retrieve session
       const storedSession = await redisService.get(sessionId);
-      expect(storedSession).toBeTruthy();
+      expect(typeof storedSession).toBe('string');
+      expect(storedSession).not.toHaveLength(0);
 
       const parsedSession = JSON.parse(storedSession!);
       expect(parsedSession).toEqual(sessionData);
@@ -527,11 +459,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle session expiration', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping session expiration test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const sessionId = 'session_short_lived';
       const sessionData = { userId: 'temp_user', temp: true };
@@ -541,7 +468,8 @@ describe('RedisService Integration', () => {
 
       // Verify session exists
       let session = await redisService.get(sessionId);
-      expect(session).toBeTruthy();
+      expect(typeof session).toBe('string');
+      expect(session).not.toHaveLength(0);
 
       // Wait for expiration
       await new Promise(resolve => setTimeout(resolve, 3000));
@@ -552,11 +480,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle session updates', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping session update test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const sessionId = 'session_update_test';
       const initialSession = {
@@ -582,17 +505,13 @@ describe('RedisService Integration', () => {
       const parsedSession = JSON.parse(storedSession!);
 
       expect(parsedSession.pageViews).toBe(2);
-      expect(parsedSession.lastActivity).toBeDefined();
+      expect(typeof parsedSession.lastActivity).toBe('string');
+      expect(Number.isNaN(Date.parse(parsedSession.lastActivity))).toBe(false);
     });
   });
 
   describeIfRun('Performance and Load Testing', () => {
     it('should handle high-throughput operations', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping high-throughput test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const operationCount = 100;
       const operations: Promise<any>[] = [];
@@ -626,11 +545,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle memory-intensive operations', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping memory-intensive test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const largeKeyCount = 20;
       const largeValueSize = 50000; // 50KB per value
@@ -660,8 +574,8 @@ describe('RedisService Integration', () => {
       const verifyResults = await Promise.all(verifyPromises);
 
       verifyResults.forEach((result, index) => {
-        expect(result).toBeDefined();
-        expect(result?.length).toBe(largeValueSize);
+        expect(typeof result).toBe('string');
+        expect(result.length).toBe(largeValueSize);
       });
 
       // Clean up
@@ -672,11 +586,6 @@ describe('RedisService Integration', () => {
 
   describeIfRun('Error Handling and Edge Cases', () => {
     it('should handle connection errors gracefully', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping connection error test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       // Test with valid connection first
       const isHealthyBefore = await redisService.healthCheck();
@@ -685,14 +594,9 @@ describe('RedisService Integration', () => {
       // Close connection to simulate error
       await redisService.close();
 
-      try {
-        await redisService.get('test_key');
-        // If we get here, operation succeeded (shouldn't happen with closed connection)
-        expect(false).toBe(true);
-      } catch (error) {
-        // Expected: connection should fail
-        expect(error).toBeDefined();
-      }
+      await expect(redisService.get('test_key')).rejects.toEqual(
+        expect.objectContaining({ message: expect.any(String) })
+      );
 
       // Reconnect for other tests
       await redisService.initialize();
@@ -701,11 +605,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle invalid key names', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping invalid key test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       // Redis generally accepts most key names, but let's test edge cases
       const edgeCaseKeys = [
@@ -738,11 +637,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should handle null and undefined values', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping null/undefined test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const testKey = 'test_null_undefined';
 
@@ -752,7 +646,7 @@ describe('RedisService Integration', () => {
         // If we get here, Redis accepted null (might happen with some Redis clients)
       } catch (error) {
         // Expected: null values should be rejected
-        expect(error).toBeDefined();
+        expect((error as any)).toHaveProperty('message');
       }
 
       try {
@@ -760,16 +654,11 @@ describe('RedisService Integration', () => {
         // If we get here, Redis accepted undefined (might happen with some Redis clients)
       } catch (error) {
         // Expected: undefined values should be rejected
-        expect(error).toBeDefined();
+        expect((error as any)).toHaveProperty('message');
       }
     });
 
     it('should handle very long keys and values', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping long key/value test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       // Test with very long key (Redis supports up to 512MB for keys and values)
       const longKey = 'a'.repeat(1000); // 1000 character key
@@ -788,11 +677,6 @@ describe('RedisService Integration', () => {
 
   describeIfRun('Real-world Usage Scenarios', () => {
     it('should implement rate limiting pattern', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping rate limiting test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const userId = 'user_rate_limit_test';
       const windowSeconds = 2; // shorter window for tests
@@ -842,11 +726,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should implement distributed locking pattern', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping distributed locking test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const lockKey = 'distributed_lock_test';
       const lockValue = `lock_${Date.now()}_${Math.random()}`;
@@ -874,11 +753,6 @@ describe('RedisService Integration', () => {
     });
 
     it('should implement pub/sub messaging pattern', async () => {
-      if (!isRedisAvailable) {
-        console.warn('Skipping pub/sub test - Redis not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const client = redisService.getClient();
       const channel = 'test_notifications';

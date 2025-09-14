@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { router, publicProcedure } from '../base.js';
+import { z } from 'zod';
 
 // Entity and Relationship schemas
 const EntitySchema = z.object({
@@ -74,16 +75,28 @@ export const graphRouter = router({
   searchEntities: publicProcedure
     .input(z.object({
       query: z.string(),
-      type: z.string().optional(),
+      entityTypes: z.array(z.enum(['function','class','interface','file','module','spec','test','change','session','directory'])).optional(),
+      searchType: z.enum(['semantic','structural','usage','dependency']).optional(),
+      filters: z.object({
+        language: z.string().optional(),
+        path: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        lastModified: z.object({ since: z.date().optional(), until: z.date().optional() }).optional(),
+        checkpointId: z.string().optional(),
+      }).optional(),
+      includeRelated: z.boolean().optional(),
       limit: z.number().min(1).max(100).default(20),
     }))
     .query(async ({ input, ctx }) => {
-      // TODO: Implement entity search
-      return {
-        items: [],
-        total: 0,
+      const entities = await ctx.kgService.search({
         query: input.query,
-      };
+        entityTypes: input.entityTypes as any,
+        searchType: input.searchType as any,
+        filters: input.filters as any,
+        includeRelated: input.includeRelated,
+        limit: input.limit,
+      } as any);
+      return { items: entities, total: entities.length };
     }),
 
   // Get entity dependencies
@@ -130,5 +143,26 @@ export const graphRouter = router({
         riskLevel: 'low' as const,
         recommendations: [],
       };
+    }),
+  // Time travel traversal
+  timeTravel: publicProcedure
+    .input(z.object({
+      startId: z.string(),
+      atTime: z.date().optional(),
+      since: z.date().optional(),
+      until: z.date().optional(),
+      maxDepth: z.number().int().min(1).max(5).optional(),
+      types: z.array(z.string()).optional(),
+    }))
+    .query(async ({ input, ctx }) => {
+      const res = await ctx.kgService.timeTravelTraversal({
+        startId: input.startId,
+        atTime: input.atTime,
+        since: input.since,
+        until: input.until,
+        maxDepth: input.maxDepth,
+        types: input.types,
+      });
+      return res;
     }),
 });

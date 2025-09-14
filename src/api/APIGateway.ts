@@ -34,6 +34,12 @@ import { registerImpactRoutes } from "./routes/impact.js";
 import { registerSCMRoutes } from "./routes/scm.js";
 import { registerDocsRoutes } from "./routes/docs.js";
 import { registerSecurityRoutes } from "./routes/security.js";
+import { registerHistoryRoutes } from "./routes/history.js";
+import fastifyStatic from "@fastify/static";
+import path from "path";
+import { registerAdminUIRoutes } from "./routes/admin-ui.js";
+import { registerAssetsProxyRoutes } from "./routes/assets.js";
+import { registerGraphViewerRoutes } from "./routes/graph-subgraph.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { MCPRouter } from "./mcp-router.js";
 import { WebSocketRouter } from "./websocket-router.js";
@@ -80,6 +86,7 @@ export class APIGateway {
   private loggingService?: LoggingService;
   private maintenanceService?: MaintenanceService;
   private configurationService?: ConfigurationService;
+  private _historyIntervals: { prune?: NodeJS.Timeout; checkpoint?: NodeJS.Timeout } = {};
   private healthCheckCache: { data: any; timestamp: number } | null = null;
   private readonly HEALTH_CACHE_TTL = 5000; // Cache health check for 5 seconds
 
@@ -197,8 +204,15 @@ export class APIGateway {
         }
         try {
           if (typeof anyApp.printRoutes === "function") {
-            const routesStr = anyApp.printRoutes();
-            return typeof routesStr === "string" && routesStr.includes(path);
+            const routesStr = String(anyApp.printRoutes());
+            const m = String(method || "").toUpperCase();
+            // Build a conservative regex to find exact METHOD + SPACE + PATH on a single line
+            const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const pattern = new RegExp(
+              `(^|\n)\s*${escape(m)}\s+${escape(path)}(\s|$)`,
+              "m"
+            );
+            return pattern.test(routesStr);
           }
         } catch {
           // ignore
@@ -267,6 +281,33 @@ export class APIGateway {
     this.app.addHook("onRequest", async (request, reply) => {
       if (request.url.includes("/admin")) {
         await adminRateLimit(request, reply);
+      }
+    });
+
+    // Simple auth guard for admin/history endpoints (optional; enabled when ADMIN_API_TOKEN is set)
+    this.app.addHook("onRequest", async (request, reply) => {
+      try {
+        const needsAuth =
+          request.url.startsWith("/api/v1/admin") ||
+          request.url.startsWith("/api/v1/history");
+        const token = process.env.ADMIN_API_TOKEN || "";
+        if (needsAuth && token) {
+          const headerKey = (request.headers["x-api-key"] as string | undefined) || "";
+          const authz = (request.headers["authorization"] as string | undefined) || "";
+          const bearer = authz.toLowerCase().startsWith("bearer ") ? authz.slice(7) : authz;
+          const ok = headerKey === token || bearer === token;
+          if (!ok) {
+            reply.status(401).send({
+              success: false,
+              error: {
+                code: "UNAUTHORIZED",
+                message: "Missing or invalid API key for admin/history",
+              },
+            });
+          }
+        }
+      } catch {
+        // fail-open to avoid blocking dev if something goes wrong
       }
     });
 
@@ -391,6 +432,132 @@ export class APIGateway {
       reply.send(openApiSpec);
     });
 
+    // Convenience root aliases for common admin endpoints (no prefix)
+    // Forward POST /sync -> /api/v1/sync
+    this.app.post("/sync", async (request, reply) => {
+      const res = await (this.app as any).inject({
+        method: "POST",
+        url: "/api/v1/sync",
+        headers: {
+          "content-type": (request.headers["content-type"] as string) ||
+            "application/json",
+        },
+        payload:
+          typeof request.body === "string"
+            ? request.body
+            : JSON.stringify(request.body ?? {}),
+      });
+      reply.status(res.statusCode).send(res.body ?? res.payload);
+    });
+
+    // Forward GET /sync-status -> /api/v1/sync-status
+    this.app.get("/sync-status", async (_request, reply) => {
+      const res = await (this.app as any).inject({
+        method: "GET",
+        url: "/api/v1/sync-status",
+      });
+      reply.status(res.statusCode).send(res.body ?? res.payload);
+    });
+
+    // Forward POST /sync/pause -> /api/v1/sync/pause
+    this.app.post("/sync/pause", async (request, reply) => {
+      const res = await (this.app as any).inject({
+        method: "POST",
+        url: "/api/v1/sync/pause",
+        headers: {
+          "content-type": (request.headers["content-type"] as string) ||
+            "application/json",
+        },
+        payload:
+          typeof request.body === "string"
+            ? request.body
+            : JSON.stringify(request.body ?? {}),
+      });
+      reply.status(res.statusCode).send(res.body ?? res.payload);
+    });
+
+    // Forward POST /sync/resume -> /api/v1/sync/resume
+    this.app.post("/sync/resume", async (request, reply) => {
+      const res = await (this.app as any).inject({
+        method: "POST",
+        url: "/api/v1/sync/resume",
+        headers: {
+          "content-type": (request.headers["content-type"] as string) ||
+            "application/json",
+        },
+        payload:
+          typeof request.body === "string"
+            ? request.body
+            : JSON.stringify(request.body ?? {}),
+      });
+      reply.status(res.statusCode).send(res.body ?? res.payload);
+    });
+
+    // Forward admin-prefixed root aliases for compatibility
+    this.app.post("/admin/sync", async (request, reply) => {
+      const res = await (this.app as any).inject({
+        method: "POST",
+        url: "/api/v1/sync",
+        headers: {
+          "content-type": (request.headers["content-type"] as string) ||
+            "application/json",
+        },
+        payload:
+          typeof request.body === "string"
+            ? request.body
+            : JSON.stringify(request.body ?? {}),
+      });
+      reply.status(res.statusCode).send(res.body ?? res.payload);
+    });
+    this.app.get("/admin/sync-status", async (_request, reply) => {
+      const res = await (this.app as any).inject({
+        method: "GET",
+        url: "/api/v1/sync-status",
+      });
+      reply.status(res.statusCode).send(res.body ?? res.payload);
+    });
+
+    // Serve built Graph Viewer at /ui/graph if present
+    try {
+      const staticDir = path.resolve(
+        process.cwd(),
+        "web",
+        "graph-viewer",
+        "dist"
+      );
+
+      // Encapsulate under a prefix to avoid route collisions and enable SPA fallback
+      this.app.register(
+        async (app) => {
+          // Register static assets within this scope
+          app.register(fastifyStatic, {
+            root: staticDir,
+            // No prefix here; the outer scope provides /ui/graph
+          });
+
+          // SPA fallback: for any not-found within /ui/graph, serve index.html
+          app.setNotFoundHandler(async (_req, reply) => {
+            try {
+              return (reply as any).sendFile("index.html");
+            } catch {
+              reply.code(404).send({
+                success: false,
+                error: {
+                  code: "NOT_BUILT",
+                  message: "Graph viewer not built. Run web build.",
+                },
+              });
+            }
+          });
+        },
+        { prefix: "/ui/graph" }
+      );
+    } catch (e) {
+      console.warn("Graph viewer static not available at startup:", e);
+    }
+    registerAdminUIRoutes(this.app, this.kgService, this.dbService);
+    registerAssetsProxyRoutes(this.app);
+
     // Test route to verify registration is working
     this.app.get("/api/v1/test", async (request, reply) => {
       reply.send({
@@ -427,12 +594,20 @@ export class APIGateway {
             this.dbService,
             this.docParser
           );
+          // History & Time-travel (stubs for now)
+          await registerHistoryRoutes(app, this.kgService, this.dbService);
           registerSecurityRoutes(
             app,
             this.kgService,
             this.dbService,
             this.securityScanner
           );
+          // Graph Viewer API routes (subgraph + neighbors)
+          await registerGraphViewerRoutes(app, this.kgService, this.dbService);
+          // Admin UI (self-contained)
+          await registerAdminUIRoutes(app, this.kgService, this.dbService);
+          // Assets proxy (for CDN fallback)
+          await registerAssetsProxyRoutes(app);
           registerAdminRoutes(
             app,
             this.kgService,
@@ -460,12 +635,13 @@ export class APIGateway {
       prefix: "/api/trpc",
       trpcOptions: {
         router: appRouter,
-        createContext: () =>
+        createContext: ({ req }) =>
           createTRPCContext({
             kgService: this.kgService,
             dbService: this.dbService,
             astParser: this.astParser,
             fileWatcher: this.fileWatcher || new FileWatcher(),
+            req,
           }),
       },
     });
@@ -685,6 +861,13 @@ export class APIGateway {
       );
       console.log(`📋 MCP tools: ${this.mcpRouter.getToolCount()} registered`);
       console.log(`🛡️  Rate limiting and validation middleware active`);
+
+      // Start history schedulers if enabled
+      try {
+        await this.startHistorySchedulers();
+      } catch (e) {
+        console.warn('History schedulers could not be started:', e);
+      }
     } catch (error) {
       console.error("Failed to start API Gateway:", error);
       throw error;
@@ -698,6 +881,12 @@ export class APIGateway {
   async stop(): Promise<void> {
     // Stop WebSocket router first
     await this.wsRouter.shutdown();
+
+    // Clear history schedulers
+    try {
+      if (this._historyIntervals.prune) clearInterval(this._historyIntervals.prune);
+      if (this._historyIntervals.checkpoint) clearInterval(this._historyIntervals.checkpoint);
+    } catch {}
 
     await this.app.close();
     console.log("🛑 API Gateway stopped");
@@ -719,6 +908,54 @@ export class APIGateway {
       anyApp.__injectWrapped = true;
     }
     return this.app;
+  }
+
+  // Schedulers for daily prune and daily checkpoint
+  private async startHistorySchedulers(): Promise<void> {
+    const cfg = this.configurationService?.getHistoryConfig?.();
+    const enabled = cfg?.enabled ?? ((process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false');
+    if (!enabled) {
+      console.log('🕒 History disabled; schedulers not started');
+      return;
+    }
+
+    const retentionDays = cfg?.retentionDays ?? (parseInt(process.env.HISTORY_RETENTION_DAYS || '30', 10) || 30);
+    const hops = cfg?.checkpoint?.hops ?? (parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '2', 10) || 2);
+    const pruneHours = cfg?.schedule?.pruneIntervalHours ?? (parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || '24', 10) || 24);
+    const checkpointHours = cfg?.schedule?.checkpointIntervalHours ?? (parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || '24', 10) || 24);
+
+    // Daily prune at interval (24h)
+    const dayMs = 24 * 60 * 60 * 1000;
+    const pruneMs = Math.max(1, pruneHours) * 60 * 60 * 1000;
+    const checkpointMs = Math.max(1, checkpointHours) * 60 * 60 * 1000;
+    const runPrune = async () => {
+      try {
+        const r = await this.kgService.pruneHistory(retentionDays);
+        console.log(`🧹 Daily prune completed: versions=${r.versionsDeleted}, edges=${r.edgesClosed}, checkpoints=${r.checkpointsDeleted}`);
+      } catch (e) {
+        console.warn('Daily prune failed:', e);
+      }
+    };
+    this._historyIntervals.prune = setInterval(runPrune, pruneMs);
+
+    // Daily checkpoint: build seeds from last 24h modified entities (capped)
+    const runCheckpoint = async () => {
+      try {
+        const since = new Date(Date.now() - dayMs);
+        const seeds = await this.kgService.findRecentEntityIds(since, 200);
+        if (seeds.length === 0) {
+          console.log('📌 Daily checkpoint skipped: no recent entities');
+          return;
+        }
+        const { checkpointId } = await this.kgService.createCheckpoint(seeds, 'daily', hops);
+        console.log(`📌 Daily checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`);
+      } catch (e) {
+        console.warn('Daily checkpoint failed:', e);
+      }
+    };
+    this._historyIntervals.checkpoint = setInterval(runCheckpoint, checkpointMs);
+
+    console.log(`🕒 History schedulers started (prune every ${pruneHours}h, checkpoint every ${checkpointHours}h)`);
   }
 
   // Method to get current configuration

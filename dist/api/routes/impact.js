@@ -47,7 +47,6 @@ async function analyzeChangeImpact(kgService, changes, includeIndirect, maxDepth
                 // Include inheritance relationships for interface changes
                 const relationshipTypes = [
                     RelationshipType.CALLS,
-                    RelationshipType.USES,
                     RelationshipType.DEPENDS_ON,
                     RelationshipType.REFERENCES,
                     RelationshipType.IMPLEMENTS,

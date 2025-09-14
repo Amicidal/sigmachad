@@ -195,7 +195,7 @@ This document outlines the comprehensive knowledge graph schema for the Memento 
 ```
 
 ### 13. Session
-**Tracks AI agent interaction sessions**
+**Tracks AI agent interaction sessions and development activity**
 ```
 {
   id: string (UUID)
@@ -208,6 +208,71 @@ This document outlines the comprehensive knowledge graph schema for the Memento 
   specs: string[] (spec IDs created in this session)
   status: string (active, completed, failed)
   metadata: object (session context and parameters)
+  
+  // Event tracking for fine-grained changes
+  events: Array<{
+    timestamp: Date
+    entityId: string
+    changeType: 'modified' | 'added' | 'deleted' | 'tested' | 'built'
+    elementType?: 'function' | 'class' | 'import' | 'test'
+    elementName?: string
+    operation?: 'added' | 'modified' | 'deleted' | 'renamed'
+    testResult?: 'passed' | 'failed' | 'skipped'
+    buildResult?: 'success' | 'failure'
+  }>
+  
+  // Semantic snapshots at key moments
+  snapshots: Map<string, {
+    trigger: 'test_fail' | 'test_pass' | 'build_fail' | 'build_pass' | 'manual' | 'periodic'
+    timestamp: Date
+    workingState: boolean
+    affectedEntities: Array<{
+      entityId: string
+      fullImplementation?: string  // Complete function/class at this moment
+      context?: {
+        imports: string[]
+        callers: string[]
+        callees: string[]
+      }
+    }>
+  }>
+  
+  // Session-level state tracking
+  lastKnownGoodState?: {
+    timestamp: Date
+    verifiedBy: 'test' | 'build' | 'manual'
+  }
+  currentState: 'working' | 'broken' | 'unknown'
+}
+```
+
+### 14. Version
+**Compact snapshot of an entity when its content changes (append-only)**
+```
+{
+  id: string (UUID)
+  type: "version"
+  entityId: string           // id of the current/live entity node
+  path?: string              // helpful for files/symbols
+  hash: string               // content hash at this moment
+  language?: string
+  timestamp: timestamp       // when this snapshot was recorded
+  metadata?: object          // minimal additional info (size, lines, metrics)
+}
+```
+
+### 15. Checkpoint
+**Materialized subgraph descriptor for fast, AI-ready retrieval**
+```
+{
+  id: string (UUID)
+  type: "checkpoint"
+  checkpointId: string       // human-friendly id or derived hash
+  timestamp: timestamp
+  reason: 'daily' | 'incident' | 'manual'
+  hops: number               // K-hop neighborhood captured
+  seedEntities: string[]     // entities around which snapshot was built
+  metadata?: object
 }
 ```
 
@@ -221,6 +286,55 @@ All relationships include:
   lastModified: timestamp
   version: number (incrementing version for relationship changes)
   metadata: object (additional relationship-specific data)
+  
+  // Temporal validity interval (when history mode is enabled)
+  validFrom?: timestamp      // when this edge became active
+  validTo?: timestamp        // when this edge was deactivated (open interval if null)
+}
+```
+
+### SessionRelationship Interface
+**Specific interface for session-based temporal relationships**
+```
+{
+  ...BaseRelationshipProperties,
+  type: SESSION_MODIFIED | SESSION_IMPACTED | SESSION_CHECKPOINT | BROKE_IN | FIXED_IN | DEPENDS_ON_CHANGE
+  
+  // Session tracking
+  sessionId: string
+  timestamp: Date  // Precise timestamp of the event
+  sequenceNumber: number  // Order within session
+  
+  // Semantic change information (for SESSION_MODIFIED)
+  changeInfo?: {
+    elementType: 'function' | 'class' | 'import' | 'test'
+    elementName: string
+    operation: 'added' | 'modified' | 'deleted' | 'renamed'
+    semanticHash?: string  // Hash of the semantic unit, not full file
+    affectedLines?: number  // Approximate lines changed
+  }
+  
+  // State transition tracking (for BROKE_IN, FIXED_IN, SESSION_CHECKPOINT)
+  stateTransition?: {
+    from: 'working' | 'broken' | 'unknown'
+    to: 'working' | 'broken' | 'unknown'
+    verifiedBy: 'test' | 'build' | 'manual'
+    confidence: number  // 0-1, confidence in state determination
+    criticalChange?: {
+      entityId: string
+      beforeSnippet?: string  // Just the relevant lines before
+      afterSnippet?: string   // Just the relevant lines after
+    }
+  }
+  
+  // Impact information (for SESSION_IMPACTED)
+  impact?: {
+    severity: 'high' | 'medium' | 'low'
+    testsFailed?: string[]
+    testsFixed?: string[]
+    buildError?: string
+    performanceImpact?: number  // Performance delta if measurable
+  }
 }
 ```
 
@@ -242,23 +356,33 @@ All relationships include:
 ### Test Relationships
 - `TESTS`: Test → Symbol (test covers symbol)
 - `VALIDATES`: Test → Spec (test validates spec criteria)
-- `LOCATED_IN`: Test → File (test file location)
 
 ### Spec Relationships
 - `REQUIRES`: Spec → Symbol (spec requires symbol implementation)
 - `IMPACTS`: Spec → File/Directory (files impacted by spec)
-- `LINKED_TO`: Spec → Spec (related specifications)
 
 ### Temporal Relationships
 - `PREVIOUS_VERSION`: Entity → Entity (links to previous version of same entity)
 - `CHANGED_AT`: Entity → Timestamp (tracks when entity changed)
 - `MODIFIED_BY`: Entity → Change (links entity to change that modified it)
 - `CREATED_IN`: Entity → Commit/Session (links entity to creation context)
+- `OF`: Version → Entity (version belongs to current/live entity)
 
 ### Change Tracking Relationships
 - `INTRODUCED_IN`: Entity → Change (when entity was first introduced)
 - `MODIFIED_IN`: Entity → Change (all changes that modified entity)
 - `REMOVED_IN`: Entity → Change (when entity was removed/deleted)
+
+### Session-Based Temporal Relationships
+- `SESSION_MODIFIED`: Session → Entity (entity modified during session with timestamp/sequence)
+- `SESSION_IMPACTED`: Session → Test/Build (test/build affected during session)
+- `SESSION_CHECKPOINT`: Session → Entity (important state transition marked)
+- `BROKE_IN`: Session → Test/Build (when test/build started failing)
+- `FIXED_IN`: Session → Test/Build (when test/build was fixed)
+- `DEPENDS_ON_CHANGE`: Entity → Entity (change dependency within session)
+
+### Checkpoint Relationships
+- `CHECKPOINT_INCLUDES`: Checkpoint → Entity/Version (members of the checkpoint subgraph)
 
 ## Graph Constraints and Indexes
 
@@ -281,6 +405,7 @@ All relationships include:
 - Session.startTime/endTime: for session queries
 - Relationship.created: for relationship creation queries
 - Relationship.lastModified: for relationship change queries
+- Relationship.validFrom/validTo: for time-scoped graph traversal
 
 ### Composite Indexes
 - (entityType + timestamp): for entity type change history
@@ -375,12 +500,14 @@ ORDER BY e.lastModified DESC
 ### 2. Entity Evolution History
 **Track how a specific entity has changed over time**
 ```
-MATCH (current:File {path: $filePath})
-OPTIONAL MATCH (current)<-[:PREVIOUS_VERSION*]-(previous:File)
-OPTIONAL MATCH (current)-[:MODIFIED_IN]->(changes:Change)
-RETURN current, collect(previous) as previousVersions,
+MATCH (e {id: $entityId})
+OPTIONAL MATCH (v:version)-[:OF]->(e)
+OPTIONAL MATCH (e)-[:PREVIOUS_VERSION*]->(prev)
+OPTIONAL MATCH (e)-[:MODIFIED_IN]->(changes:Change)
+RETURN e, collect(DISTINCT v) as versions,
+       collect(DISTINCT prev) as previousEntities,
        collect(changes {.*, .timestamp}) as changeHistory
-ORDER BY changes.timestamp DESC
+ORDER BY coalesce(v.timestamp, changes.timestamp) DESC
 ```
 
 ### 3. Session Activity Analysis
@@ -402,6 +529,21 @@ MATCH (change)-[:AFFECTS]->(affected:CodebaseEntity)
 OPTIONAL MATCH (affected)-[:DEPENDS_ON|USES|CALLS*1..2]->(downstream:CodebaseEntity)
 RETURN change, collect(DISTINCT affected) as directlyAffected,
        collect(DISTINCT downstream) as indirectlyAffected
+```
+
+### 9. Time-Scoped Traversal with Validity Intervals
+**Traverse structure as it existed at time T**
+```
+MATCH (start {id: $entityId})
+MATCH path = (start)-[r*1..3]-(connected)
+WHERE ALL(rel IN r WHERE rel.validFrom <= $atTime AND (rel.validTo IS NULL OR rel.validTo > $atTime))
+RETURN DISTINCT connected
+```
+
+### 10. Fetch a Checkpoint Neighborhood
+```
+MATCH (c:checkpoint {checkpointId: $checkpointId})-[:CHECKPOINT_INCLUDES]->(n)
+RETURN c, collect(DISTINCT n) as members
 ```
 
 ### 5. Cascading Change Detection
@@ -510,6 +652,131 @@ RETURN session, count(changes) as changeCount,
        collect(DISTINCT entities.type) as affectedEntityTypes,
        collect(DISTINCT changes.changeType) as changeTypes
 ORDER BY session.startTime DESC
+```
+
+## Session-Based Query Patterns
+
+### 1. What Changed in the Last Hour
+**Find all changes within a recent time window during active session**
+```
+MATCH (s:Session)
+WHERE s.status = 'active' AND s.startTime > (now() - 1 hour)
+MATCH (s)-[m:SESSION_MODIFIED]->(e:CodebaseEntity)
+WHERE m.timestamp > (now() - 1 hour)
+RETURN e.path, e.type, m.changeInfo.elementName, 
+       m.changeInfo.operation, m.timestamp
+ORDER BY m.sequenceNumber DESC
+```
+
+### 2. Find Last Working State
+**Identify the last known good state and what broke it**
+```
+MATCH (s:Session)
+WHERE s.lastKnownGoodState IS NOT NULL
+MATCH (s)-[f:FIXED_IN|SESSION_CHECKPOINT]->(entity)
+WHERE f.stateTransition.to = 'working'
+WITH s, MAX(f.timestamp) as lastWorkingTime
+MATCH (s)-[b:BROKE_IN]->(brokenEntity)
+WHERE b.timestamp > lastWorkingTime
+RETURN lastWorkingTime, brokenEntity.name, 
+       b.stateTransition.criticalChange as breakingChange
+```
+
+### 3. Session State Transitions
+**Track working/broken state transitions within a session**
+```
+MATCH (s:Session {id: $sessionId})
+MATCH (s)-[r:BROKE_IN|FIXED_IN|SESSION_CHECKPOINT]->(entity)
+WHERE r.stateTransition IS NOT NULL
+RETURN entity.name, r.timestamp, 
+       r.stateTransition.from as fromState,
+       r.stateTransition.to as toState,
+       r.stateTransition.verifiedBy as verification
+ORDER BY r.timestamp
+```
+
+### 4. Impact Analysis Within Session
+**Find cascading impacts of changes during a session**
+```
+MATCH (s:Session {id: $sessionId})
+MATCH (s)-[m:SESSION_MODIFIED]->(changed:CodebaseEntity)
+WHERE m.timestamp >= $sinceTime
+MATCH (s)-[i:SESSION_IMPACTED]->(impacted:Test|Build)
+WHERE i.timestamp > m.timestamp
+RETURN changed.name, m.changeInfo.operation,
+       impacted.name, i.impact.severity,
+       i.impact.testsFailed
+ORDER BY m.sequenceNumber, i.timestamp
+```
+
+### 5. Semantic Change Recovery
+**Reconstruct semantic state at any point in session**
+```
+MATCH (s:Session {id: $sessionId})
+WHERE $targetTime >= s.startTime AND $targetTime <= s.endTime
+// Find the nearest snapshot before target time
+WITH s, s.snapshots as snapshots
+UNWIND snapshots as snapshot
+WHERE snapshot.timestamp <= $targetTime
+WITH s, snapshot ORDER BY snapshot.timestamp DESC LIMIT 1
+// Get all changes between snapshot and target
+MATCH (s)-[m:SESSION_MODIFIED]->(e:CodebaseEntity)
+WHERE m.timestamp > snapshot.timestamp AND m.timestamp <= $targetTime
+RETURN snapshot.affectedEntities as snapshotState,
+       collect({
+         entity: e.name,
+         change: m.changeInfo,
+         timestamp: m.timestamp
+       }) as changesSinceSnapshot
+```
+
+### 6. Breaking Change Detection
+**Find what specific change broke the tests**
+```
+MATCH (s:Session)
+MATCH (s)-[broke:BROKE_IN]->(test:Test)
+WHERE broke.timestamp >= $startTime
+// Find the change that immediately preceded the break
+MATCH (s)-[mod:SESSION_MODIFIED]->(entity:CodebaseEntity)
+WHERE mod.timestamp < broke.timestamp
+AND mod.sequenceNumber = (
+  SELECT MAX(m2.sequenceNumber) 
+  FROM (s)-[m2:SESSION_MODIFIED]->()
+  WHERE m2.timestamp < broke.timestamp
+)
+RETURN test.name as brokenTest,
+       entity.name as suspectEntity,
+       mod.changeInfo as suspectChange,
+       broke.impact.testsFailed as failedTests
+```
+
+### 7. Session Activity Timeline
+**Get complete timeline of session activities**
+```
+MATCH (s:Session {id: $sessionId})
+// Collect all session relationships with timestamps
+MATCH (s)-[r]->(entity)
+WHERE type(r) IN ['SESSION_MODIFIED', 'BROKE_IN', 'FIXED_IN', 
+                  'SESSION_CHECKPOINT', 'SESSION_IMPACTED']
+RETURN entity.name, type(r) as eventType, r.timestamp,
+       CASE type(r)
+         WHEN 'SESSION_MODIFIED' THEN r.changeInfo
+         WHEN 'BROKE_IN' THEN r.impact
+         WHEN 'FIXED_IN' THEN r.stateTransition
+         ELSE r.metadata
+       END as eventDetails
+ORDER BY r.timestamp
+```
+
+### 8. Change Dependency Analysis
+**Find dependencies between changes in a session**
+```
+MATCH (s:Session {id: $sessionId})
+MATCH (e1:CodebaseEntity)-[d:DEPENDS_ON_CHANGE]->(e2:CodebaseEntity)
+WHERE EXISTS((s)-[:SESSION_MODIFIED]->(e1))
+AND EXISTS((s)-[:SESSION_MODIFIED]->(e2))
+RETURN e1.name as dependent, e2.name as dependency,
+       d.metadata.reason as dependencyReason
 ```
 
 ## Lifecycle Integration

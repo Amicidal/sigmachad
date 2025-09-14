@@ -45,6 +45,7 @@ export interface SyncOptions {
     timeout?: number;
     rollbackOnError?: boolean;
     conflictResolution?: "overwrite" | "merge" | "skip" | "manual";
+    batchSize?: number;
 }
 export declare class SynchronizationCoordinator extends EventEmitter {
     private kgService;
@@ -54,17 +55,29 @@ export declare class SynchronizationCoordinator extends EventEmitter {
     private completedOperations;
     private operationQueue;
     private isProcessing;
+    private paused;
+    private resumeWaiters;
     private retryQueue;
     private maxRetryAttempts;
     private retryDelay;
+    private unresolvedRelationships;
+    private tuning;
+    private localSymbolIndex;
     constructor(kgService: KnowledgeGraphService, astParser: ASTParser, dbService: DatabaseService);
     private setupEventHandlers;
+    updateTuning(operationId: string, tuning: {
+        maxConcurrency?: number;
+        batchSize?: number;
+    }): boolean;
     startSync(): Promise<string>;
     stopSync(): Promise<void>;
     startFullSynchronization(options?: SyncOptions): Promise<string>;
     synchronizeFileChanges(changes: FileChange[]): Promise<string>;
     synchronizePartial(updates: PartialUpdate[]): Promise<string>;
     private processQueue;
+    pauseSync(): void;
+    resumeSync(): void;
+    isPaused(): boolean;
     private performFullSync;
     private performIncrementalSync;
     private performPartialSync;
@@ -95,11 +108,22 @@ export declare class SynchronizationCoordinator extends EventEmitter {
     private handleOperationFailed;
     private retryOperation;
     private handleConflictDetected;
+    private runPostResolution;
 }
 export interface PartialUpdate {
     entityId: string;
     changes: Record<string, any>;
     type: "update" | "delete" | "create";
     newValue?: any;
+}
+import { GraphRelationship } from "../models/relationships.js";
+export interface FileLikeEntity {
+    path?: string;
+}
+declare module "./SynchronizationCoordinator" {
+    interface SynchronizationCoordinator {
+        resolveAndCreateRelationship(relationship: GraphRelationship, sourceFilePath?: string): Promise<boolean>;
+        resolveRelationshipTarget(relationship: GraphRelationship, sourceFilePath?: string): Promise<string | null>;
+    }
 }
 //# sourceMappingURL=SynchronizationCoordinator.d.ts.map

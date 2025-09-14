@@ -4,11 +4,11 @@
  */
 
 import { z } from 'zod';
-import { router, publicProcedure } from '../base.js';
+import { router, adminProcedure } from '../base.js';
 
 export const adminRouter = router({
   // Get system logs
-  getLogs: publicProcedure
+  getLogs: adminProcedure
     .input(z.object({
       level: z.enum(['error', 'warn', 'info', 'debug']).optional(),
       component: z.string().optional(),
@@ -25,20 +25,29 @@ export const adminRouter = router({
       };
     }),
 
-  // Get system metrics
-  getMetrics: publicProcedure
+  // Get consolidated metrics (graph/history/sync subset)
+  getMetrics: adminProcedure
     .query(async ({ ctx }) => {
-      // TODO: Implement metrics collection
+      const history = await ctx.kgService.getHistoryMetrics();
       return {
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        cpu: process.cpuUsage(),
+        graph: history.totals,
+        history: {
+          versions: history.versions,
+          checkpoints: history.checkpoints,
+          checkpointMembers: history.checkpointMembers,
+          temporalEdges: history.temporalEdges,
+          lastPrune: history.lastPrune || undefined,
+        },
+        process: {
+          uptime: process.uptime(),
+          memory: process.memoryUsage(),
+        },
         timestamp: new Date().toISOString(),
       };
     }),
 
   // Trigger file system sync
-  syncFilesystem: publicProcedure
+  syncFilesystem: adminProcedure
     .input(z.object({
       paths: z.array(z.string()).optional(),
       force: z.boolean().default(false),
@@ -53,7 +62,7 @@ export const adminRouter = router({
     }),
 
   // Clear cache
-  clearCache: publicProcedure
+  clearCache: adminProcedure
     .input(z.object({
       type: z.enum(['entities', 'relationships', 'search', 'all']).default('all'),
     }))
@@ -67,22 +76,22 @@ export const adminRouter = router({
     }),
 
   // Get system configuration
-  getConfig: publicProcedure
+  getConfig: adminProcedure
     .query(async ({ ctx }) => {
-      // TODO: Implement configuration retrieval
+      const cfg = ctx.dbService.getConfig?.();
       return {
-        version: '0.1.0',
+        version: cfg?.version || 'unknown',
         environment: process.env.NODE_ENV || 'development',
         features: {
           websocket: true,
-          graphAnalysis: true,
-          codeParsing: true,
+          graphSearch: true,
+          history: (process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false',
         },
       };
     }),
 
   // Update system configuration
-  updateConfig: publicProcedure
+  updateConfig: adminProcedure
     .input(z.object({
       key: z.string(),
       value: z.any(),
@@ -94,5 +103,26 @@ export const adminRouter = router({
         key: input.key,
         updated: new Date().toISOString(),
       };
+    }),
+
+  // Index health
+  indexHealth: adminProcedure
+    .query(async ({ ctx }) => {
+      return ctx.kgService.getIndexHealth();
+    }),
+
+  // Ensure indexes
+  ensureIndexes: adminProcedure
+    .mutation(async ({ ctx }) => {
+      await ctx.kgService.ensureGraphIndexes();
+      const health = await ctx.kgService.getIndexHealth();
+      return { ensured: true, health };
+    }),
+
+  // Benchmarks
+  runBenchmarks: adminProcedure
+    .input(z.object({ mode: z.enum(['quick','full']).optional() }).optional())
+    .query(async ({ input, ctx }) => {
+      return ctx.kgService.runBenchmarks({ mode: (input?.mode || 'quick') as any });
     }),
 });

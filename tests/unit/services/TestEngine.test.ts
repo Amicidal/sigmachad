@@ -154,13 +154,13 @@ describe('TestEngine', () => {
 
   describe('Initialization', () => {
     it('should create TestEngine instance with dependencies', () => {
-      expect(testEngine).toBeDefined();
+      expect(testEngine).toEqual(expect.any(Object));
       expect(testEngine).toBeInstanceOf(TestEngine);
     });
 
     it('should initialize with parser instance', () => {
       // The parser should be created in the constructor
-      expect(mockParser).toBeDefined();
+      expect(mockParser).toEqual(expect.any(Object));
     });
   });
 
@@ -510,7 +510,7 @@ describe('TestEngine', () => {
 
       // Should return metrics since the check is only for existence, not type
       const metrics = await testEngine.getPerformanceMetrics('file-entity');
-      expect(metrics).toBeDefined();
+      expect(metrics).toEqual(expect.any(Object));
       expect(metrics).toEqual(mockTestEntity.performanceMetrics);
 
       expect(mockKgService.getEntity).toHaveBeenCalledWith('file-entity');
@@ -680,7 +680,7 @@ describe('TestEngine', () => {
     it('should parse JUnit XML format', async () => {
       const result = await testEngine.parseTestResults('/path/to/test.xml', 'junit');
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result).toBeInstanceOf(Object);
       expect(result).toHaveProperty('suiteName');
       expect(result).toHaveProperty('results');
@@ -692,7 +692,7 @@ describe('TestEngine', () => {
 
       const result = await testEngine.parseTestResults('/path/to/test.json', 'jest');
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result).toBeInstanceOf(Object);
       expect(result).toHaveProperty('suiteName');
       expect(result).toHaveProperty('results');
@@ -704,7 +704,7 @@ describe('TestEngine', () => {
 
       const result = await testEngine.parseTestResults('/path/to/test.json', 'mocha');
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result).toBeInstanceOf(Object);
       expect(result).toHaveProperty('suiteName');
       expect(result).toHaveProperty('results');
@@ -716,7 +716,7 @@ describe('TestEngine', () => {
 
       const result = await testEngine.parseTestResults('/path/to/test.json', 'vitest');
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result).toBeInstanceOf(Object);
       expect(result).toHaveProperty('suiteName');
       expect(result).toHaveProperty('results');
@@ -744,7 +744,7 @@ describe('TestEngine', () => {
 
       // Should still return a result since the mock is set up to return a default result
       const result = await testEngine.parseTestResults('/path/to/test.xml', 'junit');
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result).toBeInstanceOf(Object);
     });
   });
@@ -893,7 +893,7 @@ describe('TestEngine', () => {
       // Get performance metrics for one test
       mockKgService.getEntity.mockResolvedValue(createMockTestEntity({ id: 'auth-login' }));
       const metrics = await testEngine.getPerformanceMetrics('auth-login');
-      expect(metrics).toBeDefined();
+      expect(metrics).toEqual(expect.any(Object));
     });
 
     it('should handle mixed framework test results', async () => {

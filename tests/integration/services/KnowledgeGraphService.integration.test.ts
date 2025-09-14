@@ -53,8 +53,9 @@ describe("KnowledgeGraphService Integration", () => {
       await kgService.createEntity(testEntity);
       const retrieved = await kgService.getEntity(testEntity.id);
 
-      expect(retrieved).toBeDefined();
-      expect(retrieved?.id).toBe(testEntity.id);
+      expect(retrieved).toEqual(
+        expect.objectContaining({ id: testEntity.id })
+      );
       expect(retrieved?.path).toBe(testEntity.path);
       expect(retrieved?.language).toBe(testEntity.language);
       expect(retrieved?.type).toBe("file");
@@ -93,7 +94,7 @@ describe("KnowledgeGraphService Integration", () => {
       for (const entity of entities) {
         await kgService.createEntity(entity);
         const retrieved = await kgService.getEntity(entity.id);
-        expect(retrieved).toBeDefined();
+        expect(retrieved).toEqual(expect.any(Object));
         expect(retrieved?.type).toBe(entity.type);
       }
     });
@@ -530,7 +531,7 @@ describe("KnowledgeGraphService Integration", () => {
       // Verify all entities were created
       for (const entity of batchEntities) {
         const retrieved = await kgService.getEntity(entity.id);
-        expect(retrieved).toBeDefined();
+        expect(retrieved).toEqual(expect.any(Object));
       }
     });
 
@@ -557,7 +558,7 @@ describe("KnowledgeGraphService Integration", () => {
       // Verify all entities were created
       for (let i = 0; i < concurrentOperations; i++) {
         const retrieved = await kgService.getEntity(`concurrent-entity-${i}`);
-        expect(retrieved).toBeDefined();
+        expect(retrieved).toEqual(expect.any(Object));
       }
     });
   });
@@ -632,7 +633,7 @@ describe("KnowledgeGraphService Integration", () => {
         dependencyEntities[0].id
       );
 
-      expect(analysis).toBeDefined();
+      expect(analysis).toEqual(expect.any(Object));
       expect(analysis.entityId).toBe(dependencyEntities[0].id);
       expect(analysis.directDependencies.length).toBeGreaterThan(0);
       expect(analysis.reverseDependencies.length).toBe(0); // No reverse deps in this setup
@@ -643,9 +644,9 @@ describe("KnowledgeGraphService Integration", () => {
         dependencyEntities[0].id
       );
 
-      expect(examples).toBeDefined();
+      expect(examples).toEqual(expect.any(Object));
       expect(examples.entityId).toBe(dependencyEntities[0].id);
-      expect(examples.signature).toBeDefined();
+      expect(typeof examples.signature).toBe('string');
       // Usage examples depend on relationships, may be empty in simple test
       expect(examples.usageExamples).toEqual(expect.any(Array));
     });
@@ -792,7 +793,7 @@ describe("KnowledgeGraphService Integration", () => {
 
       // Entity should exist and have been updated
       const updated = await kgService.getEntity(entity.id);
-      expect(updated).toBeDefined();
+      expect(updated).toEqual(expect.any(Object));
     });
   });
 });

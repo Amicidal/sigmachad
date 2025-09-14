@@ -134,7 +134,10 @@ describe("Impact Analysis API Integration", () => {
         payload: JSON.stringify(impactRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode); // 404 if endpoint not implemented yet
+      if (response.statusCode === 404) {
+        throw new Error('Impact analysis endpoint must be implemented for this test');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -240,7 +243,10 @@ describe("Impact Analysis API Integration", () => {
         payload: JSON.stringify(impactRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('Impact analysis endpoint missing; scenario requires implementation');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -302,14 +308,17 @@ describe("Impact Analysis API Integration", () => {
         payload: JSON.stringify(impactRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('Impact analysis endpoint missing; scenario requires implementation');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         expectSuccess(body);
 
         // Should detect test impact
-        expect(body.data.testImpact).toBeDefined();
+        expect(body.data.testImpact).toEqual(expect.any(Object));
         expect(
           body.data.recommendations.some(
             (rec: any) => rec.type === "warning" || rec.type === "requirement"
@@ -333,7 +342,14 @@ describe("Impact Analysis API Integration", () => {
         payload: JSON.stringify(impactRequest),
       });
 
-      expect([200, 400]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: true }));
+        expect(body.data).toEqual(expect.any(Object));
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      }
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -363,13 +379,15 @@ describe("Impact Analysis API Integration", () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      expect([400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('Impact analysis endpoint missing; invalid input test requires implementation');
+      }
+      expect(response.statusCode).toBe(400);
 
       if (response.statusCode === 400) {
         const body = JSON.parse(response.payload);
         // Fastify's schema validation returns a different error structure
-        expect(body.error).toBeDefined();
-        expect(body.error.code).toBe("FST_ERR_VALIDATION");
+        expect(body.error).toEqual(expect.objectContaining({ code: "FST_ERR_VALIDATION" }));
         expect(body.error.message).toContain("entityId");
       }
     });
@@ -426,7 +444,10 @@ describe("Impact Analysis API Integration", () => {
         payload: JSON.stringify(impactRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('Impact analysis endpoint missing; large project scenario requires implementation');
+      }
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);

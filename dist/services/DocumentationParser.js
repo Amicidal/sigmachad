@@ -5,6 +5,7 @@
 import { marked } from "marked";
 import { readFileSync } from "fs";
 import { join, extname, basename } from "path";
+import { RelationshipType, } from "../models/relationships.js";
 export class DocumentationParser {
     constructor(kgService, dbService) {
         this.supportedExtensions = [".md", ".txt", ".rst", ".adoc"];
@@ -601,12 +602,12 @@ export class DocumentationParser {
                     // Parse the file
                     const parsedDoc = await this.parseFile(filePath);
                     // Create or update documentation node
-                    await this.createOrUpdateDocumentationNode(filePath, parsedDoc);
+                    const docId = await this.createOrUpdateDocumentationNode(filePath, parsedDoc);
                     // Extract and create business domains
-                    const newDomains = await this.extractAndCreateDomains(parsedDoc);
+                    const newDomains = await this.extractAndCreateDomains(parsedDoc, docId);
                     result.newDomains += newDomains;
                     // Update semantic clusters
-                    await this.updateSemanticClusters(parsedDoc);
+                    await this.updateSemanticClusters(parsedDoc, docId);
                     result.processedFiles++;
                 }
                 catch (error) {
@@ -687,11 +688,12 @@ export class DocumentationParser {
             status: "active",
         };
         await this.kgService.createEntity(docNode);
+        return docId;
     }
     /**
      * Extract and create business domains
      */
-    async extractAndCreateDomains(parsedDoc) {
+    async extractAndCreateDomains(parsedDoc, docId) {
         let newDomainsCount = 0;
         for (const domainName of parsedDoc.businessDomains) {
             const domainId = `domain_${domainName
@@ -712,6 +714,21 @@ export class DocumentationParser {
                 };
                 await this.kgService.createEntity(domain);
                 newDomainsCount++;
+            }
+            // Create/ensure relationship from documentation -> domain
+            try {
+                await this.kgService.createRelationship({
+                    id: `rel_${docId}_${domainId}_DESCRIBES_DOMAIN`,
+                    fromEntityId: docId,
+                    toEntityId: domainId,
+                    type: RelationshipType.DESCRIBES_DOMAIN,
+                    created: new Date(),
+                    lastModified: new Date(),
+                    version: 1,
+                });
+            }
+            catch (_a) {
+                // Non-fatal
             }
         }
         return newDomainsCount;
@@ -736,7 +753,7 @@ export class DocumentationParser {
     /**
      * Update semantic clusters based on parsed documentation
      */
-    async updateSemanticClusters(parsedDoc) {
+    async updateSemanticClusters(parsedDoc, docId) {
         // This is a simplified implementation
         // In a real scenario, this would analyze the content and group related entities
         for (const domain of parsedDoc.businessDomains) {
@@ -753,6 +770,33 @@ export class DocumentationParser {
                 memberEntities: [],
             };
             await this.kgService.createEntity(cluster);
+            // Link cluster to documentation
+            try {
+                await this.kgService.createRelationship({
+                    id: `rel_${clusterId}_${docId}_DOCUMENTED_BY`,
+                    fromEntityId: clusterId,
+                    toEntityId: docId,
+                    type: RelationshipType.DOCUMENTED_BY,
+                    created: new Date(),
+                    lastModified: new Date(),
+                    version: 1,
+                });
+            }
+            catch (_a) { }
+            // Link cluster to domain explicitly
+            try {
+                const domainId = `domain_${domain.replace(/\s+/g, "_").toLowerCase()}`;
+                await this.kgService.createRelationship({
+                    id: `rel_${clusterId}_${domainId}_BELONGS_TO_DOMAIN`,
+                    fromEntityId: clusterId,
+                    toEntityId: domainId,
+                    type: RelationshipType.BELONGS_TO_DOMAIN,
+                    created: new Date(),
+                    lastModified: new Date(),
+                    version: 1,
+                });
+            }
+            catch (_b) { }
         }
     }
     /**

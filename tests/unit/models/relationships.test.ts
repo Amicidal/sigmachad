@@ -1433,7 +1433,7 @@ describe('GraphRelationship Union Type', () => {
 
     if (relationship.type === RelationshipType.TESTS) {
       // This should not execute
-      expect(true).toBe(false);
+      throw new Error('Unexpected code path: TESTS branch should not run');
     }
   });
 });

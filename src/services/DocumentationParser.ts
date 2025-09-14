@@ -757,14 +757,14 @@ export class DocumentationParser {
           const parsedDoc = await this.parseFile(filePath);
 
           // Create or update documentation node
-          await this.createOrUpdateDocumentationNode(filePath, parsedDoc);
+          const docId = await this.createOrUpdateDocumentationNode(filePath, parsedDoc);
 
           // Extract and create business domains
-          const newDomains = await this.extractAndCreateDomains(parsedDoc);
+          const newDomains = await this.extractAndCreateDomains(parsedDoc, docId);
           result.newDomains += newDomains;
 
           // Update semantic clusters
-          await this.updateSemanticClusters(parsedDoc);
+          await this.updateSemanticClusters(parsedDoc, docId);
 
           result.processedFiles++;
         } catch (error) {
@@ -847,7 +847,7 @@ export class DocumentationParser {
   private async createOrUpdateDocumentationNode(
     filePath: string,
     parsedDoc: ParsedDocument
-  ): Promise<void> {
+  ): Promise<string> {
     const docId = `doc_${basename(
       filePath,
       extname(filePath)
@@ -871,13 +871,15 @@ export class DocumentationParser {
     };
 
     await this.kgService.createEntity(docNode);
+    return docId;
   }
 
   /**
    * Extract and create business domains
    */
   private async extractAndCreateDomains(
-    parsedDoc: ParsedDocument
+    parsedDoc: ParsedDocument,
+    docId: string
   ): Promise<number> {
     let newDomainsCount = 0;
 
@@ -902,6 +904,22 @@ export class DocumentationParser {
 
         await this.kgService.createEntity(domain);
         newDomainsCount++;
+      }
+
+      // Create/ensure relationship from documentation -> domain
+      try {
+        await this.kgService.createRelationship({
+          id: `rel_${docId}_${domainId}_DESCRIBES_DOMAIN`,
+          fromEntityId: docId,
+          toEntityId: domainId,
+          type: RelationshipType.DESCRIBES_DOMAIN,
+          created: new Date(),
+          lastModified: new Date(),
+          version: 1,
+          metadata: { inferred: true, confidence: 0.6, source: 'doc-domain-extract' }
+        } as DocumentationRelationship as any);
+      } catch {
+        // Non-fatal
       }
     }
 
@@ -938,7 +956,8 @@ export class DocumentationParser {
    * Update semantic clusters based on parsed documentation
    */
   private async updateSemanticClusters(
-    parsedDoc: ParsedDocument
+    parsedDoc: ParsedDocument,
+    docId: string
   ): Promise<void> {
     // This is a simplified implementation
     // In a real scenario, this would analyze the content and group related entities
@@ -958,6 +977,35 @@ export class DocumentationParser {
       };
 
       await this.kgService.createEntity(cluster);
+
+      // Link cluster to documentation
+      try {
+        await this.kgService.createRelationship({
+          id: `rel_${clusterId}_${docId}_DOCUMENTED_BY`,
+          fromEntityId: clusterId,
+          toEntityId: docId,
+          type: RelationshipType.DOCUMENTED_BY,
+          created: new Date(),
+          lastModified: new Date(),
+          version: 1,
+          metadata: { inferred: true, confidence: 0.6, source: 'doc-cluster-link' }
+        } as DocumentationRelationship as any);
+      } catch {}
+
+      // Link cluster to domain explicitly
+      try {
+        const domainId = `domain_${domain.replace(/\s+/g, "_").toLowerCase()}`;
+        await this.kgService.createRelationship({
+          id: `rel_${clusterId}_${domainId}_BELONGS_TO_DOMAIN`,
+          fromEntityId: clusterId,
+          toEntityId: domainId,
+          type: RelationshipType.BELONGS_TO_DOMAIN,
+          created: new Date(),
+          lastModified: new Date(),
+          version: 1,
+          metadata: { inferred: true, confidence: 0.6, source: 'cluster-domain' }
+        } as DocumentationRelationship as any);
+      } catch {}
     }
   }
 

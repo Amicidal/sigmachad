@@ -269,10 +269,9 @@ describe("Multi-User Concurrent Workflow E2E", () => {
         sharedSpecResponse.statusCode !== 200 &&
         sharedSpecResponse.statusCode !== 201
       ) {
-        console.log(
-          "⚠️  Shared spec creation failed, skipping related features test"
+        throw new Error(
+          'Shared spec creation must succeed for this scenario; endpoint missing or failing'
         );
-        return;
       }
 
       const sharedSpecBody = JSON.parse(sharedSpecResponse.payload);
@@ -524,13 +523,12 @@ describe("Multi-User Concurrent Workflow E2E", () => {
         payload: JSON.stringify({ query: actualSharedSpecId }),
       });
 
-      if (sharedSpecSearchResponse.statusCode === 200) {
-        const sharedSpecSearchBody = JSON.parse(
-          sharedSpecSearchResponse.payload
-        );
-        expectSuccess(sharedSpecSearchBody);
-        expect(sharedSpecSearchBody.data.entities.length).toBeGreaterThan(0);
-      }
+      expect(sharedSpecSearchResponse.statusCode).toBe(200);
+      const sharedSpecSearchBody = JSON.parse(
+        sharedSpecSearchResponse.payload
+      );
+      expectSuccess(sharedSpecSearchBody);
+      expect(sharedSpecSearchBody.data.entities.length).toBeGreaterThan(0);
 
       console.log(
         "✅ Shared specification remained intact during concurrent work"
@@ -605,18 +603,25 @@ describe("Multi-User Concurrent Workflow E2E", () => {
         }),
       });
 
-      if (searchResponse.statusCode === 200) {
-        const searchBody = JSON.parse(searchResponse.payload);
-        expectSuccess(searchBody);
-        expect(searchBody.data.entities.length).toBeGreaterThan(0);
+      expect(searchResponse.statusCode).toBe(200);
+      const searchBody = JSON.parse(searchResponse.payload);
+      expectSuccess(searchBody);
+      expect(searchBody.data.entities.length).toBeGreaterThan(0);
 
-        // User 2 should find the utility
-        const foundUtility = searchBody.data.entities.find(
-          (e: any) => e.id === utilityEntity.id
-        );
-        expect(foundUtility).toBeDefined();
+      // User 2 should find the utility
+      const foundUtility = searchBody.data.entities.find(
+        (e: any) => e.id === utilityEntity.id
+      );
+      expect(foundUtility).toEqual(
+        expect.objectContaining({
+          id: utilityEntity.id,
+          path: utilityEntity.path,
+          type: 'file',
+          isTest: false,
+        })
+      );
 
-        // User 2 creates their own service that reuses the utility
+      // User 2 creates their own service that reuses the utility
         const consumerEntity: CodebaseEntity = {
           id: "utility-consumer-service",
           path: "src/services/UtilityConsumerService.ts",
@@ -700,25 +705,28 @@ describe("Multi-User Concurrent Workflow E2E", () => {
           }),
         });
 
-        if (combinedSearchResponse.statusCode === 200) {
-          const combinedSearchBody = JSON.parse(combinedSearchResponse.payload);
-          expectSuccess(combinedSearchBody);
+        expect(combinedSearchResponse.statusCode).toBe(200);
+        const combinedSearchBody = JSON.parse(combinedSearchResponse.payload);
+        expectSuccess(combinedSearchBody);
 
-          // Should find both the original utility and the consumer
-          const foundUtility = combinedSearchBody.data.entities.find(
-            (e: any) => e.id === utilityEntity.id
-          );
-          const foundConsumer = combinedSearchBody.data.entities.find(
-            (e: any) => e.id === consumerEntity.id
-          );
+        // Should find both the original utility and the consumer
+        const foundUtility2 = combinedSearchBody.data.entities.find(
+          (e: any) => e.id === utilityEntity.id
+        );
+        const foundConsumer = combinedSearchBody.data.entities.find(
+          (e: any) => e.id === consumerEntity.id
+        );
 
-          expect(foundUtility).toBeDefined();
-          expect(foundConsumer).toBeDefined();
+        expect(foundUtility2).toEqual(
+          expect.objectContaining({ id: utilityEntity.id, path: utilityEntity.path, type: 'file' })
+        );
+        expect(foundConsumer).toEqual(
+          expect.objectContaining({ id: consumerEntity.id, path: consumerEntity.path, type: 'file' })
+        );
 
-          console.log(
-            "✅ Users successfully discovered and reused existing work"
-          );
-        }
+        console.log(
+          "✅ Users successfully discovered and reused existing work"
+        );
       }
     });
 
@@ -850,9 +858,8 @@ describe("Multi-User Concurrent Workflow E2E", () => {
 
       // Both users should be able to analyze and validate their changes
       conflictResults.forEach((result) => {
-        expect(result.impactAnalysisWorked || result.validationWorked).toBe(
-          true
-        );
+        // Both operations should succeed for each user
+        expect(result.impactAnalysisWorked && result.validationWorked).toBe(true);
       });
 
       console.log("✅ Users handled shared resource conflicts appropriately");
@@ -930,28 +937,31 @@ describe("Multi-User Concurrent Workflow E2E", () => {
               }),
             });
 
-            if (searchResponse.statusCode === 200) {
-              const searchBody = JSON.parse(searchResponse.payload);
-              expectSuccess(searchBody);
+            expect(searchResponse.statusCode).toBe(200);
+            const searchBody2 = JSON.parse(searchResponse.payload);
+            expectSuccess(searchBody2);
 
-              // Should find their own work
-              const foundSpec = searchBody.data.entities.find(
-                (e: any) => e.id === specId
-              );
-              const foundImpl = searchBody.data.entities.find(
-                (e: any) => e.id === implEntity.id
-              );
+            // Should find their own work
+            const foundSpec = searchBody2.data.entities.find(
+              (e: any) => e.id === specId
+            );
+            const foundImpl = searchBody2.data.entities.find(
+              (e: any) => e.id === implEntity.id
+            );
 
-              expect(foundSpec).toBeDefined();
-              expect(foundImpl).toBeDefined();
+            expect(foundSpec).toEqual(
+              expect.objectContaining({ id: specId, type: 'file' })
+            );
+            expect(foundImpl).toEqual(
+              expect.objectContaining({ id: implEntity.id, path: implEntity.path, type: 'file' })
+            );
 
-              // Should NOT find other users' work (data isolation)
-              const otherUsersWork = searchBody.data.entities.filter(
-                (e: any) =>
-                  e.id.includes("isolated-user") && !e.id.includes(userId)
-              );
-              expect(otherUsersWork.length).toBe(0);
-            }
+            // Should NOT find other users' work (data isolation)
+            const otherUsersWork = searchBody2.data.entities.filter(
+              (e: any) =>
+                e.id.includes("isolated-user") && !e.id.includes(userId)
+            );
+            expect(otherUsersWork.length).toBe(0);
 
             return { userId, specId, success: true };
           }
@@ -1013,10 +1023,9 @@ describe("Multi-User Concurrent Workflow E2E", () => {
         featureSpecResponse.statusCode !== 200 &&
         featureSpecResponse.statusCode !== 201
       ) {
-        console.log(
-          "⚠️  Feature spec creation failed, skipping collaboration test"
+        throw new Error(
+          'Feature spec creation must succeed for the collaboration scenario'
         );
-        return;
       }
 
       const featureSpecBody = JSON.parse(featureSpecResponse.payload);
@@ -1122,7 +1131,7 @@ describe("Multi-User Concurrent Workflow E2E", () => {
                       const result = await paymentService.processPayment(paymentData);
 
                       expect(result.success).toBe(true);
-                      expect(result.transactionId).toBeDefined();
+                      expect(result.transactionId).toEqual(expect.any(String));
                       expect(result.amount).toBe(100.00);
                       expect(result.currency).toBe('USD');
                     });
@@ -1264,21 +1273,20 @@ describe("Multi-User Concurrent Workflow E2E", () => {
         }),
       });
 
-      if (sharedSearchResponse.statusCode === 200) {
-        const sharedSearchBody = JSON.parse(sharedSearchResponse.payload);
-        expectSuccess(sharedSearchBody);
+      expect(sharedSearchResponse.statusCode).toBe(200);
+      const sharedSearchBody = JSON.parse(sharedSearchResponse.payload);
+      expectSuccess(sharedSearchBody);
 
-        // Should find all team contributions
-        const foundContributions = sharedSearchBody.data.entities.filter(
-          (e: any) => e.path.includes("Payment")
-        );
+      // Should find all team contributions
+      const foundContributions = sharedSearchBody.data.entities.filter(
+        (e: any) => e.path.includes("Payment")
+      );
 
-        expect(foundContributions.length).toBeGreaterThan(0);
+      expect(foundContributions.length).toBeGreaterThan(0);
 
-        console.log(
-          "✅ All collaborative contributions are properly linked and discoverable"
-        );
-      }
+      console.log(
+        "✅ All collaborative contributions are properly linked and discoverable"
+      );
     });
   });
 });

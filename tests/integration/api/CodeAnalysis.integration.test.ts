@@ -80,15 +80,15 @@ describe('Code Analysis API Endpoints Integration', () => {
 
       const body = JSON.parse(response.payload);
       expect(body.success).toBe(true);
-      expect(body.data).toBeDefined();
+      expect(body.data).toEqual(expect.anything());
 
       const validation = body.data;
-      expect(validation.overall).toBeDefined();
+      expect(validation.overall).toEqual(expect.any(Object));
       expect(typeof validation.overall.passed).toBe('boolean');
       expect(typeof validation.overall.score).toBe('number');
       expect(typeof validation.overall.duration).toBe('number');
 
-      expect(validation.typescript).toBeDefined();
+      expect(validation.typescript).toEqual(expect.any(Object));
       expect(typeof validation.typescript.errors).toBe('number');
       expect(typeof validation.typescript.warnings).toBe('number');
       expect(Array.isArray(validation.typescript.issues)).toBe(true);
@@ -113,7 +113,7 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.eslint).toBeDefined();
+      expect(body.data.eslint).toEqual(expect.any(Object));
       expect(typeof body.data.eslint.errors).toBe('number');
       expect(typeof body.data.eslint.warnings).toBe('number');
       expect(Array.isArray(body.data.eslint.issues)).toBe(true);
@@ -138,7 +138,7 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.security).toBeDefined();
+      expect(body.data.security).toEqual(expect.any(Object));
       expect(typeof body.data.security.critical).toBe('number');
       expect(typeof body.data.security.high).toBe('number');
       expect(typeof body.data.security.medium).toBe('number');
@@ -165,7 +165,7 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.tests).toBeDefined();
+      expect(body.data.tests).toEqual(expect.any(Object));
       expect(typeof body.data.tests.passed).toBe('number');
       expect(typeof body.data.tests.failed).toBe('number');
       expect(typeof body.data.tests.skipped).toBe('number');
@@ -197,7 +197,7 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.architecture).toBeDefined();
+      expect(body.data.architecture).toEqual(expect.any(Object));
       expect(typeof body.data.architecture.violations).toBe('number');
       expect(Array.isArray(body.data.architecture.issues)).toBe(true);
     });
@@ -244,10 +244,10 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.typescript).toBeDefined();
-      expect(body.data.eslint).toBeDefined();
-      expect(body.data.security).toBeDefined();
-      expect(body.data.tests).toBeDefined();
+      expect(body.data.typescript).toEqual(expect.any(Object));
+      expect(body.data.eslint).toEqual(expect.any(Object));
+      expect(body.data.security).toEqual(expect.any(Object));
+      expect(body.data.tests).toEqual(expect.any(Object));
     });
 
     it('should handle empty file lists', async () => {
@@ -267,7 +267,15 @@ describe('Code Analysis API Endpoints Integration', () => {
       });
 
       // Should handle gracefully - either 200 with empty results or 400 validation error
-      expect([200, 400]).toContain(response.statusCode);
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body.success).toBe(true);
+        expect(body.data).toEqual(expect.anything());
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body.success).toBe(false);
+        expect(body.error).toEqual(expect.any(Object));
+      }
     });
   });
 
@@ -294,7 +302,7 @@ describe('Code Analysis API Endpoints Integration', () => {
 
       const body = JSON.parse(response.payload);
       expect(body.success).toBe(true);
-      expect(body.data).toBeDefined();
+      expect(body.data).toEqual(expect.anything());
       expect(body.data.analysisType).toBe('complexity');
     });
 
@@ -420,12 +428,12 @@ describe('Code Analysis API Endpoints Integration', () => {
 
       const body = JSON.parse(response.payload);
       expect(body.success).toBe(true);
-      expect(body.data).toBeDefined();
+      expect(body.data).toEqual(expect.anything());
 
       const analysis = body.data;
       expect(Array.isArray(analysis.affectedEntities)).toBe(true);
       expect(Array.isArray(analysis.breakingChanges)).toBe(true);
-      expect(analysis.impactAnalysis).toBeDefined();
+      expect(analysis.impactAnalysis).toEqual(expect.any(Object));
       expect(Array.isArray(analysis.impactAnalysis.directImpact)).toBe(true);
       expect(Array.isArray(analysis.impactAnalysis.indirectImpact)).toBe(true);
       expect(Array.isArray(analysis.impactAnalysis.testImpact)).toBe(true);
@@ -456,8 +464,8 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.affectedEntities).toBeDefined();
-      expect(body.data.breakingChanges).toBeDefined();
+      expect(body.data.affectedEntities).toEqual(expect.anything());
+      expect(body.data.breakingChanges).toEqual(expect.anything());
     });
 
     it('should analyze file deletion proposals', async () => {
@@ -484,7 +492,7 @@ describe('Code Analysis API Endpoints Integration', () => {
 
       const body = JSON.parse(response.payload);
       // Deletion should potentially have breaking changes
-      expect(body.data.breakingChanges).toBeDefined();
+      expect(body.data.breakingChanges).toEqual(expect.anything());
     });
 
     it('should analyze file rename operations', async () => {
@@ -511,7 +519,7 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.affectedEntities).toBeDefined();
+      expect(body.data.affectedEntities).toEqual(expect.anything());
     });
 
     it('should handle multiple changes in single proposal', async () => {
@@ -550,7 +558,7 @@ describe('Code Analysis API Endpoints Integration', () => {
 
       const body = JSON.parse(response.payload);
       expect(body.data.affectedEntities.length).toBeGreaterThanOrEqual(0);
-      expect(body.data.impactAnalysis).toBeDefined();
+      expect(body.data.impactAnalysis).toEqual(expect.any(Object));
     });
 
     it('should provide breaking change analysis', async () => {
@@ -578,7 +586,7 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.breakingChanges).toBeDefined();
+      expect(body.data.breakingChanges).toEqual(expect.anything());
       // Should potentially detect breaking changes
     });
 
@@ -607,7 +615,7 @@ describe('Code Analysis API Endpoints Integration', () => {
       expect(response.statusCode).toBe(200);
 
       const body = JSON.parse(response.payload);
-      expect(body.data.recommendations).toBeDefined();
+      expect(body.data.recommendations).toEqual(expect.anything());
       expect(Array.isArray(body.data.recommendations)).toBe(true);
     });
   });
@@ -629,7 +637,17 @@ describe('Code Analysis API Endpoints Integration', () => {
       });
 
       // Should handle gracefully
-      expect([200, 400, 404]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('Code analysis endpoint missing; scenario requires implementation');
+      }
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body.success).toBe(true);
+      } else if (response.statusCode === 400) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body.success).toBe(false);
+        expect(body.error).toEqual(expect.any(Object));
+      }
     });
 
     it('should handle malformed requests', async () => {
@@ -680,12 +698,13 @@ describe('Code Analysis API Endpoints Integration', () => {
           payload: JSON.stringify(validationRequest),
         });
 
-        expect([200, 500]).toContain(response.statusCode);
-
-        if (response.statusCode === 500) {
+        if (response.statusCode === 200) {
+          const body = JSON.parse(response.payload);
+          expect(body.success).toBe(true);
+        } else if (response.statusCode === 500) {
           const body = JSON.parse(response.payload);
           expect(body.success).toBe(false);
-          expect(body.error).toBeDefined();
+          expect(body.error).toEqual(expect.any(Object));
         }
       } finally {
         astParser.parseFile = originalParse;

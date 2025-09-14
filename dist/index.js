@@ -58,6 +58,13 @@ async function main() {
         syncCoordinator.on('operationFailed', (operation, error) => {
             syncMonitor.recordOperationFailed(operation, error);
         });
+        // Track progress/phase updates
+        syncCoordinator.on('syncProgress', (operation, payload) => {
+            try {
+                syncMonitor.recordProgress(operation, payload);
+            }
+            catch (_a) { }
+        });
         conflictResolver.addConflictListener((conflict) => {
             syncMonitor.recordConflict(conflict);
         });

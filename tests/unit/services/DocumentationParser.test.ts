@@ -112,14 +112,19 @@ console.log('test');
 
         const result = await documentationParser.parseFile('/path/to/test.md');
 
-        expect(result).toBeDefined();
-        expect(result.title).toBe('Test Document');
+        expect(result).toEqual(
+          expect.objectContaining({
+            title: 'Test Document',
+            content: expect.any(String),
+            docType: expect.any(String),
+            metadata: expect.any(Object),
+          })
+        );
         expect(result.content).toBe(mockContent);
         expect(result.docType).toBe('readme');
         expect(result.businessDomains.length).toBeGreaterThan(0);
         expect(result.stakeholders.length).toBeGreaterThan(0);
         expect(result.technologies).toContain('javascript');
-        expect(result.metadata).toBeDefined();
         expect(result.metadata.headings).toHaveLength(2);
         expect(result.metadata.links).toHaveLength(1);
         expect(result.metadata.codeBlocks).toHaveLength(1);
@@ -140,7 +145,14 @@ Technology: python
 
         const result = await documentationParser.parseFile('/path/to/test.txt');
 
-        expect(result).toBeDefined();
+        expect(result).toEqual(
+          expect.objectContaining({
+            title: expect.any(String),
+            content: expect.any(String),
+            docType: expect.any(String),
+            metadata: expect.any(Object),
+          })
+        );
         expect(result.title).toBe('Test Document Title');
         expect(result.content).toBe(mockContent);
         expect(result.docType).toBe('readme');
@@ -359,7 +371,9 @@ Content of section 2.
         const result = await documentationParser.parseFile('/path/to/test.adoc');
 
         expect(result.title).toBe('Document Title');
-        expect(result.metadata).toBeDefined(); // Metadata includes file info
+        expect(result.metadata).toEqual(
+          expect.objectContaining({ filePath: expect.any(String) })
+        ); // Metadata includes file info
         expect(result.metadata.filePath).toBe('/path/to/test.adoc');
       });
 
@@ -622,7 +636,7 @@ This is some random documentation.
 
       const result = await documentationParser.parseFile('/path/to/empty.md');
 
-      expect(result.metadata.checksum).toBeDefined();
+      expect(typeof result.metadata.checksum).toBe('string');
       expect(typeof result.metadata.checksum).toBe('string');
       expect(result.metadata.checksum.length).toBeGreaterThan(0);
     });
@@ -767,7 +781,7 @@ This is a test document about user management for developers.
         expect(results).toHaveLength(1);
         expect(results[0].document.title).toBe('User Management API');
         expect(results[0].relevanceScore).toBeGreaterThan(0);
-        expect(results[0].matchedSections).toBeDefined();
+        expect(results[0].matchedSections).toEqual(expect.any(Array));
       });
 
       it('should filter by document type', async () => {
@@ -833,7 +847,7 @@ This is a test document about user management for developers.
       it('should find matched sections in content', async () => {
         const results = await documentationParser.searchDocumentation('authentication');
 
-        expect(results[0].matchedSections).toBeDefined();
+        expect(results[0].matchedSections).toEqual(expect.any(Array));
         expect(results[0].matchedSections.length).toBeGreaterThan(0);
 
         // Check that matched sections contain the search term
@@ -874,12 +888,7 @@ This is a test document about user management for developers.
           isFile: () => !path.includes('subdir') && !path.includes('.hidden')
         }));
 
-        // Test would verify file finding if method existed
-        // For now, just verify mocks are set up correctly
-        expect(mockReaddir).toBeDefined();
-        expect(mockStat).toBeDefined();
-        
-        // Verify mock behavior
+        // Verify mock behavior using the mocked fs/promises APIs
         const testDirContents = await mockReaddir('/test/dir');
         expect(testDirContents).toContain('file1.md');
         expect(testDirContents).toContain('subdir');

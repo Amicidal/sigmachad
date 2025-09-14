@@ -55,14 +55,17 @@ describe("ConfigurationService Integration", () => {
       const config: SystemConfiguration =
         await configService.getSystemConfiguration();
 
-      expect(config).toBeDefined();
-      expect(config).toHaveProperty("version");
-      expect(config).toHaveProperty("environment");
-      expect(config).toHaveProperty("databases");
-      expect(config).toHaveProperty("features");
-      expect(config).toHaveProperty("performance");
-      expect(config).toHaveProperty("security");
-      expect(config).toHaveProperty("system");
+      expect(config).toEqual(
+        expect.objectContaining({
+          version: expect.any(String),
+          environment: expect.any(String),
+          databases: expect.any(Object),
+          features: expect.any(Object),
+          performance: expect.any(Object),
+          security: expect.any(Object),
+          system: expect.any(Object),
+        })
+      );
 
       // Version should be a string
       expect(typeof config.version).toBe("string");
@@ -77,7 +80,7 @@ describe("ConfigurationService Integration", () => {
         await configService.getSystemConfiguration();
 
       // Database status should be properly detected
-      expect(config.databases).toBeDefined();
+      expect(config.databases).toEqual(expect.any(Object));
       expect(["configured", "error", "unavailable"]).toContain(
         config.databases.falkordb
       );
@@ -99,7 +102,7 @@ describe("ConfigurationService Integration", () => {
       const config: SystemConfiguration =
         await configService.getSystemConfiguration();
 
-      expect(config.features).toBeDefined();
+      expect(config.features).toEqual(expect.any(Object));
 
       // Feature flags should be boolean
       Object.values(config.features).forEach((feature) => {
@@ -117,7 +120,7 @@ describe("ConfigurationService Integration", () => {
       const config: SystemConfiguration =
         await configService.getSystemConfiguration();
 
-      expect(config.performance).toBeDefined();
+      expect(config.performance).toEqual(expect.any(Object));
       expect(typeof config.performance.maxConcurrentSync).toBe("number");
       expect(typeof config.performance.cacheSize).toBe("number");
       expect(typeof config.performance.requestTimeout).toBe("number");
@@ -132,7 +135,7 @@ describe("ConfigurationService Integration", () => {
       const config: SystemConfiguration =
         await configService.getSystemConfiguration();
 
-      expect(config.security).toBeDefined();
+      expect(config.security).toEqual(expect.any(Object));
 
       // Security flags should be boolean
       Object.values(config.security).forEach((setting) => {
@@ -144,11 +147,14 @@ describe("ConfigurationService Integration", () => {
       const config: SystemConfiguration =
         await configService.getSystemConfiguration();
 
-      expect(config.system).toBeDefined();
-      expect(typeof config.system.uptime).toBe("number");
-      expect(config.system.memoryUsage).toBeDefined();
-      expect(typeof config.system.platform).toBe("string");
-      expect(typeof config.system.nodeVersion).toBe("string");
+      expect(config.system).toEqual(
+        expect.objectContaining({
+          uptime: expect.any(Number),
+          memoryUsage: expect.any(Object),
+          platform: expect.any(String),
+          nodeVersion: expect.any(String),
+        })
+      );
 
       // System info should be reasonable
       expect(config.system.uptime).toBeGreaterThanOrEqual(0);
@@ -164,8 +170,8 @@ describe("ConfigurationService Integration", () => {
         await configService.getSystemConfiguration();
 
       // Version should be read from package.json or fallback
-      expect(config.version).toBeDefined();
       expect(typeof config.version).toBe("string");
+      expect(config.version.length).toBeGreaterThan(0);
 
       // Should match semver format or fallback
       expect(
@@ -262,7 +268,9 @@ describe("ConfigurationService Integration", () => {
       // If configured, we should be able to get collections
       if (config.databases.qdrant === "configured") {
         const collections = await dbService.getQdrantClient().getCollections();
-        expect(collections).toBeDefined();
+        expect(collections).toEqual(
+          expect.objectContaining({ collections: expect.any(Array) })
+        );
       }
     });
 
@@ -422,7 +430,7 @@ describe("ConfigurationService Integration", () => {
       const config: SystemConfiguration =
         await configService.getSystemConfiguration();
 
-      expect(config.system.memoryUsage).toBeDefined();
+      expect(config.system.memoryUsage).toEqual(expect.any(Object));
       expect(typeof config.system.memoryUsage.heapUsed).toBe("number");
       expect(typeof config.system.memoryUsage.heapTotal).toBe("number");
       expect(typeof config.system.memoryUsage.external).toBe("number");
@@ -436,8 +444,8 @@ describe("ConfigurationService Integration", () => {
       const config: SystemConfiguration =
         await configService.getSystemConfiguration();
 
-      expect(config.system.platform).toBeDefined();
-      expect(config.system.nodeVersion).toBeDefined();
+      expect(typeof config.system.platform).toBe("string");
+      expect(typeof config.system.nodeVersion).toBe("string");
 
       expect(config.system.platform).toBe(process.platform);
       expect(config.system.nodeVersion).toBe(process.version);
@@ -489,10 +497,13 @@ describe("ConfigurationService Integration", () => {
 
       // All results should be valid configurations
       results.forEach((config) => {
-        expect(config).toBeDefined();
-        expect(config.version).toBeDefined();
-        expect(config.databases).toBeDefined();
-        expect(config.features).toBeDefined();
+        expect(config).toEqual(
+          expect.objectContaining({
+            version: expect.any(String),
+            databases: expect.any(Object),
+            features: expect.any(Object),
+          })
+        );
       });
 
       // Results should be consistent (same version, environment, etc.)
@@ -513,8 +524,9 @@ describe("ConfigurationService Integration", () => {
       const config = await configServiceNoDb.getSystemConfiguration();
 
       // Should still provide basic configuration
-      expect(config).toBeDefined();
-      expect(config.version).toBeDefined();
+      expect(config).toEqual(
+        expect.objectContaining({ version: expect.any(String) })
+      );
 
       // Database status should indicate unavailability
       expect(config.databases.falkordb).toBe("unavailable");
@@ -529,7 +541,7 @@ describe("ConfigurationService Integration", () => {
       const config = await configServiceNoSync.getSystemConfiguration();
 
       // Should still work
-      expect(config).toBeDefined();
+      expect(config).toEqual(expect.any(Object));
       expect(config.features.syncCoordinator).toBe(false);
     });
 
@@ -547,7 +559,7 @@ describe("ConfigurationService Integration", () => {
         const config = await restrictedConfigService.getSystemConfiguration();
 
         // Should still provide configuration with fallback values
-        expect(config).toBeDefined();
+        expect(config).toEqual(expect.any(Object));
         expect(config.version).toBe("0.1.0"); // Fallback version
       } finally {
         await fs.rm(restrictedDir, { recursive: true, force: true });
@@ -561,7 +573,7 @@ describe("ConfigurationService Integration", () => {
       const config = await configService.getSystemConfiguration();
 
       // Configuration should still be valid even if some checks fail
-      expect(config).toBeDefined();
+      expect(config).toEqual(expect.any(Object));
       expect(["configured", "error", "unavailable"]).toContain(
         config.databases.falkordb
       );

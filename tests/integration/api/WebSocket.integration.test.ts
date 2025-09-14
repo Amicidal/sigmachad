@@ -155,7 +155,7 @@ describe("WebSocket Router Integration", () => {
         ws.on("message", (data) => {
           try {
             const response = JSON.parse(data.toString());
-            expect(response).toBeDefined();
+            expect(response).toEqual(expect.any(Object));
             expect(typeof response).toBe("object");
             ws.close();
             resolve();
@@ -197,7 +197,7 @@ describe("WebSocket Router Integration", () => {
         ws.on("message", (data) => {
           try {
             const response = JSON.parse(data.toString());
-            expect(response).toBeDefined();
+            expect(response).toEqual(expect.any(Object));
             // Should receive acknowledgment or error
             ws.close();
             resolve();
@@ -232,7 +232,7 @@ describe("WebSocket Router Integration", () => {
         ws.on("message", (data) => {
           try {
             const response = JSON.parse(data.toString());
-            expect(response).toBeDefined();
+            expect(response).toEqual(expect.any(Object));
             // Should receive error response
             expect(response.type).toBe("error");
             ws.close();
@@ -295,7 +295,7 @@ describe("WebSocket Router Integration", () => {
               message.data?.type === "entity_created"
             ) {
               receivedUpdate = true;
-              expect(message.data).toBeDefined();
+              expect(message.data).toEqual(expect.any(Object));
               ws.close();
               resolve();
             }
@@ -351,8 +351,7 @@ describe("WebSocket Router Integration", () => {
               message.data?.type === "file_change"
             ) {
               receivedFileChange = true;
-              expect(message.data).toBeDefined();
-              expect(message.data.path).toBeDefined();
+              expect(message.data).toEqual(expect.objectContaining({ path: expect.any(String) }));
               ws.close();
               resolve();
             }
@@ -389,7 +388,7 @@ describe("WebSocket Router Integration", () => {
         });
 
         ws.on("close", (code, reason) => {
-          expect(code).toBeDefined();
+          expect(code).toEqual(expect.any(Number));
           // Connection should close cleanly
           resolve();
         });
@@ -426,8 +425,8 @@ describe("WebSocket Router Integration", () => {
             const message = JSON.parse(data.toString());
             if (message.type === "pong") {
               receivedPong = true;
-              expect(message.data).toBeDefined();
-              expect(message.data.timestamp).toBeDefined();
+              expect(message.data).toEqual(expect.any(Object));
+              expect(message.data.timestamp).toEqual(expect.any(String));
               ws.close();
               resolve();
             }
@@ -657,7 +656,7 @@ describe("WebSocket Router Integration", () => {
           try {
             const message = JSON.parse(data.toString());
             if (message.type === "error") {
-              expect(message.data).toBeDefined();
+              expect(message.data).toEqual(expect.any(Object));
               ws.close();
               resolve();
             }

@@ -553,6 +553,23 @@ export class SecurityScanner extends EventEmitter {
                 discoveredAt: issue.discoveredAt.toISOString(),
                 lastScanned: issue.lastScanned.toISOString(),
             });
+            // Link affected entity to the security issue
+            try {
+                if (issue.affectedEntityId) {
+                    await this.kgService.createRelationship({
+                        id: `rel_${issue.affectedEntityId}_${issue.id}_HAS_SECURITY_ISSUE`,
+                        fromEntityId: issue.affectedEntityId,
+                        toEntityId: issue.id,
+                        type: "HAS_SECURITY_ISSUE",
+                        created: new Date(),
+                        lastModified: new Date(),
+                        version: 1,
+                    });
+                }
+            }
+            catch (e) {
+                // Non-fatal; continue storing results
+            }
         }
         // Store vulnerabilities
         for (const vuln of result.vulnerabilities) {
@@ -580,6 +597,41 @@ export class SecurityScanner extends EventEmitter {
                 publishedAt: vuln.publishedAt.toISOString(),
                 lastUpdated: vuln.lastUpdated.toISOString(),
             });
+            // Link vulnerable dependencies to files that depend on the package
+            try {
+                // Find file entities and filter by dependency list
+                const files = await this.kgService.findEntitiesByType("file");
+                for (const f of files) {
+                    const deps = Array.isArray(f.dependencies)
+                        ? f.dependencies
+                        : [];
+                    if (deps.includes(vuln.packageName)) {
+                        // File depends on vulnerable package
+                        await this.kgService.createRelationship({
+                            id: `rel_${f.id}_${vuln.id}_DEPENDS_ON_VULNERABLE`,
+                            fromEntityId: f.id,
+                            toEntityId: vuln.id,
+                            type: "DEPENDS_ON_VULNERABLE",
+                            created: new Date(),
+                            lastModified: new Date(),
+                            version: 1,
+                        });
+                        // Also record impact from vulnerability to the file
+                        await this.kgService.createRelationship({
+                            id: `rel_${vuln.id}_${f.id}_SECURITY_IMPACTS`,
+                            fromEntityId: vuln.id,
+                            toEntityId: f.id,
+                            type: "SECURITY_IMPACTS",
+                            created: new Date(),
+                            lastModified: new Date(),
+                            version: 1,
+                        });
+                    }
+                }
+            }
+            catch (e) {
+                // Non-fatal
+            }
         }
     }
     async getVulnerabilityReport() {

@@ -67,16 +67,28 @@ export const graphRouter = router({
     searchEntities: publicProcedure
         .input(z.object({
         query: z.string(),
-        type: z.string().optional(),
+        entityTypes: z.array(z.enum(['function', 'class', 'interface', 'file', 'module', 'spec', 'test', 'change', 'session', 'directory'])).optional(),
+        searchType: z.enum(['semantic', 'structural', 'usage', 'dependency']).optional(),
+        filters: z.object({
+            language: z.string().optional(),
+            path: z.string().optional(),
+            tags: z.array(z.string()).optional(),
+            lastModified: z.object({ since: z.date().optional(), until: z.date().optional() }).optional(),
+            checkpointId: z.string().optional(),
+        }).optional(),
+        includeRelated: z.boolean().optional(),
         limit: z.number().min(1).max(100).default(20),
     }))
         .query(async ({ input, ctx }) => {
-        // TODO: Implement entity search
-        return {
-            items: [],
-            total: 0,
+        const entities = await ctx.kgService.search({
             query: input.query,
-        };
+            entityTypes: input.entityTypes,
+            searchType: input.searchType,
+            filters: input.filters,
+            includeRelated: input.includeRelated,
+            limit: input.limit,
+        });
+        return { items: entities, total: entities.length };
     }),
     // Get entity dependencies
     getDependencies: publicProcedure
@@ -120,6 +132,27 @@ export const graphRouter = router({
             riskLevel: 'low',
             recommendations: [],
         };
+    }),
+    // Time travel traversal
+    timeTravel: publicProcedure
+        .input(z.object({
+        startId: z.string(),
+        atTime: z.date().optional(),
+        since: z.date().optional(),
+        until: z.date().optional(),
+        maxDepth: z.number().int().min(1).max(5).optional(),
+        types: z.array(z.string()).optional(),
+    }))
+        .query(async ({ input, ctx }) => {
+        const res = await ctx.kgService.timeTravelTraversal({
+            startId: input.startId,
+            atTime: input.atTime,
+            since: input.since,
+            until: input.until,
+            maxDepth: input.maxDepth,
+            types: input.types,
+        });
+        return res;
     }),
 });
 //# sourceMappingURL=graph.js.map

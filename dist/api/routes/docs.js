@@ -2,6 +2,7 @@
  * Documentation Operations Routes
  * Handles documentation synchronization, domain analysis, and content management
  */
+import { RelationshipType } from '../../models/relationships.js';
 export async function registerDocsRoutes(app, kgService, dbService, docParser) {
     // POST /docs/sync - Synchronize documentation with knowledge graph
     const syncRouteOptions = {
@@ -19,6 +20,36 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         try {
             const { docsPath } = request.body;
             const result = await docParser.syncDocumentation(docsPath);
+            // After documents are synced, link code symbols to spec-like docs
+            try {
+                const docs = await kgService.findEntitiesByType('documentation');
+                const symbols = await kgService.findEntitiesByType('symbol');
+                let created = 0;
+                for (const doc of docs) {
+                    const docType = doc.docType || '';
+                    const isSpec = ["design-doc", "api-docs", "architecture"].includes(String(docType));
+                    if (!isSpec)
+                        continue;
+                    const content = String(doc.content || '').toLowerCase();
+                    for (const sym of symbols) {
+                        const name = String(sym.name || '').toLowerCase();
+                        if (name && name.length > 2 && content.includes(name)) {
+                            await kgService.createRelationship({
+                                id: `rel_${sym.id}_${doc.id}_IMPLEMENTS_SPEC`,
+                                fromEntityId: sym.id,
+                                toEntityId: doc.id,
+                                type: RelationshipType.IMPLEMENTS_SPEC,
+                                created: new Date(),
+                                lastModified: new Date(),
+                                version: 1,
+                            });
+                            created++;
+                        }
+                    }
+                }
+                result.createdImplementsSpec = created;
+            }
+            catch (_a) { }
             reply.send({
                 success: true,
                 data: result

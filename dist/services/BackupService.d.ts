@@ -2,7 +2,8 @@
  * Backup Service for Memento
  * Handles system backup and restore operations across all databases
  */
-import { DatabaseService, DatabaseConfig } from "./DatabaseService.js";
+import { DatabaseService } from "./DatabaseService.js";
+import type { DatabaseConfig } from "./database";
 export interface BackupOptions {
     type: "full" | "incremental";
     includeData: boolean;

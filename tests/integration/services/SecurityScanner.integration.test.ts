@@ -152,7 +152,7 @@ describe("SecurityScanner Integration", () => {
 
       const result = await securityScanner.performScan(scanRequest);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.objectContaining({ issues: expect.any(Array), vulnerabilities: expect.any(Array), summary: expect.any(Object) }));
       expect(result.issues.length).toBeGreaterThan(0);
       expect(result.vulnerabilities.length).toBeGreaterThan(0);
       expect(result.summary.totalIssues).toBe(
@@ -383,7 +383,7 @@ describe("SecurityScanner Integration", () => {
     it("should generate comprehensive vulnerability report", async () => {
       const report = await securityScanner.getVulnerabilityReport();
 
-      expect(report).toBeDefined();
+      expect(report).toEqual(expect.any(Object));
       expect(report.summary.total).toBeGreaterThan(0);
       expect(report.vulnerabilities.length).toBeGreaterThan(0);
       expect(Object.keys(report.byPackage).length).toBeGreaterThan(0);
@@ -573,9 +573,9 @@ describe("SecurityScanner Integration", () => {
     it("should perform full security audit", async () => {
       const audit = await securityScanner.performSecurityAudit("full");
 
-      expect(audit).toBeDefined();
+      expect(audit).toEqual(expect.any(Object));
       expect(audit.scope).toBe("full");
-      expect(audit.startTime).toBeDefined();
+      expect(audit.startTime).toEqual(expect.any(Date));
       expect(audit.findings).toEqual(expect.any(Array));
       expect(audit.recommendations).toEqual(expect.any(Array));
       expect(typeof audit.score).toBe("number");
@@ -674,7 +674,7 @@ describe("SecurityScanner Integration", () => {
     it("should generate security fixes for issues", async () => {
       const fix = await securityScanner.generateSecurityFix(issueId);
 
-      expect(fix).toBeDefined();
+      expect(fix).toEqual(expect.any(Object));
       expect(fix.issueId).toBe(issueId);
       expect(fix.fixes).toEqual(expect.any(Array));
       expect(fix.fixes.length).toBeGreaterThan(0);
@@ -781,7 +781,7 @@ describe("SecurityScanner Integration", () => {
   });
 
   describe("Compliance and Monitoring Configuration", () => {
-    it("should setup security monitoring configuration", async () => {
+    it("should setup and persist security monitoring configuration", async () => {
       const config = {
         enabled: true,
         schedule: "daily" as const,
@@ -797,8 +797,53 @@ describe("SecurityScanner Integration", () => {
 
       await securityScanner.setupMonitoring(config);
 
-      // Configuration should be stored (verified by no errors)
-      expect(true).toBe(true); // If we get here, setup succeeded
+      // Verify persistence in FalkorDB via DatabaseService
+      const result = await dbService.falkordbQuery(
+        `MATCH (c:SecurityConfig {type: 'monitoring'}) RETURN c LIMIT 1`
+      );
+
+      // Extract properties defensively to handle different FalkorDB result shapes
+      let storedConfigRaw: any;
+      if (Array.isArray(result) && result.length > 0) {
+        const row: any = result[0];
+        // Common shapes observed in project code
+        if (row.c && Array.isArray(row.c)) {
+          const propsEntry = row.c.find((i: any) => Array.isArray(i) && String(i[0]) === 'properties');
+          if (propsEntry && Array.isArray(propsEntry[1])) {
+            const propsArray = propsEntry[1];
+            const propsObj: any = {};
+            for (const p of propsArray) {
+              if (Array.isArray(p) && p.length >= 2) propsObj[String(p[0])] = p[1];
+            }
+            storedConfigRaw = propsObj?.config;
+          }
+        } else if (row.c && row.c.properties) {
+          storedConfigRaw = row.c.properties.config;
+        } else if (row.properties) {
+          storedConfigRaw = row.properties.config;
+        } else if (row.c) {
+          storedConfigRaw = row.c.config ?? row.c["config"];
+        } else if (row.data && row.data.c) {
+          storedConfigRaw = row.data.c.config;
+        }
+      }
+
+      // Parse JSON string if needed
+      let storedConfig: any = undefined;
+      if (typeof storedConfigRaw === 'string') {
+        try { storedConfig = JSON.parse(storedConfigRaw); } catch { /* ignore */ }
+      } else if (storedConfigRaw && typeof storedConfigRaw === 'object') {
+        storedConfig = storedConfigRaw;
+      }
+
+      expect(storedConfig).toEqual(expect.any(Object));
+      expect(storedConfig.enabled).toBe(true);
+      expect(storedConfig.schedule).toBe('daily');
+      expect(Array.isArray(storedConfig.alerts)).toBe(true);
+      const firstAlert = storedConfig.alerts?.[0];
+      expect(firstAlert).toEqual(
+        expect.objectContaining({ type: 'severity_threshold', severity: 'high' })
+      );
     });
 
     it("should retrieve compliance status", async () => {
@@ -807,7 +852,7 @@ describe("SecurityScanner Integration", () => {
         "full"
       );
 
-      expect(compliance).toBeDefined();
+      expect(compliance).toEqual(expect.any(Object));
       expect(compliance.framework).toBe("OWASP");
       expect(compliance.scope).toBe("full");
       expect(typeof compliance.overallScore).toBe("number");
@@ -836,7 +881,7 @@ describe("SecurityScanner Integration", () => {
 
       const result = await securityScanner.performScan(scanRequest);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result.issues.length).toBe(0);
       expect(result.vulnerabilities.length).toBe(0);
       expect(result.summary.totalIssues).toBe(0);
@@ -850,7 +895,7 @@ describe("SecurityScanner Integration", () => {
 
       const result = await securityScanner.performScan(scanRequest);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result.summary.totalIssues).toBe(0);
     });
 
@@ -881,7 +926,7 @@ describe("SecurityScanner Integration", () => {
 
       // Should not throw, but may have fewer issues
       const result = await securityScanner.performScan(scanRequest);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
     });
 
     it("should handle malformed package.json files", async () => {
@@ -911,7 +956,7 @@ describe("SecurityScanner Integration", () => {
 
       // Should handle the malformed JSON gracefully
       const result = await securityScanner.performScan(scanRequest);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
     });
 
     it("should handle fix generation for non-existent issues", async () => {
@@ -980,7 +1025,7 @@ describe("SecurityScanner Integration", () => {
 
       expect(results).toHaveLength(2);
       results.forEach((result) => {
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.any(Object));
         expect(typeof result.summary.totalIssues).toBe("number");
       });
     });
@@ -1018,7 +1063,7 @@ describe("SecurityScanner Integration", () => {
       });
       const endTime = Date.now();
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result.issues.length).toBeGreaterThan(0); // Should detect SQL injection
 
       // Should complete within reasonable time (10 seconds for large file)

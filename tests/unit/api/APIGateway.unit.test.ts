@@ -5,6 +5,9 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
+import fastifyCors from '@fastify/cors';
+import fastifyWebsocket from '@fastify/websocket';
+import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 
 // Mock the dependencies
 vi.mock('../../../src/services/KnowledgeGraphService', () => ({
@@ -180,11 +183,14 @@ describe('APIGateway Unit Tests', () => {
     it('should have correct default configuration', () => {
       const config = apiGateway.getConfig();
 
-      expect(config).toBeDefined();
-      expect(config.port).toBeGreaterThan(0);
-      expect(config.host).toBe('0.0.0.0');
-      expect(config.cors).toBeDefined();
-      expect(config.rateLimit).toBeDefined();
+      expect(config).toEqual(
+        expect.objectContaining({
+          port: expect.any(Number),
+          host: '0.0.0.0',
+          cors: expect.any(Object),
+          rateLimit: expect.any(Object),
+        })
+      );
     });
 
     it('should accept custom configuration', () => {
@@ -211,27 +217,26 @@ describe('APIGateway Unit Tests', () => {
     });
 
     it('should initialize with mocked Fastify app', () => {
-      expect(mockApp).toBeDefined();
-      expect(typeof mockApp).toBe('object');
+      expect(mockApp).toEqual(expect.any(Object));
     });
   });
 
   describe('Service Integration', () => {
     it('should integrate with KnowledgeGraphService', () => {
-      expect(kgService).toBeDefined();
-      expect(kgService.search).toBeDefined();
-      expect(kgService.createEntity).toBeDefined();
+      expect(kgService).toEqual(expect.any(Object));
+      expect(typeof kgService.search).toBe('function');
+      expect(typeof kgService.createEntity).toBe('function');
     });
 
     it('should integrate with DatabaseService', () => {
-      expect(dbService).toBeDefined();
-      expect(dbService.healthCheck).toBeDefined();
-      expect(dbService.isInitialized).toBeDefined();
+      expect(dbService).toEqual(expect.any(Object));
+      expect(typeof dbService.healthCheck).toBe('function');
+      expect(typeof dbService.isInitialized).toBe('function');
     });
 
     it('should provide access to Fastify app', () => {
       const app = apiGateway.getApp();
-      expect(app).toBeDefined();
+      expect(app).toEqual(expect.any(Object));
       expect(app).toBe(mockApp);
     });
   });
@@ -240,12 +245,14 @@ describe('APIGateway Unit Tests', () => {
     it('should return current configuration', () => {
       const config = apiGateway.getConfig();
 
-      expect(config).toBeDefined();
-      expect(typeof config).toBe('object');
-      expect(config).toHaveProperty('port');
-      expect(config).toHaveProperty('host');
-      expect(config).toHaveProperty('cors');
-      expect(config).toHaveProperty('rateLimit');
+      expect(config).toEqual(
+        expect.objectContaining({
+          port: expect.any(Number),
+          host: expect.any(String),
+          cors: expect.any(Object),
+          rateLimit: expect.any(Object),
+        })
+      );
     });
 
     it('should maintain configuration consistency', () => {
@@ -301,13 +308,7 @@ describe('APIGateway Unit Tests', () => {
       // Mock a service method to throw an error
       const searchSpy = vi.spyOn(kgService, 'search').mockRejectedValueOnce(new Error('Mock database error'));
 
-      try {
-        await kgService.search({ query: 'test' });
-        expect(false).toBe(true); // Should not reach here
-      } catch (error) {
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toBe('Mock database error');
-      }
+      await expect(kgService.search({ query: 'test' })).rejects.toThrow('Mock database error');
 
       expect(searchSpy).toHaveBeenCalled();
     });
@@ -337,12 +338,33 @@ describe('APIGateway Unit Tests', () => {
 
     it('should expose getApp method', () => {
       expect(typeof apiGateway.getApp).toBe('function');
-      expect(apiGateway.getApp()).toBeDefined();
+      const app = apiGateway.getApp();
+      expect(app).toEqual(
+        expect.objectContaining({
+          register: expect.any(Function),
+          get: expect.any(Function),
+          post: expect.any(Function),
+        })
+      );
     });
 
     it('should expose getConfig method', () => {
       expect(typeof apiGateway.getConfig).toBe('function');
-      expect(apiGateway.getConfig()).toBeDefined();
+      const cfg = apiGateway.getConfig();
+      expect(cfg).toEqual(
+        expect.objectContaining({
+          port: expect.any(Number),
+          host: expect.any(String),
+          cors: expect.objectContaining({
+            origin: expect.anything(),
+            credentials: expect.any(Boolean),
+          }),
+          rateLimit: expect.objectContaining({
+            max: expect.any(Number),
+            timeWindow: expect.any(String),
+          }),
+        })
+      );
     });
   });
 
@@ -360,31 +382,40 @@ describe('APIGateway Unit Tests', () => {
   });
 
   describe('Middleware Configuration', () => {
-    it('should configure CORS middleware', () => {
-      // Test that Fastify app has register method available
-      expect(typeof mockApp.register).toBe('function');
-
-      // Since middleware registration happens in constructor,
-      // we verify the app has the expected interface
-      expect(mockApp.register).toBeDefined();
+    it('should register CORS middleware with configured options', () => {
+      const registerCalls = (mockApp as any).register.mock.calls as any[];
+      const corsCall = registerCalls.find(([plugin]) => plugin === fastifyCors);
+      expect(corsCall).toBeDefined();
+      const [, corsOpts] = corsCall!;
+      const cfg = apiGateway.getConfig();
+      expect(corsOpts).toEqual(
+        expect.objectContaining({
+          origin: cfg.cors.origin,
+          credentials: cfg.cors.credentials,
+        })
+      );
     });
 
-    it('should configure WebSocket support', () => {
-      // Test that Fastify app has WebSocket support configured
-      expect(typeof mockApp.register).toBe('function');
-
-      // Since WebSocket registration happens in constructor,
-      // we verify the app has the expected interface
-      expect(mockApp.register).toBeDefined();
+    it('should register WebSocket plugin', () => {
+      const registerCalls = (mockApp as any).register.mock.calls as any[];
+      const wsCall = registerCalls.find(([plugin]) => plugin === fastifyWebsocket);
+      expect(wsCall).toBeDefined();
     });
 
-    it('should configure tRPC support', () => {
-      // Test that Fastify app has tRPC support configured
-      expect(typeof mockApp.register).toBe('function');
-
-      // Since tRPC registration happens in constructor,
-      // we verify the app has the expected interface
-      expect(mockApp.register).toBeDefined();
+    it('should register tRPC plugin with expected prefix and options', () => {
+      const registerCalls = (mockApp as any).register.mock.calls as any[];
+      const trpcCall = registerCalls.find(([plugin]) => plugin === fastifyTRPCPlugin);
+      expect(trpcCall).toBeDefined();
+      const [, trpcOpts] = trpcCall!;
+      expect(trpcOpts).toEqual(
+        expect.objectContaining({
+          prefix: '/api/trpc',
+          trpcOptions: expect.objectContaining({
+            router: expect.any(Object),
+            createContext: expect.any(Function),
+          }),
+        })
+      );
     });
   });
 });

@@ -22,6 +22,72 @@ export class ConfigurationService {
         };
         return config;
     }
+    // History configuration derived from environment variables
+    getHistoryConfig() {
+        const enabled = (process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false';
+        const retentionDays = parseInt(process.env.HISTORY_RETENTION_DAYS || '', 10);
+        const hops = parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '', 10);
+        const embedVersions = (process.env.HISTORY_EMBED_VERSIONS || 'false').toLowerCase() === 'true';
+        const incidentEnabled = (process.env.HISTORY_INCIDENT_ENABLED || 'true').toLowerCase() !== 'false';
+        const incidentHops = parseInt(process.env.HISTORY_INCIDENT_HOPS || '', 10);
+        const pruneHours = parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || '', 10);
+        const checkpointHours = parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || '', 10);
+        return {
+            enabled,
+            retentionDays: Number.isFinite(retentionDays) && retentionDays > 0 ? retentionDays : 30,
+            checkpoint: {
+                hops: Number.isFinite(hops) && hops > 0 ? Math.min(hops, 5) : 2,
+                embedVersions,
+            },
+            incident: {
+                enabled: incidentEnabled,
+                hops: Number.isFinite(incidentHops) && incidentHops > 0 ? Math.min(incidentHops, 5) : (Number.isFinite(hops) && hops > 0 ? Math.min(hops, 5) : 2),
+            },
+            schedule: {
+                pruneIntervalHours: Number.isFinite(pruneHours) && pruneHours > 0 ? pruneHours : 24,
+                checkpointIntervalHours: Number.isFinite(checkpointHours) && checkpointHours > 0 ? checkpointHours : 24,
+            },
+        };
+    }
+    // Update history configuration at runtime (process.env backed)
+    updateHistoryConfig(updates) {
+        if (updates.enabled !== undefined) {
+            process.env.HISTORY_ENABLED = String(!!updates.enabled);
+        }
+        if (typeof updates.retentionDays === 'number') {
+            const v = Math.max(1, Math.floor(updates.retentionDays));
+            process.env.HISTORY_RETENTION_DAYS = String(v);
+        }
+        if (updates.checkpoint) {
+            if (typeof updates.checkpoint.hops === 'number') {
+                const h = Math.max(1, Math.min(5, Math.floor(updates.checkpoint.hops)));
+                process.env.HISTORY_CHECKPOINT_HOPS = String(h);
+            }
+            if (updates.checkpoint.embedVersions !== undefined) {
+                process.env.HISTORY_EMBED_VERSIONS = String(!!updates.checkpoint.embedVersions);
+            }
+        }
+        if (updates.incident) {
+            if (typeof updates.incident.enabled === 'boolean') {
+                process.env.HISTORY_INCIDENT_ENABLED = String(!!updates.incident.enabled);
+            }
+            if (typeof updates.incident.hops === 'number') {
+                const ih = Math.max(1, Math.min(5, Math.floor(updates.incident.hops)));
+                process.env.HISTORY_INCIDENT_HOPS = String(ih);
+            }
+        }
+        if (updates.schedule) {
+            if (typeof updates.schedule.pruneIntervalHours === 'number') {
+                const ph = Math.max(1, Math.floor(updates.schedule.pruneIntervalHours));
+                process.env.HISTORY_PRUNE_INTERVAL_HOURS = String(ph);
+            }
+            if (typeof updates.schedule.checkpointIntervalHours === 'number') {
+                const ch = Math.max(1, Math.floor(updates.schedule.checkpointIntervalHours));
+                process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS = String(ch);
+            }
+        }
+        return this.getHistoryConfig();
+    }
     async getVersion() {
         try {
             // Read version from package.json
@@ -84,6 +150,7 @@ export class ConfigurationService {
             securityScanning: false,
             mcpServer: true, // Always available
             syncCoordinator: !!this.syncCoordinator,
+            history: (process.env.HISTORY_ENABLED || "true").toLowerCase() !== "false",
         };
         try {
             // Check graph search capability
@@ -154,7 +221,14 @@ export class ConfigurationService {
         }
         return {
             uptime: process.uptime(),
-            memoryUsage: memUsage,
+            memoryUsage: memUsage ||
+                {
+                    rss: 0,
+                    heapTotal: 0,
+                    heapUsed: 0,
+                    external: 0,
+                    arrayBuffers: 0,
+                },
             cpuUsage,
             platform: process.platform,
             nodeVersion: process.version,
@@ -186,7 +260,7 @@ export class ConfigurationService {
         throw new Error("Configuration updates not yet implemented - this is a placeholder");
     }
     async getDatabaseHealth() {
-        var _a;
+        var _a, _b;
         const health = {
             falkordb: null,
             qdrant: null,
@@ -235,7 +309,7 @@ export class ConfigurationService {
       `);
             health.postgres = {
                 status: "healthy",
-                tables: postgresStats.length,
+                tables: ((_b = postgresStats === null || postgresStats === void 0 ? void 0 : postgresStats.rows) !== null && _b !== void 0 ? _b : []).length,
             };
         }
         catch (error) {

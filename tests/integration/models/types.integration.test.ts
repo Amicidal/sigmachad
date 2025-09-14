@@ -119,7 +119,7 @@ describe("Types Integration Tests", () => {
 
         // Verify response structure
         expect(apiResponse).toEqual(expect.objectContaining({ success: true }));
-        expect(apiResponse.data).toBeDefined();
+        expect(apiResponse.data).toEqual(expect.any(Object));
         expect(apiResponse.data?.id).toBe(testSpecId);
         expect(apiResponse.error).toBeUndefined();
         expect(apiResponse.metadata?.executionTime).toBe(150);
@@ -222,7 +222,7 @@ describe("Types Integration Tests", () => {
           // Verify error response structure
           expect(errorResponse.success).toBe(false);
           expect(errorResponse.data).toBeUndefined();
-          expect(errorResponse.error).toBeDefined();
+          expect(errorResponse.error).toEqual(expect.any(Object));
           expect(errorResponse.error?.code).toBe(scenario.code);
           expect(errorResponse.error?.message).toBe(scenario.message);
           expect(errorResponse.metadata?.executionTime).toBe(50);
@@ -328,7 +328,7 @@ describe("Types Integration Tests", () => {
           expect(paginatedResponse).toEqual(
             expect.objectContaining({ success: true })
           );
-          expect(paginatedResponse.data).toBeDefined();
+          expect(paginatedResponse.data).toEqual(expect.any(Array));
           expect(paginatedResponse.data?.length).toBe(
             page < totalPages
               ? pageSize
@@ -795,10 +795,10 @@ describe("Types Integration Tests", () => {
           );
 
           // Verify impact analysis structure
-          expect(impactAnalysis.directImpact).toBeDefined();
-          expect(impactAnalysis.cascadingImpact).toBeDefined();
-          expect(impactAnalysis.testImpact).toBeDefined();
-          expect(impactAnalysis.recommendations).toBeDefined();
+          expect(impactAnalysis.directImpact).toEqual(expect.any(Array));
+          expect(impactAnalysis.cascadingImpact).toEqual(expect.any(Array));
+          expect(impactAnalysis.testImpact).toEqual(expect.any(Object));
+          expect(impactAnalysis.recommendations).toEqual(expect.any(Array));
           expect(impactAnalysis.recommendations.length).toBeGreaterThan(0);
         }
 
@@ -1089,7 +1089,7 @@ describe("Types Integration Tests", () => {
           );
 
           // Verify search result
-          expect(searchResult.entities).toBeDefined();
+          expect(searchResult.entities).toEqual(expect.any(Array));
           expect(searchResult.entities.length).toBe(
             scenario.expectedResultCount
           );
@@ -1299,11 +1299,11 @@ describe("Types Integration Tests", () => {
           );
 
           // Verify vector search result structure
-          expect(vectorSearchResult.results).toBeDefined();
+          expect(vectorSearchResult.results).toEqual(expect.any(Array));
           expect(vectorSearchResult.results.length).toBeLessThanOrEqual(
             scenario.limit
           );
-          expect(vectorSearchResult.metadata).toBeDefined();
+          expect(vectorSearchResult.metadata).toEqual(expect.any(Object));
           expect(vectorSearchResult.metadata.searchTime).toBeGreaterThan(0);
           expect(vectorSearchResult.metadata.indexSize).toBe(
             vectorEntities.length
@@ -1311,12 +1311,12 @@ describe("Types Integration Tests", () => {
 
           // Verify each result has required fields
           vectorSearchResult.results.forEach((result) => {
-            expect(result.entity).toBeDefined();
-            expect(result.similarity).toBeDefined();
+            expect(result.entity).toEqual(expect.any(Object));
+            expect(result.similarity).toEqual(expect.any(Number));
             expect(result.similarity).toBeGreaterThanOrEqual(0);
             expect(result.similarity).toBeLessThanOrEqual(1);
-            expect(result.context).toBeDefined();
-            expect(result.highlights).toBeDefined();
+            expect(result.context).toEqual(expect.anything());
+            expect(result.highlights).toEqual(expect.anything());
           });
         }
 

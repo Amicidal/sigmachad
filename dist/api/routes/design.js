@@ -220,11 +220,13 @@ async function createSpec(params, kgService, dbService) {
     };
 }
 async function getSpec(specId, kgService, dbService) {
+    var _a;
     const result = await dbService.postgresQuery("SELECT content FROM documents WHERE id = $1 AND type = $2", [specId, "spec"]);
-    if (result.length === 0) {
+    const rows = (_a = result === null || result === void 0 ? void 0 : result.rows) !== null && _a !== void 0 ? _a : [];
+    if (rows.length === 0) {
         throw new Error(`Specification ${specId} not found`);
     }
-    const spec = JSON.parse(result[0].content);
+    const spec = JSON.parse(rows[0].content);
     // Get related specs and affected entities (placeholder for now)
     const relatedSpecs = [];
     const affectedEntities = [];
@@ -248,12 +250,14 @@ async function getSpec(specId, kgService, dbService) {
     };
 }
 async function updateSpec(specId, updates, kgService, dbService) {
+    var _a;
     // Get existing spec
     const result = await dbService.postgresQuery("SELECT content FROM documents WHERE id = $1 AND type = $2", [specId, "spec"]);
-    if (result.length === 0) {
+    const rows2 = (_a = result === null || result === void 0 ? void 0 : result.rows) !== null && _a !== void 0 ? _a : [];
+    if (rows2.length === 0) {
         throw new Error(`Specification ${specId} not found`);
     }
-    const existingSpec = JSON.parse(result[0].content);
+    const existingSpec = JSON.parse(rows2[0].content);
     // Apply updates
     const updatedSpec = {
         ...existingSpec,
@@ -274,6 +278,7 @@ async function updateSpec(specId, updates, kgService, dbService) {
     return updatedSpec;
 }
 async function listSpecs(params, kgService, dbService) {
+    var _a;
     let query = "SELECT content FROM documents WHERE type = $1";
     const queryParams = ["spec"];
     let paramIndex = 2;
@@ -308,7 +313,8 @@ async function listSpecs(params, kgService, dbService) {
     query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     queryParams.push(limit, offset);
     const result = await dbService.postgresQuery(query, queryParams);
-    const specs = result.map((row) => JSON.parse(row.content));
+    const rows3 = (_a = result === null || result === void 0 ? void 0 : result.rows) !== null && _a !== void 0 ? _a : [];
+    const specs = rows3.map((row) => JSON.parse(row.content));
     return {
         specs,
         pagination: {

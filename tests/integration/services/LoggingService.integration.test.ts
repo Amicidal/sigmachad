@@ -61,10 +61,13 @@ describe("LoggingService Integration", () => {
         (log) =>
           log.message.includes(testMessage) && log.component === "console"
       );
-
-      expect(consoleLog).toBeDefined();
-      expect(consoleLog?.level).toBe("info");
-      expect(consoleLog?.message).toContain(testMessage);
+      expect(consoleLog).toEqual(
+        expect.objectContaining({
+          level: 'info',
+          component: 'console',
+          message: expect.stringContaining(testMessage),
+        })
+      );
     });
 
     it("should capture console.error messages", async () => {
@@ -78,10 +81,13 @@ describe("LoggingService Integration", () => {
         (log) =>
           log.message.includes(testMessage) && log.component === "console"
       );
-
-      expect(consoleError).toBeDefined();
-      expect(consoleError?.level).toBe("error");
-      expect(consoleError?.message).toContain(testMessage);
+      expect(consoleError).toEqual(
+        expect.objectContaining({
+          level: 'error',
+          component: 'console',
+          message: expect.stringContaining(testMessage),
+        })
+      );
     });
 
     it("should capture console.warn messages", async () => {
@@ -95,10 +101,13 @@ describe("LoggingService Integration", () => {
         (log) =>
           log.message.includes(testMessage) && log.component === "console"
       );
-
-      expect(consoleWarn).toBeDefined();
-      expect(consoleWarn?.level).toBe("warn");
-      expect(consoleWarn?.message).toContain(testMessage);
+      expect(consoleWarn).toEqual(
+        expect.objectContaining({
+          level: 'warn',
+          component: 'console',
+          message: expect.stringContaining(testMessage),
+        })
+      );
     });
 
     it("should capture console.debug messages", async () => {
@@ -112,10 +121,13 @@ describe("LoggingService Integration", () => {
         (log) =>
           log.message.includes(testMessage) && log.component === "console"
       );
-
-      expect(consoleDebug).toBeDefined();
-      expect(consoleDebug?.level).toBe("debug");
-      expect(consoleDebug?.message).toContain(testMessage);
+      expect(consoleDebug).toEqual(
+        expect.objectContaining({
+          level: 'debug',
+          component: 'console',
+          message: expect.stringContaining(testMessage),
+        })
+      );
     });
 
     it("should capture uncaught exceptions", async () => {
@@ -133,10 +145,15 @@ describe("LoggingService Integration", () => {
           log.message.includes(errorMessage) &&
           log.component === "process"
       );
-
-      expect(exceptionLog).toBeDefined();
-      expect(exceptionLog?.level).toBe("error");
-      expect(exceptionLog?.data).toHaveProperty("stack");
+      expect(exceptionLog).toEqual(
+        expect.objectContaining({
+          level: 'error',
+          component: 'process',
+          message: expect.stringContaining('Uncaught Exception'),
+          data: expect.any(Object),
+        })
+      );
+      expect((exceptionLog as any).data).toHaveProperty('stack');
     });
 
     it("should capture unhandled rejections", async () => {
@@ -154,9 +171,13 @@ describe("LoggingService Integration", () => {
           log.message.includes(rejectionReason) &&
           log.component === "process"
       );
-
-      expect(rejectionLog).toBeDefined();
-      expect(rejectionLog?.level).toBe("error");
+      expect(rejectionLog).toEqual(
+        expect.objectContaining({
+          level: 'error',
+          component: 'process',
+          message: expect.stringContaining('Unhandled Rejection'),
+        })
+      );
     });
   });
 
@@ -456,10 +477,14 @@ describe("LoggingService Integration", () => {
     it("should provide log statistics", async () => {
       const stats = loggingService.getLogStats();
 
-      expect(stats).toBeDefined();
+      expect(stats).toEqual(
+        expect.objectContaining({
+          totalLogs: expect.any(Number),
+          byLevel: expect.any(Object),
+          byComponent: expect.any(Object),
+        })
+      );
       expect(stats.totalLogs).toBeGreaterThan(0);
-      expect(stats.byLevel).toBeDefined();
-      expect(stats.byComponent).toBeDefined();
 
       // Should have error logs
       expect(stats.byLevel.error).toBeGreaterThan(0);
@@ -470,8 +495,7 @@ describe("LoggingService Integration", () => {
     it("should export logs in different formats", async () => {
       // Test JSON export
       const jsonExport = loggingService.exportLogs("json");
-      expect(jsonExport).toBeDefined();
-      expect(typeof jsonExport).toBe("string");
+      expect(jsonExport).toEqual(expect.any(String));
 
       // Should be valid JSON
       const parsedJson = JSON.parse(jsonExport);
@@ -479,8 +503,7 @@ describe("LoggingService Integration", () => {
 
       // Test CSV export
       const csvExport = loggingService.exportLogs("csv");
-      expect(csvExport).toBeDefined();
-      expect(typeof csvExport).toBe("string");
+      expect(csvExport).toEqual(expect.any(String));
 
       // Should contain CSV headers
       expect(csvExport).toContain("timestamp");
@@ -537,7 +560,7 @@ describe("LoggingService Integration", () => {
       const logs = loggingService.getLogs();
       const longMessageLog = logs.find((log) => log.message.includes("xxxxx")); // Look for part of the repeated string
 
-      expect(longMessageLog).toBeDefined();
+      expect(longMessageLog).toEqual(expect.any(Object));
       expect(longMessageLog?.message.length).toBe(10000);
     });
 

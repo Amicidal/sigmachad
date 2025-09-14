@@ -71,7 +71,16 @@ describe('QdrantService Integration', () => {
   describeIfRun('Initialization and Connection', () => {
     it('should initialize Qdrant service successfully when available', async () => {
       expect(qdrantService.isInitialized()).toBe(true);
-      expect(qdrantService.getClient()).toBeDefined();
+      expect(qdrantService.getClient()).toEqual(
+        expect.objectContaining({
+          getCollections: expect.any(Function),
+          createCollection: expect.any(Function),
+          deleteCollection: expect.any(Function),
+          getCollection: expect.any(Function),
+          upsert: expect.any(Function),
+          search: expect.any(Function),
+        })
+      );
     });
 
     it('should handle health checks', async () => {
@@ -81,7 +90,7 @@ describe('QdrantService Integration', () => {
 
     it('should handle connection closure', async () => {
       const client = qdrantService.getClient();
-      expect(client).toBeDefined();
+      expect(client).toEqual(expect.any(Object));
 
       await qdrantService.close();
       expect(qdrantService.isInitialized()).toBe(false);
@@ -111,8 +120,12 @@ describe('QdrantService Integration', () => {
 
       // Get collection info
       const collectionInfo = await client.getCollection(collectionName);
-      expect(collectionInfo).toBeDefined();
-      expect(collectionInfo.status).toBeDefined();
+      expect(collectionInfo).toEqual(
+        expect.objectContaining({
+          status: expect.any(String),
+          config: expect.any(Object),
+        })
+      );
 
       // Delete collection
       await client.deleteCollection(collectionName);
@@ -136,7 +149,7 @@ describe('QdrantService Integration', () => {
       });
 
       const collectionInfo = await client.getCollection(collectionName);
-      expect(collectionInfo).toBeDefined();
+      expect(collectionInfo).toEqual(expect.any(Object));
 
       // Clean up
       await client.deleteCollection(collectionName);
@@ -236,7 +249,7 @@ describe('QdrantService Integration', () => {
         limit: 3,
       });
 
-      expect(searchResults).toBeDefined();
+      expect(searchResults).toEqual(expect.any(Array));
       expect(searchResults.length).toBeGreaterThan(0);
       expect(searchResults[0].id).toBe(1); // Should find the exact match first
       expect(searchResults[0].score).toBeCloseTo(1.0, 1); // High similarity score for exact match
@@ -294,7 +307,7 @@ describe('QdrantService Integration', () => {
         },
       });
 
-      expect(filteredResults).toBeDefined();
+      expect(filteredResults).toEqual(expect.any(Array));
       expect(filteredResults.length).toBe(2); // Should find 2 code entries
 
       // Verify all results are code type
@@ -307,11 +320,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle batch vector operations', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping batch operations test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const client = qdrantService.getClient();
       const collectionName = 'test_batch_operations';
@@ -395,7 +403,7 @@ describe('QdrantService Integration', () => {
 
       // Verify collection still exists and has correct configuration
       const collectionInfo = await client.getCollection('code_embeddings');
-      expect(collectionInfo).toBeDefined();
+      expect(collectionInfo).toEqual(expect.any(Object));
     });
   });
 
@@ -451,11 +459,6 @@ describe('QdrantService Integration', () => {
     });
 
     it('should handle large vector operations', async () => {
-      if (!isQdrantAvailable) {
-        console.warn('Skipping large operations test - Qdrant not available');
-        expect(true).toBe(true); // Skip test
-        return;
-      }
 
       const client = qdrantService.getClient();
       const collectionName = 'test_large_operations';
@@ -506,39 +509,22 @@ describe('QdrantService Integration', () => {
   describeIfRun('Error Handling and Edge Cases', () => {
     it('should handle invalid collection names', async () => {
       const client = qdrantService.getClient();
-
-      // Try to create collection with invalid name
-      try {
-        await client.createCollection('', {
-          vectors: {
-            size: 1536,
-            distance: 'Cosine',
-          },
-        });
-        // If we get here, Qdrant accepts empty names (shouldn't happen)
-        expect(false).toBe(true);
-      } catch (error: any) {
-        // Expected: invalid collection name
-        expect(error).toBeDefined();
-      }
+      // Creating a collection with an empty name should fail
+      await expect(
+        client.createCollection('', {
+          vectors: { size: 1536, distance: 'Cosine' },
+        })
+      ).rejects.toEqual(expect.objectContaining({ message: expect.any(String) }));
     });
 
     it('should handle operations on non-existent collections', async () => {
       const client = qdrantService.getClient();
-
-      try {
-        await client.search('non_existent_collection', {
+      await expect(
+        client.search('non_existent_collection', {
           vector: new Array(1536).fill(0),
           limit: 1,
-        });
-        // If we get here, operation succeeded (shouldn't happen)
-        expect(false).toBe(true);
-      } catch (error: any) {
-        // Expected: collection doesn't exist
-        expect(error).toBeDefined();
-        expect(error.message?.toLowerCase()).toContain('not found') ||
-               expect(error.status).toBe(404);
-      }
+        })
+      ).rejects.toEqual(expect.objectContaining({ message: expect.any(String) }));
     });
 
     it('should handle malformed vectors', async () => {
@@ -553,21 +539,14 @@ describe('QdrantService Integration', () => {
         },
       });
 
-      try {
-        // Try to upsert vector with wrong size
-        await client.upsert(collectionName, {
-          points: [{
-            id: 1,
-            vector: new Array(768).fill(0), // Wrong size (should be 1536)
-            payload: { test: 'malformed' },
-          }],
-        });
-        // If we get here, Qdrant accepted wrong vector size (shouldn't happen)
-        expect(false).toBe(true);
-      } catch (error: any) {
-        // Expected: vector size mismatch
-        expect(error).toBeDefined();
-      }
+      // Upserting with wrong vector size should fail
+      await expect(
+        client.upsert(collectionName, {
+          points: [
+            { id: 1, vector: new Array(768).fill(0), payload: { test: 'malformed' } },
+          ],
+        })
+      ).rejects.toEqual(expect.objectContaining({ message: expect.any(String) }));
 
       // Clean up
       await client.deleteCollection(collectionName);
@@ -674,7 +653,7 @@ describe('QdrantService Integration', () => {
         },
       });
 
-      expect(searchResults).toBeDefined();
+      expect(searchResults).toEqual(expect.any(Array));
       expect(searchResults.length).toBeGreaterThan(0);
 
       // Should find the JavaScript functions
@@ -747,8 +726,7 @@ describe('QdrantService Integration', () => {
           ],
         },
       });
-
-      expect(searchResults).toBeDefined();
+      expect(searchResults).toEqual(expect.any(Array));
       expect(searchResults.length).toBeGreaterThan(0);
 
       // All results should be backend category

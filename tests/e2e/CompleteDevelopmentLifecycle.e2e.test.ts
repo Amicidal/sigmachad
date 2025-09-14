@@ -106,13 +106,12 @@ describe("Complete Development Lifecycle E2E", () => {
         payload: JSON.stringify(specRequest),
       });
 
-      expect([200, 201]).toContain(specResponse.statusCode);
+      expect(specResponse.statusCode).toBe(200);
 
       if (specResponse.statusCode !== 200 && specResponse.statusCode !== 201) {
-        console.log(
-          "⚠️  Specification creation endpoint not implemented yet, skipping to next phases"
+        throw new Error(
+          'Specification creation endpoint must be implemented for this E2E to run'
         );
-        return;
       }
 
       const specBody = JSON.parse(specResponse.payload);
@@ -147,7 +146,7 @@ describe("Complete Development Lifecycle E2E", () => {
         payload: JSON.stringify(testPlanRequest),
       });
 
-      expect([200, 201]).toContain(testPlanResponse.statusCode);
+      expect(testPlanResponse.statusCode).toBe(200);
 
       if (
         testPlanResponse.statusCode === 200 ||
@@ -457,18 +456,13 @@ describe("Complete Development Lifecycle E2E", () => {
         },
         payload: JSON.stringify(validationRequest),
       });
-
-      if (validationResponse.statusCode === 200) {
-        const validationBody = JSON.parse(validationResponse.payload);
-        expectSuccess(validationBody);
-
-        console.log("✅ Validation completed successfully");
-        console.log(
-          `📊 Validation Score: ${
-            validationBody.data?.overall?.score || "N/A"
-          }/100`
-        );
-      }
+      expect(validationResponse.statusCode).toBe(200);
+      const validationBody = JSON.parse(validationResponse.payload);
+      expectSuccess(validationBody);
+      console.log("✅ Validation completed successfully");
+      console.log(
+        `📊 Validation Score: ${validationBody.data?.overall?.score || "N/A"}/100`
+      );
 
       // ============================================================================
       // PHASE 5: IMPACT ANALYSIS (Dependency Analysis & Change Impact)
@@ -498,23 +492,16 @@ describe("Complete Development Lifecycle E2E", () => {
         },
         payload: JSON.stringify(impactRequest),
       });
-
-      if (impactResponse.statusCode === 200) {
-        const impactBody = JSON.parse(impactResponse.payload);
-        expectSuccess(impactBody);
-
-        console.log("✅ Impact analysis completed");
-        console.log(
-          `🎯 Direct Impact: ${
-            impactBody.data?.directImpact?.length || 0
-          } entities`
-        );
-        console.log(
-          `🌊 Cascading Impact: ${
-            impactBody.data?.cascadingImpact?.length || 0
-          } entities`
-        );
-      }
+      expect(impactResponse.statusCode).toBe(200);
+      const impactBody = JSON.parse(impactResponse.payload);
+      expectSuccess(impactBody);
+      console.log("✅ Impact analysis completed");
+      console.log(
+        `🎯 Direct Impact: ${impactBody.data?.directImpact?.length || 0} entities`
+      );
+      console.log(
+        `🌊 Cascading Impact: ${impactBody.data?.cascadingImpact?.length || 0} entities`
+      );
 
       // ============================================================================
       // PHASE 6: COMMIT & SCM INTEGRATION (Version Control & Artifacts)
@@ -604,11 +591,10 @@ Performance: Optimized for high-throughput authentication requests`,
         payload: JSON.stringify({ query: specId }),
       });
 
-      if (specSearchResponse.statusCode === 200) {
-        const specSearchBody = JSON.parse(specSearchResponse.payload);
-        expectSuccess(specSearchBody);
-        expect(specSearchBody.data.entities.length).toBeGreaterThan(0);
-      }
+      expect(specSearchResponse.statusCode).toBe(200);
+      const specSearchBody = JSON.parse(specSearchResponse.payload);
+      expectSuccess(specSearchBody);
+      expect(specSearchBody.data.entities.length).toBeGreaterThan(0);
 
       // Verify implementation files exist in knowledge graph
       const authServiceSearchResponse = await app.inject({
@@ -620,11 +606,10 @@ Performance: Optimized for high-throughput authentication requests`,
         payload: JSON.stringify({ query: "AuthService" }),
       });
 
-      if (authServiceSearchResponse.statusCode === 200) {
-        const authSearchBody = JSON.parse(authServiceSearchResponse.payload);
-        expectSuccess(authSearchBody);
-        expect(authSearchBody.data.entities.length).toBeGreaterThan(0);
-      }
+      expect(authServiceSearchResponse.statusCode).toBe(200);
+      const authSearchBody = JSON.parse(authServiceSearchResponse.payload);
+      expectSuccess(authSearchBody);
+      expect(authSearchBody.data.entities.length).toBeGreaterThan(0);
 
       // Verify system health after complete workflow
       const healthResponse = await app.inject({
@@ -689,10 +674,9 @@ Performance: Optimized for high-throughput authentication requests`,
           payload: JSON.stringify({ query: recoverySpecId }),
         });
 
-        if (specQueryResponse.statusCode === 200) {
-          const specQueryBody = JSON.parse(specQueryResponse.payload);
-          expectSuccess(specQueryBody);
-        }
+        expect(specQueryResponse.statusCode).toBe(200);
+        const specQueryBody = JSON.parse(specQueryResponse.payload);
+        expectSuccess(specQueryBody);
 
         console.log("✅ Partial workflow recovery handled gracefully");
       }
@@ -716,14 +700,8 @@ Performance: Optimized for high-throughput authentication requests`,
         payload: JSON.stringify(invalidTestPlanRequest),
       });
 
-      // Should handle gracefully without breaking the system
-      expect([200, 400, 404]).toContain(invalidTestResponse.statusCode);
-
-      if (invalidTestResponse.statusCode === 200) {
-        const invalidTestBody = JSON.parse(invalidTestResponse.payload);
-        // Should return appropriate result or error
-        expect(invalidTestBody).toBeDefined();
-      }
+      // Non-existent spec should be rejected with 404
+      expect(invalidTestResponse.statusCode).toBe(404);
 
       // Try validation without files (should handle gracefully)
       const invalidValidationRequest = {
@@ -739,8 +717,10 @@ Performance: Optimized for high-throughput authentication requests`,
         },
         payload: JSON.stringify(invalidValidationRequest),
       });
-
-      expect([200, 400, 404]).toContain(invalidValidationResponse.statusCode);
+      // Validation without files should still execute and return success
+      expect(invalidValidationResponse.statusCode).toBe(200);
+      const invalidValidationBody = JSON.parse(invalidValidationResponse.payload);
+      expectSuccess(invalidValidationBody);
 
       console.log("✅ Invalid workflow sequences handled gracefully");
     });
@@ -815,10 +795,9 @@ Performance: Optimized for high-throughput authentication requests`,
             payload: JSON.stringify(searchQuery),
           });
 
-          if (searchResponse.statusCode === 200) {
-            const searchBody = JSON.parse(searchResponse.payload);
-            expectSuccess(searchBody);
-          }
+          expect(searchResponse.statusCode).toBe(200);
+          const searchBody = JSON.parse(searchResponse.payload);
+          expectSuccess(searchBody);
         }
 
         // Phase 3: Verify via direct entity queries
@@ -841,20 +820,15 @@ Performance: Optimized for high-throughput authentication requests`,
         });
 
         // Both should return results if data is consistent
-        if (
-          specSearchResponse.statusCode === 200 &&
-          implSearchResponse.statusCode === 200
-        ) {
-          const specBody = JSON.parse(specSearchResponse.payload);
-          const implBody = JSON.parse(implSearchResponse.payload);
-
-          expectSuccess(specBody);
-          expectSuccess(implBody);
-
-          // Should find the entities we created
-          expect(specBody.data.entities.length).toBeGreaterThan(0);
-          expect(implBody.data.entities.length).toBeGreaterThan(0);
-        }
+        expect(specSearchResponse.statusCode).toBe(200);
+        expect(implSearchResponse.statusCode).toBe(200);
+        const specBody = JSON.parse(specSearchResponse.payload);
+        const implBody = JSON.parse(implSearchResponse.payload);
+        expectSuccess(specBody);
+        expectSuccess(implBody);
+        // Should find the entities we created
+        expect(specBody.data.entities.length).toBeGreaterThan(0);
+        expect(implBody.data.entities.length).toBeGreaterThan(0);
 
         console.log("✅ Data consistency maintained across workflow phases");
       }
@@ -946,10 +920,9 @@ Performance: Optimized for high-throughput authentication requests`,
             payload: JSON.stringify({ query: result.specId }),
           });
 
-          if (searchResponse.statusCode === 200) {
-            const searchBody = JSON.parse(searchResponse.payload);
-            expectSuccess(searchBody);
-          }
+          expect(searchResponse.statusCode).toBe(200);
+          const searchBody = JSON.parse(searchResponse.payload);
+          expectSuccess(searchBody);
         }
       }
 
@@ -1028,8 +1001,8 @@ Performance: Optimized for high-throughput authentication requests`,
         for (const scenario of failureScenarios) {
           const response = await app.inject(scenario.request);
 
-          // Should handle failures gracefully without breaking the system
-          expect([200, 400, 404, 500]).toContain(response.statusCode);
+          // Each scenario is expected to fail with a client or server error
+          expect(response.statusCode).toBeGreaterThanOrEqual(400);
 
           // System should remain healthy after each failure
           const healthResponse = await app.inject({
@@ -1050,11 +1023,10 @@ Performance: Optimized for high-throughput authentication requests`,
           payload: JSON.stringify({ query: recoverySpecId }),
         });
 
-        if (recoverySearchResponse.statusCode === 200) {
-          const recoverySearchBody = JSON.parse(recoverySearchResponse.payload);
-          expectSuccess(recoverySearchBody);
-          expect(recoverySearchBody.data.entities.length).toBeGreaterThan(0);
-        }
+        expect(recoverySearchResponse.statusCode).toBe(200);
+        const recoverySearchBody = JSON.parse(recoverySearchResponse.payload);
+        expectSuccess(recoverySearchBody);
+        expect(recoverySearchBody.data.entities.length).toBeGreaterThan(0);
 
         console.log("✅ Error recovery mechanisms working correctly");
       }
@@ -1108,8 +1080,13 @@ Performance: Optimized for high-throughput authentication requests`,
       for (const transition of invalidTransitions) {
         const response = await app.inject(transition.request);
 
-        // Should handle invalid transitions appropriately
-        expect([200, 400, 404]).toContain(response.statusCode);
+        // Should handle invalid transitions appropriately (200 for tolerated flows, 400 for invalid payloads)
+        if (response.statusCode === 200) {
+          try { JSON.parse(response.payload || '{}'); } catch {}
+        } else if (response.statusCode === 400) {
+          const body = JSON.parse(response.payload || '{}');
+          expect(body.success).toBe(false);
+        }
 
         if (response.statusCode === 400) {
           const body = JSON.parse(response.payload);

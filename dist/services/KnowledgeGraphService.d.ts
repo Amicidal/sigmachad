@@ -5,25 +5,218 @@
 import { DatabaseService } from "./DatabaseService.js";
 import { Entity } from "../models/entities.js";
 import { GraphRelationship, RelationshipType, RelationshipQuery, PathQuery, TraversalQuery } from "../models/relationships.js";
-import { GraphSearchRequest, GraphExamples, DependencyAnalysis } from "../models/types.js";
+import { GraphSearchRequest, GraphExamples, DependencyAnalysis, TimeRangeParams } from "../models/types.js";
 import { EventEmitter } from "events";
 export declare class KnowledgeGraphService extends EventEmitter {
     private db;
     private searchCache;
     private entityCache;
+    private _lastPruneSummary;
     constructor(db: DatabaseService);
+    private isHistoryEnabled;
+    /**
+     * Append a compact version snapshot for an entity when its content changes.
+     * Stub: returns a generated version id without writing to the graph.
+     */
+    appendVersion(entity: Entity, opts?: {
+        changeSetId?: string;
+        timestamp?: Date;
+    }): Promise<string>;
+    /**
+     * Open (or create) a relationship with a validity interval starting at ts.
+     * Stub: logs intent; no-op.
+     */
+    openEdge(fromId: string, toId: string, type: RelationshipType, ts?: Date, changeSetId?: string): Promise<void>;
+    /**
+     * Close a relationship's validity interval at ts.
+     * Stub: logs intent; no-op.
+     */
+    closeEdge(fromId: string, toId: string, type: RelationshipType, ts?: Date): Promise<void>;
+    /**
+     * Create a checkpoint subgraph descriptor and (in full impl) link members.
+     * Stub: returns a generated checkpointId.
+     */
+    createCheckpoint(seedEntities: string[], reason: "daily" | "incident" | "manual", hops: number, window?: TimeRangeParams): Promise<{
+        checkpointId: string;
+    }>;
+    /**
+     * Prune history artifacts older than the retention window.
+     * Stub: returns zeros.
+     */
+    pruneHistory(retentionDays: number, opts?: {
+        dryRun?: boolean;
+    }): Promise<{
+        versionsDeleted: number;
+        edgesClosed: number;
+        checkpointsDeleted: number;
+    }>;
+    /** Aggregate history-related metrics for admin */
+    getHistoryMetrics(): Promise<{
+        versions: number;
+        checkpoints: number;
+        checkpointMembers: {
+            avg: number;
+            min: number;
+            max: number;
+        };
+        temporalEdges: {
+            open: number;
+            closed: number;
+        };
+        lastPrune?: {
+            retentionDays: number;
+            cutoff: string;
+            versions: number;
+            closedEdges: number;
+            checkpoints: number;
+            dryRun?: boolean;
+        } | null;
+        totals: {
+            nodes: number;
+            relationships: number;
+        };
+    }>;
+    /** Inspect database indexes and evaluate expected coverage. */
+    getIndexHealth(): Promise<{
+        supported: boolean;
+        indexes?: any[];
+        expected: {
+            file_path: boolean;
+            symbol_path: boolean;
+            version_entity: boolean;
+            checkpoint_id: boolean;
+            rel_validFrom: boolean;
+            rel_validTo: boolean;
+        };
+        notes?: string[];
+    }>;
+    /** Run quick, non-destructive micro-benchmarks for common queries. */
+    runBenchmarks(options?: {
+        mode?: 'quick' | 'full';
+    }): Promise<{
+        mode: 'quick' | 'full';
+        totals: {
+            nodes: number;
+            edges: number;
+        };
+        timings: Record<string, number>;
+        samples: Record<string, any>;
+    }>;
+    /** Ensure graph indexes for common queries (best-effort across dialects). */
+    ensureGraphIndexes(): Promise<void>;
+    /**
+     * List checkpoints with optional filters and pagination.
+     * Returns an array of checkpoint entities and the total count matching filters.
+     */
+    listCheckpoints(options?: {
+        reason?: string;
+        since?: Date | string;
+        until?: Date | string;
+        limit?: number;
+        offset?: number;
+    }): Promise<{
+        items: any[];
+        total: number;
+    }>;
+    /** Get a checkpoint node by id. */
+    getCheckpoint(id: string): Promise<Entity | null>;
+    /** Get members of a checkpoint with pagination. */
+    getCheckpointMembers(id: string, options?: {
+        limit?: number;
+        offset?: number;
+    }): Promise<{
+        items: Entity[];
+        total: number;
+    }>;
+    /**
+     * Time-scoped traversal starting from a node, filtering relationships by validFrom/validTo.
+     * atTime: edges active at a specific moment.
+     * since/until: edges overlapping a time window.
+     */
+    timeTravelTraversal(query: {
+        startId: string;
+        atTime?: Date | string;
+        since?: Date | string;
+        until?: Date | string;
+        maxDepth?: number;
+        types?: string[];
+    }): Promise<{
+        entities: Entity[];
+        relationships: GraphRelationship[];
+    }>;
+    /** Delete a checkpoint node and its include edges. */
+    deleteCheckpoint(id: string): Promise<boolean>;
+    /** Compute summary statistics for a checkpoint. */
+    getCheckpointSummary(id: string): Promise<{
+        totalMembers: number;
+        entityTypeCounts: Array<{
+            type: string;
+            count: number;
+        }>;
+        relationshipTypeCounts: Array<{
+            type: string;
+            count: number;
+        }>;
+    } | null>;
+    /** Find recently modified entities (by lastModified property) */
+    findRecentEntityIds(since: Date, limit?: number): Promise<string[]>;
+    /** Export a checkpoint to a portable JSON structure. */
+    exportCheckpoint(id: string, options?: {
+        includeRelationships?: boolean;
+    }): Promise<{
+        checkpoint: any;
+        members: Entity[];
+        relationships?: GraphRelationship[];
+    } | null>;
+    /** Import a checkpoint JSON; returns new checkpoint id and stats. */
+    importCheckpoint(data: {
+        checkpoint: any;
+        members: Array<Entity | {
+            id: string;
+        }>;
+        relationships?: Array<GraphRelationship>;
+    }, options?: {
+        useOriginalId?: boolean;
+    }): Promise<{
+        checkpointId: string;
+        linked: number;
+        missing: number;
+    }>;
     initialize(): Promise<void>;
     private hasCodebaseProperties;
-    createEntity(entity: Entity): Promise<void>;
+    createEntity(entity: Entity, options?: {
+        skipEmbedding?: boolean;
+    }): Promise<void>;
+    /**
+     * Create many entities in a small number of graph queries.
+     * Groups by primary label (entity.type) and uses UNWIND + SET n += row.
+     */
+    createEntitiesBulk(entities: Entity[], options?: {
+        skipEmbedding?: boolean;
+    }): Promise<void>;
+    private getEntityLabel;
     getEntity(entityId: string): Promise<Entity | null>;
-    updateEntity(entityId: string, updates: Partial<Entity>): Promise<void>;
+    updateEntity(entityId: string, updates: Partial<Entity>, options?: {
+        skipEmbedding?: boolean;
+    }): Promise<void>;
     createOrUpdateEntity(entity: Entity): Promise<void>;
     deleteEntity(entityId: string): Promise<void>;
     deleteRelationship(relationshipId: string): Promise<void>;
-    createRelationship(relationship: GraphRelationship | string, toEntityId?: string, type?: RelationshipType): Promise<void>;
+    createRelationship(relationship: GraphRelationship | string, toEntityId?: string, type?: RelationshipType, options?: {
+        validate?: boolean;
+    }): Promise<void>;
     getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
     queryRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
+    getRelationshipById(relationshipId: string): Promise<GraphRelationship | null>;
+    /**
+     * Create many relationships in one round-trip per relationship type.
+     * Validation is optional (defaults to false for performance in sync paths).
+     */
+    createRelationshipsBulk(relationships: GraphRelationship[], options?: {
+        validate?: boolean;
+    }): Promise<void>;
     search(request: GraphSearchRequest): Promise<Entity[]>;
+    private entityMatchesRequestedTypes;
     /**
      * Clear search cache
      */
@@ -36,13 +229,31 @@ export declare class KnowledgeGraphService extends EventEmitter {
      * Find entities by type
      */
     findEntitiesByType(entityType: string): Promise<Entity[]>;
+    /**
+     * Find symbol entities by exact name
+     */
+    findSymbolsByName(name: string, limit?: number): Promise<Entity[]>;
+    /**
+     * Find symbol by kind and name (e.g., class/interface/function)
+     */
+    findSymbolByKindAndName(kind: string, name: string, limit?: number): Promise<Entity[]>;
+    /**
+     * Find a symbol defined in a specific file by name
+     */
+    findSymbolInFile(filePath: string, name: string): Promise<Entity | null>;
+    /**
+     * Get a file entity by path
+     */
+    getFileByPath(path: string): Promise<Entity | null>;
     private semanticSearch;
     private structuralSearch;
     getEntityExamples(entityId: string): Promise<GraphExamples | null>;
     getEntityDependencies(entityId: string): Promise<DependencyAnalysis | null>;
     findPaths(query: PathQuery): Promise<any[]>;
     traverseGraph(query: TraversalQuery): Promise<Entity[]>;
-    createEmbeddingsBatch(entities: Entity[]): Promise<void>;
+    createEmbeddingsBatch(entities: Entity[], options?: {
+        checkpointId?: string;
+    }): Promise<void>;
     private createEmbedding;
     private updateEmbedding;
     private deleteEmbedding;

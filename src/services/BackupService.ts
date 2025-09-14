@@ -3,7 +3,8 @@
  * Handles system backup and restore operations across all databases
  */
 
-import { DatabaseService, DatabaseConfig } from "./DatabaseService.js";
+import { DatabaseService } from "./DatabaseService.js";
+import type { DatabaseConfig } from "./database";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -334,7 +335,7 @@ export class BackupService {
       const tables = tablesResult.rows || tablesResult;
       console.log(
         `Found ${tables.length} tables to backup:`,
-        tables.map((t) => t.tablename || t).join(", ")
+        tables.map((t: any) => t.tablename || t).join(", ")
       );
 
       let dumpContent = `-- PostgreSQL dump created by Memento Backup Service\n`;
@@ -868,9 +869,9 @@ export class BackupService {
       for (const statement of createStatements) {
         try {
           await postgresService.query(statement);
-        } catch (error) {
+        } catch (error: any) {
           // Skip table already exists errors
-          if (!error.message?.includes("already exists")) {
+          if (!error?.message?.includes("already exists")) {
             console.warn(
               `⚠️ Failed to create table: ${statement.substring(0, 50)}...`,
               error

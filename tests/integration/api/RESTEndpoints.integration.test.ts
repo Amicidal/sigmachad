@@ -177,12 +177,13 @@ describe('REST API Endpoints Integration', () => {
               url: `/api/v1/graph/examples/${entityId}`,
             });
 
-            expect([200, 404]).toContain(response.statusCode); // 404 if no examples found
+            expect(response.statusCode).toBe(200);
 
             if (response.statusCode === 200) {
               const body = JSON.parse(response.payload);
-              expect(body).toEqual(expect.objectContaining({ success: true }));
-              expect(body.data).toBeDefined();
+              expect(body).toEqual(
+                expect.objectContaining({ success: true, data: expect.anything() })
+              );
             }
           }
         }
@@ -194,7 +195,7 @@ describe('REST API Endpoints Integration', () => {
           url: '/api/v1/graph/examples/non-existent-entity-123',
         });
 
-        expect([200, 404, 500]).toContain(response.statusCode);
+        expect(response.statusCode).toBeGreaterThanOrEqual(400);
       });
     });
 
@@ -219,12 +220,13 @@ describe('REST API Endpoints Integration', () => {
               url: `/api/v1/graph/dependencies/${entityId}`,
             });
 
-            expect([200, 404]).toContain(response.statusCode);
+            expect(response.statusCode).toBe(200);
 
             if (response.statusCode === 200) {
               const body = JSON.parse(response.payload);
-              expect(body).toEqual(expect.objectContaining({ success: true }));
-              expect(body.data).toBeDefined();
+              expect(body).toEqual(
+                expect.objectContaining({ success: true, data: expect.anything() })
+              );
             }
           }
         }
@@ -244,9 +246,10 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body).toEqual(expect.objectContaining({ success: true }));
-        expect(Array.isArray(body.data)).toBe(true);
-        expect(body.pagination).toBeDefined();
+        expect(body).toEqual(
+          expect.objectContaining({ success: true, data: expect.any(Array) })
+        );
+        expect(body.pagination).toEqual(expect.any(Object));
         expect(typeof body.pagination.page).toBe('number');
         expect(typeof body.pagination.pageSize).toBe('number');
         expect(typeof body.pagination.total).toBe('number');
@@ -292,7 +295,7 @@ describe('REST API Endpoints Integration', () => {
         const body = JSON.parse(response.payload);
         expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(Array.isArray(body.data)).toBe(true);
-        expect(body.pagination).toBeDefined();
+        expect(body.pagination).toEqual(expect.any(Object));
       });
 
       it('should handle filtering by relationship type', async () => {
@@ -346,9 +349,24 @@ describe('REST API Endpoints Integration', () => {
 
         const body = JSON.parse(response.payload);
         expect(body).toEqual(expect.objectContaining({ success: true }));
-        expect(body.data).toBeDefined();
-        expect(body.data.testPlan).toBeDefined();
-        expect(body.data.estimatedCoverage).toBeDefined();
+        expect(body).toEqual(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              testPlan: expect.objectContaining({
+                unitTests: expect.any(Array),
+                integrationTests: expect.any(Array),
+                e2eTests: expect.any(Array),
+                performanceTests: expect.any(Array),
+              }),
+              estimatedCoverage: expect.objectContaining({
+                lines: expect.any(Number),
+                branches: expect.any(Number),
+                functions: expect.any(Number),
+                statements: expect.any(Number),
+              }),
+            }),
+          })
+        );
       });
 
       it('should handle non-existent specification', async () => {
@@ -369,9 +387,12 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(404);
 
         const body = JSON.parse(response.payload);
-        expect(body).toEqual(expect.objectContaining({ success: false }));
-        expect(body.error).toBeDefined();
-        expect(body.error.code).toBe('SPEC_NOT_FOUND');
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: false,
+            error: expect.objectContaining({ code: 'SPEC_NOT_FOUND' })
+          })
+        );
       });
 
       it('should validate required fields', async () => {
@@ -420,9 +441,12 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body).toEqual(expect.objectContaining({ success: true }));
-        expect(body.data).toBeDefined();
-        expect(body.data.recorded).toBe(2);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            data: expect.objectContaining({ recorded: 2 }),
+          })
+        );
       });
 
       it('should handle single test result', async () => {
@@ -446,8 +470,12 @@ describe('REST API Endpoints Integration', () => {
         expect(response.statusCode).toBe(200);
 
         const body = JSON.parse(response.payload);
-        expect(body).toEqual(expect.objectContaining({ success: true }));
-        expect(body.data.recorded).toBe(1);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            data: expect.objectContaining({ recorded: 1 }),
+          })
+        );
       });
     });
 
@@ -465,12 +493,16 @@ describe('REST API Endpoints Integration', () => {
           url: `/api/v1/tests/performance/${entityId}`,
         });
 
-        expect([200, 404]).toContain(response.statusCode);
+        expect(response.statusCode).toBe(200);
 
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
-          expect(body).toEqual(expect.objectContaining({ success: true }));
-          expect(body.data).toBeDefined();
+          expect(body).toEqual(
+            expect.objectContaining({
+              success: true,
+              data: expect.any(Object),
+            })
+          );
         }
       });
     });
@@ -489,74 +521,197 @@ describe('REST API Endpoints Integration', () => {
           url: `/api/v1/tests/coverage/${entityId}`,
         });
 
-        expect([200, 404]).toContain(response.statusCode);
+        expect(response.statusCode).toBe(200);
 
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
-          expect(body).toEqual(expect.objectContaining({ success: true }));
-          expect(body.data).toBeDefined();
+          expect(body).toEqual(
+            expect.objectContaining({
+              success: true,
+              data: expect.any(Object),
+            })
+          );
         }
       });
     });
   });
 
   describe('Admin API Endpoints', () => {
-    // Note: Admin endpoints would require authentication/authorization
-    // These tests verify the routes exist and handle unauthorized access properly
+    it('GET /api/v1/admin/admin-health responds with status and metrics', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/admin/admin-health' });
+      const body = JSON.parse(res.payload || '{}');
+      if (res.statusCode === 200) {
+        expect(body).toEqual(
+          expect.objectContaining({
+            overall: expect.any(String),
+            components: expect.any(Object),
+            metrics: expect.any(Object),
+          })
+        );
+      } else if (res.statusCode === 503) {
+        expect(body).toEqual(expect.objectContaining({ success: false }));
+      } else {
+        throw new Error(`Unexpected /admin/admin-health status: ${res.statusCode}`);
+      }
+    });
 
-    it('should have admin routes registered', () => {
-      // Verify that admin routes are registered (this would typically require auth)
-      expect(app.hasRoute('GET', '/api/v1/admin/health')).toBe(true);
-      expect(app.hasRoute('POST', '/api/v1/admin/backup')).toBe(true);
-      expect(app.hasRoute('GET', '/api/v1/admin/logs')).toBe(true);
+    it('POST /api/v1/admin/backup returns success', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/admin/backup', headers: { 'content-type': 'application/json' }, payload: JSON.stringify({}) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
+    });
+
+    it('GET /api/v1/admin/logs returns logs array', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/admin/logs?limit=10' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Array) }));
     });
   });
 
   describe('Security API Endpoints', () => {
-    it('should have security routes registered', () => {
-      expect(app.hasRoute('POST', '/api/v1/security/scan')).toBe(true);
-      expect(app.hasRoute('GET', '/api/v1/security/vulnerabilities')).toBe(true);
-      expect(app.hasRoute('POST', '/api/v1/security/fix')).toBe(true);
+    it('POST /api/v1/security/scan returns a scan result', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/security/scan', headers: { 'content-type': 'application/json' }, payload: JSON.stringify({}) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
+    });
+
+    it('GET /api/v1/security/vulnerabilities returns report', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/security/vulnerabilities' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
+    });
+
+    it('POST /api/v1/security/fix requires id and returns 400', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/security/fix', headers: { 'content-type': 'application/json' }, payload: JSON.stringify({}) });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'MISSING_ID' }) }));
     });
   });
 
   describe('Documentation API Endpoints', () => {
-    it('should have documentation routes registered', () => {
-      expect(app.hasRoute('GET', '/api/v1/docs/search')).toBe(true);
-      expect(app.hasRoute('GET', '/api/v1/docs/:id')).toBe(true);
-      expect(app.hasRoute('POST', '/api/v1/docs/parse')).toBe(true);
+    it('GET /api/v1/docs/search returns results', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/docs/search?query=test' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true }));
+    });
+
+    it('POST /api/v1/docs/parse parses content', async () => {
+      const payload = { content: '# Title', format: 'markdown' };
+      const res = await app.inject({ method: 'POST', url: '/api/v1/docs/parse', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
+    });
+
+    it('GET /api/v1/docs/:id returns 404 for unknown id', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/docs/non-existent-id' });
+      expect(res.statusCode).toBe(404);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: false, error: expect.any(Object) }));
     });
   });
 
   describe('Source Control API Endpoints', () => {
-    it('should have SCM routes registered', () => {
-      expect(app.hasRoute('GET', '/api/v1/scm/changes')).toBe(true);
-      expect(app.hasRoute('POST', '/api/v1/scm/commit')).toBe(true);
-      expect(app.hasRoute('GET', '/api/v1/scm/branches')).toBe(true);
+    it('GET /api/v1/scm/changes returns array', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/scm/changes' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Array) }));
+    });
+
+    it('POST /api/v1/scm/commit-pr accepts minimal valid payload', async () => {
+      const payload = { title: 't', description: 'd', changes: ['README.md'] };
+      const res = await app.inject({ method: 'POST', url: '/api/v1/scm/commit-pr', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ commitHash: expect.any(String) }) }));
+    });
+
+    it('GET /api/v1/scm/branches returns list', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/scm/branches' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Array) }));
     });
   });
 
   describe('Code Analysis API Endpoints', () => {
-    it('should have code routes registered', () => {
-      expect(app.hasRoute('POST', '/api/v1/code/analyze')).toBe(true);
-      expect(app.hasRoute('GET', '/api/v1/code/symbols')).toBe(true);
-      expect(app.hasRoute('POST', '/api/v1/code/refactor')).toBe(true);
+    it('GET /api/v1/code/symbols returns list', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/code/symbols' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Array) }));
+    });
+
+    it('POST /api/v1/code/refactor returns suggestions skeleton', async () => {
+      const payload = { files: ['src/index.ts'], refactorType: 'rename' };
+      const res = await app.inject({ method: 'POST', url: '/api/v1/code/refactor', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
+    });
+
+    it('POST /api/v1/code/analyze (complexity) executes with valid input', async () => {
+      const payload = { files: ['src/index.ts'], analysisType: 'complexity' };
+      const res = await app.inject({ method: 'POST', url: '/api/v1/code/analyze', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
     });
   });
 
   describe('Design API Endpoints', () => {
-    it('should have design routes registered', () => {
-      expect(app.hasRoute('POST', '/api/v1/design/create-spec')).toBe(true);
-      expect(app.hasRoute('GET', '/api/v1/design/specs')).toBe(true);
-      expect(app.hasRoute('POST', '/api/v1/design/generate')).toBe(true);
+    it('POST /api/v1/design/create-spec creates spec', async () => {
+      const payload = { title: 'A', description: 'B', acceptanceCriteria: ['C'] };
+      const res = await app.inject({ method: 'POST', url: '/api/v1/design/create-spec', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
+    });
+
+    it('GET /api/v1/design/specs returns list', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/design/specs' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true }));
+    });
+
+    it('POST /api/v1/design/generate returns spec id', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/design/generate' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ specId: expect.any(String) }) }));
     });
   });
 
   describe('Impact Analysis API Endpoints', () => {
-    it('should have impact routes registered', () => {
-      expect(app.hasRoute('POST', '/api/v1/impact/analyze')).toBe(true);
-      expect(app.hasRoute('GET', '/api/v1/impact/changes')).toBe(true);
-      expect(app.hasRoute('POST', '/api/v1/impact/simulate')).toBe(true);
+    it('POST /api/v1/impact/analyze analyzes minimal change', async () => {
+      const payload = { changes: [{ entityId: 'non-existent', changeType: 'modify' }] };
+      const res = await app.inject({ method: 'POST', url: '/api/v1/impact/analyze', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
+    });
+
+    it('GET /api/v1/impact/changes returns summary', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/impact/changes' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true }));
+    });
+
+    it('POST /api/v1/impact/simulate compares scenarios', async () => {
+      const payload = { scenarios: [{ name: 's1', changes: [{ entityId: 'e', changeType: 'modify' }] }] };
+      const res = await app.inject({ method: 'POST', url: '/api/v1/impact/simulate', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
     });
   });
 });

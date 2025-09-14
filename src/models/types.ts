@@ -53,6 +53,33 @@ export interface TimeRangeParams {
   timeRange?: "1h" | "24h" | "7d" | "30d" | "90d";
 }
 
+// History/Checkpoint configuration
+export interface HistoryConfig {
+  enabled?: boolean;
+  retentionDays?: number; // e.g., 30
+  checkpoint?: {
+    hops?: number;            // K-hop neighborhood size
+    embedVersions?: boolean;  // whether to embed version nodes
+  };
+}
+
+export type CheckpointReason = "daily" | "incident" | "manual";
+
+export interface CheckpointCreateRequest {
+  seedEntities: string[];
+  reason: CheckpointReason;
+  hops?: number;
+  window?: TimeRangeParams;
+}
+
+export interface TemporalGraphQuery {
+  startId: string;
+  atTime?: Date;
+  since?: Date;
+  until?: Date;
+  maxDepth?: number;
+}
+
 // Design & Specification Management Types
 export interface CreateSpecRequest {
   title: string;
@@ -203,6 +230,7 @@ export interface GraphSearchRequest {
     path?: string;
     tags?: string[];
     lastModified?: TimeRangeParams;
+    checkpointId?: string;
   };
   includeRelated?: boolean;
   limit?: number;

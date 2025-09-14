@@ -209,6 +209,30 @@ export interface Session {
   metadata?: Record<string, any>;
 }
 
+// Version snapshot of an entity (append-only)
+export interface Version {
+  id: string;
+  type: "version";
+  entityId: string; // id of the current/live entity node
+  path?: string;
+  hash: string;
+  language?: string;
+  timestamp: Date;
+  metadata?: Record<string, any>;
+}
+
+// Checkpoint descriptor for a materialized neighborhood
+export interface Checkpoint {
+  id: string;
+  type: "checkpoint";
+  checkpointId: string;
+  timestamp: Date;
+  reason: "daily" | "incident" | "manual";
+  hops: number;
+  seedEntities: string[];
+  metadata?: Record<string, any>;
+}
+
 // Documentation-related entities for enhanced capabilities
 export interface DocumentationNode extends CodebaseEntity {
   type: "documentation";
@@ -296,6 +320,8 @@ export type Entity =
   | Spec
   | Change
   | Session
+  | Version
+  | Checkpoint
   | DocumentationNode
   | BusinessDomain
   | SemanticCluster

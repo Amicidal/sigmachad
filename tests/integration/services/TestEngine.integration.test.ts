@@ -74,8 +74,15 @@ describe("TestEngine Integration", () => {
 
       const result = await testEngine.parseTestResults(testFile, "junit");
 
-      expect(result).toBeDefined();
-      expect(result.suiteName).toContain("JUnit");
+      expect(result).toEqual(
+        expect.objectContaining({
+          suiteName: expect.stringContaining('JUnit'),
+          results: expect.any(Array),
+          totalTests: expect.any(Number),
+          passedTests: expect.any(Number),
+          failedTests: expect.any(Number),
+        })
+      );
       expect(result.results.length).toBe(2);
       expect(result.totalTests).toBe(2);
       expect(result.passedTests).toBe(2);
@@ -109,8 +116,13 @@ describe("TestEngine Integration", () => {
 
       const result = await testEngine.parseTestResults(testFile, "jest");
 
-      expect(result).toBeDefined();
-      expect(result.suiteName).toContain("Jest");
+      expect(result).toEqual(
+        expect.objectContaining({
+          suiteName: expect.stringContaining('Jest'),
+          results: expect.any(Array),
+          totalTests: expect.any(Number),
+        })
+      );
       expect(result.results.length).toBe(2);
       expect(result.totalTests).toBe(2);
       expect(result.passedTests).toBe(2);
@@ -139,8 +151,13 @@ describe("TestEngine Integration", () => {
 
       const result = await testEngine.parseTestResults(testFile, "vitest");
 
-      expect(result).toBeDefined();
-      expect(result.suiteName).toContain("Vitest");
+      expect(result).toEqual(
+        expect.objectContaining({
+          suiteName: expect.stringContaining('Vitest'),
+          results: expect.any(Array),
+          totalTests: expect.any(Number),
+        })
+      );
       expect(result.results.length).toBe(2);
       expect(result.totalTests).toBe(2);
     });
@@ -224,9 +241,9 @@ describe("TestEngine Integration", () => {
       const testEntity2 = await kgService.getEntity("integration-test-2");
       const testEntity3 = await kgService.getEntity("unit-test-1");
 
-      expect(testEntity1).toBeDefined();
-      expect(testEntity2).toBeDefined();
-      expect(testEntity3).toBeDefined();
+      expect(testEntity1).toEqual(expect.objectContaining({ id: 'integration-test-1', type: 'test' }));
+      expect(testEntity2).toEqual(expect.objectContaining({ id: 'integration-test-2', type: 'test' }));
+      expect(testEntity3).toEqual(expect.objectContaining({ id: 'unit-test-1', type: 'test' }));
 
       expect(testEntity1?.type).toBe("test");
       expect(testEntity2?.type).toBe("test");
@@ -272,7 +289,12 @@ describe("TestEngine Integration", () => {
       const performanceMetrics = await testEngine.getPerformanceMetrics(
         "integration-test-1"
       );
-      expect(performanceMetrics).toBeDefined();
+      expect(performanceMetrics).toEqual(
+        expect.objectContaining({
+          averageExecutionTime: expect.any(Number),
+          successRate: expect.any(Number),
+        })
+      );
       expect(performanceMetrics.averageExecutionTime).toBeGreaterThan(0);
       expect(performanceMetrics.successRate).toBe(1); // 100% success rate
     });
@@ -293,12 +315,12 @@ describe("TestEngine Integration", () => {
       await testEngine.recordTestResults(suiteResult);
 
       const testEntity = await kgService.getEntity("unit-test-1");
-      expect(testEntity).toBeDefined();
+      expect(testEntity).toEqual(expect.any(Object));
 
       // Check that failure information is recorded
       if (testEntity) {
         const executionHistory = (testEntity as any).executionHistory;
-        expect(executionHistory).toBeDefined();
+        expect(executionHistory).toEqual(expect.any(Array));
         expect(executionHistory.length).toBeGreaterThan(0);
 
         // Find the most recent failed execution
@@ -309,7 +331,7 @@ describe("TestEngine Integration", () => {
               new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
           )[0];
 
-        expect(failedExecution).toBeDefined();
+        expect(failedExecution).toEqual(expect.any(Object));
         expect(failedExecution.status).toBe("failed");
         expect(failedExecution.errorMessage).toBe(
           "Expected true but received false"
@@ -469,15 +491,16 @@ describe("TestEngine Integration", () => {
 
       // First verify the test entity exists
       const testEntity = await kgService.getEntity("coverage-test-1");
-      expect(testEntity).toBeDefined();
+      expect(testEntity).toEqual(expect.objectContaining({ id: 'coverage-test-1' }));
 
       // Then get coverage analysis
       const coverageAnalysis = await testEngine.getCoverageAnalysis(
         "coverage-test-1"
       );
 
-      expect(coverageAnalysis).toBeDefined();
-      expect(coverageAnalysis.entityId).toBe("coverage-test-1");
+      expect(coverageAnalysis).toEqual(
+        expect.objectContaining({ entityId: 'coverage-test-1', testCases: expect.any(Array), overallCoverage: expect.any(Object) })
+      );
 
       // The coverage should be calculated from the test results
       if (coverageAnalysis.testCases.length > 0) {
@@ -577,9 +600,9 @@ describe("TestEngine Integration", () => {
         "src/services/__tests__/UserService.test.js:should delete user"
       );
 
-      expect(test1).toBeDefined();
-      expect(test2).toBeDefined();
-      expect(test3).toBeDefined();
+      expect(test1).toEqual(expect.objectContaining({ id: expect.stringContaining('should create user successfully') }));
+      expect(test2).toEqual(expect.objectContaining({ id: expect.stringContaining('should handle invalid input') }));
+      expect(test3).toEqual(expect.objectContaining({ id: expect.stringContaining('should delete user') }));
 
       // Check status of failed test
       expect((test3 as any).status).toBe("failing");
@@ -623,8 +646,8 @@ describe("TestEngine Integration", () => {
         "src/components/Input.test.js:handles input changes"
       );
 
-      expect(buttonTest).toBeDefined();
-      expect(inputTest).toBeDefined();
+      expect(buttonTest).toEqual(expect.objectContaining({ id: expect.stringContaining('Button.test.js:renders button') }));
+      expect(inputTest).toEqual(expect.objectContaining({ id: expect.stringContaining('Input.test.js:handles input changes') }));
     });
   });
 
@@ -670,7 +693,7 @@ describe("TestEngine Integration", () => {
       for (let i = 0; i < 10; i++) {
         // Check first 10
         const testEntity = await kgService.getEntity(`performance-test-${i}`);
-        expect(testEntity).toBeDefined();
+        expect(testEntity).toEqual(expect.any(Object));
       }
     });
 
@@ -710,7 +733,9 @@ describe("TestEngine Integration", () => {
       // Verify all concurrent tests were recorded
       for (let i = 0; i < 5; i++) {
         const testEntity = await kgService.getEntity(`concurrent-test-${i}`);
-        expect(testEntity).toBeDefined();
+        expect(testEntity).toEqual(
+          expect.objectContaining({ id: `concurrent-test-${i}` })
+        );
       }
     });
   });
@@ -819,7 +844,9 @@ describe("TestEngine Integration", () => {
       }
 
       const testEntity = await kgService.getEntity("trend-test-1");
-      expect(testEntity).toBeDefined();
+      expect(testEntity).toEqual(
+        expect.objectContaining({ id: "trend-test-1" })
+      );
 
       const performanceMetrics = await testEngine.getPerformanceMetrics(
         "trend-test-1"

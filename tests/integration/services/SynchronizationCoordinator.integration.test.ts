@@ -95,7 +95,6 @@ describe('SynchronizationCoordinator Integration', () => {
     it('should successfully perform full synchronization', async () => {
       const operationId = await syncCoordinator.startFullSynchronization();
 
-      expect(operationId).toBeDefined();
       expect(typeof operationId).toBe('string');
       expect(operationId).toMatch(/^full_sync_/);
 
@@ -104,7 +103,13 @@ describe('SynchronizationCoordinator Integration', () => {
 
       // Check operation status
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(
+        expect.objectContaining({
+          id: expect.any(String),
+          type: 'full',
+          status: expect.any(String),
+        })
+      );
       expect(operation?.type).toBe('full');
       expect(['completed', 'running']).toContain(operation?.status);
     });
@@ -119,15 +124,15 @@ describe('SynchronizationCoordinator Integration', () => {
       };
 
       const operationId = await syncCoordinator.startFullSynchronization(options);
-
-      expect(operationId).toBeDefined();
+      expect(typeof operationId).toBe('string');
 
       // Wait for sync to complete
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
-      expect(operation?.type).toBe('full');
+      expect(operation).toEqual(
+        expect.objectContaining({ type: 'full' })
+      );
     });
 
     it('should track sync progress and statistics', async () => {
@@ -136,7 +141,7 @@ describe('SynchronizationCoordinator Integration', () => {
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
 
       if (operation) {
         expect(typeof operation.filesProcessed).toBe('number');
@@ -193,14 +198,14 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const operationId = await syncCoordinator.synchronizeFileChanges(changes);
 
-      expect(operationId).toBeDefined();
+      expect(typeof operationId).toBe('string');
       expect(operationId).toMatch(/^incremental_sync_/);
 
       // Wait for sync to complete
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       expect(operation?.type).toBe('incremental');
     });
 
@@ -222,12 +227,12 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const operationId = await syncCoordinator.synchronizeFileChanges(changes);
 
-      expect(operationId).toBeDefined();
+      expect(typeof operationId).toBe('string');
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       expect(operation?.type).toBe('incremental');
     });
 
@@ -262,12 +267,12 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const operationId = await syncCoordinator.synchronizeFileChanges(deleteChanges);
 
-      expect(operationId).toBeDefined();
+      expect(typeof operationId).toBe('string');
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
     });
   });
 
@@ -308,13 +313,12 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const operationId = await syncCoordinator.synchronizePartial(updates);
 
-      expect(operationId).toBeDefined();
-      expect(operationId).toMatch(/^partial_sync_/);
+      expect(operationId).toEqual(expect.stringMatching(/^partial_sync_/));
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       expect(operation?.type).toBe('partial');
     });
 
@@ -336,12 +340,12 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const operationId = await syncCoordinator.synchronizePartial(updates);
 
-      expect(operationId).toBeDefined();
+      expect(operationId).toEqual(expect.any(String));
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       expect(operation?.entitiesCreated).toBeGreaterThanOrEqual(0);
     });
 
@@ -353,12 +357,12 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const operationId = await syncCoordinator.synchronizePartial(updates);
 
-      expect(operationId).toBeDefined();
+      expect(operationId).toEqual(expect.any(String));
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       expect(operation?.entitiesDeleted).toBeGreaterThanOrEqual(0);
     });
   });
@@ -375,8 +379,7 @@ describe('SynchronizationCoordinator Integration', () => {
 
       expect(operationIds).toHaveLength(3);
       operationIds.forEach(id => {
-        expect(id).toBeDefined();
-        expect(typeof id).toBe('string');
+        expect(id).toEqual(expect.any(String));
       });
 
       // Check active operations
@@ -391,7 +394,7 @@ describe('SynchronizationCoordinator Integration', () => {
     it('should cancel operations successfully', async () => {
       const operationId = await syncCoordinator.startFullSynchronization();
 
-      expect(operationId).toBeDefined();
+      expect(operationId).toEqual(expect.any(String));
 
       // Cancel the operation
       const cancelResult = await syncCoordinator.cancelOperation(operationId);
@@ -400,7 +403,7 @@ describe('SynchronizationCoordinator Integration', () => {
 
       // Verify operation is cancelled
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       expect(operation?.status).toBe('failed'); // Cancelled operations are marked as failed
     });
 
@@ -413,7 +416,7 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const stats = syncCoordinator.getOperationStatistics();
 
-      expect(stats).toBeDefined();
+      expect(stats).toEqual(expect.any(Object));
       expect(typeof stats.total).toBe('number');
       expect(typeof stats.active).toBe('number');
       expect(typeof stats.queued).toBe('number');
@@ -436,12 +439,12 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const operationId = await syncCoordinator.synchronizeFileChanges(invalidChanges);
 
-      expect(operationId).toBeDefined();
+      expect(typeof operationId).toBe('string');
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       // Should either complete or fail gracefully
       expect(['completed', 'failed']).toContain(operation?.status);
     });
@@ -459,30 +462,30 @@ describe('SynchronizationCoordinator Integration', () => {
         // If it doesn't throw, the operation should be created but may fail later
       } catch (error) {
         // Expected to fail with database issues
-        expect(error).toBeDefined();
+        expect(error as any).toEqual(expect.anything());
       }
     });
 
     it('should handle empty file changes array', async () => {
       const operationId = await syncCoordinator.synchronizeFileChanges([]);
 
-      expect(operationId).toBeDefined();
+      expect(typeof operationId).toBe('string');
 
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
     });
 
     it('should handle empty partial updates array', async () => {
       const operationId = await syncCoordinator.synchronizePartial([]);
 
-      expect(operationId).toBeDefined();
+      expect(typeof operationId).toBe('string');
 
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
     });
 
     it('should handle non-existent entity updates gracefully', async () => {
@@ -494,12 +497,12 @@ describe('SynchronizationCoordinator Integration', () => {
 
       const operationId = await syncCoordinator.synchronizePartial(updates);
 
-      expect(operationId).toBeDefined();
+      expect(typeof operationId).toBe('string');
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       // Should complete but may have errors
       expect(operation?.errors.length).toBeGreaterThanOrEqual(0);
     });
@@ -588,7 +591,7 @@ describe('SynchronizationCoordinator Integration', () => {
       const duration = endTime - startTime;
 
       const operation = syncCoordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
 
       // Should complete within reasonable time (adjust based on environment)
       expect(duration).toBeLessThan(10000); // 10 seconds for 5 files

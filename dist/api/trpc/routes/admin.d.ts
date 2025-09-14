@@ -16,7 +16,13 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
             transformer: typeof import("superjson").default;
         }>;
         _meta: object;
-        _ctx_out: import("../base.js").TRPCContext;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
         _input_in: {
             limit?: number | undefined;
             since?: string | undefined;
@@ -43,16 +49,48 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
             errorShape: any;
             transformer: typeof import("superjson").default;
         }>;
-        _ctx_out: import("../base.js").TRPCContext;
+        _meta: object;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
         _input_in: typeof import("@trpc/server").unsetMarker;
         _input_out: typeof import("@trpc/server").unsetMarker;
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-        _meta: object;
     }, {
-        uptime: number;
-        memory: NodeJS.MemoryUsage;
-        cpu: NodeJS.CpuUsage;
+        graph: {
+            nodes: number;
+            relationships: number;
+        };
+        history: {
+            versions: number;
+            checkpoints: number;
+            checkpointMembers: {
+                avg: number;
+                min: number;
+                max: number;
+            };
+            temporalEdges: {
+                open: number;
+                closed: number;
+            };
+            lastPrune: {
+                retentionDays: number;
+                cutoff: string;
+                versions: number;
+                closedEdges: number;
+                checkpoints: number;
+                dryRun?: boolean;
+            } | undefined;
+        };
+        process: {
+            uptime: number;
+            memory: NodeJS.MemoryUsage;
+        };
         timestamp: string;
     }>;
     syncFilesystem: import("@trpc/server").BuildProcedure<"mutation", {
@@ -63,7 +101,13 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
             transformer: typeof import("superjson").default;
         }>;
         _meta: object;
-        _ctx_out: import("../base.js").TRPCContext;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
         _input_in: {
             paths?: string[] | undefined;
             force?: boolean | undefined;
@@ -87,7 +131,13 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
             transformer: typeof import("superjson").default;
         }>;
         _meta: object;
-        _ctx_out: import("../base.js").TRPCContext;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
         _input_in: {
             type?: "search" | "entities" | "relationships" | "all" | undefined;
         };
@@ -108,19 +158,25 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
             errorShape: any;
             transformer: typeof import("superjson").default;
         }>;
-        _ctx_out: import("../base.js").TRPCContext;
+        _meta: object;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
         _input_in: typeof import("@trpc/server").unsetMarker;
         _input_out: typeof import("@trpc/server").unsetMarker;
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-        _meta: object;
     }, {
-        version: string;
+        version: any;
         environment: string;
         features: {
             websocket: boolean;
-            graphAnalysis: boolean;
-            codeParsing: boolean;
+            graphSearch: boolean;
+            history: boolean;
         };
     }>;
     updateConfig: import("@trpc/server").BuildProcedure<"mutation", {
@@ -131,7 +187,13 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
             transformer: typeof import("superjson").default;
         }>;
         _meta: object;
-        _ctx_out: import("../base.js").TRPCContext;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
         _input_in: {
             key: string;
             value?: any;
@@ -146,6 +208,105 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         success: boolean;
         key: string;
         updated: string;
+    }>;
+    indexHealth: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
+        _input_in: typeof import("@trpc/server").unsetMarker;
+        _input_out: typeof import("@trpc/server").unsetMarker;
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, {
+        supported: boolean;
+        indexes?: any[];
+        expected: {
+            file_path: boolean;
+            symbol_path: boolean;
+            version_entity: boolean;
+            checkpoint_id: boolean;
+            rel_validFrom: boolean;
+            rel_validTo: boolean;
+        };
+        notes?: string[];
+    }>;
+    ensureIndexes: import("@trpc/server").BuildProcedure<"mutation", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
+        _input_in: typeof import("@trpc/server").unsetMarker;
+        _input_out: typeof import("@trpc/server").unsetMarker;
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, {
+        ensured: boolean;
+        health: {
+            supported: boolean;
+            indexes?: any[];
+            expected: {
+                file_path: boolean;
+                symbol_path: boolean;
+                version_entity: boolean;
+                checkpoint_id: boolean;
+                rel_validFrom: boolean;
+                rel_validTo: boolean;
+            };
+            notes?: string[];
+        };
+    }>;
+    runBenchmarks: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: {
+            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
+            dbService: import("../../../services/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            authToken: string | undefined;
+        };
+        _input_in: {
+            mode?: "quick" | "full" | undefined;
+        } | undefined;
+        _input_out: {
+            mode?: "quick" | "full" | undefined;
+        } | undefined;
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, {
+        mode: "quick" | "full";
+        totals: {
+            nodes: number;
+            edges: number;
+        };
+        timings: Record<string, number>;
+        samples: Record<string, any>;
     }>;
 }>;
 //# sourceMappingURL=admin.d.ts.map

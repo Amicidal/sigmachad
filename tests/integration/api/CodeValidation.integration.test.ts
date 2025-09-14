@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { v4 as uuidv4 } from "uuid";
-import { expectSuccess } from "../../test-utils/assertions";
+import { expectSuccess, expectError } from "../../test-utils/assertions";
 import { FastifyInstance } from "fastify";
 import { APIGateway } from "../../../src/api/APIGateway.js";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
@@ -116,7 +116,7 @@ describe("Code Validation API Integration", () => {
               it('should get user by id', async () => {
                 const service = new ValidService(mockDb);
                 const user = await service.getUser('123');
-                expect(user).toBeDefined();
+                expect(user).toEqual(expect.anything());
               });
 
               it('should validate email format', () => {
@@ -150,7 +150,7 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(validationRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode); // 404 if endpoint not implemented yet
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -227,7 +227,7 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(validationRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -298,7 +298,7 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(validationRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -378,17 +378,20 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(validationRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         expectSuccess(body);
 
         // Should detect security issues
-        expect(body.data.security).toBeDefined();
-        expect(typeof body.data.security.critical).toBe("number");
-        expect(typeof body.data.security.high).toBe("number");
-        expect(body.data.security.issues).toEqual(expect.any(Array));
+        expect(body.data.security).toEqual(
+          expect.objectContaining({
+            critical: expect.any(Number),
+            high: expect.any(Number),
+            issues: expect.any(Array),
+          })
+        );
 
         // Should have specific security vulnerabilities
         if (body.data.security.issues.length > 0) {
@@ -470,7 +473,7 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(validationRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -572,7 +575,7 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(validationRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
@@ -645,11 +648,16 @@ describe("Code Validation API Integration", () => {
 
       // All requests should succeed
       responses.forEach((response) => {
-        expect([200, 404]).toContain(response.statusCode);
+        expect(response.statusCode).toBe(200);
         if (response.statusCode === 200) {
           const body = JSON.parse(response.payload);
           expectSuccess(body);
-          expect(body.data.overall).toBeDefined();
+          expect(body.data.overall).toEqual(
+            expect.objectContaining({
+              passed: expect.any(Boolean),
+              score: expect.any(Number),
+            })
+          );
         }
       });
     });
@@ -696,11 +704,13 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(lenientRequest),
       });
 
-      expect([200, 404]).toContain(lenientResponse.statusCode);
-
       if (lenientResponse.statusCode === 200) {
         const lenientBody = JSON.parse(lenientResponse.payload);
         expectSuccess(lenientBody);
+      } else if (lenientResponse.statusCode === 404) {
+        const lenientBody = JSON.parse(lenientResponse.payload || '{}');
+        expectError(lenientBody);
+      }
 
         // Test with failOnWarnings: true
         const strictRequest = {
@@ -718,14 +728,14 @@ describe("Code Validation API Integration", () => {
           payload: JSON.stringify(strictRequest),
         });
 
-        expect([200, 404]).toContain(strictResponse.statusCode);
-
         if (strictResponse.statusCode === 200) {
           const strictBody = JSON.parse(strictResponse.payload);
 
-          // Strict validation should potentially fail with warnings treated as errors
-          // (depending on implementation, may still pass if no actual errors)
-          expect(strictBody.data).toBeDefined();
+          // Strict validation returns a structured data object
+          expect(strictBody.data).toEqual(expect.any(Object));
+        } else if (strictResponse.statusCode === 404) {
+          const strictBody = JSON.parse(strictResponse.payload || '{}');
+          expectError(strictBody);
         }
       }
     });
@@ -746,13 +756,14 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      expect([400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(400);
 
       if (response.statusCode === 400) {
         const body = JSON.parse(response.payload);
         expect(body.success).toBe(false);
-        expect(body.error).toBeDefined();
-        expect(body.error.code).toBe("VALIDATION_ERROR");
+        expect(body).toEqual(
+          expect.objectContaining({ error: expect.objectContaining({ code: "VALIDATION_ERROR" }) })
+        );
       }
     });
 
@@ -825,15 +836,15 @@ describe("Code Validation API Integration", () => {
         payload: JSON.stringify(validationRequest),
       });
 
-      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
         expectSuccess(body);
 
         // Should include architecture validation
-        expect(body.data.architecture).toBeDefined();
-        expect(body.data.architecture.violations).toBeDefined();
+        expect(body.data.architecture).toEqual(expect.any(Object));
+        expect(body.data.architecture.violations).toEqual(expect.anything());
         expect(body.data.architecture.issues).toEqual(expect.any(Array));
       }
     });

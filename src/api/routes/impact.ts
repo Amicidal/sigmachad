@@ -104,7 +104,6 @@ async function analyzeChangeImpact(
         // Include inheritance relationships for interface changes
         const relationshipTypes: RelationshipType[] = [
           RelationshipType.CALLS,
-          RelationshipType.USES,
           RelationshipType.DEPENDS_ON,
           RelationshipType.REFERENCES,
           RelationshipType.IMPLEMENTS,

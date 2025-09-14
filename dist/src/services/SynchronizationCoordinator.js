@@ -63,6 +63,8 @@ export class SynchronizationCoordinator extends EventEmitter {
             errors: [],
             conflicts: [],
         };
+        // Attach options so the performFullSync stage can honor them
+        operation.options = options;
         this.activeOperations.set(operation.id, operation);
         this.operationQueue.push(operation);
         this.emit("operationStarted", operation);
@@ -223,13 +225,36 @@ export class SynchronizationCoordinator extends EventEmitter {
         // Scan all source files
         const files = await this.scanSourceFiles();
         this.emit("syncProgress", operation, { phase: "parsing", progress: 0.2 });
-        // Process files in batches
-        const batchSize = 10;
-        for (let i = 0; i < files.length; i += batchSize) {
-            const batch = files.slice(i, i + batchSize);
-            for (const file of batch) {
-                try {
-                    const result = await this.astParser.parseFile(file);
+        // Process files in larger batches to enable higher concurrency
+        const batchSize = 64;
+        const opts = (operation.options || {});
+        const includeEmbeddings = opts.includeEmbeddings !== false;
+        // Allow concurrency up to requested value; later bounded by batch length
+        const maxConcurrency = Math.max(1, (opts.maxConcurrency ?? 16));
+        // Buffers for batch writes
+        const entityBuffer = [];
+        const relationshipBuffer = [];
+        const ENTITY_FLUSH_AT = 200;
+        const REL_FLUSH_AT = 1000;
+
+        const flushEntities = async () => {
+            if (entityBuffer.length === 0) return;
+            try {
+                await this.kgService.createEntitiesBatch(entityBuffer, { skipEmbedding: !includeEmbeddings });
+            } catch { /* fallback handled per-entity if needed */ }
+            entityBuffer.length = 0;
+        };
+        const flushRelationships = async () => {
+            if (relationshipBuffer.length === 0) return;
+            try {
+                await this.kgService.createRelationshipsBatch(relationshipBuffer);
+            } catch { /* ignore and let next pass retry */ }
+            relationshipBuffer.length = 0;
+        };
+
+        const processFile = async (file) => {
+            try {
+                const result = await this.astParser.parseFile(file);
                     // Detect and handle conflicts before creating entities
                     if (result.entities.length > 0 || result.relationships.length > 0) {
                         try {
@@ -255,55 +280,46 @@ export class SynchronizationCoordinator extends EventEmitter {
                         }
                     }
                     // Create/update entities and relationships
-                    for (const entity of result.entities) {
-                        try {
-                            await this.kgService.createEntity(entity);
-                            operation.entitiesCreated++;
-                        }
-                        catch (entityError) {
-                            operation.errors.push({
-                                file,
-                                type: "database",
-                                message: `Failed to create entity ${entity.id}: ${entityError instanceof Error
-                                    ? entityError.message
-                                    : "Unknown error"}`,
-                                timestamp: new Date(),
-                                recoverable: true,
-                            });
-                        }
-                    }
-                    for (const relationship of result.relationships) {
-                        try {
-                            await this.kgService.createRelationship(relationship);
-                            operation.relationshipsCreated++;
-                        }
-                        catch (relationshipError) {
-                            operation.errors.push({
-                                file,
-                                type: "database",
-                                message: `Failed to create relationship: ${relationshipError instanceof Error
-                                    ? relationshipError.message
-                                    : "Unknown error"}`,
-                                timestamp: new Date(),
-                                recoverable: true,
-                            });
-                        }
-                    }
-                    operation.filesProcessed++;
+                // Buffer entities for batch creation
+                if (result.entities?.length) {
+                    for (const entity of result.entities) entityBuffer.push(entity);
+                    operation.entitiesCreated += result.entities.length;
+                    if (entityBuffer.length >= ENTITY_FLUSH_AT) await flushEntities();
                 }
-                catch (error) {
-                    operation.errors.push({
-                        file,
-                        type: "parse",
-                        message: error instanceof Error ? error.message : "Parse error",
-                        timestamp: new Date(),
-                        recoverable: true,
-                    });
+                // Buffer relationships to batch after nodes exist
+                if (result.relationships?.length) {
+                    for (const r of result.relationships) relationshipBuffer.push(r);
+                    if (relationshipBuffer.length >= REL_FLUSH_AT) await flushRelationships();
                 }
+                operation.filesProcessed++;
             }
+            catch (error) {
+                operation.errors.push({
+                    file,
+                    type: "parse",
+                    message: error instanceof Error ? error.message : "Parse error",
+                    timestamp: new Date(),
+                    recoverable: true,
+                });
+            }
+        };
+        for (let i = 0; i < files.length; i += batchSize) {
+            const batch = files.slice(i, i + batchSize);
+            let idx = 0;
+            const worker = async () => {
+                while (idx < batch.length) {
+                    const current = idx++;
+                    await processFile(batch[current]);
+                }
+            };
+            const workers = Array.from({ length: Math.min(maxConcurrency, batch.length) }, () => worker());
+            await Promise.allSettled(workers);
             const progress = 0.2 + (i / files.length) * 0.8;
             this.emit("syncProgress", operation, { phase: "parsing", progress });
         }
+        // Final flush for any remaining buffered writes
+        await flushEntities();
+        await flushRelationships();
         this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
     }
     async performIncrementalSync(operation) {

@@ -743,18 +743,14 @@ describe("BackupService", () => {
         expect(result.backupId).toBe(backupId);
         expect(result.status).toBe("dry_run_completed");
         expect(result.changes).toHaveLength(4); // All components
-        expect(
-          result.changes.find((c) => c.component === "falkordb")
-        ).toBeDefined();
-        expect(
-          result.changes.find((c) => c.component === "qdrant")
-        ).toBeDefined();
-        expect(
-          result.changes.find((c) => c.component === "postgres")
-        ).toBeDefined();
-        expect(
-          result.changes.find((c) => c.component === "config")
-        ).toBeDefined();
+        expect(result.changes.find((c) => c.component === "falkordb"))
+          .toEqual(expect.any(Object));
+        expect(result.changes.find((c) => c.component === "qdrant"))
+          .toEqual(expect.any(Object));
+        expect(result.changes.find((c) => c.component === "postgres"))
+          .toEqual(expect.any(Object));
+        expect(result.changes.find((c) => c.component === "config"))
+          .toEqual(expect.any(Object));
       });
 
       it("should throw error when backup not found", async () => {

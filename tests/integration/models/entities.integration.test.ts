@@ -263,7 +263,7 @@ describe("Models Integration Tests", () => {
         const redisResult = await dbService.redisGet(
           `entity:${testFileId}:metadata`
         );
-        expect(redisResult).toBeTruthy();
+        expect(redisResult).toEqual(expect.any(String));
         const redisData = JSON.parse(redisResult!);
         expect(redisData.id).toBe(testFileId);
         expect(redisData.type).toBe("file");
@@ -1438,20 +1438,20 @@ describe("Models Integration Tests", () => {
         // Test type narrowing in practice
         reconstructedEntities.forEach((entity) => {
           if (isFile(entity)) {
-            expect(entity.extension).toBeDefined();
+            expect(typeof entity.extension).toBe('string');
             expect(typeof entity.size).toBe("number");
           } else if (isDirectory(entity)) {
             expect(Array.isArray(entity.children)).toBe(true);
             expect(typeof entity.depth).toBe("number");
           } else if (isSymbol(entity)) {
-            expect(entity.name).toBeDefined();
+            expect(typeof entity.name).toBe('string');
             expect(["function", "class", "interface"]).toContain(entity.kind);
           } else if (isTest(entity)) {
-            expect(entity.testType).toBeDefined();
-            expect(entity.coverage).toBeDefined();
+            expect(typeof entity.testType).toBe('string');
+            expect(entity.coverage).toEqual(expect.any(Object));
           } else if (isSpec(entity)) {
-            expect(entity.title).toBeDefined();
-            expect(entity.acceptanceCriteria).toBeDefined();
+            expect(typeof entity.title).toBe('string');
+            expect(entity.acceptanceCriteria).toEqual(expect.any(Array));
           }
         });
       });
@@ -1765,7 +1765,7 @@ describe("Models Integration Tests", () => {
             );
           } catch (error) {
             // Expected to handle errors gracefully
-            expect(error).toBeDefined();
+            expect(error).toBeInstanceOf(Error);
           }
         }
 
@@ -1775,14 +1775,14 @@ describe("Models Integration Tests", () => {
             "INVALID CYPHER SYNTAX THAT SHOULD FAIL"
           );
         } catch (error) {
-          expect(error).toBeDefined();
+          expect(error).toBeInstanceOf(Error);
         }
 
         // Test Redis error handling
         try {
           await dbService.redisSet("test-key", null as any);
         } catch (error) {
-          expect(error).toBeDefined();
+          expect(error).toBeInstanceOf(Error);
         }
 
         // Verify system remains stable
@@ -1823,7 +1823,7 @@ describe("Models Integration Tests", () => {
           );
         } catch (error) {
           // Expected constraint violation
-          expect(error).toBeDefined();
+          expect(error).toBeInstanceOf(Error);
         }
 
         // Verify only one entity exists
@@ -1867,19 +1867,19 @@ describe("Models Integration Tests", () => {
         try {
           await dbService.postgresQuery("SELECT * FROM nonexistent_table");
         } catch (error) {
-          expect(error).toBeDefined();
+          expect(error).toBeInstanceOf(Error);
         }
 
         try {
           await dbService.falkordbQuery("MATCH (n:NonExistentLabel) RETURN n");
         } catch (error) {
-          expect(error).toBeDefined();
+          expect(error).toBeInstanceOf(Error);
         }
 
         // Verify system health after errors
         const healthAfterErrors = await dbService.healthCheck();
         expect(healthAfterErrors.postgresql.status).toBe("healthy");
-        expect(healthAfterErrors.falkordb).toBeDefined();
+        expect(healthAfterErrors.falkordb).toEqual(expect.any(Object));
       });
 
       it("should handle timeouts and long-running operations", async () => {
@@ -1944,7 +1944,7 @@ describe("Models Integration Tests", () => {
           );
         } catch (error) {
           // Expected error for invalid JSON
-          expect(error).toBeDefined();
+          expect(error).toBeInstanceOf(Error);
         }
 
         // Verify entity still exists and is accessible

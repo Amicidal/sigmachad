@@ -88,20 +88,43 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
             query: string;
-            type?: string | undefined;
             limit?: number | undefined;
+            entityTypes?: ("function" | "test" | "class" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
+            searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
+            filters?: {
+                tags?: string[] | undefined;
+                checkpointId?: string | undefined;
+                path?: string | undefined;
+                language?: string | undefined;
+                lastModified?: {
+                    since?: Date | undefined;
+                    until?: Date | undefined;
+                } | undefined;
+            } | undefined;
+            includeRelated?: boolean | undefined;
         };
         _input_out: {
             query: string;
             limit: number;
-            type?: string | undefined;
+            entityTypes?: ("function" | "test" | "class" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
+            searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
+            filters?: {
+                tags?: string[] | undefined;
+                checkpointId?: string | undefined;
+                path?: string | undefined;
+                language?: string | undefined;
+                lastModified?: {
+                    since?: Date | undefined;
+                    until?: Date | undefined;
+                } | undefined;
+            } | undefined;
+            includeRelated?: boolean | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        items: never[];
+        items: import("../../../models/entities.js").Entity[];
         total: number;
-        query: string;
     }>;
     getDependencies: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
@@ -175,6 +198,37 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         affectedEntities: never[];
         riskLevel: "low";
         recommendations: never[];
+    }>;
+    timeTravel: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../base.js").TRPCContext;
+        _input_in: {
+            startId: string;
+            types?: string[] | undefined;
+            since?: Date | undefined;
+            until?: Date | undefined;
+            atTime?: Date | undefined;
+            maxDepth?: number | undefined;
+        };
+        _input_out: {
+            startId: string;
+            types?: string[] | undefined;
+            since?: Date | undefined;
+            until?: Date | undefined;
+            atTime?: Date | undefined;
+            maxDepth?: number | undefined;
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, {
+        entities: import("../../../models/entities.js").Entity[];
+        relationships: import("../../../models/relationships.js").GraphRelationship[];
     }>;
 }>;
 //# sourceMappingURL=graph.d.ts.map

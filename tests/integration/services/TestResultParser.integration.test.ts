@@ -70,8 +70,17 @@ describe('TestResultParser Integration', () => {
 
       const result = await parser.parseFile(filePath, 'junit');
 
-      expect(result).toBeDefined();
-      expect(result.framework).toBe('junit');
+      expect(result).toEqual(
+        expect.objectContaining({
+          framework: 'junit',
+          totalTests: expect.any(Number),
+          passedTests: expect.any(Number),
+          failedTests: expect.any(Number),
+          skippedTests: expect.any(Number),
+          duration: expect.any(Number),
+          results: expect.any(Array),
+        })
+      );
       expect(result.totalTests).toBe(5);
       expect(result.passedTests).toBe(3);
       expect(result.failedTests).toBe(1);
@@ -81,12 +90,16 @@ describe('TestResultParser Integration', () => {
 
       // Check specific test results
       const failedTest = result.results.find(test => test.status === 'failed');
-      expect(failedTest).toBeDefined();
+      expect(failedTest).toEqual(
+        expect.objectContaining({ status: 'failed', testName: expect.any(String) })
+      );
       expect(failedTest?.testName).toBe('should handle invalid credentials');
       expect(failedTest?.errorMessage).toContain('Invalid credentials test failed');
 
       const skippedTest = result.results.find(test => test.status === 'skipped');
-      expect(skippedTest).toBeDefined();
+      expect(skippedTest).toEqual(
+        expect.objectContaining({ status: 'skipped', testName: expect.any(String) })
+      );
       expect(skippedTest?.testName).toBe('should delete user');
     });
 
@@ -108,13 +121,17 @@ describe('TestResultParser Integration', () => {
 
       const result = await parser.parseFile(filePath, 'junit');
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({ framework: 'junit', totalTests: expect.any(Number), results: expect.any(Array) })
+      );
       expect(result.totalTests).toBe(2);
       expect(result.failedTests).toBe(0); // Errors are counted as failed in our implementation
       expect(result.skippedTests).toBe(1);
 
       const errorTest = result.results.find(test => test.errorMessage?.includes('timeout'));
-      expect(errorTest).toBeDefined();
+      expect(errorTest).toEqual(
+        expect.objectContaining({ status: 'error', errorMessage: expect.any(String) })
+      );
       expect(errorTest?.status).toBe('error');
     });
   });
@@ -170,8 +187,9 @@ describe('TestResultParser Integration', () => {
 
       const result = await parser.parseFile(filePath, 'jest');
 
-      expect(result).toBeDefined();
-      expect(result.framework).toBe('jest');
+      expect(result).toEqual(
+        expect.objectContaining({ framework: 'jest', totalTests: expect.any(Number), results: expect.any(Array) })
+      );
       expect(result.totalTests).toBe(4);
       expect(result.passedTests).toBe(3);
       expect(result.failedTests).toBe(1);
@@ -180,7 +198,9 @@ describe('TestResultParser Integration', () => {
 
       // Check failed test details
       const failedTest = result.results.find(test => test.status === 'failed');
-      expect(failedTest).toBeDefined();
+      expect(failedTest).toEqual(
+        expect.objectContaining({ testName: expect.any(String) })
+      );
       expect(failedTest?.testName).toBe('should reject invalid password');
       expect(failedTest?.errorMessage).toContain('expect(received).toBe(expected)');
       expect(failedTest?.stackTrace).toContain('Expected: 401');
@@ -296,7 +316,7 @@ describe('TestResultParser Integration', () => {
 
       const result = await parser.parseFile(filePath, 'mocha');
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result.framework).toBe('mocha');
       expect(result.totalTests).toBe(5);
       expect(result.passedTests).toBe(3);
@@ -311,7 +331,7 @@ describe('TestResultParser Integration', () => {
 
       // Check failed test
       const failedTest = result.results.find(test => test.status === 'failed');
-      expect(failedTest).toBeDefined();
+      expect(failedTest).toEqual(expect.any(Object));
       expect(failedTest?.errorMessage).toBe('Profile update failed');
       expect(failedTest?.stackTrace).toContain('at test.js:25:10');
     });
@@ -357,7 +377,7 @@ describe('TestResultParser Integration', () => {
 
       const result = await parser.parseFile(filePath, 'vitest');
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result.framework).toBe('jest'); // Vitest uses Jest parser internally
       expect(result.totalTests).toBe(3);
       expect(result.passedTests).toBe(2);
@@ -412,8 +432,9 @@ describe('TestResultParser Integration', () => {
 
       const result = await parser.parseFile(filePath, 'cypress');
 
-      expect(result).toBeDefined();
-      expect(result.framework).toBe('cypress');
+      expect(result).toEqual(
+        expect.objectContaining({ framework: 'cypress', results: expect.any(Array) })
+      );
       expect(result.totalTests).toBe(3);
       expect(result.passedTests).toBe(2);
       expect(result.failedTests).toBe(1);
@@ -475,8 +496,9 @@ describe('TestResultParser Integration', () => {
 
       const result = await parser.parseFile(filePath, 'playwright');
 
-      expect(result).toBeDefined();
-      expect(result.framework).toBe('playwright');
+      expect(result).toEqual(
+        expect.objectContaining({ framework: 'playwright', results: expect.any(Array) })
+      );
       expect(result.totalTests).toBe(2);
       expect(result.passedTests).toBe(1);
       expect(result.failedTests).toBe(1);
@@ -484,7 +506,7 @@ describe('TestResultParser Integration', () => {
 
       // Check error handling
       const failedTest = result.results.find(test => test.status === 'failed');
-      expect(failedTest).toBeDefined();
+      expect(failedTest).toEqual(expect.any(Object));
       expect(failedTest?.errorMessage).toContain('Login failed');
       expect(failedTest?.stackTrace).toContain('auth.spec.ts:67:8');
     });
@@ -502,7 +524,7 @@ describe('TestResultParser Integration', () => {
 
       const result = await parser.parseContent(junitXml, 'junit');
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
       expect(result.framework).toBe('junit');
       expect(result.totalTests).toBe(2);
       expect(result.passedTests).toBe(2);
@@ -546,8 +568,8 @@ describe('TestResultParser Integration', () => {
       const result = await parser.parseFile(filePath, 'junit');
 
       // Should still return a result, even if empty
-      expect(result).toBeDefined();
-      expect(result.results).toBeDefined();
+      expect(result).toEqual(expect.any(Object));
+      expect(result.results).toEqual(expect.any(Array));
     });
   });
 

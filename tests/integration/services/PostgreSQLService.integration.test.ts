@@ -65,8 +65,7 @@ describe("PostgreSQLService Integration", () => {
       expect(newService.isInitialized()).toBe(true);
 
       const pool = newService.getPool();
-      expect(pool).toBeDefined();
-      expect(typeof pool).toBe("object");
+      expect(pool).toEqual(expect.any(Object));
 
       await newService.close();
       expect(newService.isInitialized()).toBe(false);
@@ -142,7 +141,7 @@ describe("PostgreSQLService Integration", () => {
       );
 
       expect(result.rows).toHaveLength(1);
-      expect(result.rows[0].id).toBeDefined();
+      expect(result.rows[0].id).toEqual(expect.any(String));
       expect(result.rows[0].type).toBe(testData.type);
     });
 
@@ -383,7 +382,7 @@ describe("PostgreSQLService Integration", () => {
         };
       });
 
-      expect(result.sessionId).toBeDefined();
+      expect(result.sessionId).toEqual(expect.any(String));
       expect(result.documentCount).toBe(3);
 
       // Verify transaction committed
@@ -488,7 +487,7 @@ describe("PostgreSQLService Integration", () => {
         return { sessionId };
       });
 
-      expect(result.sessionId).toBeDefined();
+      expect(result.sessionId).toEqual(expect.any(String));
 
       // Verify both operations succeeded
       const sessionResult = await pgService.query(
@@ -631,7 +630,7 @@ describe("PostgreSQLService Integration", () => {
       expect(results[0].rowCount).toBe(1);
 
       // Second query should have error
-      expect(results[1].error).toBeDefined();
+      expect(results[1].error).toEqual(expect.any(Object));
 
       // Third and fourth queries should succeed
       expect(results[2].rowCount).toBe(1);
@@ -677,7 +676,7 @@ describe("PostgreSQLService Integration", () => {
         await pgService.bulkQuery(failingQueries, { continueOnError: false });
       } catch (error) {
         // Expected error
-        expect(error).toBeDefined();
+        expect(error as any).toEqual(expect.anything());
       }
 
       // Verify no data was inserted due to rollback
@@ -1041,7 +1040,7 @@ describe("PostgreSQLService Integration", () => {
 
       expect(metrics).toHaveLength(3); // We inserted 3 metrics
       expect(metrics[0].entity_id).toBe(testEntityId);
-      expect(metrics[0].timestamp).toBeDefined();
+      expect(new Date(metrics[0].timestamp).toString()).not.toBe('Invalid Date');
 
       // Check that all 3 metric types are present
       const metricTypes = metrics.map((m) => m.metric_type);
@@ -1059,7 +1058,7 @@ describe("PostgreSQLService Integration", () => {
       expect(coverage[0].lines_covered).toBe(85);
       expect(coverage[0].lines_total).toBe(100);
       expect(coverage[0].percentage).toBe(85.5);
-      expect(coverage[0].timestamp).toBeDefined();
+      expect(new Date(coverage[0].timestamp).toString()).not.toBe('Invalid Date');
     });
 
     it("should handle history queries with no results", async () => {
@@ -1286,7 +1285,7 @@ describe("PostgreSQLService Integration", () => {
       expect(loadResults).toHaveLength(loadTestQueries);
       loadResults.forEach((result) => {
         expect(result.rows).toHaveLength(1);
-        expect(result.rows[0].id).toBeDefined();
+        expect(result.rows[0].id).toEqual(expect.any(String));
       });
 
       // Should complete within reasonable time
@@ -1375,7 +1374,7 @@ describe("PostgreSQLService Integration", () => {
       );
 
       expect(result.rows).toHaveLength(1);
-      expect(result.rows[0].id).toBeDefined();
+      expect(result.rows[0].id).toEqual(expect.any(String));
     });
 
     it("should handle concurrent transactions safely", async () => {
@@ -1423,7 +1422,7 @@ describe("PostgreSQLService Integration", () => {
       const endTime = Date.now();
 
       expect(txResults).toHaveLength(concurrentTx);
-      txResults.forEach((result) => expect(result).toBeDefined());
+      txResults.forEach((result) => expect(result).toEqual(expect.any(String)));
 
       // Should complete within reasonable time
       expect(endTime - startTime).toBeLessThan(5000); // 5 seconds max

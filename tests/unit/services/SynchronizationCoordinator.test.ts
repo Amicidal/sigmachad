@@ -599,7 +599,7 @@ describe("SynchronizationCoordinator", () => {
 
       // Initially should be queued or running
       let operation = coordinator.getOperationStatus(operationId);
-      expect(operation).toBeDefined();
+      expect(operation).toEqual(expect.any(Object));
       expect(["pending", "running"]).toContain(operation?.status);
 
       // Wait for completion

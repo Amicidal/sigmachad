@@ -19,6 +19,7 @@ export interface SystemConfiguration {
         securityScanning: boolean;
         mcpServer: boolean;
         syncCoordinator: boolean;
+        history: boolean;
     };
     performance: {
         maxConcurrentSync: number;
@@ -44,6 +45,53 @@ export declare class ConfigurationService {
     private testWorkingDir?;
     constructor(dbService: DatabaseService, syncCoordinator?: SynchronizationCoordinator | undefined, testWorkingDir?: string | undefined);
     getSystemConfiguration(): Promise<SystemConfiguration>;
+    getHistoryConfig(): {
+        enabled: boolean;
+        retentionDays: number;
+        checkpoint: {
+            hops: number;
+            embedVersions: boolean;
+        };
+        incident: {
+            enabled: boolean;
+            hops: number;
+        };
+        schedule: {
+            pruneIntervalHours: number;
+            checkpointIntervalHours: number;
+        };
+    };
+    updateHistoryConfig(updates: Partial<{
+        enabled: boolean;
+        retentionDays: number;
+        checkpoint: {
+            hops: number;
+            embedVersions: boolean;
+        };
+        incident: {
+            enabled: boolean;
+            hops: number;
+        };
+        schedule: {
+            pruneIntervalHours: number;
+            checkpointIntervalHours: number;
+        };
+    }>): {
+        enabled: boolean;
+        retentionDays: number;
+        checkpoint: {
+            hops: number;
+            embedVersions: boolean;
+        };
+        incident: {
+            enabled: boolean;
+            hops: number;
+        };
+        schedule: {
+            pruneIntervalHours: number;
+            checkpointIntervalHours: number;
+        };
+    };
     private getVersion;
     private checkDatabaseStatus;
     private checkFeatureStatus;

@@ -15,6 +15,7 @@ import {
   TestHistoricalData,
 } from "../models/entities.js";
 import { RelationshipType } from "../models/relationships.js";
+import { noiseConfig } from "../config/noise.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -82,6 +83,8 @@ export interface FlakyTestAnalysis {
 
 export class TestEngine {
   private parser: TestResultParser;
+  private perfRelBuffer: import("../models/relationships.js").GraphRelationship[] = [];
+  private perfIncidentSeeds: Set<string> = new Set();
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -128,7 +131,25 @@ export class TestEngine {
       }
 
       // Store the test suite result
-      await this.dbService.storeTestSuiteResult(suiteResult);
+      // Map to DatabaseService storage shape
+      const overallStatus: "passed" | "failed" | "skipped" =
+        suiteResult.failedTests > 0
+          ? "failed"
+          : suiteResult.passedTests > 0
+          ? "passed"
+          : "skipped";
+      await this.dbService.storeTestSuiteResult({
+        name: suiteResult.suiteName,
+        status: overallStatus,
+        duration: suiteResult.duration,
+        timestamp: suiteResult.timestamp,
+        testResults: suiteResult.results.map((r) => ({
+          name: r.testName,
+          status: r.status === "error" ? "failed" : r.status,
+          duration: r.duration,
+          error: r.errorMessage,
+        })),
+      });
 
       // Process individual test results
       for (const result of suiteResult.results) {
@@ -140,6 +161,25 @@ export class TestEngine {
 
       // Perform flaky test analysis
       await this.analyzeFlakyTests(suiteResult.results);
+
+      // Auto-create an incident checkpoint when failures occur (config-gated)
+      const hasFailures =
+        suiteResult.failedTests > 0 ||
+        suiteResult.results.some((r) => r.status === "failed" || r.status === "error");
+      if (hasFailures) {
+        await this.createIncidentCheckpoint(suiteResult).catch((e) => {
+          console.warn("Incident checkpoint creation failed:", e);
+        });
+      }
+
+      // Flush any batched performance relationships
+      if (this.perfRelBuffer.length > 0) {
+        try {
+          await this.kgService.createRelationshipsBulk(this.perfRelBuffer, { validate: false });
+        } finally {
+          this.perfRelBuffer = [];
+        }
+      }
     } catch (error) {
       console.error("Failed to record test results:", error);
       throw new Error(
@@ -148,6 +188,65 @@ export class TestEngine {
         }`
       );
     }
+  }
+
+  /**
+   * Create an incident checkpoint seeded with failing tests and their impacted entities.
+   * Controlled by env: HISTORY_ENABLED (default true), HISTORY_INCIDENT_ENABLED (default true),
+   * HISTORY_INCIDENT_HOPS (default falls back to HISTORY_CHECKPOINT_HOPS or 2).
+   */
+  private async createIncidentCheckpoint(suiteResult: TestSuiteResult): Promise<void> {
+    // Feature flags
+    const historyEnabled = (process.env.HISTORY_ENABLED || "true").toLowerCase() !== "false";
+    const incidentEnabled = (process.env.HISTORY_INCIDENT_ENABLED || "true").toLowerCase() !== "false";
+    if (!historyEnabled || !incidentEnabled) return;
+
+    // Determine hops
+    const incidentHopsRaw = parseInt(process.env.HISTORY_INCIDENT_HOPS || "", 10);
+    const baseHopsRaw = parseInt(process.env.HISTORY_CHECKPOINT_HOPS || "", 10);
+    const hops = Number.isFinite(incidentHopsRaw)
+      ? incidentHopsRaw
+      : Number.isFinite(baseHopsRaw)
+      ? baseHopsRaw
+      : 2;
+
+    const failing = suiteResult.results.filter(
+      (r) => r.status === "failed" || r.status === "error"
+    );
+    if (failing.length === 0) return;
+
+    const seedIds = new Set<string>();
+    for (const fr of failing) {
+      seedIds.add(fr.testId);
+      try {
+        // Include direct TESTS relationships (target/covered entities)
+        const rels = await this.kgService.queryRelationships({
+          fromEntityId: fr.testId,
+          type: RelationshipType.TESTS,
+          limit: 100,
+        });
+        for (const rel of rels) {
+          if (rel.toEntityId) seedIds.add(rel.toEntityId);
+        }
+        // Include targetSymbol on the test entity if present
+        const testEntity = (await this.kgService.getEntity(fr.testId)) as Test | null;
+        if (testEntity?.targetSymbol) seedIds.add(testEntity.targetSymbol);
+      } catch {
+        // Non-fatal; continue collecting seeds
+      }
+    }
+
+    const seeds = Array.from(seedIds);
+    if (seeds.length === 0) return;
+
+    const { checkpointId } = await this.kgService.createCheckpoint(
+      seeds,
+      "incident",
+      Math.max(1, Math.min(5, Math.floor(hops)))
+    );
+    console.log(
+      `📌 Incident checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`
+    );
   }
 
   /**
@@ -181,6 +280,9 @@ export class TestEngine {
     };
 
     // Add execution to test history (avoid duplicates)
+    const priorStatus = testEntity.executionHistory.length > 0
+      ? testEntity.executionHistory[testEntity.executionHistory.length - 1].status
+      : undefined;
     const existingExecutionIndex = testEntity.executionHistory.findIndex(
       (exec) => exec.id === execution.id
     );
@@ -201,6 +303,63 @@ export class TestEngine {
 
     // Save test entity first
     await this.kgService.createOrUpdateEntity(testEntity);
+
+    // Link tests to specs they validate via IMPLEMENTS_SPEC on target symbol
+    try {
+      if (testEntity.targetSymbol) {
+        const impls = await this.kgService.getRelationships({
+          fromEntityId: testEntity.targetSymbol,
+          type: (RelationshipType as any).IMPLEMENTS_SPEC as any,
+          limit: 50,
+        } as any);
+        for (const r of impls) {
+          try {
+            await this.kgService.createRelationship({
+              id: `rel_${testEntity.id}_${r.toEntityId}_VALIDATES`,
+              fromEntityId: testEntity.id,
+              toEntityId: r.toEntityId,
+              type: RelationshipType.VALIDATES as any,
+              created: timestamp,
+              lastModified: timestamp,
+              version: 1,
+            } as any, undefined, undefined, { validate: false });
+          } catch {}
+        }
+      }
+    } catch {}
+
+    // Emit BROKE_IN / FIXED_IN signals between test and its target symbol on status transition
+    try {
+      const curr = result.status;
+      const prev = priorStatus;
+      const target = testEntity.targetSymbol;
+      if (target) {
+        if ((prev === 'passed' || prev === 'skipped' || prev === undefined) && curr === 'failed') {
+          await this.kgService.createRelationship({
+            id: `rel_${testEntity.id}_${target}_BROKE_IN`,
+            fromEntityId: testEntity.id,
+            toEntityId: target,
+            type: RelationshipType.BROKE_IN as any,
+            created: timestamp,
+            lastModified: timestamp,
+            version: 1,
+            metadata: { verifiedBy: 'test' },
+          } as any, undefined, undefined, { validate: false });
+        }
+        if (prev === 'failed' && curr === 'passed') {
+          await this.kgService.createRelationship({
+            id: `rel_${testEntity.id}_${target}_FIXED_IN`,
+            fromEntityId: testEntity.id,
+            toEntityId: target,
+            type: RelationshipType.FIXED_IN as any,
+            created: timestamp,
+            lastModified: timestamp,
+            version: 1,
+            metadata: { verifiedBy: 'test' },
+          } as any, undefined, undefined, { validate: false });
+        }
+      }
+    } catch {}
 
     // Update coverage if provided
     if (result.coverage) {
@@ -331,7 +490,9 @@ export class TestEngine {
     flakyScore += alternatingPattern * 0.3;
 
     // Duration variability (longer tests tend to be more flaky)
-    const durationVariability = this.calculateDurationVariability(results);
+    const durationVariability = this.calculateDurationVariability(
+      results.map((r) => r.duration)
+    );
     flakyScore += Math.min(durationVariability / 1000, 1) * 0.3; // Cap at 1
 
     const patterns = this.identifyFailurePatterns(results);
@@ -385,50 +546,40 @@ export class TestEngine {
       throw new Error(`Test entity ${entityId} not found`);
     }
 
-    // Get all tests that cover this entity
-    const coveringTests = await this.kgService.queryRelationships({
+    // Get all test relationships to this entity
+    const testRels = await this.kgService.queryRelationships({
       toEntityId: entityId,
-      type: RelationshipType.COVERAGE_PROVIDES,
+      type: RelationshipType.TESTS,
     });
 
-    const testEntities = await Promise.all(
-      coveringTests.map(
-        (rel) => this.kgService.getEntity(rel.fromEntityId) as Promise<Test>
-      )
-    );
-
-    // Filter out null results and ensure they have coverage data
-    const validTestEntities = testEntities.filter(
-      (test): test is Test => test !== null && test.coverage !== undefined
-    );
+    // Derive coverage from relationship metadata or fallback to test entity
+    const coverages: number[] = [];
+    for (const rel of testRels) {
+      const meta = (rel as any).metadata || {};
+      const relCov = meta.coverage?.lines ?? meta.coveragePercentage ?? meta.coverage;
+      if (typeof relCov === 'number') {
+        coverages.push(relCov);
+        continue;
+      }
+      const test = (await this.kgService.getEntity(rel.fromEntityId)) as Test | null;
+      if (test && test.coverage && typeof test.coverage.lines === 'number') {
+        coverages.push(test.coverage.lines);
+      }
+    }
 
     return {
       entityId,
-      overallCoverage: this.aggregateCoverage(
-        validTestEntities.map((t) => t.coverage!)
-      ),
+      overallCoverage: this.aggregateCoverage(coverages),
       testBreakdown: {
-        unitTests: this.aggregateCoverage(
-          validTestEntities
-            .filter((t) => t.testType === "unit")
-            .map((t) => t.coverage!)
-        ),
-        integrationTests: this.aggregateCoverage(
-          validTestEntities
-            .filter((t) => t.testType === "integration")
-            .map((t) => t.coverage!)
-        ),
-        e2eTests: this.aggregateCoverage(
-          validTestEntities
-            .filter((t) => t.testType === "e2e")
-            .map((t) => t.coverage!)
-        ),
+        unitTests: 0,
+        integrationTests: 0,
+        e2eTests: 0,
       },
       uncoveredLines: [], // Would need source map integration
       uncoveredBranches: [],
-      testCases: validTestEntities.map((test) => ({
-        testId: test.id,
-        testName: test.path,
+      testCases: testRels.map((rel) => ({
+        testId: rel.fromEntityId,
+        testName: rel.fromEntityId,
         covers: [entityId],
       })),
     };
@@ -868,6 +1019,69 @@ export class TestEngine {
       testEntity.performanceMetrics.historicalData =
         testEntity.performanceMetrics.historicalData.slice(-100);
     }
+
+    // Queue performance relationships when we can associate a target symbol (batched)
+    try {
+      if (testEntity.targetSymbol) {
+        const target = await this.kgService.getEntity(testEntity.targetSymbol);
+        if (target) {
+          const hist = Array.isArray(testEntity.performanceMetrics.historicalData)
+            ? testEntity.performanceMetrics.historicalData
+            : [];
+          const historyOk = hist.length >= noiseConfig.PERF_MIN_HISTORY;
+          const lastN = hist.slice(-Math.max(1, noiseConfig.PERF_TREND_MIN_RUNS));
+          const lastExecs = lastN.map((h) => h.executionTime);
+          const monotonicIncrease = lastExecs.every((v, i, arr) => i === 0 || v >= arr[i - 1]);
+          const increaseDelta = lastExecs.length >= 2 ? (lastExecs[lastExecs.length - 1] - lastExecs[0]) : 0;
+          const degradingOk =
+            testEntity.performanceMetrics.trend === "degrading" &&
+            historyOk &&
+            monotonicIncrease &&
+            increaseDelta >= noiseConfig.PERF_DEGRADING_MIN_DELTA_MS;
+
+          // Regression if degrading meets sustained and delta thresholds
+          if (degradingOk) {
+            this.perfRelBuffer.push({
+              id: `${testEntity.id}_perf_regression_${testEntity.targetSymbol}`,
+              fromEntityId: testEntity.id,
+              toEntityId: testEntity.targetSymbol,
+              type: RelationshipType.PERFORMANCE_REGRESSION,
+              created: new Date(),
+              lastModified: new Date(),
+              version: 1,
+              metadata: {
+                avgMs: testEntity.performanceMetrics.averageExecutionTime,
+                p95Ms: testEntity.performanceMetrics.p95ExecutionTime,
+              },
+            } as any);
+            this.perfIncidentSeeds.add(testEntity.id);
+          } else if (
+            // Performance impact if latency is above configurable high-water marks
+            historyOk && (
+              testEntity.performanceMetrics.p95ExecutionTime >= noiseConfig.PERF_IMPACT_P95_MS ||
+              testEntity.performanceMetrics.averageExecutionTime >= noiseConfig.PERF_IMPACT_AVG_MS
+            )
+          ) {
+            this.perfRelBuffer.push({
+              id: `${testEntity.id}_perf_impact_${testEntity.targetSymbol}`,
+              fromEntityId: testEntity.id,
+              toEntityId: testEntity.targetSymbol,
+              type: RelationshipType.PERFORMANCE_IMPACT,
+              created: new Date(),
+              lastModified: new Date(),
+              version: 1,
+              metadata: {
+                avgMs: testEntity.performanceMetrics.averageExecutionTime,
+                p95Ms: testEntity.performanceMetrics.p95ExecutionTime,
+              },
+            } as any);
+            this.perfIncidentSeeds.add(testEntity.id);
+          }
+        }
+      }
+    } catch {
+      // Non-fatal; continue
+    }
   }
 
   private async updateCoverageRelationships(testEntity: Test): Promise<void> {
@@ -892,16 +1106,23 @@ export class TestEngine {
         `✅ Creating coverage relationship: ${testEntity.id} -> ${testEntity.targetSymbol}`
       );
 
-      // Create coverage relationship with target symbol
+      // Create a test relationship and include coverage in metadata
       await this.kgService.createRelationship({
-        id: `${testEntity.id}_covers_${testEntity.targetSymbol}`,
+        id: `${testEntity.id}_tests_${testEntity.targetSymbol}`,
         fromEntityId: testEntity.id,
         toEntityId: testEntity.targetSymbol,
-        type: RelationshipType.COVERAGE_PROVIDES,
+        type: RelationshipType.TESTS,
         created: new Date(),
         lastModified: new Date(),
         version: 1,
-        coveragePercentage: testEntity.coverage.lines,
+        metadata: {
+          coverage: {
+            lines: testEntity.coverage?.lines,
+            branches: testEntity.coverage?.branches,
+            functions: testEntity.coverage?.functions,
+          },
+          testType: testEntity.testType,
+        },
       } as any);
     } catch (error) {
       // If we can't create the relationship, just skip it
@@ -940,8 +1161,7 @@ export class TestEngine {
     return alternations / (results.length - 1);
   }
 
-  private calculateDurationVariability(results: TestResult[]): number {
-    const durations = results.map((r) => r.duration);
+  private calculateDurationVariability(durations: number[]): number {
     const mean = durations.reduce((a, b) => a + b, 0) / durations.length;
     const variance =
       durations.reduce((acc, d) => acc + Math.pow(d - mean, 2), 0) /
@@ -1099,8 +1319,18 @@ export class TestEngine {
   private async storeFlakyTestAnalyses(
     analyses: FlakyTestAnalysis[]
   ): Promise<void> {
-    // Store analyses in database for historical tracking
-    await this.dbService.storeFlakyTestAnalyses(analyses);
+    // Map to DatabaseService FlakyTestAnalysis shape
+    const mapped = analyses.map((a) => ({
+      testId: a.testId,
+      testName: a.testName,
+      failureCount: Math.round(a.failureRate * a.totalRuns),
+      totalRuns: a.totalRuns,
+      lastFailure: new Date(),
+      failurePatterns: Object.entries(a.patterns)
+        .filter(([, v]) => !!v)
+        .map(([k, v]) => `${k}:${v}`),
+    }));
+    await this.dbService.storeFlakyTestAnalyses(mapped as any);
   }
 
   private calculateTrend(

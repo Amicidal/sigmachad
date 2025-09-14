@@ -60,9 +60,607 @@ export class KnowledgeGraphService extends EventEmitter {
     constructor(db) {
         super();
         this.db = db;
+        this._lastPruneSummary = null;
         this.setMaxListeners(100); // Allow more listeners for WebSocket connections
         this.searchCache = new SimpleCache(500, 300000); // Increased cache size to 500 results for 5 minutes
         this.entityCache = new SimpleCache(1000, 600000); // Cache individual entities for 10 minutes
+    }
+    isHistoryEnabled() {
+        try {
+            return (process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false';
+        }
+        catch (_a) {
+            return true;
+        }
+    }
+    // --- History/Checkpoint stubs (to be implemented) ---
+    /**
+     * Append a compact version snapshot for an entity when its content changes.
+     * Stub: returns a generated version id without writing to the graph.
+     */
+    async appendVersion(entity, opts) {
+        if (!this.isHistoryEnabled()) {
+            const vid = `ver_${(entity === null || entity === void 0 ? void 0 : entity.id) || 'disabled'}_${Date.now().toString(36)}`;
+            console.log(`📝 [history disabled] appendVersion skipped; returning ${vid}`);
+            return vid;
+        }
+        const entityId = entity === null || entity === void 0 ? void 0 : entity.id;
+        if (!entityId)
+            throw new Error('appendVersion: entity.id is required');
+        const ts = ((opts === null || opts === void 0 ? void 0 : opts.timestamp) || new Date());
+        const tsISO = ts.toISOString();
+        const hash = (entity === null || entity === void 0 ? void 0 : entity.hash) || '';
+        const path = (this.hasCodebaseProperties(entity) ? entity.path : undefined);
+        const language = (this.hasCodebaseProperties(entity) ? entity.language : undefined);
+        const vid = `ver_${entityId}_${hash || Date.now().toString(36)}`;
+        // Create/merge version node and OF relationship
+        const vprops = {
+            id: vid,
+            type: 'version',
+            entityId,
+            hash,
+            timestamp: tsISO,
+        };
+        if (path)
+            vprops.path = path;
+        if (language)
+            vprops.language = language;
+        if (opts === null || opts === void 0 ? void 0 : opts.changeSetId)
+            vprops.changeSetId = opts.changeSetId;
+        await this.db.falkordbQuery(`MATCH (e {id: $entityId})
+       MERGE (v:version { id: $vid })
+       SET v += $vprops
+       MERGE (v)-[of:OF { id: $ofId }]->(e)
+       ON CREATE SET of.created = $ts, of.version = 1, of.metadata = '{}'
+       SET of.lastModified = $ts
+      `, { entityId, vid, vprops, ts: tsISO, ofId: `rel_${vid}_${entityId}_OF` });
+        // Link to previous version if exists (chain among version nodes)
+        const prev = await this.db.falkordbQuery(`MATCH (e {id: $entityId})<-[:OF]-(pv:version)
+       WHERE pv.id <> $vid AND pv.timestamp <= $ts
+       RETURN pv.id AS id, pv.timestamp AS ts
+       ORDER BY ts DESC LIMIT 1
+      `, { entityId, vid, ts: tsISO });
+        if (prev && prev.length > 0) {
+            const prevId = prev[0].id;
+            await this.db.falkordbQuery(`MATCH (v:version {id: $vid}), (pv:version {id: $prevId})
+         MERGE (v)-[r:PREVIOUS_VERSION { id: $rid }]->(pv)
+         ON CREATE SET r.created = $ts, r.version = 1, r.metadata = '{}'
+         SET r.lastModified = $ts
+        `, { vid, prevId, ts: tsISO, rid: `rel_${vid}_${prevId}_PREVIOUS_VERSION` });
+        }
+        console.log({ event: 'history.version_created', entityId, versionId: vid, timestamp: tsISO });
+        return vid;
+    }
+    /**
+     * Open (or create) a relationship with a validity interval starting at ts.
+     * Stub: logs intent; no-op.
+     */
+    async openEdge(fromId, toId, type, ts, changeSetId) {
+        if (!this.isHistoryEnabled()) {
+            console.log(`🔗 [history disabled] openEdge skipped for ${fromId}->${toId} ${type}`);
+            return;
+        }
+        const at = (ts || new Date()).toISOString();
+        const id = `rel_${fromId}_${toId}_${type}`;
+        const meta = JSON.stringify(changeSetId ? { changeSetId } : {});
+        const query = `
+      MATCH (a {id: $fromId}), (b {id: $toId})
+      MERGE (a)-[r:${type} { id: $id }]->(b)
+      ON CREATE SET r.created = $at, r.version = 1, r.metadata = $meta, r.validFrom = $at, r.validTo = NULL
+      SET r.lastModified = $at, r.validTo = NULL, r.version = coalesce(r.version, 0) + 1
+    `;
+        await this.db.falkordbQuery(query, { fromId, toId, id, at, meta });
+        console.log({ event: 'history.edge_opened', id, type, fromId, toId, at });
+    }
+    /**
+     * Close a relationship's validity interval at ts.
+     * Stub: logs intent; no-op.
+     */
+    async closeEdge(fromId, toId, type, ts) {
+        if (!this.isHistoryEnabled()) {
+            console.log(`⛓️ [history disabled] closeEdge skipped for ${fromId}->${toId} ${type}`);
+            return;
+        }
+        const at = (ts || new Date()).toISOString();
+        const id = `rel_${fromId}_${toId}_${type}`;
+        const query = `
+      MATCH (a {id: $fromId})-[r:${type} { id: $id }]->(b {id: $toId})
+      SET r.validTo = coalesce(r.validTo, $at), r.lastModified = $at, r.version = coalesce(r.version, 0) + 1
+    `;
+        await this.db.falkordbQuery(query, { fromId, toId, id, at });
+        console.log({ event: 'history.edge_closed', id, type, fromId, toId, at });
+    }
+    /**
+     * Create a checkpoint subgraph descriptor and (in full impl) link members.
+     * Stub: returns a generated checkpointId.
+     */
+    async createCheckpoint(seedEntities, reason, hops, window) {
+        if (!this.isHistoryEnabled()) {
+            const checkpointId = `chk_${Date.now().toString(36)}`;
+            console.log(`📌 [history disabled] createCheckpoint skipped; returning ${checkpointId}`);
+            return { checkpointId };
+        }
+        const envHops = parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '', 10);
+        const effectiveHops = Number.isFinite(envHops) && envHops > 0 ? envHops : (hops || 2);
+        const hopsClamped = Math.max(1, Math.min(effectiveHops, 5));
+        const checkpointId = `chk_${Date.now().toString(36)}`;
+        const ts = new Date().toISOString();
+        const seeds = seedEntities || [];
+        const metadata = { reason, window: window || {} };
+        // Create checkpoint node
+        await this.db.falkordbQuery(`MERGE (c:checkpoint { id: $id })
+       SET c.type = 'checkpoint', c.checkpointId = $id, c.timestamp = $ts, c.reason = $reason, c.hops = $hops, c.seedEntities = $seeds, c.metadata = $meta
+      `, { id: checkpointId, ts, reason, hops, seeds: JSON.stringify(seeds), meta: JSON.stringify(metadata) });
+        // Collect neighborhood member ids up to K hops
+        const queryMembers = `
+      UNWIND $seedIds AS sid
+      MATCH (s {id: sid})
+      WITH collect(s) AS seeds
+      UNWIND seeds AS s
+      MATCH (s)-[*1..${hopsClamped}]-(n)
+      RETURN DISTINCT n.id AS id
+    `;
+        const res = await this.db.falkordbQuery(queryMembers, { seedIds: seeds });
+        const memberIds = (res || []).map((row) => row.id).filter(Boolean);
+        if (memberIds.length > 0) {
+            const ridPrefix = `rel_chk_${checkpointId}_includes_`;
+            await this.db.falkordbQuery(`UNWIND $members AS mid
+         MATCH (n {id: mid}), (c:checkpoint {id: $cid})
+         MERGE (c)-[r:CHECKPOINT_INCLUDES { id: $ridPrefix + mid }]->(n)
+         ON CREATE SET r.created = $ts, r.version = 1, r.metadata = '{}'
+         SET r.lastModified = $ts
+        `, { members: memberIds, cid: checkpointId, ts, ridPrefix });
+        }
+        // Optional embeddings for checkpoint members with checkpointId payload tag
+        const embedVersions = (process.env.HISTORY_EMBED_VERSIONS || 'false').toLowerCase() === 'true';
+        if (embedVersions && memberIds.length > 0) {
+            try {
+                const nodes = await this.db.falkordbQuery(`UNWIND $ids AS id MATCH (n {id: id}) RETURN n`, { ids: memberIds });
+                const entities = (nodes || []).map((row) => this.parseEntityFromGraph(row));
+                if (entities.length > 0) {
+                    await this.createEmbeddingsBatch(entities, { checkpointId });
+                }
+            }
+            catch (e) {
+                console.warn('Checkpoint embeddings failed:', e);
+            }
+        }
+        console.log({ event: 'history.checkpoint_created', checkpointId, members: memberIds.length, reason, hops: hopsClamped, timestamp: ts });
+        return { checkpointId };
+    }
+    /**
+     * Prune history artifacts older than the retention window.
+     * Stub: returns zeros.
+     */
+    async pruneHistory(retentionDays, opts) {
+        var _a, _b, _c;
+        if (!this.isHistoryEnabled()) {
+            console.log(`🧹 [history disabled] pruneHistory no-op`);
+            return { versionsDeleted: 0, edgesClosed: 0, checkpointsDeleted: 0 };
+        }
+        const cutoff = new Date(Date.now() - Math.max(1, retentionDays) * 24 * 60 * 60 * 1000).toISOString();
+        const dry = !!(opts === null || opts === void 0 ? void 0 : opts.dryRun);
+        // Delete old checkpoints (or count if dry-run)
+        const delCheckpoints = await this.db.falkordbQuery(dry
+            ? `MATCH (c:checkpoint) WHERE c.timestamp < $cutoff RETURN count(c) AS count`
+            : `MATCH (c:checkpoint)
+           WHERE c.timestamp < $cutoff
+           WITH collect(c) AS cs
+           FOREACH (x IN cs | DETACH DELETE x)
+           RETURN size(cs) AS count`, { cutoff });
+        const checkpointsDeleted = ((_a = delCheckpoints === null || delCheckpoints === void 0 ? void 0 : delCheckpoints[0]) === null || _a === void 0 ? void 0 : _a.count) || 0;
+        // Delete relationships that have been closed before cutoff (or count)
+        const delEdges = await this.db.falkordbQuery(dry
+            ? `MATCH ()-[r]-() WHERE r.validTo IS NOT NULL AND r.validTo < $cutoff RETURN count(r) AS count`
+            : `MATCH ()-[r]-()
+           WHERE r.validTo IS NOT NULL AND r.validTo < $cutoff
+           WITH collect(r) AS rs
+           FOREACH (x IN rs | DELETE x)
+           RETURN size(rs) AS count`, { cutoff });
+        const edgesClosed = ((_b = delEdges === null || delEdges === void 0 ? void 0 : delEdges[0]) === null || _b === void 0 ? void 0 : _b.count) || 0;
+        // Delete versions older than cutoff not referenced by non-expired checkpoints (or count)
+        const delVersions = await this.db.falkordbQuery(dry
+            ? `MATCH (v:version)
+           WHERE v.timestamp < $cutoff AND NOT EXISTS ((:checkpoint)-[:CHECKPOINT_INCLUDES]->(v))
+           RETURN count(v) AS count`
+            : `MATCH (v:version)
+           WHERE v.timestamp < $cutoff AND NOT EXISTS ((:checkpoint)-[:CHECKPOINT_INCLUDES]->(v))
+           WITH collect(v) AS vs
+           FOREACH (x IN vs | DETACH DELETE x)
+           RETURN size(vs) AS count`, { cutoff });
+        const versionsDeleted = ((_c = delVersions === null || delVersions === void 0 ? void 0 : delVersions[0]) === null || _c === void 0 ? void 0 : _c.count) || 0;
+        console.log({ event: 'history.prune', dryRun: dry, retentionDays, cutoff, versions: versionsDeleted, closedEdges: edgesClosed, checkpoints: checkpointsDeleted });
+        this._lastPruneSummary = { retentionDays, cutoff, versions: versionsDeleted, closedEdges: edgesClosed, checkpoints: checkpointsDeleted, ...(dry ? { dryRun: true } : {}) };
+        return { versionsDeleted, edgesClosed, checkpointsDeleted };
+    }
+    /** Aggregate history-related metrics for admin */
+    async getHistoryMetrics() {
+        var _a, _b, _c, _d, _e, _f;
+        // Parallelize counts
+        const [nodesRow, relsRow, verRow, cpRow, openEdgesRow, closedEdgesRow, cpMembersRows] = await Promise.all([
+            this.db.falkordbQuery(`MATCH (n) RETURN count(n) AS c`, {}),
+            this.db.falkordbQuery(`MATCH ()-[r]-() RETURN count(r) AS c`, {}),
+            this.db.falkordbQuery(`MATCH (v:version) RETURN count(v) AS c`, {}),
+            this.db.falkordbQuery(`MATCH (c:checkpoint) RETURN count(c) AS c`, {}),
+            this.db.falkordbQuery(`MATCH ()-[r]-() WHERE r.validFrom IS NOT NULL AND (r.validTo IS NULL) RETURN count(r) AS c`, {}),
+            this.db.falkordbQuery(`MATCH ()-[r]-() WHERE r.validTo IS NOT NULL RETURN count(r) AS c`, {}),
+            this.db.falkordbQuery(`MATCH (c:checkpoint) OPTIONAL MATCH (c)-[:CHECKPOINT_INCLUDES]->(n) RETURN c.id AS id, count(n) AS m`, {}),
+        ]);
+        const membersCounts = (cpMembersRows || []).map((r) => Number(r.m) || 0);
+        const min = membersCounts.length ? Math.min(...membersCounts) : 0;
+        const max = membersCounts.length ? Math.max(...membersCounts) : 0;
+        const avg = membersCounts.length ? membersCounts.reduce((a, b) => a + b, 0) / membersCounts.length : 0;
+        return {
+            versions: ((_a = verRow === null || verRow === void 0 ? void 0 : verRow[0]) === null || _a === void 0 ? void 0 : _a.c) || 0,
+            checkpoints: ((_b = cpRow === null || cpRow === void 0 ? void 0 : cpRow[0]) === null || _b === void 0 ? void 0 : _b.c) || 0,
+            checkpointMembers: { avg, min, max },
+            temporalEdges: { open: ((_c = openEdgesRow === null || openEdgesRow === void 0 ? void 0 : openEdgesRow[0]) === null || _c === void 0 ? void 0 : _c.c) || 0, closed: ((_d = closedEdgesRow === null || closedEdgesRow === void 0 ? void 0 : closedEdgesRow[0]) === null || _d === void 0 ? void 0 : _d.c) || 0 },
+            lastPrune: this._lastPruneSummary || null,
+            totals: { nodes: ((_e = nodesRow === null || nodesRow === void 0 ? void 0 : nodesRow[0]) === null || _e === void 0 ? void 0 : _e.c) || 0, relationships: ((_f = relsRow === null || relsRow === void 0 ? void 0 : relsRow[0]) === null || _f === void 0 ? void 0 : _f.c) || 0 },
+        };
+    }
+    /** Inspect database indexes and evaluate expected coverage. */
+    async getIndexHealth() {
+        const expectedNames = [
+            'file_path',
+            'symbol_path',
+            'version_entity',
+            'checkpoint_id',
+            'rel_valid_from',
+            'rel_valid_to',
+        ];
+        const notes = [];
+        try {
+            const rows = await this.db.falkordbQuery("CALL db.indexes()", {});
+            const textDump = JSON.stringify(rows || []).toLowerCase();
+            const has = (token) => textDump.includes(token.toLowerCase());
+            const health = {
+                supported: true,
+                indexes: rows,
+                expected: {
+                    file_path: has('file(path)') || has('file_path'),
+                    symbol_path: has('symbol(path)') || has('symbol_path'),
+                    version_entity: has('version(entityid)') || has('version_entity') || has('entityid'),
+                    checkpoint_id: has('checkpoint(checkpointid)') || has('checkpoint_id') || has('checkpointid'),
+                    rel_validFrom: has('validfrom') || has('rel_valid_from'),
+                    rel_validTo: has('validto') || has('rel_valid_to'),
+                },
+                notes,
+            };
+            return health;
+        }
+        catch (e) {
+            notes.push('db.indexes() not supported; using heuristic checks');
+            // Try minimal heuristic checks by running EXPLAIN-like queries (if supported); fallback to nulls
+            return {
+                supported: false,
+                expected: {
+                    file_path: false,
+                    symbol_path: false,
+                    version_entity: false,
+                    checkpoint_id: false,
+                    rel_validFrom: false,
+                    rel_validTo: false,
+                },
+                notes,
+            };
+        }
+    }
+    /** Run quick, non-destructive micro-benchmarks for common queries. */
+    async runBenchmarks(options) {
+        var _a, _b, _c, _d;
+        const mode = (options === null || options === void 0 ? void 0 : options.mode) || 'quick';
+        const timings = {};
+        const samples = {};
+        const time = async (label, fn) => {
+            const t0 = Date.now();
+            const out = await fn();
+            timings[label] = Date.now() - t0;
+            return out;
+        };
+        // Totals
+        const nodesRow = await time('nodes.count', async () => await this.db.falkordbQuery(`MATCH (n) RETURN count(n) AS c`, {}));
+        const edgesRow = await time('edges.count', async () => await this.db.falkordbQuery(`MATCH ()-[r]-() RETURN count(r) AS c`, {}));
+        const nodes = ((_a = nodesRow === null || nodesRow === void 0 ? void 0 : nodesRow[0]) === null || _a === void 0 ? void 0 : _a.c) || 0;
+        const edges = ((_b = edgesRow === null || edgesRow === void 0 ? void 0 : edgesRow[0]) === null || _b === void 0 ? void 0 : _b.c) || 0;
+        // Sample one id for targeted lookup
+        const idRow = await time('sample.id.fetch', async () => await this.db.falkordbQuery(`MATCH (n) RETURN n.id AS id LIMIT 1`, {}));
+        const sampleId = (_c = idRow === null || idRow === void 0 ? void 0 : idRow[0]) === null || _c === void 0 ? void 0 : _c.id;
+        samples.entityId = sampleId || null;
+        if (sampleId) {
+            await time('lookup.byId', async () => await this.db.falkordbQuery(`MATCH (n {id: $id}) RETURN n`, { id: sampleId }));
+        }
+        // Versions and checkpoints
+        await time('versions.count', async () => await this.db.falkordbQuery(`MATCH (v:version) RETURN count(v) AS c`, {}));
+        const cpIdRow = await time('checkpoint.sample', async () => await this.db.falkordbQuery(`MATCH (c:checkpoint) RETURN c.id AS id LIMIT 1`, {}));
+        const cpId = (_d = cpIdRow === null || cpIdRow === void 0 ? void 0 : cpIdRow[0]) === null || _d === void 0 ? void 0 : _d.id;
+        samples.checkpointId = cpId || null;
+        if (cpId) {
+            await time('checkpoint.members', async () => await this.db.falkordbQuery(`MATCH (c:checkpoint {id: $id})-[:CHECKPOINT_INCLUDES]->(n) RETURN count(n) AS c`, { id: cpId }));
+        }
+        // Temporal edges
+        await time('temporal.open', async () => await this.db.falkordbQuery(`MATCH ()-[r]-() WHERE r.validFrom IS NOT NULL AND r.validTo IS NULL RETURN count(r) AS c`, {}));
+        await time('temporal.closed', async () => await this.db.falkordbQuery(`MATCH ()-[r]-() WHERE r.validTo IS NOT NULL RETURN count(r) AS c`, {}));
+        // Time-travel traversal micro
+        if (sampleId) {
+            const until = new Date().toISOString();
+            await time('timetravel.depth2', async () => this.timeTravelTraversal({ startId: sampleId, until: new Date(until), maxDepth: 2 }));
+        }
+        // Optional extended benchmarks
+        if (mode === 'full') {
+            // Neighbor fanout
+            if (sampleId) {
+                await time('neighbors.depth3', async () => await this.db.falkordbQuery(`MATCH (s {id: $id})-[:DEPENDS_ON*1..3]-(n) RETURN count(n) AS c`, { id: sampleId }));
+            }
+        }
+        return {
+            mode,
+            totals: { nodes, edges },
+            timings,
+            samples,
+        };
+    }
+    /** Ensure graph indexes for common queries (best-effort across dialects). */
+    async ensureGraphIndexes() {
+        const tries = [];
+        const run = async (query) => {
+            tries.push(query);
+            try {
+                await this.db.falkordbQuery(query, {});
+            }
+            catch (_a) { }
+        };
+        // Neo4j 4+/5 style
+        await run("CREATE INDEX file_path IF NOT EXISTS FOR (n:file) ON (n.path)");
+        await run("CREATE INDEX symbol_path IF NOT EXISTS FOR (n:symbol) ON (n.path)");
+        await run("CREATE INDEX version_entity IF NOT EXISTS FOR (n:version) ON (n.entityId)");
+        await run("CREATE INDEX checkpoint_id IF NOT EXISTS FOR (n:checkpoint) ON (n.checkpointId)");
+        // Relationship property indexes (may be unsupported; best-effort)
+        await run("CREATE INDEX rel_valid_from IF NOT EXISTS FOR ()-[r]-() ON (r.validFrom)");
+        await run("CREATE INDEX rel_valid_to IF NOT EXISTS FOR ()-[r]-() ON (r.validTo)");
+        // Fallback to legacy style
+        await run("CREATE INDEX ON :file(path)");
+        await run("CREATE INDEX ON :symbol(path)");
+        await run("CREATE INDEX ON :version(entityId)");
+        await run("CREATE INDEX ON :checkpoint(checkpointId)");
+        console.log({ event: 'graph.indexes.ensure_attempted', attempts: tries.length });
+    }
+    /**
+     * List checkpoints with optional filters and pagination.
+     * Returns an array of checkpoint entities and the total count matching filters.
+     */
+    async listCheckpoints(options) {
+        var _a, _b, _c;
+        const reason = (options === null || options === void 0 ? void 0 : options.reason) || null;
+        const sinceISO = (options === null || options === void 0 ? void 0 : options.since) ? new Date(options.since).toISOString() : null;
+        const untilISO = (options === null || options === void 0 ? void 0 : options.until) ? new Date(options.until).toISOString() : null;
+        const limit = Math.max(0, Math.min(500, Math.floor((_a = options === null || options === void 0 ? void 0 : options.limit) !== null && _a !== void 0 ? _a : 100)));
+        const offset = Math.max(0, Math.floor((_b = options === null || options === void 0 ? void 0 : options.offset) !== null && _b !== void 0 ? _b : 0));
+        const where = `
+      WHERE ($reason IS NULL OR c.reason = $reason)
+        AND ($since IS NULL OR c.timestamp >= $since)
+        AND ($until IS NULL OR c.timestamp <= $until)
+    `;
+        const totalRes = await this.db.falkordbQuery(`MATCH (c:checkpoint)
+       ${where}
+       RETURN count(c) AS total
+      `, { reason, since: sinceISO, until: untilISO });
+        const total = ((_c = totalRes === null || totalRes === void 0 ? void 0 : totalRes[0]) === null || _c === void 0 ? void 0 : _c.total) || 0;
+        const rows = await this.db.falkordbQuery(`MATCH (c:checkpoint)
+       ${where}
+       OPTIONAL MATCH (c)-[:CHECKPOINT_INCLUDES]->(n)
+       WITH c, count(n) AS memberCount
+       RETURN c AS n, memberCount
+       ORDER BY c.timestamp DESC
+       SKIP $offset LIMIT $limit
+      `, { reason, since: sinceISO, until: untilISO, offset, limit });
+        const items = (rows || []).map((row) => {
+            var _a;
+            const cp = this.parseEntityFromGraph(row.n);
+            return { ...cp, memberCount: (_a = row.memberCount) !== null && _a !== void 0 ? _a : 0 };
+        });
+        return { items, total };
+    }
+    /** Get a checkpoint node by id. */
+    async getCheckpoint(id) {
+        const rows = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })
+       RETURN c AS n
+       LIMIT 1
+      `, { id });
+        if (!rows || rows.length === 0)
+            return null;
+        return this.parseEntityFromGraph(rows[0].n);
+    }
+    /** Get members of a checkpoint with pagination. */
+    async getCheckpointMembers(id, options) {
+        var _a, _b, _c;
+        const limit = Math.max(0, Math.min(1000, Math.floor((_a = options === null || options === void 0 ? void 0 : options.limit) !== null && _a !== void 0 ? _a : 100)));
+        const offset = Math.max(0, Math.floor((_b = options === null || options === void 0 ? void 0 : options.offset) !== null && _b !== void 0 ? _b : 0));
+        const totalRes = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n)
+       RETURN count(n) AS total
+      `, { id });
+        const total = ((_c = totalRes === null || totalRes === void 0 ? void 0 : totalRes[0]) === null || _c === void 0 ? void 0 : _c.total) || 0;
+        const rows = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n)
+       RETURN n
+       SKIP $offset LIMIT $limit
+      `, { id, offset, limit });
+        const items = (rows || []).map((row) => this.parseEntityFromGraph(row));
+        return { items, total };
+    }
+    /**
+     * Time-scoped traversal starting from a node, filtering relationships by validFrom/validTo.
+     * atTime: edges active at a specific moment.
+     * since/until: edges overlapping a time window.
+     */
+    async timeTravelTraversal(query) {
+        var _a;
+        const depth = Math.max(1, Math.min(5, Math.floor((_a = query.maxDepth) !== null && _a !== void 0 ? _a : 3)));
+        const at = query.atTime ? new Date(query.atTime).toISOString() : null;
+        const since = query.since ? new Date(query.since).toISOString() : null;
+        const until = query.until ? new Date(query.until).toISOString() : null;
+        const types = Array.isArray(query.types) ? query.types.map((t) => String(t).toUpperCase()) : [];
+        const hasTypes = types.length > 0 ? 1 : 0;
+        // Collect nodeIds reachable within depth under validity constraints
+        const nodeRows = await this.db.falkordbQuery(`MATCH (start {id: $startId})
+       MATCH path = (start)-[r*1..${depth}]-(n)
+       WHERE ALL(rel IN r WHERE
+         ($hasTypes = 0 OR type(rel) IN $types) AND
+         (
+           ($at IS NOT NULL AND ((rel.validFrom IS NULL OR rel.validFrom <= $at) AND (rel.validTo IS NULL OR rel.validTo > $at))) OR
+           ($at IS NULL AND $since IS NOT NULL AND $until IS NOT NULL AND ((rel.validFrom IS NULL OR rel.validFrom <= $until) AND (rel.validTo IS NULL OR rel.validTo >= $since))) OR
+           ($at IS NULL AND $since IS NULL AND $until IS NULL)
+         )
+       )
+       RETURN DISTINCT n.id AS id
+      `, { startId: query.startId, at, since, until, types, hasTypes });
+        const nodeIds = new Set([query.startId]);
+        for (const row of nodeRows || []) {
+            if (row.id)
+                nodeIds.add(row.id);
+        }
+        const idsArr = Array.from(nodeIds);
+        if (idsArr.length === 0) {
+            return { entities: [], relationships: [] };
+        }
+        // Fetch entities
+        const entityRows = await this.db.falkordbQuery(`UNWIND $ids AS id
+       MATCH (n {id: id})
+       RETURN n
+      `, { ids: idsArr });
+        const entities = (entityRows || []).map((row) => this.parseEntityFromGraph(row));
+        // Fetch relationships among these nodes under the same validity constraint
+        const relRows = await this.db.falkordbQuery(`UNWIND $ids AS idA
+       MATCH (a {id: idA})-[r]->(b)
+       WHERE b.id IN $ids AND (
+         ($at IS NOT NULL AND ((r.validFrom IS NULL OR r.validFrom <= $at) AND (r.validTo IS NULL OR r.validTo > $at))) OR
+         ($at IS NULL AND $since IS NOT NULL AND $until IS NOT NULL AND ((r.validFrom IS NULL OR r.validFrom <= $until) AND (r.validTo IS NULL OR r.validTo >= $since))) OR
+         ($at IS NULL AND $since IS NULL AND $until IS NULL)
+       ) AND ($hasTypes = 0 OR type(r) IN $types)
+       RETURN r, a.id AS fromId, b.id AS toId
+      `, { ids: idsArr, at, since, until, types, hasTypes });
+        const relationships = (relRows || []).map((row) => {
+            const base = this.parseRelationshipFromGraph(row.r);
+            return {
+                ...base,
+                fromEntityId: row.fromId,
+                toEntityId: row.toId,
+            };
+        });
+        return { entities, relationships };
+    }
+    /** Delete a checkpoint node and its include edges. */
+    async deleteCheckpoint(id) {
+        const res = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })
+       WITH c LIMIT 1
+       DETACH DELETE c
+       RETURN 1 AS ok
+      `, { id });
+        return !!(res && res[0] && res[0].ok);
+    }
+    /** Compute summary statistics for a checkpoint. */
+    async getCheckpointSummary(id) {
+        var _a;
+        // Ensure checkpoint exists
+        const cp = await this.getCheckpoint(id);
+        if (!cp)
+            return null;
+        const memberCountRes = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n)
+       RETURN count(n) AS total
+      `, { id });
+        const totalMembers = ((_a = memberCountRes === null || memberCountRes === void 0 ? void 0 : memberCountRes[0]) === null || _a === void 0 ? void 0 : _a.total) || 0;
+        const typeRows = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n)
+       WITH coalesce(n.type, 'unknown') AS t
+       RETURN t AS type, count(*) AS count
+       ORDER BY count DESC
+      `, { id });
+        const entityTypeCounts = (typeRows || []).map((row) => ({ type: row.type, count: row.count }));
+        const relRows = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(a)
+       MATCH (c)-[:CHECKPOINT_INCLUDES]->(b)
+       MATCH (a)-[r]->(b)
+       WITH type(r) AS t
+       RETURN t AS type, count(*) AS count
+       ORDER BY count DESC
+      `, { id });
+        const relationshipTypeCounts = (relRows || []).map((row) => ({ type: row.type, count: row.count }));
+        return { totalMembers, entityTypeCounts, relationshipTypeCounts };
+    }
+    /** Find recently modified entities (by lastModified property) */
+    async findRecentEntityIds(since, limit = 200) {
+        const iso = since.toISOString();
+        const rows = await this.db.falkordbQuery(`MATCH (n)
+       WHERE n.lastModified IS NOT NULL AND n.lastModified >= $since
+       RETURN n.id AS id
+       ORDER BY n.lastModified DESC
+       LIMIT $limit
+      `, { since: iso, limit });
+        return (rows || []).map((row) => row.id).filter(Boolean);
+    }
+    /** Export a checkpoint to a portable JSON structure. */
+    async exportCheckpoint(id, options) {
+        const cp = await this.getCheckpoint(id);
+        if (!cp)
+            return null;
+        const { items: members } = await this.getCheckpointMembers(id, { limit: 1000, offset: 0 });
+        let relationships;
+        if ((options === null || options === void 0 ? void 0 : options.includeRelationships) !== false && members.length > 0) {
+            const ids = members.map((m) => m.id);
+            const rows = await this.db.falkordbQuery(`UNWIND $ids AS idA
+         MATCH (a {id: idA})-[r]->(b)
+         WHERE b.id IN $ids
+         RETURN r, a.id AS fromId, b.id AS toId
+        `, { ids });
+            relationships = (rows || []).map((row) => {
+                const base = this.parseRelationshipFromGraph(row.r);
+                return { ...base, fromEntityId: row.fromId, toEntityId: row.toId };
+            });
+        }
+        return {
+            checkpoint: cp,
+            members,
+            ...(relationships ? { relationships } : {}),
+        };
+    }
+    /** Import a checkpoint JSON; returns new checkpoint id and stats. */
+    async importCheckpoint(data, options) {
+        var _a, _b;
+        if (!this.isHistoryEnabled()) {
+            const fakeId = `chk_${Date.now().toString(36)}`;
+            console.log(`📦 [history disabled] importCheckpoint skipped; returning ${fakeId}`);
+            return { checkpointId: fakeId, linked: 0, missing: ((_a = data.members) === null || _a === void 0 ? void 0 : _a.length) || 0 };
+        }
+        const original = data.checkpoint || {};
+        const providedId = original.id || original.checkpointId;
+        const useOriginal = (options === null || options === void 0 ? void 0 : options.useOriginalId) === true && !!providedId;
+        const checkpointId = useOriginal ? String(providedId) : `chk_${Date.now().toString(36)}`;
+        const ts = original.timestamp ? new Date(original.timestamp).toISOString() : new Date().toISOString();
+        const reason = original.reason || 'manual';
+        const hops = Number.isFinite(original.hops) ? original.hops : 2;
+        const seeds = Array.isArray(original.seedEntities) ? original.seedEntities : [];
+        const meta = JSON.stringify(original.metadata || {});
+        await this.db.falkordbQuery(`MERGE (c:checkpoint { id: $id })
+       SET c.type = 'checkpoint', c.checkpointId = $id, c.timestamp = $ts, c.reason = $reason, c.hops = $hops, c.seedEntities = $seeds, c.metadata = $meta
+      `, { id: checkpointId, ts, reason, hops, seeds: JSON.stringify(seeds), meta });
+        const memberIds = (data.members || []).map((m) => m.id).filter(Boolean);
+        let linked = 0;
+        let missing = 0;
+        if (memberIds.length > 0) {
+            // Check which members exist
+            const presentRows = await this.db.falkordbQuery(`UNWIND $ids AS id MATCH (n {id: id}) RETURN collect(n.id) AS present`, { ids: memberIds });
+            const present = new Set(((_b = presentRows === null || presentRows === void 0 ? void 0 : presentRows[0]) === null || _b === void 0 ? void 0 : _b.present) || []);
+            const existing = memberIds.filter((id) => present.has(id));
+            missing = memberIds.length - existing.length;
+            if (existing.length > 0) {
+                await this.db.falkordbQuery(`UNWIND $ids AS mid
+           MATCH (n {id: mid}), (c:checkpoint {id: $cid})
+           MERGE (c)-[r:CHECKPOINT_INCLUDES { id: $ridPrefix + mid }]->(n)
+           ON CREATE SET r.created = $ts, r.version = 1, r.metadata = '{}'
+           SET r.lastModified = $ts
+          `, { ids: existing, cid: checkpointId, ts, ridPrefix: `rel_chk_${checkpointId}_includes_` });
+                linked = existing.length;
+            }
+        }
+        // Relationships import optional: we do not create relationships here to avoid duplicating topology; rely on existing graph.
+        return { checkpointId, linked, missing };
     }
     async initialize() {
         // Ensure database is ready
@@ -81,6 +679,11 @@ export class KnowledgeGraphService extends EventEmitter {
             // Indexes might not be queryable yet, this is okay
             console.log("📊 Graph indexes will be verified on first query");
         }
+        // Best-effort ensure indexes for our common access patterns
+        try {
+            await this.ensureGraphIndexes();
+        }
+        catch (_a) { }
     }
     hasCodebaseProperties(entity) {
         return ("path" in entity &&
@@ -90,44 +693,26 @@ export class KnowledgeGraphService extends EventEmitter {
             "created" in entity);
     }
     // Entity CRUD operations
-    async createEntity(entity) {
-        const nodeId = entity.id;
+    async createEntity(entity, options) {
+        var _a;
         const labels = this.getEntityLabels(entity);
         const properties = this.sanitizeProperties(entity);
-        // Prepare all properties for storage
-        const queryParams = {
-            id: nodeId,
-            type: entity.type,
-        };
-        // Build dynamic property list for the query
-        const propertyKeys = ["id", "type"];
-        // Add all properties from the sanitized entity
+        // Build props excluding id so we never overwrite an existing node's id
+        const propsNoId = {};
         for (const [key, value] of Object.entries(properties)) {
-            if (key === "id" || key === "type")
-                continue; // Already included
+            if (key === "id")
+                continue;
             let processedValue = value;
-            // Convert dates to ISO strings for FalkorDB storage
-            if (value instanceof Date) {
+            if (value instanceof Date)
                 processedValue = value.toISOString();
-            }
-            // Convert arrays and objects to JSON strings
-            else if (Array.isArray(value) ||
-                (typeof value === "object" && value !== null)) {
+            else if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
                 processedValue = JSON.stringify(value);
             }
-            queryParams[key] = processedValue;
-            propertyKeys.push(key);
+            if (processedValue !== undefined)
+                propsNoId[key] = processedValue;
         }
-        // Build dynamic Cypher query with all properties
-        const propertyAssignments = propertyKeys
-            .map((key) => `${key}: $${key}`)
-            .join(", ");
-        const createQuery = `
-      CREATE (n${labels.join(":")}:${entity.type} {
-        ${propertyAssignments}
-      })
-    `;
-        // In test runs, emit event early to avoid flakiness from external DB latency
+        // Choose merge key: prefer (type,path) for codebase entities, otherwise id
+        const usePathKey = this.hasCodebaseProperties(entity) && properties.path;
         const shouldEarlyEmit = process.env.NODE_ENV === "test" || process.env.RUN_INTEGRATION === "1";
         if (shouldEarlyEmit) {
             const hasCodebasePropsEarly = this.hasCodebaseProperties(entity);
@@ -138,10 +723,39 @@ export class KnowledgeGraphService extends EventEmitter {
                 timestamp: new Date().toISOString(),
             });
         }
-        await this.db.falkordbQuery(createQuery, queryParams);
-        // Create vector embedding for semantic search
-        await this.createEmbedding(entity);
-        // Emit event for real-time updates (ensure at least one emission)
+        let result = [];
+        if (usePathKey) {
+            const query = `
+        MERGE (n:${labels.join(":")} { type: $type, path: $path })
+        ON CREATE SET n.id = $id
+        SET n += $props
+        RETURN n.id AS id
+      `;
+            result = await this.db.falkordbQuery(query, {
+                id: properties.id,
+                type: properties.type,
+                path: properties.path,
+                props: propsNoId,
+            });
+        }
+        else {
+            const query = `
+        MERGE (n:${labels.join(":")} { id: $id })
+        SET n += $props
+        RETURN n.id AS id
+      `;
+            result = await this.db.falkordbQuery(query, {
+                id: properties.id,
+                props: propsNoId,
+            });
+        }
+        // Align in-memory id with the graph's persisted id
+        const persistedId = ((_a = result === null || result === void 0 ? void 0 : result[0]) === null || _a === void 0 ? void 0 : _a.id) || properties.id;
+        entity.id = persistedId;
+        // Create or refresh vector embedding (unless explicitly skipped)
+        if (!(options === null || options === void 0 ? void 0 : options.skipEmbedding)) {
+            await this.createEmbedding(entity);
+        }
         if (!shouldEarlyEmit) {
             const hasCodebaseProps = this.hasCodebaseProperties(entity);
             this.emit("entityCreated", {
@@ -151,9 +765,117 @@ export class KnowledgeGraphService extends EventEmitter {
                 timestamp: new Date().toISOString(),
             });
         }
-        console.log(`✅ Created entity: ${this.hasCodebaseProperties(entity) ? entity.path : entity.id} (${entity.type})`);
-        // Invalidate cache since a new entity was created
+        const label = this.getEntityLabel(entity);
+        console.log(`✅ Upserted entity: ${label} (${entity.type})`);
         this.invalidateEntityCache(entity.id);
+    }
+    /**
+     * Create many entities in a small number of graph queries.
+     * Groups by primary label (entity.type) and uses UNWIND + SET n += row.
+     */
+    async createEntitiesBulk(entities, options) {
+        if (!entities || entities.length === 0)
+            return;
+        // Group by primary label
+        const byType = new Map();
+        for (const e of entities) {
+            const t = String(e.type || e.type);
+            const arr = byType.get(t) || [];
+            arr.push(e);
+            byType.set(t, arr);
+        }
+        for (const [type, list] of byType.entries()) {
+            const withPath = [];
+            const withoutPath = [];
+            for (const entity of list) {
+                const properties = this.sanitizeProperties(entity);
+                const propsNoId = {};
+                for (const [key, value] of Object.entries(properties)) {
+                    if (key === "id")
+                        continue;
+                    let v = value;
+                    if (value instanceof Date)
+                        v = value.toISOString();
+                    else if (Array.isArray(value) || (typeof value === "object" && value !== null))
+                        v = JSON.stringify(value);
+                    if (v !== undefined)
+                        propsNoId[key] = v;
+                }
+                if (properties.path) {
+                    withPath.push({ id: properties.id, type: properties.type, path: properties.path, props: propsNoId });
+                }
+                else {
+                    withoutPath.push({ id: properties.id, type: properties.type, props: propsNoId });
+                }
+            }
+            if (withPath.length > 0) {
+                const queryWithPath = `
+          UNWIND $rows AS row
+          MERGE (n:${type} { type: row.type, path: row.path })
+          ON CREATE SET n.id = row.id
+          SET n += row.props
+        `;
+                await this.db.falkordbQuery(queryWithPath, { rows: withPath });
+            }
+            if (withoutPath.length > 0) {
+                const queryById = `
+          UNWIND $rows AS row
+          MERGE (n:${type} { id: row.id })
+          SET n += row.props
+        `;
+                await this.db.falkordbQuery(queryById, { rows: withoutPath });
+            }
+            // Align entity IDs in memory for items with path (to ensure embeddings reference persisted nodes)
+            if (withPath.length > 0) {
+                const fetchIdsQuery = `
+          UNWIND $rows AS row
+          MATCH (n { type: row.type, path: row.path })
+          RETURN row.type AS type, row.path AS path, n.id AS id
+        `;
+                const idRows = await this.db.falkordbQuery(fetchIdsQuery, { rows: withPath.map(r => ({ type: r.type, path: r.path })) });
+                const idMap = new Map();
+                for (const r of idRows) {
+                    idMap.set(`${r.type}::${r.path}`, r.id);
+                }
+                for (const e of list) {
+                    const p = e.path;
+                    if (p) {
+                        const k = `${e.type}::${p}`;
+                        const persistedId = idMap.get(k);
+                        if (persistedId)
+                            e.id = persistedId;
+                    }
+                }
+            }
+        }
+        if (!(options === null || options === void 0 ? void 0 : options.skipEmbedding)) {
+            await this.createEmbeddingsBatch(entities);
+        }
+    }
+    // Prefer human-friendly label over raw ID for logs/UI
+    getEntityLabel(entity) {
+        try {
+            if (this.hasCodebaseProperties(entity)) {
+                const p = entity.path;
+                if (p)
+                    return p;
+            }
+            if (entity.title) {
+                return entity.title;
+            }
+            if (entity.name) {
+                const nm = entity.name;
+                // Include kind for symbols if present
+                const kind = entity.kind;
+                return kind ? `${kind}:${nm}` : nm;
+            }
+            // Fall back to signature if available
+            const sig = this.getEntitySignature(entity);
+            if (sig && sig !== entity.id)
+                return sig;
+        }
+        catch (_a) { }
+        return entity.id;
     }
     async getEntity(entityId) {
         // Check cache first
@@ -178,7 +900,7 @@ export class KnowledgeGraphService extends EventEmitter {
         }
         return entity;
     }
-    async updateEntity(entityId, updates) {
+    async updateEntity(entityId, updates, options) {
         // Convert dates to ISO strings for FalkorDB
         const sanitizedUpdates = { ...updates };
         if ("lastModified" in sanitizedUpdates &&
@@ -234,16 +956,18 @@ export class KnowledgeGraphService extends EventEmitter {
         await this.db.falkordbQuery(query, params);
         // Invalidate cache before fetching the updated entity to avoid stale reads
         this.invalidateEntityCache(entityId);
-        // Update vector embedding based on the freshly fetched entity
-        const updatedEntity = await this.getEntity(entityId);
-        if (updatedEntity) {
-            await this.updateEmbedding(updatedEntity);
-            // Emit event for real-time updates
-            this.emit("entityUpdated", {
-                id: entityId,
-                updates: sanitizedUpdates,
-                timestamp: new Date().toISOString(),
-            });
+        if (!(options === null || options === void 0 ? void 0 : options.skipEmbedding)) {
+            // Update vector embedding based on the freshly fetched entity
+            const updatedEntity = await this.getEntity(entityId);
+            if (updatedEntity) {
+                await this.updateEmbedding(updatedEntity);
+                // Emit event for real-time updates
+                this.emit("entityUpdated", {
+                    id: entityId,
+                    updates: sanitizedUpdates,
+                    timestamp: new Date().toISOString(),
+                });
+            }
         }
         // Cache already invalidated above
     }
@@ -287,7 +1011,7 @@ export class KnowledgeGraphService extends EventEmitter {
         this.emit("relationshipDeleted", relationshipId);
     }
     // Relationship operations
-    async createRelationship(relationship, toEntityId, type) {
+    async createRelationship(relationship, toEntityId, type, options) {
         // Handle backward compatibility with old calling signature
         let relationshipObj;
         if (typeof relationship === "string") {
@@ -295,8 +1019,9 @@ export class KnowledgeGraphService extends EventEmitter {
             if (!toEntityId || !type) {
                 throw new Error("Invalid parameters: when using old signature, both toEntityId and type are required");
             }
+            const deterministicId = `rel_${relationship}_${toEntityId}_${type}`;
             relationshipObj = {
-                id: `rel_${relationship}_${toEntityId}_${Date.now()}`,
+                id: deterministicId,
                 fromEntityId: relationship,
                 toEntityId: toEntityId,
                 type: type,
@@ -307,7 +1032,17 @@ export class KnowledgeGraphService extends EventEmitter {
         }
         else {
             // New signature: createRelationship(relationshipObject)
-            relationshipObj = relationship;
+            const rel = { ...relationship };
+            if (!rel.id) {
+                rel.id = `rel_${rel.fromEntityId}_${rel.toEntityId}_${rel.type}`;
+            }
+            if (!rel.created)
+                rel.created = new Date();
+            if (!rel.lastModified)
+                rel.lastModified = new Date();
+            if (typeof rel.version !== "number")
+                rel.version = 1;
+            relationshipObj = rel;
         }
         // Validate required fields
         if (!relationshipObj.fromEntityId) {
@@ -319,24 +1054,22 @@ export class KnowledgeGraphService extends EventEmitter {
         if (!relationshipObj.type) {
             throw new Error("Relationship type is required");
         }
-        // Validate that both entities exist before creating the relationship
-        const fromEntity = await this.getEntity(relationshipObj.fromEntityId);
-        if (!fromEntity) {
-            throw new Error(`From entity ${relationshipObj.fromEntityId} does not exist`);
-        }
-        const toEntity = await this.getEntity(relationshipObj.toEntityId);
-        if (!toEntity) {
-            throw new Error(`To entity ${relationshipObj.toEntityId} does not exist`);
+        // Optionally validate existence (default true)
+        if ((options === null || options === void 0 ? void 0 : options.validate) !== false) {
+            const fromEntity = await this.getEntity(relationshipObj.fromEntityId);
+            if (!fromEntity) {
+                throw new Error(`From entity ${relationshipObj.fromEntityId} does not exist`);
+            }
+            const toEntity = await this.getEntity(relationshipObj.toEntityId);
+            if (!toEntity) {
+                throw new Error(`To entity ${relationshipObj.toEntityId} does not exist`);
+            }
         }
         const query = `
       MATCH (a {id: $fromId}), (b {id: $toId})
-      CREATE (a)-[r:${relationshipObj.type} {
-        id: $id,
-        created: $created,
-        lastModified: $lastModified,
-        version: $version,
-        metadata: $metadata
-      }]->(b)
+      MERGE (a)-[r:${relationshipObj.type} { id: $id }]->(b)
+      ON CREATE SET r.created = $created, r.version = $version, r.metadata = $metadata
+      SET r.lastModified = $lastModified
     `;
         const result = await this.db.falkordbQuery(query, {
             fromId: relationshipObj.fromEntityId,
@@ -403,6 +1136,73 @@ export class KnowledgeGraphService extends EventEmitter {
     async queryRelationships(query) {
         return this.getRelationships(query);
     }
+    // Retrieve a single relationship by ID
+    async getRelationshipById(relationshipId) {
+        const query = `
+      MATCH (a)-[r]->(b)
+      WHERE r.id = $id
+      RETURN r, a.id as fromId, b.id as toId
+      LIMIT 1
+    `;
+        const result = await this.db.falkordbQuery(query, { id: relationshipId });
+        if (!result || result.length === 0)
+            return null;
+        const relationship = this.parseRelationshipFromGraph(result[0]);
+        return {
+            ...relationship,
+            fromEntityId: result[0].fromId,
+            toEntityId: result[0].toId,
+        };
+    }
+    /**
+     * Create many relationships in one round-trip per relationship type.
+     * Validation is optional (defaults to false for performance in sync paths).
+     */
+    async createRelationshipsBulk(relationships, options) {
+        var _a;
+        if (!relationships || relationships.length === 0)
+            return;
+        const validate = (options === null || options === void 0 ? void 0 : options.validate) === true;
+        // Group by relationship type since Cypher relationship type is not parameterizable
+        const byType = new Map();
+        for (const r of relationships) {
+            if (!r.type || !r.fromEntityId || !r.toEntityId)
+                continue;
+            const list = byType.get(r.type) || [];
+            list.push(r);
+            byType.set(r.type, list);
+        }
+        for (const [type, relList] of byType.entries()) {
+            let listEff = relList;
+            // Optionally validate node existence in bulk (lightweight)
+            if (validate) {
+                const ids = Array.from(new Set(listEff.flatMap(r => [r.fromEntityId, r.toEntityId])));
+                const result = await this.db.falkordbQuery(`UNWIND $ids AS id MATCH (n {id: id}) RETURN collect(n.id) as present`, { ids });
+                const present = ((_a = result === null || result === void 0 ? void 0 : result[0]) === null || _a === void 0 ? void 0 : _a.present) || [];
+                const presentSet = new Set(present);
+                listEff = listEff.filter(r => presentSet.has(r.fromEntityId) && presentSet.has(r.toEntityId));
+                if (listEff.length === 0)
+                    continue;
+            }
+            const rows = listEff.map((r) => ({
+                fromId: r.fromEntityId,
+                toId: r.toEntityId,
+                id: r.id || `rel_${r.fromEntityId}_${r.toEntityId}_${type}`,
+                created: (r.created instanceof Date ? r.created : new Date(r.created)).toISOString(),
+                lastModified: (r.lastModified instanceof Date ? r.lastModified : new Date(r.lastModified)).toISOString(),
+                version: r.version,
+                metadata: JSON.stringify(r.metadata || {}),
+            }));
+            const query = `
+        UNWIND $rows AS row
+        MATCH (a {id: row.fromId}), (b {id: row.toId})
+        MERGE (a)-[r:${type} { id: row.id }]->(b)
+        ON CREATE SET r.created = row.created, r.version = row.version, r.metadata = row.metadata
+        SET r.lastModified = row.lastModified
+      `;
+            await this.db.falkordbQuery(query, { rows });
+        }
+    }
     // Graph search operations
     async search(request) {
         // Create a cache key from the request
@@ -428,10 +1228,33 @@ export class KnowledgeGraphService extends EventEmitter {
         else {
             result = await this.structuralSearch(request);
         }
+        // If caller requested specific entity types, filter results to match
+        if (request.entityTypes && request.entityTypes.length > 0) {
+            result = result.filter((e) => this.entityMatchesRequestedTypes(e, request.entityTypes));
+        }
         // Cache the result
         this.searchCache.set(cacheKey, result);
         console.log(`🔍 Cached search result for query: ${request.query}`);
         return result;
+    }
+    // Map request entityTypes (function/class/interface/file/module) to actual entity shape
+    entityMatchesRequestedTypes(entity, requested) {
+        const type = entity === null || entity === void 0 ? void 0 : entity.type;
+        const kind = entity === null || entity === void 0 ? void 0 : entity.kind;
+        for (const t of requested) {
+            const tn = String(t || "").toLowerCase();
+            if (tn === "function" && type === "symbol" && kind === "function")
+                return true;
+            if (tn === "class" && type === "symbol" && kind === "class")
+                return true;
+            if (tn === "interface" && type === "symbol" && kind === "interface")
+                return true;
+            if (tn === "file" && type === "file")
+                return true;
+            if (tn === "module" && (type === "module" || type === "file"))
+                return true;
+        }
+        return false;
     }
     /**
      * Clear search cache
@@ -462,8 +1285,74 @@ export class KnowledgeGraphService extends EventEmitter {
         };
         return this.structuralSearch(request);
     }
+    /**
+     * Find symbol entities by exact name
+     */
+    async findSymbolsByName(name, limit = 50) {
+        const query = `
+      MATCH (n {type: $type})
+      WHERE n.name = $name
+      RETURN n
+      LIMIT $limit
+    `;
+        const result = await this.db.falkordbQuery(query, {
+            type: "symbol",
+            name,
+            limit,
+        });
+        return result.map((row) => this.parseEntityFromGraph(row));
+    }
+    /**
+     * Find symbol by kind and name (e.g., class/interface/function)
+     */
+    async findSymbolByKindAndName(kind, name, limit = 50) {
+        const query = `
+      MATCH (n {type: $type})
+      WHERE n.name = $name AND n.kind = $kind
+      RETURN n
+      LIMIT $limit
+    `;
+        const result = await this.db.falkordbQuery(query, {
+            type: "symbol",
+            name,
+            kind,
+            limit,
+        });
+        return result.map((row) => this.parseEntityFromGraph(row));
+    }
+    /**
+     * Find a symbol defined in a specific file by name
+     */
+    async findSymbolInFile(filePath, name) {
+        const query = `
+      MATCH (n {type: $type})
+      WHERE n.path = $path
+      RETURN n
+      LIMIT 1
+    `;
+        // Symbol entities store path as `${filePath}:${name}`
+        const compositePath = `${filePath}:${name}`;
+        const result = await this.db.falkordbQuery(query, {
+            type: "symbol",
+            path: compositePath,
+        });
+        const entity = result[0] ? this.parseEntityFromGraph(result[0]) : null;
+        return entity;
+    }
+    /**
+     * Get a file entity by path
+     */
+    async getFileByPath(path) {
+        const query = `
+      MATCH (n {type: $type, path: $path})
+      RETURN n
+      LIMIT 1
+    `;
+        const result = await this.db.falkordbQuery(query, { type: "file", path });
+        return result[0] ? this.parseEntityFromGraph(result[0]) : null;
+    }
     async semanticSearch(request) {
-        var _a;
+        var _a, _b;
         // Validate limit parameter
         if (request.limit !== undefined &&
             (typeof request.limit !== "number" ||
@@ -475,12 +1364,21 @@ export class KnowledgeGraphService extends EventEmitter {
             // Get vector embeddings for the query
             const embeddings = await this.generateEmbedding(String(request.query || ""));
             // Search in Qdrant
-            const searchResult = await this.db.qdrant.search("code_embeddings", {
+            const qdrantOptions = {
                 vector: embeddings,
                 limit: request.limit || 10,
                 with_payload: true,
                 with_vector: false,
-            });
+            };
+            const checkpointId = (_a = request.filters) === null || _a === void 0 ? void 0 : _a.checkpointId;
+            if (checkpointId) {
+                qdrantOptions.filter = {
+                    must: [
+                        { key: 'checkpointId', match: { value: checkpointId } }
+                    ]
+                };
+            }
+            const searchResult = await this.db.qdrant.search("code_embeddings", qdrantOptions);
             // Get entities from graph database
             const searchResultData = searchResult;
             // Handle different Qdrant response formats
@@ -500,7 +1398,7 @@ export class KnowledgeGraphService extends EventEmitter {
             const entities = [];
             for (const point of points) {
                 // Get the actual entity ID from the payload, not the numeric ID
-                const entityId = (_a = point.payload) === null || _a === void 0 ? void 0 : _a.entityId;
+                const entityId = (_b = point.payload) === null || _b === void 0 ? void 0 : _b.entityId;
                 if (entityId) {
                     const entity = await this.getEntity(entityId);
                     if (entity) {
@@ -522,7 +1420,7 @@ export class KnowledgeGraphService extends EventEmitter {
         }
     }
     async structuralSearch(request) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
         // Validate limit parameter
         if (request.limit !== undefined &&
             (typeof request.limit !== "number" ||
@@ -533,34 +1431,68 @@ export class KnowledgeGraphService extends EventEmitter {
         let query = "MATCH (n)";
         const whereClause = [];
         const params = {};
-        // Add entity type filters with optimized query structure
+        // Map requested entityTypes to stored schema (type/kind)
         if (request.entityTypes && request.entityTypes.length > 0) {
-            // Sanitize entity types to ensure valid Cypher label names
-            const validEntityTypes = request.entityTypes.filter((type) => {
-                // Cypher labels must start with a letter and contain only alphanumeric characters and underscores
-                return /^[a-zA-Z][a-zA-Z0-9_]*$/.test(type);
-            });
-            if (validEntityTypes.length === 0) {
-                // If no valid entity types, return empty result instead of invalid query
+            const typeClauses = [];
+            let idx = 0;
+            for (const t of request.entityTypes) {
+                const typeName = String(t || "").toLowerCase();
+                switch (typeName) {
+                    case "function": {
+                        const tp = `etype_${idx}`;
+                        const kd = `ekind_${idx}`;
+                        params[tp] = "symbol";
+                        params[kd] = "function";
+                        typeClauses.push(`(n.type = $${tp} AND n.kind = $${kd})`);
+                        idx++;
+                        break;
+                    }
+                    case "class": {
+                        const tp = `etype_${idx}`;
+                        const kd = `ekind_${idx}`;
+                        params[tp] = "symbol";
+                        params[kd] = "class";
+                        typeClauses.push(`(n.type = $${tp} AND n.kind = $${kd})`);
+                        idx++;
+                        break;
+                    }
+                    case "interface": {
+                        const tp = `etype_${idx}`;
+                        const kd = `ekind_${idx}`;
+                        params[tp] = "symbol";
+                        params[kd] = "interface";
+                        typeClauses.push(`(n.type = $${tp} AND n.kind = $${kd})`);
+                        idx++;
+                        break;
+                    }
+                    case "file": {
+                        const tp = `etype_${idx}`;
+                        params[tp] = "file";
+                        typeClauses.push(`(n.type = $${tp})`);
+                        idx++;
+                        break;
+                    }
+                    case "module": {
+                        // Prefer explicit module type; some graphs represent modules as files
+                        const tp1 = `etype_${idx}`;
+                        const tp2 = `etype_${idx + 1}`;
+                        params[tp1] = "module";
+                        params[tp2] = "file";
+                        typeClauses.push(`(n.type = $${tp1} OR n.type = $${tp2})`);
+                        idx += 2;
+                        break;
+                    }
+                    default: {
+                        // Unknown type: skip
+                        break;
+                    }
+                }
+            }
+            if (typeClauses.length === 0) {
                 return [];
             }
-            // For single entity type, use direct label matching for better performance
-            if (validEntityTypes.length === 1) {
-                const entityType = validEntityTypes[0];
-                query = `MATCH (n:${entityType})`;
-            }
-            else {
-                // For multiple types, use UNION for better performance
-                const unionQueries = validEntityTypes.map((type, index) => {
-                    const paramName = `type_${index}`;
-                    params[paramName] = type;
-                    return `MATCH (n {type: $${paramName}}) RETURN n`;
-                });
-                const fullQuery = unionQueries.join(" UNION ");
-                // Execute union query and return early
-                const result = await this.db.falkordbQuery(fullQuery, params);
-                return result.map((row) => this.parseEntityFromGraph(row));
-            }
+            // Apply all mapped type constraints using OR so other filters still apply
+            whereClause.push(`(${typeClauses.join(" OR ")})`);
         }
         // Add text search if query is provided
         if (request.query && request.query.trim() !== "") {
@@ -582,7 +1514,7 @@ export class KnowledgeGraphService extends EventEmitter {
                     // Build conditions array based on what FalkorDB supports
                     const conditions = [];
                     // Use CONTAINS for substring matching (widely supported in Cypher)
-                    if (request.searchType !== "simple") {
+                    if (request.searchType !== undefined) {
                         conditions.push(`toLower(n.name) CONTAINS $term_${index}`, `toLower(n.docstring) CONTAINS $term_${index}`, `toLower(n.path) CONTAINS $term_${index}`, `toLower(n.id) CONTAINS $term_${index}`);
                     }
                     // Always include exact matches (most compatible and performant)
@@ -636,15 +1568,28 @@ export class KnowledgeGraphService extends EventEmitter {
             params.limit = request.limit;
         try {
             const result = await this.db.falkordbQuery(fullQuery, params);
-            return result.map((row) => this.parseEntityFromGraph(row));
+            let entities = result.map((row) => this.parseEntityFromGraph(row));
+            // Optional checkpoint filter: restrict to checkpoint members
+            const checkpointId = (_g = request.filters) === null || _g === void 0 ? void 0 : _g.checkpointId;
+            if (checkpointId) {
+                try {
+                    const rows = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n) RETURN n.id AS id`, { id: checkpointId });
+                    const allowed = new Set((rows || []).map((r) => r.id));
+                    entities = entities.filter((e) => allowed.has(e.id));
+                }
+                catch (_m) {
+                    // If filter query fails, return unfiltered entities
+                }
+            }
+            return entities;
         }
         catch (error) {
             // If the query fails due to unsupported functions, try a simpler query
-            if (((_g = error === null || error === void 0 ? void 0 : error.message) === null || _g === void 0 ? void 0 : _g.includes("Unknown function")) ||
-                ((_h = error === null || error === void 0 ? void 0 : error.message) === null || _h === void 0 ? void 0 : _h.includes("matchRegEx"))) {
+            if (((_h = error === null || error === void 0 ? void 0 : error.message) === null || _h === void 0 ? void 0 : _h.includes("Unknown function")) ||
+                ((_j = error === null || error === void 0 ? void 0 : error.message) === null || _j === void 0 ? void 0 : _j.includes("matchRegEx"))) {
                 console.warn("FalkorDB query failed with advanced functions, falling back to simple search");
                 // Retry with simple exact match only
-                const simpleQuery = (_j = request.query) === null || _j === void 0 ? void 0 : _j.trim();
+                const simpleQuery = (_k = request.query) === null || _k === void 0 ? void 0 : _k.trim();
                 if (simpleQuery && !simpleQuery.match(/^[a-f0-9-]{36}$/i)) {
                     const simpleParams = { searchTerm: simpleQuery.toLowerCase() };
                     const simpleFullQuery = `
@@ -657,7 +1602,17 @@ export class KnowledgeGraphService extends EventEmitter {
           `;
                     try {
                         const result = await this.db.falkordbQuery(simpleFullQuery, simpleParams);
-                        return result.map((row) => this.parseEntityFromGraph(row));
+                        let entities = result.map((row) => this.parseEntityFromGraph(row));
+                        const checkpointId = (_l = request.filters) === null || _l === void 0 ? void 0 : _l.checkpointId;
+                        if (checkpointId) {
+                            try {
+                                const rows = await this.db.falkordbQuery(`MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n) RETURN n.id AS id`, { id: checkpointId });
+                                const allowed = new Set((rows || []).map((r) => r.id));
+                                entities = entities.filter((e) => allowed.has(e.id));
+                            }
+                            catch (_o) { }
+                        }
+                        return entities;
                     }
                     catch (fallbackError) {
                         console.error("Even simple FalkorDB query failed:", fallbackError);
@@ -680,7 +1635,6 @@ export class KnowledgeGraphService extends EventEmitter {
             type: [
                 RelationshipType.CALLS,
                 RelationshipType.REFERENCES,
-                RelationshipType.USES,
             ],
             limit: 10,
         });
@@ -735,7 +1689,6 @@ export class KnowledgeGraphService extends EventEmitter {
             type: [
                 RelationshipType.CALLS,
                 RelationshipType.REFERENCES,
-                RelationshipType.USES,
                 RelationshipType.DEPENDS_ON,
             ],
         });
@@ -745,7 +1698,6 @@ export class KnowledgeGraphService extends EventEmitter {
             type: [
                 RelationshipType.CALLS,
                 RelationshipType.REFERENCES,
-                RelationshipType.USES,
                 RelationshipType.DEPENDS_ON,
             ],
         });
@@ -828,38 +1780,37 @@ export class KnowledgeGraphService extends EventEmitter {
         return result.map((row) => this.parseEntityFromGraph(row));
     }
     // Vector embedding operations
-    async createEmbeddingsBatch(entities) {
+    async createEmbeddingsBatch(entities, options) {
         try {
             const inputs = entities.map((entity) => ({
                 content: this.getEntityContentForEmbedding(entity),
                 entityId: entity.id,
             }));
             const batchResult = await embeddingService.generateEmbeddingsBatch(inputs);
-            // Store embeddings in Qdrant
+            // Build one upsert per collection with all points
+            const byCollection = new Map();
             for (let i = 0; i < entities.length; i++) {
                 const entity = entities[i];
                 const embedding = batchResult.results[i].embedding;
                 const collection = this.getEmbeddingCollection(entity);
                 const hasCodebaseProps = this.hasCodebaseProperties(entity);
-                // Convert string ID to numeric ID for Qdrant
                 const numericId = this.stringToNumericId(entity.id);
-                await this.db.qdrant.upsert(collection, {
-                    points: [
-                        {
-                            id: numericId,
-                            vector: embedding,
-                            payload: {
-                                entityId: entity.id,
-                                type: entity.type,
-                                path: hasCodebaseProps ? entity.path : "",
-                                language: hasCodebaseProps ? entity.language : "",
-                                lastModified: hasCodebaseProps
-                                    ? entity.lastModified.toISOString()
-                                    : new Date().toISOString(),
-                            },
-                        },
-                    ],
-                });
+                const payload = {
+                    entityId: entity.id,
+                    type: entity.type,
+                    path: hasCodebaseProps ? entity.path : "",
+                    language: hasCodebaseProps ? entity.language : "",
+                    lastModified: hasCodebaseProps
+                        ? entity.lastModified.toISOString()
+                        : new Date().toISOString(),
+                    ...((options === null || options === void 0 ? void 0 : options.checkpointId) ? { checkpointId: options.checkpointId } : {}),
+                };
+                const list = byCollection.get(collection) || [];
+                list.push({ id: numericId, vector: embedding, payload });
+                byCollection.set(collection, list);
+            }
+            for (const [collection, points] of byCollection.entries()) {
+                await this.db.qdrant.upsert(collection, { points });
             }
             console.log(`✅ Created embeddings for ${entities.length} entities (${batchResult.totalTokens} tokens, $${batchResult.totalCost.toFixed(4)})`);
         }

@@ -97,15 +97,16 @@ describe('ASTParser Integration', () => {
       await fs.writeFile(tsFilePath, tsContent, 'utf-8');
       const result: ParseResult = await parser.parseFile(tsFilePath);
 
-      expect(result.entities).toBeDefined();
+      // Tighten existence-only assertions with concrete type/shape checks
+      expect(result.entities).toEqual(expect.any(Array));
       expect(result.entities.length).toBeGreaterThan(0);
-      expect(result.relationships).toBeDefined();
-      expect(result.errors).toBeDefined();
+      expect(result.relationships).toEqual(expect.any(Array));
+      expect(result.errors).toEqual(expect.any(Array));
       expect(result.errors.length).toBe(0); // Should parse without errors
 
       // Verify file entity
       const fileEntity = result.entities.find(e => e.type === 'file');
-      expect(fileEntity).toBeDefined();
+      expect(fileEntity).toEqual(expect.any(Object));
       expect(fileEntity?.path).toContain('test-class.ts');
       expect(fileEntity?.language).toBe('typescript');
 
@@ -113,7 +114,7 @@ describe('ASTParser Integration', () => {
       const classEntity = result.entities.find(e =>
         e.type === 'symbol' && (e as any).kind === 'class'
       );
-      expect(classEntity).toBeDefined();
+      expect(classEntity).toEqual(expect.any(Object));
       expect((classEntity as any).name).toBe('TestService');
       expect((classEntity as any).isExported).toBe(true);
 
@@ -170,7 +171,7 @@ describe('ASTParser Integration', () => {
       await fs.writeFile(tsFilePath, tsContent, 'utf-8');
       const result: ParseResult = await parser.parseFile(tsFilePath);
 
-      expect(result.entities).toBeDefined();
+      expect(result.entities).toEqual(expect.any(Array));
       expect(result.errors.length).toBe(0);
 
       // Verify interfaces are parsed
@@ -233,11 +234,11 @@ describe('ASTParser Integration', () => {
       await fs.writeFile(jsFilePath, jsContent, 'utf-8');
       const result: ParseResult = await parser.parseFile(jsFilePath);
 
-      expect(result.entities).toBeDefined();
+      expect(result.entities).toEqual(expect.any(Array));
 
       // Verify file entity
       const fileEntity = result.entities.find(e => e.type === 'file');
-      expect(fileEntity).toBeDefined();
+      expect(fileEntity).toEqual(expect.any(Object));
       expect(fileEntity?.language).toBe('javascript');
 
       // Note: JavaScript parsing might fall back to basic file parsing if tree-sitter is not available
@@ -258,14 +259,17 @@ describe('ASTParser Integration', () => {
       const result: ParseResult = await parser.parseFile(invalidFilePath);
 
       // Should return a result even with syntax errors
-      expect(result).toBeDefined();
-      expect(result.entities).toBeDefined();
-      expect(result.relationships).toBeDefined();
-      expect(result.errors).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          entities: expect.any(Array),
+          relationships: expect.any(Array),
+          errors: expect.any(Array),
+        })
+      );
 
       // Should still create a file entity
       const fileEntity = result.entities.find(e => e.type === 'file');
-      expect(fileEntity).toBeDefined();
+      expect(fileEntity).toEqual(expect.any(Object));
     });
 
     it('should handle non-existent files gracefully', async () => {
@@ -475,7 +479,7 @@ describe('ASTParser Integration', () => {
       // Parse multiple files
       const results: ParseResult[] = await parser.parseMultipleFiles(filePaths);
 
-      expect(results).toBeDefined();
+      expect(results).toEqual(expect.any(Array));
       expect(results.length).toBe(3);
 
       // Each result should have entities
@@ -511,7 +515,7 @@ describe('ASTParser Integration', () => {
       // Parse multiple files
       const results: ParseResult[] = await parser.parseMultipleFiles(filePaths);
 
-      expect(results).toBeDefined();
+      expect(results).toEqual(expect.any(Array));
       expect(results.length).toBe(3);
 
       // At least the valid files should have entities
@@ -617,10 +621,13 @@ describe('ASTParser Integration', () => {
       const result: ParseResult = await parser.parseFile(errorFilePath);
 
       // Should not crash
-      expect(result).toBeDefined();
-      expect(result.entities).toBeDefined();
-      expect(result.relationships).toBeDefined();
-      expect(result.errors).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          entities: expect.any(Array),
+          relationships: expect.any(Array),
+          errors: expect.any(Array),
+        })
+      );
 
       // Should still extract some information
       expect(result.entities.length).toBeGreaterThan(0);
@@ -632,7 +639,13 @@ describe('ASTParser Integration', () => {
 
       const result: ParseResult = await parser.parseFile(emptyFilePath);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          entities: expect.any(Array),
+          relationships: expect.any(Array),
+          errors: expect.any(Array),
+        })
+      );
       expect(result.entities.length).toBeGreaterThan(0); // Should at least have file entity
       expect(result.errors.length).toBe(0);
     });
@@ -657,7 +670,13 @@ describe('ASTParser Integration', () => {
       await fs.writeFile(commentFilePath, commentContent, 'utf-8');
       const result: ParseResult = await parser.parseFile(commentFilePath);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          entities: expect.any(Array),
+          relationships: expect.any(Array),
+          errors: expect.any(Array),
+        })
+      );
       expect(result.entities.length).toBeGreaterThan(0); // Should have file entity
       expect(result.errors.length).toBe(0);
     });
@@ -671,7 +690,13 @@ describe('ASTParser Integration', () => {
       await fs.writeFile(longPath, content, 'utf-8');
       const result: ParseResult = await parser.parseFile(longPath);
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          entities: expect.any(Array),
+          relationships: expect.any(Array),
+          errors: expect.any(Array),
+        })
+      );
       expect(result.entities.length).toBeGreaterThan(0);
       expect(result.errors.length).toBe(0);
     });
@@ -708,7 +733,14 @@ describe('ASTParser Integration', () => {
         originalContent
       );
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          isIncremental: expect.any(Boolean),
+          addedEntities: expect.any(Array),
+          removedEntities: expect.any(Array),
+          updatedEntities: expect.any(Array),
+        })
+      );
       expect(result.isIncremental).toBe(true);
     });
   });

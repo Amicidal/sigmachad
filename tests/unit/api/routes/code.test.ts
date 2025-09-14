@@ -1453,8 +1453,8 @@ describe('Code Routes', () => {
       });
     });
 
-    // Note: Error handling test removed because the suggestions endpoint is not fully implemented (has TODO comment)
-    // When the endpoint is implemented, this test should be re-added
+    // Track missing negative-path coverage until endpoint is fully implemented
+    it.todo('should return 400 or structured error for invalid query params');
   });
 
   describe('POST /code/refactor', () => {
@@ -1486,8 +1486,8 @@ describe('Code Routes', () => {
       });
     });
 
-    // Note: Error handling test removed because the refactor endpoint is not fully implemented (has TODO comment)
-    // When the endpoint is implemented, this test should be re-added
+    // Track missing negative-path coverage until endpoint is fully implemented
+    it.todo('should validate body and return structured errors for invalid payload');
   });
 
   describe('Schema Validation and Edge Cases', () => {

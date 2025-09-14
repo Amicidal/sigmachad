@@ -68,6 +68,7 @@ export declare class ASTParser {
     private createJavaScriptFunctionEntity;
     private createJavaScriptClassEntity;
     private extractSymbolRelationships;
+    private extractReferenceRelationships;
     private extractImportRelationships;
     private createRelationship;
     private getSymbolName;

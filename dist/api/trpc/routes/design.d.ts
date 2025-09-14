@@ -111,8 +111,8 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
             tags: string[];
-            created: Date;
             id: string;
+            created: Date;
             dependencies: string[];
             updated: Date;
             author: string;
@@ -125,8 +125,8 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
             tags: string[];
-            created: Date;
             id: string;
+            created: Date;
             dependencies: string[];
             updated: Date;
             author: string;
@@ -143,8 +143,8 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
             description: string;
             status: "draft" | "approved" | "implemented" | "deprecated" | "review";
             tags: string[];
-            created: Date;
             id: string;
+            created: Date;
             dependencies: string[];
             updated: Date;
             author: string;

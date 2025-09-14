@@ -30,6 +30,7 @@ export declare class MCPRouter {
     private tools;
     private metrics;
     private executionHistory;
+    private getSrcRoot;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, astParser: ASTParser, testEngine: TestEngine, securityScanner: SecurityScanner);
     private registerTools;
     private registerTool;
@@ -66,6 +67,9 @@ export declare class MCPRouter {
     getServer(): Server;
     getToolCount(): number;
     private recordExecution;
+    private handleAstGrepSearch;
+    private runAstGrepOne;
+    private searchWithTsMorph;
     getMetrics(): {
         tools: ToolExecutionMetrics[];
         summary: any;

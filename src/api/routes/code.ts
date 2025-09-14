@@ -1320,7 +1320,6 @@ async function analyzeCodeDependencies(
             fromEntityId: entity.id,
             type: [
               RelationshipType.CALLS,
-              RelationshipType.USES,
               RelationshipType.IMPORTS,
             ],
           });

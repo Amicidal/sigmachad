@@ -87,10 +87,16 @@ describe("BackupService Integration", () => {
         options
       );
 
-      expect(metadata).toBeDefined();
-      expect(metadata.id).toMatch(/^backup_\d+$/);
-      expect(metadata.type).toBe("full");
-      expect(metadata.timestamp).toBeInstanceOf(Date);
+      expect(metadata).toEqual(
+        expect.objectContaining({
+          id: expect.stringMatching(/^backup_\d+$/),
+          type: 'full',
+          status: expect.any(String),
+          timestamp: expect.any(Date),
+          size: expect.any(Number),
+          checksum: expect.any(String),
+        })
+      );
       expect(metadata.status).toBe("completed");
       expect(metadata.size).toBeGreaterThan(0);
       expect(typeof metadata.checksum).toBe("string");
@@ -129,8 +135,7 @@ describe("BackupService Integration", () => {
       const metadata: BackupMetadata = await backupService.createBackup(
         options
       );
-
-      expect(metadata).toBeDefined();
+      expect(metadata).toEqual(expect.objectContaining({ type: 'incremental', status: expect.any(String) }));
       expect(metadata.type).toBe("incremental");
       expect(metadata.status).toBe("completed");
 
@@ -151,9 +156,9 @@ describe("BackupService Integration", () => {
       const metadata: BackupMetadata = await backupService.createBackup(
         options
       );
-
-      expect(metadata).toBeDefined();
-      expect(metadata.components.config).toBe(true);
+      expect(metadata).toEqual(
+        expect.objectContaining({ components: expect.objectContaining({ config: true }) })
+      );
 
       // Check for config files in backup
       const backupFiles = await fs.readdir(testBackupDir);
@@ -177,9 +182,7 @@ describe("BackupService Integration", () => {
       const metadata: BackupMetadata = await backupService.createBackup(
         options
       );
-
-      expect(metadata).toBeDefined();
-      expect(metadata.status).toBe("completed");
+      expect(metadata).toEqual(expect.objectContaining({ status: 'completed' }));
 
       // Check for compressed files
       const backupFiles = await fs.readdir(testBackupDir);
@@ -206,12 +209,25 @@ describe("BackupService Integration", () => {
         options
       );
 
-      expect(metadata).toBeDefined();
-      expect(metadata.status).toBe("completed");
+      expect(metadata).toEqual(
+        expect.objectContaining({ status: "completed", id: expect.any(String) })
+      );
 
-      // Should still create a backup (possibly empty or with metadata only)
+      // When both data and config are disabled, no DB or config artifacts should be written
       const backupFiles = await fs.readdir(testBackupDir);
-      expect(backupFiles.length).toBeGreaterThanOrEqual(0);
+      const hasDbArtifacts = backupFiles.some(
+        (file) => file.includes("postgres") || file.includes("falkordb") || file.includes("qdrant")
+      );
+      const hasConfigArtifacts = backupFiles.some(
+        (file) => file.includes("config") || file.includes("package.json")
+      );
+      const hasCompressedFile = backupFiles.some(
+        (file) => file.endsWith(".zip") || file.endsWith(".tar.gz") || file.endsWith(".tar")
+      );
+
+      expect(hasDbArtifacts).toBe(false);
+      expect(hasConfigArtifacts).toBe(false);
+      expect(hasCompressedFile).toBe(false);
     });
   });
 
@@ -229,8 +245,7 @@ describe("BackupService Integration", () => {
         options
       );
 
-      expect(metadata.checksum).toBeDefined();
-      expect(typeof metadata.checksum).toBe("string");
+      expect(metadata.checksum).toEqual(expect.any(String));
       expect(metadata.checksum.length).toBeGreaterThan(0);
 
       // Checksum should be consistent (run backup again with same data)
@@ -256,8 +271,7 @@ describe("BackupService Integration", () => {
       const metadata: BackupMetadata = await backupService.createBackup(
         options
       );
-
-      expect(metadata.components).toBeDefined();
+      expect(metadata.components).toEqual(expect.any(Object));
 
       // Components should be tracked as booleans
       expect(typeof metadata.components.falkordb).toBe("boolean");
@@ -352,7 +366,6 @@ describe("BackupService Integration", () => {
         }
       );
 
-      expect(restoreResult).toBeDefined();
       expect(restoreResult).toEqual(expect.objectContaining({ success: true }));
 
       // Add a small delay to ensure restoration is committed
@@ -410,13 +423,12 @@ describe("BackupService Integration", () => {
         }
       );
 
-      expect(restoreResult).toBeDefined();
       expect(restoreResult).toEqual(expect.objectContaining({ success: true }));
 
       // Should include integrity check results
       if (restoreResult.integrityCheck) {
         expect(typeof restoreResult.integrityCheck.passed).toBe("boolean");
-        expect(restoreResult.integrityCheck.details).toBeDefined();
+        expect(restoreResult.integrityCheck.details).toEqual(expect.any(Object));
       }
     });
   });
@@ -447,8 +459,9 @@ describe("BackupService Integration", () => {
       const metadata = await invalidBackupService.createBackup(options);
 
       // Backup should still be created (even if with errors)
-      expect(metadata).toBeDefined();
-      expect(metadata.id).toBeDefined();
+      expect(metadata).toEqual(
+        expect.objectContaining({ id: expect.any(String), status: expect.any(String) })
+      );
       // Status might be 'failed' or 'completed' depending on implementation
       expect(["completed", "failed"]).toContain(metadata.status);
     });
@@ -472,9 +485,9 @@ describe("BackupService Integration", () => {
         destination: testBackupDir,
       });
 
-      expect(restoreResult).toBeDefined();
-      expect(restoreResult.success).toBe(false);
-      expect(restoreResult.error).toBeDefined();
+      expect(restoreResult).toEqual(
+        expect.objectContaining({ success: false, error: expect.any(Object) })
+      );
     });
 
     it("should handle corrupted backup files", async () => {
@@ -501,7 +514,7 @@ describe("BackupService Integration", () => {
         });
 
         // Should handle corruption gracefully
-        expect(restoreResult).toBeDefined();
+        expect(restoreResult).toEqual(expect.any(Object));
         // May succeed or fail depending on corruption severity
         expect(typeof restoreResult.success).toBe("boolean");
       }
@@ -686,9 +699,12 @@ describe("BackupService Integration", () => {
         }
       );
 
-      expect(integrityResult).toBeDefined();
-      expect(typeof integrityResult.isValid).toBe("boolean");
-      expect(integrityResult.details).toBeDefined();
+      expect(integrityResult).toEqual(
+        expect.objectContaining({
+          isValid: expect.any(Boolean),
+          details: expect.anything(),
+        })
+      );
 
       // If backup was created successfully, integrity should be valid
       if (metadata.status === "completed") {
@@ -752,15 +768,18 @@ describe("BackupService Integration", () => {
         destination: testBackupDir,
       });
 
-      expect(availableBackups).toBeDefined();
-      expect(Array.isArray(availableBackups)).toBe(true);
+      expect(availableBackups).toEqual(expect.any(Array));
       expect(availableBackups.length).toBeGreaterThanOrEqual(3);
 
       // Each backup should have proper metadata
       availableBackups.forEach((backup) => {
-        expect(backup.id).toBeDefined();
-        expect(backup.timestamp).toBeInstanceOf(Date);
-        expect(typeof backup.size).toBe("number");
+        expect(backup).toEqual(
+          expect.objectContaining({
+            id: expect.any(String),
+            timestamp: expect.any(Date),
+            size: expect.any(Number),
+          })
+        );
       });
     });
   });

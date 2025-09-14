@@ -452,7 +452,9 @@ describe('SynchronizationMonitoring', () => {
 
       const history = monitoring.getOperationHistory(10);
       expect(history.find(op => op.id === 'old-op')).toBeUndefined();
-      expect(history.find(op => op.id === 'new-op')).toBeDefined();
+      expect(history.find(op => op.id === 'new-op')).toEqual(
+        expect.objectContaining({ id: 'new-op' })
+      );
     });
 
     it('should cleanup old alerts', () => {
@@ -511,7 +513,9 @@ describe('SynchronizationMonitoring', () => {
 
       monitoring.cleanup(24 * 60 * 60 * 1000);
 
-      expect(monitoring.getAlerts(false).find(a => a.id === 'unresolved-alert')).toBeDefined();
+      expect(monitoring.getAlerts(false).find(a => a.id === 'unresolved-alert')).toEqual(
+        expect.objectContaining({ id: 'unresolved-alert', resolved: false })
+      );
     });
   });
 

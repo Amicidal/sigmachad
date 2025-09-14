@@ -149,12 +149,12 @@ describe("DatabaseService Integration", () => {
         (point) =>
           point.payload?.path === "test.ts" && point.payload?.type === "code"
       );
-      expect(ourPoint).toBeDefined();
+      expect(ourPoint).not.toBeUndefined();
+      expect(ourPoint?.payload).toEqual(expect.objectContaining({ path: 'test.ts', type: 'code' }));
 
       // Redis
       const redisResult = await dbService.redisGet(`doc:${docId}:metadata`);
-      expect(redisResult).toBeTruthy();
-      expect(typeof redisResult).toBe("string");
+      expect(redisResult).toEqual(expect.any(String));
       expect(redisResult.length).toBeGreaterThan(0);
       const metadata = JSON.parse(redisResult!);
       expect(metadata.type).toBe("code");
@@ -257,8 +257,7 @@ describe("DatabaseService Integration", () => {
 
       // Verify Redis key still exists (not affected by PostgreSQL transaction)
       const redisResult = await dbService.redisGet(testRedisKey);
-      expect(redisResult).toBeTruthy();
-      expect(typeof redisResult).toBe("string");
+      expect(redisResult).toEqual(expect.any(String));
       const redisData = JSON.parse(redisResult!);
       expect(redisData.associatedEntity).toBe(testEntityId);
 
@@ -568,10 +567,8 @@ describe("DatabaseService Integration", () => {
       docsByType.rows.forEach(
         (row: { type: string; id: string; content: any; metadata: any }) => {
           expect(row.type).toBe("code");
-          expect(row.id).toBeTruthy();
-          expect(typeof row.id).toBe("string");
-          expect(row.content).toBeTruthy();
-          expect(typeof row.content).toBe("object");
+          expect(row.id).toEqual(expect.any(String));
+          expect(row.content).toEqual(expect.any(Object));
         }
       );
 
@@ -586,11 +583,11 @@ describe("DatabaseService Integration", () => {
       expect(entitiesByType.length).toBeGreaterThan(0);
       entitiesByType.forEach(
         (entity: { id: string; path: string; language: string }) => {
-          expect(entity.language).toBeTruthy();
+          expect(entity.language).toEqual(expect.any(String));
           expect(typeof entity.language).toBe("string");
-          expect(entity.id).toBeTruthy();
+          expect(entity.id).toEqual(expect.any(String));
           expect(typeof entity.id).toBe("string");
-          expect(entity.path).toBeTruthy();
+          expect(entity.path).toEqual(expect.any(String));
           expect(typeof entity.path).toBe("string");
           expect(entity.path).toMatch(/\.(ts|js|py|go|rs)$/);
         }
@@ -681,10 +678,10 @@ describe("DatabaseService Integration", () => {
       testSearch.rows.forEach(
         (row: { test_id: string; test_name: string; status: string }) => {
           expect(row.test_name.toLowerCase()).toContain("pass");
-          expect(row.test_id).toBeTruthy();
+          expect(row.test_id).toEqual(expect.any(String));
           expect(typeof row.test_id).toBe("string");
           expect(row.test_name.toLowerCase()).toContain("pass");
-          expect(row.status).toBeTruthy();
+          expect(row.status).toEqual(expect.any(String));
           expect(["passed", "failed", "skipped"]).toContain(row.status);
         }
       );
@@ -933,17 +930,9 @@ describe("DatabaseService Integration", () => {
       }
 
       // Test with invalid FalkorDB query
-      try {
-        await dbService.falkordbQuery("INVALID CYPHER QUERY SYNTAX");
-        // If we get here, the query was accepted (shouldn't happen)
-        expect(false).toBe(true); // Force failure
-      } catch (error: unknown) {
-        // Expected: FalkorDB should reject invalid Cypher syntax
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toMatch(
-          /invalid|syntax|cypher|query/i
-        );
-      }
+      await expect(
+        dbService.falkordbQuery("INVALID CYPHER QUERY SYNTAX")
+      ).rejects.toThrow(/invalid|syntax|cypher|query/i);
 
       // Test with null/undefined values
       try {
@@ -1062,7 +1051,8 @@ describe("DatabaseService Integration", () => {
         }
       } else {
         // Unexpected type, just verify something was stored
-        expect(rowContent).toBeTruthy();
+        expect(typeof rowContent).not.toBe("undefined");
+        expect(rowContent).not.toEqual(null);
       }
 
       // Clean up
@@ -1212,8 +1202,8 @@ describe("DatabaseService Integration", () => {
             ? finalResult.rows[0].metadata
             : JSON.parse(finalResult.rows[0].metadata);
       } catch (parseError) {
-        // If JSON parsing fails due to concurrent updates, just verify document exists
-        expect(finalResult.rows[0]).toBeTruthy();
+        // If JSON parsing fails due to concurrent updates, verify the row object exists
+        expect(finalResult.rows[0]).toEqual(expect.any(Object));
         return;
       }
 
@@ -1351,7 +1341,7 @@ describe("DatabaseService Integration", () => {
           user_id?: string;
           session_status?: string;
         }) => {
-          expect(row.test_id).toBeTruthy();
+          expect(row.test_id).toEqual(expect.any(String));
           expect(typeof row.test_id).toBe("string");
           expect(testIds).toContain(row.test_id);
           expect(row.suite_name).toBe("integrity_test_suite");
@@ -1458,8 +1448,7 @@ describe("DatabaseService Integration", () => {
         const redisData = await dbService.redisGet(
           `consistency:${batchId}_${i}`
         );
-        expect(redisData).toBeTruthy();
-        expect(typeof redisData).toBe("string");
+        expect(redisData).toEqual(expect.any(String));
         const parsedData = JSON.parse(redisData!);
         expect(parsedData.batchId).toBe(batchId);
         expect(parsedData.index).toBe(i);
@@ -1903,7 +1892,7 @@ describe("DatabaseService Integration", () => {
           }
         );
 
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.any(Object));
         expect(result.data).toEqual(expect.any(Array));
         expect(result.data!.length).toBeGreaterThan(0);
 
@@ -1937,7 +1926,7 @@ describe("DatabaseService Integration", () => {
           { batch: "command-batch", minIndex: 1 }
         );
 
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.any(Object));
         expect(result.data).toEqual(expect.any(Array));
         expect(result.data.length).toBe(2); // Should return index 2 and 3
 
@@ -1986,8 +1975,12 @@ describe("DatabaseService Integration", () => {
           return { docId, transactionId };
         });
 
-        expect(result).toBeDefined();
-        expect(result.docId).toBeDefined();
+        expect(result).toEqual(
+          expect.objectContaining({
+            docId: expect.any(String),
+            transactionId: expect.any(String),
+          })
+        );
         expect(result.transactionId).toBe(transactionId);
 
         // Verify data was committed
@@ -2005,8 +1998,9 @@ describe("DatabaseService Integration", () => {
           expect(metadata.transaction_id).toBe(transactionId);
           expect(metadata.updated).toBe(true);
         } catch (parseError) {
-          // If JSON parsing fails, just verify the field exists
-          expect(verifyResult.rows![0].metadata).toBeTruthy();
+          // If JSON parsing fails, verify the field exists and is a non-empty string
+          expect(verifyResult.rows![0].metadata).toEqual(expect.any(String));
+          expect(String(verifyResult.rows![0].metadata).length).toBeGreaterThan(0);
         }
 
         // Cleanup
@@ -2146,7 +2140,7 @@ describe("DatabaseService Integration", () => {
         const result = await dbService.storeTestSuiteResult(suiteResult);
 
         // Verify the result
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.any(Object));
 
         // Verify data was stored
         const storedSuites = await dbService.postgresQuery(
@@ -2203,7 +2197,7 @@ describe("DatabaseService Integration", () => {
         const result = await dbService.storeFlakyTestAnalyses(analyses);
 
         // Verify the result
-        expect(result).toBeDefined();
+        expect(result).toEqual(expect.any(Object));
 
         // Verify data was stored
         const storedAnalyses = await dbService.postgresQuery(
@@ -2217,7 +2211,7 @@ describe("DatabaseService Integration", () => {
         const firstAnalysis = storedAnalyses.rows!.find(
           (row) => row.test_id === "flaky-test-1"
         );
-        expect(firstAnalysis).toBeDefined();
+        expect(firstAnalysis).toEqual(expect.any(Object));
         expect(firstAnalysis.test_name).toBe("FlakyTest.integration");
         expect(firstAnalysis.failure_count).toBe(3);
         expect(firstAnalysis.total_runs).toBe(10);
@@ -2487,8 +2481,8 @@ describe("DatabaseService Integration", () => {
 
         // Verify all queries executed successfully
         results.forEach((_result, _index) => {
-          expect(_result).toBeDefined();
-          expect(_result.rowCount).toBeDefined();
+          expect(_result).toEqual(expect.any(Object));
+          expect(typeof _result.rowCount).toBe('number');
         });
 
         // Verify data was inserted
@@ -2540,10 +2534,10 @@ describe("DatabaseService Integration", () => {
         expect(results.length).toBe(3);
 
         // First and third queries should succeed, second should fail
-        expect(results[0]).toBeDefined();
-        expect(results[2]).toBeDefined();
-        // Second query should have failed
-        expect(results[1]).toBeDefined(); // Still returns a result object, but with error info
+        expect(results[0]).toEqual(expect.any(Object));
+        expect(results[2]).toEqual(expect.any(Object));
+        // Second query should have failed but returns structured error result
+        expect(results[1]).toEqual(expect.any(Object));
 
         // Verify only successful insertions occurred
         const verifyResult = await dbService.postgresQuery(
@@ -2583,9 +2577,13 @@ describe("DatabaseService Integration", () => {
 
         // Test that operations work
         const healthCheck = await newService.healthCheck();
-        expect(healthCheck.falkordb).toBeDefined();
-        expect(healthCheck.qdrant).toBeDefined();
-        expect(healthCheck.postgresql).toBeDefined();
+        expect(healthCheck).toEqual(
+          expect.objectContaining({
+            falkordb: expect.objectContaining({ status: expect.any(String) }),
+            qdrant: expect.objectContaining({ status: expect.any(String) }),
+            postgresql: expect.objectContaining({ status: expect.any(String) }),
+          })
+        );
 
         // Clean up
         await newService.close();
@@ -2598,17 +2596,15 @@ describe("DatabaseService Integration", () => {
 
         // Test PostgreSQL client
         const pgClient = dbService.getPostgresPool();
-        expect(pgClient).toBeDefined();
-        expect(typeof pgClient).toBe("object");
+        expect(pgClient).toEqual(expect.any(Object));
 
         // Test FalkorDB client
         const falkorClient = dbService.getFalkorDBClient();
-        expect(falkorClient).toBeDefined();
+        expect(falkorClient).toEqual(expect.any(Object));
 
         // Test Qdrant client
         const qdrantClient = dbService.getQdrantClient();
-        expect(qdrantClient).toBeDefined();
-        expect(typeof qdrantClient).toBe("object");
+        expect(qdrantClient).toEqual(expect.any(Object));
       });
     });
   });

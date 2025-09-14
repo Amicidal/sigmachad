@@ -1711,7 +1711,14 @@ describe('API Types and Interfaces', () => {
           } else if (response.success && typeof response.data === 'number') {
             expect(typeof response.data).toBe('number');
           } else if (!response.success) {
-            expect(response.error).toBeDefined();
+            expect(response).toEqual(
+              expect.objectContaining({
+                error: expect.objectContaining({
+                  code: expect.any(String),
+                  message: expect.any(String),
+                }),
+              })
+            );
           }
         });
       });

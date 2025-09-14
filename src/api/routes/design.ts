@@ -17,6 +17,8 @@ import {
   PaginatedResponse,
 } from "../../models/types.js";
 import { Spec } from "../../models/entities.js";
+import { RelationshipType } from "../../models/relationships.js";
+import { noiseConfig } from "../../config/noise.js";
 
 export function registerDesignRoutes(
   app: FastifyInstance,
@@ -261,6 +263,71 @@ async function createSpec(
   // Create entity in knowledge graph
   await kgService.createEntity(spec);
 
+  // Heuristic REQUIRES/IMPACTS edges from acceptance criteria / description
+  try {
+    const namesFromAC = Array.from(new Set((spec.acceptanceCriteria || [])
+      .flatMap((s) => String(s || '').match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || [])));
+    const namesFromDesc = Array.from(new Set(String(spec.description || '')
+      .match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []));
+    const pickTop = (arr: string[], n: number) => arr.slice(0, n);
+    for (const name of pickTop(namesFromAC, 25)) {
+      try {
+        const syms = (await kgService.findSymbolsByName(name, 3))
+          .filter((s: any) => (s?.isExported === true))
+          .filter((s: any) => ['function','class','interface','typeAlias'].includes(String(s?.kind || '').toLowerCase()));
+        const seen = new Set<string>();
+        for (const s of syms) {
+          if (!s?.id || seen.has(s.id)) continue; seen.add(s.id);
+          const nm = String((s as any).name || '');
+          const conf = Math.min(
+            1,
+            (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF)
+          );
+          if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
+            await kgService.createRelationship({
+              id: `rel_${spec.id}_${s.id}_REQUIRES`,
+              fromEntityId: spec.id,
+              toEntityId: s.id,
+              type: RelationshipType.REQUIRES as any,
+              created: new Date(),
+              lastModified: new Date(),
+              version: 1,
+              metadata: { inferred: true, confidence: conf, source: 'spec-acceptance' }
+            } as any, undefined, undefined, { validate: false });
+          }
+        }
+      } catch {}
+    }
+    for (const name of pickTop(namesFromDesc, 25)) {
+      try {
+        const syms = (await kgService.findSymbolsByName(name, 2))
+          .filter((s: any) => (s?.isExported === true))
+          .filter((s: any) => ['function','class','interface','typeAlias'].includes(String(s?.kind || '').toLowerCase()));
+        const seen = new Set<string>();
+        for (const s of syms) {
+          if (!s?.id || seen.has(s.id)) continue; seen.add(s.id);
+          const nm = String((s as any).name || '');
+          const conf = Math.min(
+            1,
+            (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF)
+          );
+          if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
+            await kgService.createRelationship({
+              id: `rel_${spec.id}_${s.id}_IMPACTS`,
+              fromEntityId: spec.id,
+              toEntityId: s.id,
+              type: RelationshipType.IMPACTS as any,
+              created: new Date(),
+              lastModified: new Date(),
+              version: 1,
+              metadata: { inferred: true, confidence: conf, source: 'spec-description' }
+            } as any, undefined, undefined, { validate: false });
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+
   return {
     specId,
     spec,
@@ -278,11 +345,12 @@ async function getSpec(
     [specId, "spec"]
   );
 
-  if (result.length === 0) {
+  const rows = (result as any)?.rows ?? [];
+  if (rows.length === 0) {
     throw new Error(`Specification ${specId} not found`);
   }
 
-  const spec: Spec = JSON.parse(result[0].content);
+  const spec: Spec = JSON.parse(rows[0].content);
 
   // Get related specs and affected entities (placeholder for now)
   const relatedSpecs: Spec[] = [];
@@ -320,11 +388,12 @@ async function updateSpec(
     [specId, "spec"]
   );
 
-  if (result.length === 0) {
+  const rows2 = (result as any)?.rows ?? [];
+  if (rows2.length === 0) {
     throw new Error(`Specification ${specId} not found`);
   }
 
-  const existingSpec: Spec = JSON.parse(result[0].content);
+  const existingSpec: Spec = JSON.parse(rows2[0].content);
 
   // Apply updates
   const updatedSpec: Spec = {
@@ -351,6 +420,71 @@ async function updateSpec(
 
   // Update in knowledge graph
   await kgService.updateEntity(specId, updatedSpec);
+
+  // Refresh REQUIRES/IMPACTS edges using same heuristics
+  try {
+    const namesFromAC = Array.from(new Set((updatedSpec.acceptanceCriteria || [])
+      .flatMap((s) => String(s || '').match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || [])));
+    const namesFromDesc = Array.from(new Set(String(updatedSpec.description || '')
+      .match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []));
+    const pickTop = (arr: string[], n: number) => arr.slice(0, n);
+    for (const name of pickTop(namesFromAC, 25)) {
+      try {
+        const syms = (await kgService.findSymbolsByName(name, 3))
+          .filter((s: any) => (s?.isExported === true))
+          .filter((s: any) => ['function','class','interface','typeAlias'].includes(String(s?.kind || '').toLowerCase()));
+        const seen = new Set<string>();
+        for (const s of syms) {
+          if (!s?.id || seen.has(s.id)) continue; seen.add(s.id);
+          const nm = String((s as any).name || '');
+          const conf = Math.min(
+            1,
+            (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF)
+          );
+          if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
+            await kgService.createRelationship({
+              id: `rel_${updatedSpec.id}_${s.id}_REQUIRES`,
+              fromEntityId: updatedSpec.id,
+              toEntityId: s.id,
+              type: RelationshipType.REQUIRES as any,
+              created: new Date(),
+              lastModified: new Date(),
+              version: 1,
+              metadata: { inferred: true, confidence: conf, source: 'spec-acceptance' }
+            } as any, undefined, undefined, { validate: false });
+          }
+        }
+      } catch {}
+    }
+    for (const name of pickTop(namesFromDesc, 25)) {
+      try {
+        const syms = (await kgService.findSymbolsByName(name, 2))
+          .filter((s: any) => (s?.isExported === true))
+          .filter((s: any) => ['function','class','interface','typeAlias'].includes(String(s?.kind || '').toLowerCase()));
+        const seen = new Set<string>();
+        for (const s of syms) {
+          if (!s?.id || seen.has(s.id)) continue; seen.add(s.id);
+          const nm = String((s as any).name || '');
+          const conf = Math.min(
+            1,
+            (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF)
+          );
+          if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
+            await kgService.createRelationship({
+              id: `rel_${updatedSpec.id}_${s.id}_IMPACTS`,
+              fromEntityId: updatedSpec.id,
+              toEntityId: s.id,
+              type: RelationshipType.IMPACTS as any,
+              created: new Date(),
+              lastModified: new Date(),
+              version: 1,
+              metadata: { inferred: true, confidence: conf, source: 'spec-description' }
+            } as any, undefined, undefined, { validate: false });
+          }
+        }
+      } catch {}
+    }
+  } catch {}
 
   return updatedSpec;
 }
@@ -401,8 +535,8 @@ async function listSpecs(
   queryParams.push(limit, offset);
 
   const result = await dbService.postgresQuery(query, queryParams);
-
-  const specs = result.map((row: any) => JSON.parse(row.content));
+  const rows3 = (result as any)?.rows ?? [];
+  const specs = rows3.map((row: any) => JSON.parse(row.content));
 
   return {
     specs,

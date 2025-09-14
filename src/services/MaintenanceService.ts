@@ -203,11 +203,11 @@ export class MaintenanceService {
       }
 
       // 2. Reindex PostgreSQL
-      const tables = await this.dbService.postgresQuery(`
+      const tablesResult = await this.dbService.postgresQuery(`
         SELECT tablename FROM pg_tables
         WHERE schemaname = 'public'
       `);
-
+      const tables = ((tablesResult as any)?.rows ?? []) as Array<{ tablename: string }>;
       for (const table of tables) {
         try {
           await this.dbService.postgresQuery(`REINDEX TABLE ${table.tablename}`);

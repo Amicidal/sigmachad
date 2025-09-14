@@ -299,7 +299,7 @@ describe("SecurityScanner", () => {
 
     it("should have valid hardcoded secret rule", () => {
       const secretRule = rules.find((rule) => rule.id === "HARDCODED_SECRET");
-      expect(secretRule).toBeDefined();
+      expect(secretRule).toEqual(expect.any(Object));
       expect(secretRule!.severity).toBe("high");
       expect(secretRule!.category).toBe("secrets");
       expect(secretRule!.cwe).toBe("CWE-798");
@@ -307,7 +307,7 @@ describe("SecurityScanner", () => {
 
     it("should have valid command injection rule", () => {
       const cmdRule = rules.find((rule) => rule.id === "COMMAND_INJECTION");
-      expect(cmdRule).toBeDefined();
+      expect(cmdRule).toEqual(expect.any(Object));
       expect(cmdRule!.severity).toBe("critical");
       expect(cmdRule!.category).toBe("sast");
       expect(cmdRule!.cwe).toBe("CWE-78");
@@ -315,10 +315,10 @@ describe("SecurityScanner", () => {
 
     it("should validate all rules have required properties", () => {
       rules.forEach((rule) => {
-        expect(rule.id).toBeDefined();
-        expect(rule.name).toBeDefined();
-        expect(rule.description).toBeDefined();
-        expect(rule.severity).toBeDefined();
+        expect(rule.id).toEqual(expect.any(String));
+        expect(rule.name).toEqual(expect.any(String));
+        expect(rule.description).toEqual(expect.any(String));
+        expect(rule.severity).toEqual(expect.any(String));
         expect(["critical", "high", "medium", "low", "info"]).toContain(
           rule.severity
         );
@@ -326,7 +326,7 @@ describe("SecurityScanner", () => {
         expect(["sast", "secrets", "dependency", "configuration"]).toContain(
           rule.category
         );
-        expect(rule.remediation).toBeDefined();
+        expect(rule.remediation).toEqual(expect.anything());
       });
     });
 

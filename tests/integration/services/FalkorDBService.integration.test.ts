@@ -73,7 +73,7 @@ describe("FalkorDBService Integration", () => {
       expect(newService.isInitialized()).toBe(true);
 
       const client = newService.getClient();
-      expect(client).toBeDefined();
+      expect(client).toEqual(expect.any(Object));
 
       await newService.close();
       expect(newService.isInitialized()).toBe(false);
@@ -114,7 +114,7 @@ describe("FalkorDBService Integration", () => {
       `;
 
       const result = await falkorService.query(createQuery);
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Array));
 
       // Verify node was created
       const verifyQuery =
@@ -159,8 +159,7 @@ describe("FalkorDBService Integration", () => {
         targetId: "target-node",
         strength: 0.8,
       });
-
-      expect(result).toBeDefined();
+      expect(result).toEqual(expect.any(Array));
 
       // Verify relationship was created
       const verifyQuery = `
@@ -940,8 +939,8 @@ describe("FalkorDBService Integration", () => {
         "MATCH (n:Entity {id: $id}) RETURN n",
         { id: "cmd-test" }
       );
-
-      expect(result).toBeDefined();
+      
+      expect(result).toEqual(expect.any(Object));
       expect(typeof result).toBe("object");
       expect(result).toHaveProperty("data");
       expect(result).toHaveProperty("headers");

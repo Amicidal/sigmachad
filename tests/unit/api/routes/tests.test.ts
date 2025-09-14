@@ -858,9 +858,9 @@ describe('Test Routes', () => {
 
       // These should still work but may return errors due to missing services
       // In a real scenario, Fastify would validate the parameters first
-      expect(performanceHandler).toBeDefined();
-      expect(coverageHandler).toBeDefined();
-      expect(flakyHandler).toBeDefined();
+      expect(typeof performanceHandler).toBe('function');
+      expect(typeof coverageHandler).toBe('function');
+      expect(typeof flakyHandler).toBe('function');
     });
 
     it('should handle service unavailability', async () => {

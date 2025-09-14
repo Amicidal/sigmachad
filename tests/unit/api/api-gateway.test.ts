@@ -76,7 +76,7 @@ describe('APIGateway', () => {
       try {
         const gateway = new APIGateway(mockKgService, mockDbService);
         expect(gateway).toBeInstanceOf(APIGateway);
-        expect(gateway.getConfig()).toBeDefined();
+        expect(gateway.getConfig()).toEqual(expect.any(Object));
       } finally {
         // Always restore original methods
         APIGateway.prototype.setupMiddleware = originalSetupMiddleware;

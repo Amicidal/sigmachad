@@ -38,6 +38,28 @@ export interface TimeRangeParams {
     until?: Date;
     timeRange?: "1h" | "24h" | "7d" | "30d" | "90d";
 }
+export interface HistoryConfig {
+    enabled?: boolean;
+    retentionDays?: number;
+    checkpoint?: {
+        hops?: number;
+        embedVersions?: boolean;
+    };
+}
+export type CheckpointReason = "daily" | "incident" | "manual";
+export interface CheckpointCreateRequest {
+    seedEntities: string[];
+    reason: CheckpointReason;
+    hops?: number;
+    window?: TimeRangeParams;
+}
+export interface TemporalGraphQuery {
+    startId: string;
+    atTime?: Date;
+    since?: Date;
+    until?: Date;
+    maxDepth?: number;
+}
 export interface CreateSpecRequest {
     title: string;
     description: string;
@@ -163,6 +185,7 @@ export interface GraphSearchRequest {
         path?: string;
         tags?: string[];
         lastModified?: TimeRangeParams;
+        checkpointId?: string;
     };
     includeRelated?: boolean;
     limit?: number;

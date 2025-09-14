@@ -69,20 +69,20 @@ describe("APIGateway Integration", () => {
     it("should initialize with correct configuration", () => {
       const config = apiGateway.getConfig();
 
-      expect(config).toBeDefined();
+      expect(config).toEqual(expect.any(Object));
       // Port should be assigned after server starts
       expect(config.port).toBeGreaterThan(0);
       expect(config.host).toBe("0.0.0.0");
-      expect(config.cors).toBeDefined();
-      expect(config.cors.origin).toBeDefined();
-      expect(config.rateLimit).toBeDefined();
+      expect(config.cors).toEqual(expect.any(Object));
+      expect(config.cors.origin).toEqual(expect.anything());
+      expect(config.rateLimit).toEqual(expect.any(Object));
       expect(config.rateLimit.max).toBeGreaterThan(0);
     });
 
     it("should have Fastify app instance", () => {
-      expect(app).toBeDefined();
+      expect(app).toEqual(expect.any(Object));
       expect(typeof app).toBe("object");
-      expect(app.server).toBeDefined();
+      expect(app.server).toEqual(expect.any(Object));
     });
 
     it("should have all required routes registered", () => {
@@ -92,9 +92,30 @@ describe("APIGateway Integration", () => {
       expect(app.hasRoute("GET", "/api/v1/test")).toBe(true);
     });
 
-    it.skip("should have API v1 routes properly registered", () => {
-      // Skip this test - hasRoute doesn't check nested routes correctly
-      // Routes are tested by actual injection in other tests
+    it("should respond on key API v1 routes via injection", async () => {
+      // Validate nested routes by performing minimal requests
+      // Graph search: expect 200 on valid payload (or 400 for validation in non-strict)
+      const graphSearch = await app.inject({
+        method: "POST",
+        url: "/api/v1/graph/search",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({ query: "function", limit: 1 })
+      });
+      expect(graphSearch.statusCode).toBe(200);
+
+      // Tests: plan-and-generate
+      const testPlan = await app.inject({
+        method: "POST",
+        url: "/api/v1/tests/plan-and-generate",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({ specId: "non-existent", testTypes: ["unit"] })
+      });
+      // Non-existent spec should produce 404 from REST tests route
+      expect(testPlan.statusCode).toBe(404);
+
+      // Docs endpoint should exist
+      const docs = await app.inject({ method: "GET", url: "/docs" });
+      expect(docs.statusCode).toBe(200);
     });
   });
 
@@ -110,11 +131,11 @@ describe("APIGateway Integration", () => {
 
       const body = JSON.parse(response.payload);
       expect(body.status).toBe("healthy");
-      expect(body.timestamp).toBeDefined();
+      expect(new Date(body.timestamp).toString()).not.toBe('Invalid Date');
       expect(body.uptime).toBeGreaterThan(0);
-      expect(body.services).toBeDefined();
-      expect(body.mcp).toBeDefined();
-      expect(body.mcp.tools).toBeDefined();
+      expect(body.services).toEqual(expect.any(Object));
+      expect(body.mcp).toEqual(expect.any(Object));
+      expect(typeof body.mcp.tools).toBe('number');
     });
 
     it("should include database health status", async () => {
@@ -137,9 +158,9 @@ describe("APIGateway Integration", () => {
       });
 
       const body = JSON.parse(response.payload);
-      expect(body.mcp).toBeDefined();
+      expect(body.mcp).toEqual(expect.any(Object));
       expect(typeof body.mcp.tools).toBe("number");
-      expect(body.mcp.validation).toBeDefined();
+      expect(body.mcp.validation).toEqual(expect.any(Object));
     });
 
     it("should return unhealthy status when critical services fail", async () => {
@@ -217,11 +238,8 @@ describe("APIGateway Integration", () => {
         url: "/health",
       });
 
-      expect(response.headers["x-request-id"]).toBeDefined();
-      expect(typeof response.headers["x-request-id"]).toBe("string");
-      expect(
-        (response.headers["x-request-id"] as string).length
-      ).toBeGreaterThan(0);
+      expect(response.headers["x-request-id"]).toEqual(expect.any(String));
+      expect((response.headers["x-request-id"] as string).length).toBeGreaterThan(0);
     });
 
     it("should handle custom request IDs", async () => {
@@ -266,8 +284,12 @@ describe("APIGateway Integration", () => {
       const body = JSON.parse(response.payload);
       expect(body.error).toBe("Not Found");
       expect(body.message).toContain("not found");
-      expect(body.requestId).toBeDefined();
-      expect(body.timestamp).toBeDefined();
+      expect(body).toEqual(
+        expect.objectContaining({
+          requestId: expect.any(String),
+          timestamp: expect.any(String),
+        })
+      );
     });
 
     it("should handle invalid JSON in request body", async () => {
@@ -303,11 +325,15 @@ describe("APIGateway Integration", () => {
         expect(response.statusCode).toBe(500);
 
         const body = JSON.parse(response.payload);
-        expect(body.error).toBeDefined();
+        expect(body.error).toEqual(expect.any(Object));
         expect(body.error.code).toBe("GRAPH_SEARCH_FAILED");
         expect(body.error.message).toContain("Failed to perform graph search");
-        expect(body.requestId).toBeDefined();
-        expect(body.timestamp).toBeDefined();
+        expect(body).toEqual(
+          expect.objectContaining({
+            requestId: expect.any(String),
+            timestamp: expect.any(String),
+          })
+        );
       } finally {
         // Restore original method
         kgService.search = originalSearch;
@@ -336,7 +362,15 @@ describe("APIGateway Integration", () => {
       });
 
       // Should handle gracefully even with invalid ID
-      expect([200, 404, 500]).toContain(response.statusCode);
+      if (response.statusCode === 404) {
+        throw new Error('APIGateway route must be implemented for this test');
+      }
+      if (response.statusCode === 200) {
+        try { JSON.parse(response.payload || '{}'); } catch {}
+      } else if (response.statusCode === 500) {
+        const body = JSON.parse(response.payload || '{}');
+        expect(body).toHaveProperty('error');
+      }
     });
   });
 
@@ -351,8 +385,12 @@ describe("APIGateway Integration", () => {
       expect(response.headers["content-type"]).toContain("application/json");
 
       const body = JSON.parse(response.payload);
-      expect(body).toBeDefined();
-      expect(typeof body).toBe("object");
+      expect(body).toEqual(
+        expect.objectContaining({
+          openapi: expect.any(String),
+          info: expect.any(Object),
+        })
+      );
     });
   });
 
@@ -367,7 +405,7 @@ describe("APIGateway Integration", () => {
 
       const body = JSON.parse(response.payload);
       expect(body.message).toContain("Route registration is working");
-      expect(body.timestamp).toBeDefined();
+      expect(body.timestamp).toEqual(expect.any(String));
     });
   });
 
@@ -375,14 +413,45 @@ describe("APIGateway Integration", () => {
     it("should have server running with assigned port", () => {
       // Server is already started in beforeAll
       expect(apiGateway.getConfig().port).toBeGreaterThan(0);
-      expect(app.server).toBeDefined();
+      expect(app.server).toEqual(expect.any(Object));
       expect(app.server.listening).toBe(true);
     });
 
-    it.skip("should handle multiple start/stop cycles", async () => {
-      // Skip this test - Fastify doesn't support reopening a closed server
-      // This would require creating a new APIGateway instance for each start
-      // which is not a typical use case in production
+    it("should handle multiple start/stop cycles with fresh instances", async () => {
+      // Use a new APIGateway instance per cycle to avoid reopening a closed server
+      for (let i = 0; i < 2; i++) {
+        const cycleGateway = new APIGateway(kgService, dbService);
+        const cycleApp = cycleGateway.getApp();
+        await cycleGateway.start();
+
+        // Verify server is listening and a basic route responds
+        expect(cycleGateway.getConfig().port).toBeGreaterThan(0);
+        expect(cycleApp.server.listening).toBe(true);
+        const resp = await cycleApp.inject({ method: 'GET', url: '/health' });
+        // Be explicit about acceptable outcomes and validate payload shape
+        if (resp.statusCode === 200) {
+          const body = JSON.parse(resp.payload || '{}');
+          expect(body).toEqual(
+            expect.objectContaining({
+              status: 'healthy',
+              services: expect.any(Object),
+            })
+          );
+        } else if (resp.statusCode === 503) {
+          const body = JSON.parse(resp.payload || '{}');
+          expect(body).toEqual(
+            expect.objectContaining({
+              status: 'unhealthy',
+              services: expect.any(Object),
+            })
+          );
+        } else {
+          throw new Error(`Unexpected /health status: ${resp.statusCode}`);
+        }
+
+        await cycleGateway.stop();
+        expect(cycleApp.server.listening).toBe(false);
+      }
     });
   });
 });

@@ -36,6 +36,18 @@ export class ASTParser {
             console.warn('tree-sitter JavaScript grammar unavailable; JS parsing disabled.', error);
             this.jsParser = null;
         }
+        // Add project-wide TS sources for better cross-file symbol resolution
+        try {
+            this.tsProject.addSourceFilesAtPaths([
+                'src/**/*.ts', 'src/**/*.tsx',
+                'tests/**/*.ts', 'tests/**/*.tsx',
+                'types/**/*.d.ts',
+            ]);
+            this.tsProject.resolveSourceFileDependencies();
+        }
+        catch (error) {
+            // Non-fatal: fallback to per-file parsing
+        }
     }
     async parseFile(filePath) {
         try {
@@ -279,13 +291,21 @@ export class ASTParser {
                 Node.isVariableDeclaration(node) ||
                 Node.isMethodDeclaration(node) ||
                 Node.isPropertyDeclaration(node));
+            const localSymbols = [];
             for (const symbol of symbols) {
                 try {
                     const symbolEntity = this.createSymbolEntity(symbol, fileEntity);
                     if (symbolEntity) {
                         entities.push(symbolEntity);
+                        localSymbols.push({ node: symbol, entity: symbolEntity });
                         // Create relationship between file and symbol
                         relationships.push(this.createRelationship(fileEntity.id, symbolEntity.id, RelationshipType.DEFINES));
+                        // Also record structural containment
+                        relationships.push(this.createRelationship(fileEntity.id, symbolEntity.id, RelationshipType.CONTAINS));
+                        // If symbol is exported, record EXPORTS relationship
+                        if (symbolEntity.isExported) {
+                            relationships.push(this.createRelationship(fileEntity.id, symbolEntity.id, RelationshipType.EXPORTS));
+                        }
                         // Extract relationships for this symbol
                         const symbolRelationships = this.extractSymbolRelationships(symbol, symbolEntity, sourceFile);
                         relationships.push(...symbolRelationships);
@@ -300,6 +320,14 @@ export class ASTParser {
                         severity: 'warning',
                     });
                 }
+            }
+            // Add reference-based relationships using type-aware heuristics
+            try {
+                const refRels = this.extractReferenceRelationships(sourceFile, fileEntity, localSymbols);
+                relationships.push(...refRels);
+            }
+            catch (e) {
+                // Non-fatal: continue without reference relationships
             }
             // Extract import/export relationships
             const importRelationships = this.extractImportRelationships(sourceFile, fileEntity);
@@ -374,6 +402,7 @@ export class ASTParser {
             if (functionEntity) {
                 entities.push(functionEntity);
                 relationships.push(this.createRelationship(fileEntity.id, functionEntity.id, RelationshipType.DEFINES));
+                relationships.push(this.createRelationship(fileEntity.id, functionEntity.id, RelationshipType.CONTAINS));
             }
         }
         // Extract class declarations
@@ -382,6 +411,7 @@ export class ASTParser {
             if (classEntity) {
                 entities.push(classEntity);
                 relationships.push(this.createRelationship(fileEntity.id, classEntity.id, RelationshipType.DEFINES));
+                relationships.push(this.createRelationship(fileEntity.id, classEntity.id, RelationshipType.CONTAINS));
             }
         }
         // Recursively walk child nodes
@@ -564,6 +594,83 @@ export class ASTParser {
                     }
                 }
             }
+        }
+        return relationships;
+    }
+    // Advanced reference extraction using TypeScript AST with best-effort resolution
+    extractReferenceRelationships(sourceFile, fileEntity, localSymbols) {
+        const relationships = [];
+        const dedupe = new Set();
+        const addRel = (fromId, toId, type) => {
+            const key = `${fromId}|${type}|${toId}`;
+            if (dedupe.has(key))
+                return;
+            dedupe.add(key);
+            relationships.push(this.createRelationship(fromId, toId, type));
+        };
+        const enclosingSymbolId = (node) => {
+            const owner = node.getFirstAncestor((a) => Node.isFunctionDeclaration(a) ||
+                Node.isMethodDeclaration(a) ||
+                Node.isClassDeclaration(a) ||
+                Node.isInterfaceDeclaration(a) ||
+                Node.isTypeAliasDeclaration(a) ||
+                Node.isVariableDeclaration(a));
+            if (owner) {
+                const found = localSymbols.find((ls) => ls.node === owner);
+                if (found)
+                    return found.entity.id;
+            }
+            return fileEntity.id;
+        };
+        const isDeclarationName = (id) => {
+            const p = id.getParent();
+            if (!p)
+                return false;
+            return ((Node.isFunctionDeclaration(p) && p.getNameNode() === id) ||
+                (Node.isClassDeclaration(p) && p.getNameNode() === id) ||
+                (Node.isInterfaceDeclaration(p) && p.getNameNode() === id) ||
+                (Node.isTypeAliasDeclaration(p) && p.getNameNode() === id) ||
+                (Node.isVariableDeclaration(p) && p.getNameNode() === id) ||
+                Node.isImportSpecifier(p) ||
+                Node.isImportClause(p) ||
+                Node.isNamespaceImport(p));
+        };
+        // Type dependencies (e.g., Foo<T>, param: Bar)
+        for (const tr of sourceFile.getDescendantsOfKind(SyntaxKind.TypeReference)) {
+            const typeName = tr.getTypeName().getText();
+            if (!typeName)
+                continue;
+            const fromId = enclosingSymbolId(tr);
+            // Use generic external:NAME target; resolver will map to concrete symbol
+            addRel(fromId, `external:${typeName}`, RelationshipType.DEPENDS_ON);
+        }
+        // Class usage via instantiation: new Foo() -> treat as a reference
+        for (const nw of sourceFile.getDescendantsOfKind(SyntaxKind.NewExpression)) {
+            const expr = nw.getExpression();
+            const name = expr ? expr.getText().split('.').pop() || '' : '';
+            if (!name)
+                continue;
+            const fromId = enclosingSymbolId(nw);
+            addRel(fromId, `class:${name}`, RelationshipType.REFERENCES);
+        }
+        // General identifier references (non-call, non-declaration names)
+        for (const id of sourceFile.getDescendantsOfKind(SyntaxKind.Identifier)) {
+            const text = id.getText();
+            if (!text)
+                continue;
+            // Skip if this identifier is part of a call expression callee; CALLS handled elsewhere
+            const parent = id.getParent();
+            if (parent && Node.isCallExpression(parent) && parent.getExpression() === id) {
+                continue;
+            }
+            if (isDeclarationName(id))
+                continue;
+            // Skip import/export specifiers (already captured as IMPORTS/EXPORTS)
+            if (parent && (Node.isImportSpecifier(parent) || Node.isImportClause(parent) || Node.isNamespaceImport(parent))) {
+                continue;
+            }
+            const fromId = enclosingSymbolId(id);
+            addRel(fromId, `external:${text}`, RelationshipType.REFERENCES);
         }
         return relationships;
     }

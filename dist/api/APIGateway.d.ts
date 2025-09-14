@@ -48,6 +48,7 @@ export declare class APIGateway {
     private loggingService?;
     private maintenanceService?;
     private configurationService?;
+    private _historyIntervals;
     private healthCheckCache;
     private readonly HEALTH_CACHE_TTL;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher?: FileWatcher, astParser?: ASTParser, docParser?: DocumentationParser, securityScanner?: SecurityScanner, config?: Partial<APIGatewayConfig>, syncServices?: SynchronizationServices);
@@ -61,6 +62,7 @@ export declare class APIGateway {
     getServer(): FastifyInstance;
     stop(): Promise<void>;
     getApp(): FastifyInstance;
+    private startHistorySchedulers;
     getConfig(): APIGatewayConfig;
     private isOriginAllowed;
 }

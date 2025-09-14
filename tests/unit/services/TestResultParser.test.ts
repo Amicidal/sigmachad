@@ -247,7 +247,8 @@ describe('TestResultParser', () => {
       expect(result.totalTests).toBeGreaterThanOrEqual(0);
     });
 
-    it('should handle test cases with failure messages', async () => {
+    // TODO: When JUnit failure tags are parsed, convert this back to a normal test
+    it.fails('should detect failed status for <failure> testcases', async () => {
       const failureXml = `<?xml version="1.0"?>
         <testsuite name="TestSuite" tests="1" time="0.150">
           <testcase name="failing test" time="0.150">
@@ -257,15 +258,15 @@ describe('TestResultParser', () => {
 
       const result = await parser.parseContent(failureXml, 'junit');
 
-      // Note: Current implementation may not detect failure tags correctly
       expect(result).toBeDefined();
-      expect(result.results).toBeInstanceOf(Array);
-      if (result.results.length > 0) {
-        expect(result.results[0].status).toBe('passed'); // Default status
-      }
+      expect(result.results.length).toBe(1);
+      expect(result.results[0].testName).toBe('failing test');
+      expect(result.results[0].status).toBe('failed');
+      expect(result.results[0].errorMessage).toContain('Detailed failure information');
     });
 
-    it('should handle test cases with error messages', async () => {
+    // TODO: When JUnit error tags are parsed, convert this back to a normal test
+    it.fails('should detect error status for <error> testcases', async () => {
       const errorXml = `<?xml version="1.0"?>
         <testsuite name="TestSuite" tests="1" time="0.100">
           <testcase name="error test" time="0.100">
@@ -275,15 +276,15 @@ describe('TestResultParser', () => {
 
       const result = await parser.parseContent(errorXml, 'junit');
 
-      // Note: Current implementation may not detect error tags correctly
       expect(result).toBeDefined();
-      expect(result.results).toBeInstanceOf(Array);
-      if (result.results.length > 0) {
-        expect(result.results[0].status).toBe('passed'); // Default status
-      }
+      expect(result.results.length).toBe(1);
+      expect(result.results[0].testName).toBe('error test');
+      expect(result.results[0].status).toBe('error');
+      expect(result.results[0].errorMessage).toContain('Exception details');
     });
 
-    it('should handle skipped test cases', async () => {
+    // TODO: When JUnit skipped tags are parsed, convert this back to a normal test
+    it.fails('should detect skipped status for <skipped> testcases', async () => {
       const skippedXml = `<?xml version="1.0"?>
         <testsuite name="TestSuite" tests="1" time="0.000">
           <testcase name="skipped test" time="0.000">
@@ -293,12 +294,10 @@ describe('TestResultParser', () => {
 
       const result = await parser.parseContent(skippedXml, 'junit');
 
-      // Note: Current implementation may not detect skipped tags correctly
       expect(result).toBeDefined();
-      expect(result.results).toBeInstanceOf(Array);
-      if (result.results.length > 0) {
-        expect(result.results[0].status).toBe('passed'); // Default status
-      }
+      expect(result.results.length).toBe(1);
+      expect(result.results[0].testName).toBe('skipped test');
+      expect(result.results[0].status).toBe('skipped');
     });
 
     it('should handle empty test suites', async () => {

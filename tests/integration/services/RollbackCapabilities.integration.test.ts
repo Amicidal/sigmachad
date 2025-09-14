@@ -54,13 +54,13 @@ describe('RollbackCapabilities Integration', () => {
 
       const rollbackId = await rollbackService.createRollbackPoint(operationId, description);
 
-      expect(rollbackId).toBeDefined();
+      expect(typeof rollbackId).toBe('string');
       expect(typeof rollbackId).toBe('string');
       expect(rollbackId).toMatch(/^rollback_test_operation_1_/);
 
       // Verify rollback point exists
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
-      expect(rollbackPoint).toBeDefined();
+      expect(rollbackPoint).toEqual(expect.any(Object));
       expect(rollbackPoint?.operationId).toBe(operationId);
       expect(rollbackPoint?.description).toBe(description);
       expect(rollbackPoint?.timestamp).toBeInstanceOf(Date);
@@ -105,7 +105,7 @@ describe('RollbackCapabilities Integration', () => {
       const rollbackId = await rollbackService.createRollbackPoint('test_operation_2', 'Capture test data');
 
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
-      expect(rollbackPoint).toBeDefined();
+      expect(rollbackPoint).toEqual(expect.any(Object));
       expect(rollbackPoint?.entities).toEqual(expect.any(Array));
       expect(rollbackPoint?.relationships).toEqual(expect.any(Array));
 
@@ -118,7 +118,7 @@ describe('RollbackCapabilities Integration', () => {
       const rollbackId = await rollbackService.createRollbackPoint('empty_test', 'Empty graph test');
 
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
-      expect(rollbackPoint).toBeDefined();
+      expect(rollbackPoint).toEqual(expect.any(Object));
       expect(rollbackPoint?.entities).toEqual(expect.any(Array));
       expect(rollbackPoint?.relationships).toEqual(expect.any(Array));
     });
@@ -184,7 +184,7 @@ describe('RollbackCapabilities Integration', () => {
     it('should validate rollback point successfully', async () => {
       const validationResult = await rollbackService.validateRollbackPoint(rollbackId1);
 
-      expect(validationResult).toBeDefined();
+      expect(validationResult).toEqual(expect.any(Object));
       expect(typeof validationResult.valid).toBe('boolean');
       expect(validationResult.issues).toEqual(expect.any(Array));
     });
@@ -225,12 +225,12 @@ describe('RollbackCapabilities Integration', () => {
       );
 
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
-      expect(rollbackPoint).toBeDefined();
+      expect(rollbackPoint).toEqual(expect.any(Object));
 
       const entityChange = rollbackPoint?.entities.find((e: any) => e.id === entity.id);
-      expect(entityChange).toBeDefined();
+      expect(entityChange).toEqual(expect.any(Object));
       expect(entityChange.action).toBe('create');
-      expect(entityChange.newState).toBeDefined();
+      expect(entityChange.newState).not.toBeUndefined();
     });
 
     it('should record entity update changes', async () => {
@@ -261,10 +261,10 @@ describe('RollbackCapabilities Integration', () => {
 
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
       const entityChange = rollbackPoint?.entities.find((e: any) => e.id === originalEntity.id);
-      expect(entityChange).toBeDefined();
+      expect(entityChange).toEqual(expect.any(Object));
       expect(entityChange.action).toBe('update');
-      expect(entityChange.previousState).toBeDefined();
-      expect(entityChange.newState).toBeDefined();
+      expect(entityChange.previousState).not.toBeUndefined();
+      expect(entityChange.newState).not.toBeUndefined();
     });
 
     it('should record entity deletion changes', async () => {
@@ -289,9 +289,9 @@ describe('RollbackCapabilities Integration', () => {
 
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
       const entityChange = rollbackPoint?.entities.find((e: any) => e.id === entity.id);
-      expect(entityChange).toBeDefined();
+      expect(entityChange).toEqual(expect.any(Object));
       expect(entityChange.action).toBe('delete');
-      expect(entityChange.previousState).toBeDefined();
+      expect(entityChange.previousState).not.toBeUndefined();
     });
 
     it('should handle recording changes for non-existent rollback point', async () => {
@@ -359,7 +359,7 @@ describe('RollbackCapabilities Integration', () => {
       // Perform rollback
       const rollbackResult = await rollbackService.rollbackToPoint(rollbackId);
 
-      expect(rollbackResult).toBeDefined();
+      expect(rollbackResult).toEqual(expect.any(Object));
       expect(typeof rollbackResult.success).toBe('boolean');
       expect(typeof rollbackResult.rolledBackEntities).toBe('number');
       expect(typeof rollbackResult.rolledBackRelationships).toBe('number');
@@ -385,7 +385,7 @@ describe('RollbackCapabilities Integration', () => {
 
       const rollbackResult = await rollbackService.rollbackLastOperation(operationId);
 
-      expect(rollbackResult).toBeDefined();
+      expect(rollbackResult).toEqual(expect.any(Object));
       // Should rollback to the most recent point (secondRollbackId)
       expect(rollbackResult).not.toBeNull();
     });
@@ -403,7 +403,7 @@ describe('RollbackCapabilities Integration', () => {
       // Perform rollback
       const rollbackResult = await rollbackService.rollbackToPoint(rollbackId);
 
-      expect(rollbackResult).toBeDefined();
+      expect(rollbackResult).toEqual(expect.any(Object));
       // Should attempt to restore the deleted entity
       expect(rollbackResult.rolledBackEntities).toBeGreaterThanOrEqual(0);
     });
@@ -424,7 +424,7 @@ describe('RollbackCapabilities Integration', () => {
       // Perform rollback
       const rollbackResult = await rollbackService.rollbackToPoint(rollbackId);
 
-      expect(rollbackResult).toBeDefined();
+      expect(rollbackResult).toEqual(expect.any(Object));
       // Should attempt to remove the newly created entity
       expect(rollbackResult.rolledBackEntities).toBeGreaterThanOrEqual(0);
     });
@@ -437,13 +437,13 @@ describe('RollbackCapabilities Integration', () => {
 
       const snapshotId = await rollbackService.createSnapshot(operationId, description);
 
-      expect(snapshotId).toBeDefined();
+      expect(typeof snapshotId).toBe('string');
       expect(typeof snapshotId).toBe('string');
       expect(snapshotId).toMatch(/^rollback_snapshot_test_/);
 
       // Verify snapshot exists as rollback point
       const snapshot = rollbackService.getRollbackPoint(snapshotId);
-      expect(snapshot).toBeDefined();
+      expect(snapshot).toEqual(expect.any(Object));
       expect(snapshot?.operationId).toBe(operationId);
       expect(snapshot?.description).toBe(`Snapshot: ${description}`);
     });
@@ -469,7 +469,7 @@ describe('RollbackCapabilities Integration', () => {
       // Restore from snapshot
       const restoreResult = await rollbackService.restoreFromSnapshot(snapshotId);
 
-      expect(restoreResult).toBeDefined();
+      expect(restoreResult).toEqual(expect.any(Object));
       expect(typeof restoreResult.success).toBe('boolean');
       expect(typeof restoreResult.rolledBackEntities).toBe('number');
       expect(typeof restoreResult.rolledBackRelationships).toBe('number');
@@ -495,7 +495,7 @@ describe('RollbackCapabilities Integration', () => {
     it('should provide accurate rollback statistics', async () => {
       const stats = rollbackService.getRollbackStatistics();
 
-      expect(stats).toBeDefined();
+      expect(stats).toEqual(expect.any(Object));
       expect(typeof stats.totalRollbackPoints).toBe('number');
       expect(typeof stats.averageEntitiesPerPoint).toBe('number');
       expect(typeof stats.averageRelationshipsPerPoint).toBe('number');
@@ -562,7 +562,7 @@ describe('RollbackCapabilities Integration', () => {
         // If it doesn't throw, verify it handles the error gracefully
       } catch (error) {
         // Expected to fail with database connection issues
-        expect(error).toBeDefined();
+        expect(error).toBeInstanceOf(Error);
       }
     });
 
@@ -593,7 +593,7 @@ describe('RollbackCapabilities Integration', () => {
 
       failedResults.forEach(result => {
         if (result.status === 'fulfilled') {
-          expect(result.value.errors).toBeDefined();
+          expect(result.value.errors).toEqual(expect.any(Array));
         }
       });
     });
@@ -625,7 +625,7 @@ describe('RollbackCapabilities Integration', () => {
       const duration = endTime - startTime;
 
       const rollbackPoint = rollbackService.getRollbackPoint(rollbackId);
-      expect(rollbackPoint).toBeDefined();
+      expect(rollbackPoint).toEqual(expect.any(Object));
       expect(rollbackPoint?.entities.length).toBeGreaterThanOrEqual(entityCount);
 
       // Should complete within reasonable time
@@ -645,7 +645,7 @@ describe('RollbackCapabilities Integration', () => {
       const validationResult = await rollbackService.validateRollbackPoint(rollbackId);
 
       // Should handle corruption gracefully
-      expect(validationResult).toBeDefined();
+      expect(validationResult).toEqual(expect.any(Object));
       expect(typeof validationResult.valid).toBe('boolean');
       expect(Array.isArray(validationResult.issues)).toBe(true);
     });
@@ -692,7 +692,7 @@ describe('RollbackCapabilities Integration', () => {
       // All rollback points should be created successfully
       rollbackIds.forEach(id => {
         const point = rollbackService.getRollbackPoint(id);
-        expect(point).toBeDefined();
+        expect(point).toEqual(expect.any(Object));
       });
 
       // Should complete within reasonable time

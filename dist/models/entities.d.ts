@@ -180,6 +180,26 @@ export interface Session {
     status: "active" | "completed" | "failed";
     metadata?: Record<string, any>;
 }
+export interface Version {
+    id: string;
+    type: "version";
+    entityId: string;
+    path?: string;
+    hash: string;
+    language?: string;
+    timestamp: Date;
+    metadata?: Record<string, any>;
+}
+export interface Checkpoint {
+    id: string;
+    type: "checkpoint";
+    checkpointId: string;
+    timestamp: Date;
+    reason: "daily" | "incident" | "manual";
+    hops: number;
+    seedEntities: string[];
+    metadata?: Record<string, any>;
+}
 export interface DocumentationNode extends CodebaseEntity {
     type: "documentation";
     title: string;
@@ -246,7 +266,7 @@ export interface Vulnerability {
     lastUpdated: Date;
     exploitability: "high" | "medium" | "low";
 }
-export type Entity = File | Directory | Module | Symbol | FunctionSymbol | ClassSymbol | InterfaceSymbol | TypeAliasSymbol | Test | Spec | Change | Session | DocumentationNode | BusinessDomain | SemanticCluster | SecurityIssue | Vulnerability;
+export type Entity = File | Directory | Module | Symbol | FunctionSymbol | ClassSymbol | InterfaceSymbol | TypeAliasSymbol | Test | Spec | Change | Session | Version | Checkpoint | DocumentationNode | BusinessDomain | SemanticCluster | SecurityIssue | Vulnerability;
 export declare const isFile: (entity: Entity | null | undefined) => entity is File;
 export declare const isDirectory: (entity: Entity | null | undefined) => entity is Directory;
 export declare const isSymbol: (entity: Entity | null | undefined) => entity is Symbol;

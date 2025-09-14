@@ -20,13 +20,26 @@
     "test:integration": "RUN_INTEGRATION=1 NODE_ENV=test vitest run tests/integration",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
+    "lint:tests:lax-codes": "ast-grep run -p 'expect([$A, $B]).toContain($RESP.statusCode)' -l ts tests && ast-grep run -p 'expect([$A, $B, $C]).toContain($RESP.statusCode)' -l ts tests && ast-grep run -p 'expect([$A, $B, $C, $D]).toContain($RESP.statusCode)' -l ts tests",
+    "lint:tests:not-to-throw": "ast-grep run -p 'await expect($CALL).resolves.not.toThrow()' -l ts tests",
+    "lint:tests:no-skip-only": "ast-grep run --config .ast-grep.yaml --rule-id no-focused-tests --rule-id no-skipped-tests tests",
+    "lint:tests:no-empty": "ast-grep run --config .ast-grep.yaml --rule-id test-must-have-expect tests",
+    "lint:tests:config": "ast-grep scan -c .ast-grep.yaml --report-style medium tests",
+    "lint:tests": "pnpm lint:tests:lax-codes && pnpm lint:tests:not-to-throw && pnpm lint:tests:no-skip-only && pnpm lint:tests:no-empty && pnpm lint:tests:config",
     "docker:build": "docker build -t memento-local .",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:test-up": "docker-compose -f docker-compose.test.yml up -d",
     "docker:test-down": "docker-compose -f docker-compose.test.yml down -v",
+    "kg:clear": "node scripts/clear-knowledge-graph.js",
+    "db:clear:pg": "node scripts/clear-postgres.js",
+    "db:clear:qdrant": "node scripts/clear-qdrant.js",
+    "db:clear:all": "pnpm kg:clear && pnpm db:clear:qdrant && pnpm db:clear:pg",
     "sync": "tsx scripts/sync-knowledge-graph.ts",
-    "health": "tsx scripts/health-check.ts"
+    "health": "tsx scripts/health-check.ts",
+    "assets:webgl": "tsx scripts/fetch-webgl-assets.ts",
+    "web:dev": "pnpm --dir web/graph-viewer dev",
+    "web:build": "pnpm --dir web/graph-viewer build"
   },
   "keywords": [
     "ai",
@@ -43,6 +56,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
+    "@fastify/static": "^8.2.0",
     "@fastify/websocket": "^11.2.0",
     "@modelcontextprotocol/sdk": "^1.17.4",
     "@qdrant/js-client-rest": "^1.9.0",
@@ -68,6 +82,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@ast-grep/cli": "^0.39.5",
     "@eslint/js": "^9.34.0",
     "@types/chokidar": "^2.1.7",
     "@types/jsonwebtoken": "^9.0.10",
@@ -89,6 +104,7 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "uuid": "^11.1.0",
+    "vite": "^5.4.10",
     "vitest": "^3.2.4"
   },
   "pnpm": {

@@ -68,6 +68,8 @@ export declare class TestEngine {
     private kgService;
     private dbService;
     private parser;
+    private perfRelBuffer;
+    private perfIncidentSeeds;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService);
     /**
      * Parse test results from a file and record them
@@ -77,6 +79,12 @@ export declare class TestEngine {
      * Parse and store test execution results from various formats
      */
     recordTestResults(suiteResult: TestSuiteResult): Promise<void>;
+    /**
+     * Create an incident checkpoint seeded with failing tests and their impacted entities.
+     * Controlled by env: HISTORY_ENABLED (default true), HISTORY_INCIDENT_ENABLED (default true),
+     * HISTORY_INCIDENT_HOPS (default falls back to HISTORY_CHECKPOINT_HOPS or 2).
+     */
+    private createIncidentCheckpoint;
     /**
      * Process individual test result and update knowledge graph
      */
