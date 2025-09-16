@@ -332,7 +332,7 @@ describe('ConflictResolution', () => {
         type: 'depends_on',
         sourceId: 'source-1',
         targetId: 'target-1',
-        metadata: { strength: 0.8 }
+        metadata: { confidence: 0.8 }
       };
 
       const conflicts = await conflictResolution.detectConflicts([], [relationship]);

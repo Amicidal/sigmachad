@@ -93,6 +93,96 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             });
         }
     });
+    // GET /api/graph/relationship/:relationshipId/evidence - List auxiliary evidence nodes
+    app.get("/graph/relationship/:relationshipId/evidence", {
+        schema: {
+            params: {
+                type: "object",
+                properties: { relationshipId: { type: "string" } },
+                required: ["relationshipId"],
+            },
+            querystring: {
+                type: "object",
+                properties: { limit: { type: "number" } },
+            },
+        },
+    }, async (request, reply) => {
+        try {
+            const { relationshipId } = request.params;
+            const { limit } = request.query || {};
+            if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
+                return reply.status(400).send({ success: false, error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" } });
+            }
+            const rel = await kgService.getRelationshipById(relationshipId);
+            if (!rel)
+                return reply.status(404).send({ success: false, error: { code: 'RELATIONSHIP_NOT_FOUND', message: 'Relationship not found' } });
+            const evidence = await kgService.getEdgeEvidenceNodes(relationshipId, Math.max(1, Math.min(Number(limit) || 200, 1000)));
+            reply.send({ success: true, data: evidence });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'EVIDENCE_FETCH_FAILED', message: 'Failed to fetch evidence', details: error instanceof Error ? error.message : 'Unknown error' } });
+        }
+    });
+    // GET /api/graph/relationship/:relationshipId/sites - List auxiliary site nodes
+    app.get("/graph/relationship/:relationshipId/sites", {
+        schema: {
+            params: {
+                type: "object",
+                properties: { relationshipId: { type: "string" } },
+                required: ["relationshipId"],
+            },
+            querystring: {
+                type: "object",
+                properties: { limit: { type: "number" } },
+            },
+        },
+    }, async (request, reply) => {
+        try {
+            const { relationshipId } = request.params;
+            const { limit } = request.query || {};
+            if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
+                return reply.status(400).send({ success: false, error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" } });
+            }
+            const rel = await kgService.getRelationshipById(relationshipId);
+            if (!rel)
+                return reply.status(404).send({ success: false, error: { code: 'RELATIONSHIP_NOT_FOUND', message: 'Relationship not found' } });
+            const sites = await kgService.getEdgeSites(relationshipId, Math.max(1, Math.min(Number(limit) || 50, 500)));
+            reply.send({ success: true, data: sites });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'SITES_FETCH_FAILED', message: 'Failed to fetch sites', details: error instanceof Error ? error.message : 'Unknown error' } });
+        }
+    });
+    // GET /api/graph/relationship/:relationshipId/candidates - List auxiliary candidate nodes
+    app.get("/graph/relationship/:relationshipId/candidates", {
+        schema: {
+            params: {
+                type: "object",
+                properties: { relationshipId: { type: "string" } },
+                required: ["relationshipId"],
+            },
+            querystring: {
+                type: "object",
+                properties: { limit: { type: "number" } },
+            },
+        },
+    }, async (request, reply) => {
+        try {
+            const { relationshipId } = request.params;
+            const { limit } = request.query || {};
+            if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
+                return reply.status(400).send({ success: false, error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" } });
+            }
+            const rel = await kgService.getRelationshipById(relationshipId);
+            if (!rel)
+                return reply.status(404).send({ success: false, error: { code: 'RELATIONSHIP_NOT_FOUND', message: 'Relationship not found' } });
+            const candidates = await kgService.getEdgeCandidates(relationshipId, Math.max(1, Math.min(Number(limit) || 50, 500)));
+            reply.send({ success: true, data: candidates });
+        }
+        catch (error) {
+            reply.status(500).send({ success: false, error: { code: 'CANDIDATES_FETCH_FAILED', message: 'Failed to fetch candidates', details: error instanceof Error ? error.message : 'Unknown error' } });
+        }
+    });
     // GET /api/graph/relationship/:relationshipId/full - Relationship with resolved endpoints
     app.get("/graph/relationship/:relationshipId/full", {
         schema: {

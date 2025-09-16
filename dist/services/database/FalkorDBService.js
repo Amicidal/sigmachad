@@ -286,10 +286,9 @@ export class FalkorDBService {
             return `[${elements.join(", ")}]`;
         }
         if (typeof value === "object") {
-            // Serialize objects to JSON for property storage
-            const json = JSON.stringify(value);
-            const escaped = json.replace(/'/g, "\\'");
-            return `'${escaped}'`;
+            // Represent plain objects as Cypher map literals for property updates (SET n += $props)
+            // Values inside the map are handled (quoted/escaped) by objectToCypherProperties
+            return this.objectToCypherProperties(value);
         }
         // For other types, convert to string and quote
         return `'${String(value)}'`;

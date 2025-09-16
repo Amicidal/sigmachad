@@ -378,7 +378,7 @@ describe('Graph Routes', () => {
       // Seed relationships (note: underlying store de-dupes by id)
       await mockKgService.createRelationship(createMockRelationship({ id: 'rel-1', fromEntityId: 'entity-1', toEntityId: 'entity-2', type: 'CALLS' as any }));
       await mockKgService.createRelationship(createMockRelationship({ id: 'rel-1', fromEntityId: 'entity-1', toEntityId: 'entity-2', type: 'CALLS' as any })); // duplicate id
-      await mockKgService.createRelationship(createMockRelationship({ id: 'rel-2', fromEntityId: 'entity-1', toEntityId: 'entity-3', type: 'USES' as any }));
+      await mockKgService.createRelationship(createMockRelationship({ id: 'rel-2', fromEntityId: 'entity-1', toEntityId: 'entity-3', type: 'TYPE_USES' as any }));
 
       mockRequest.body = {
         query: 'entity-1',
@@ -412,7 +412,7 @@ describe('Graph Routes', () => {
       await mockKgService.createEntity(createMockFunctionSymbol({ id: 'caller-1', name: 'caller1', path: 'svc.ts:caller1' }) as any);
       await mockKgService.createEntity(createMockFunctionSymbol({ id: 'caller-2', name: 'caller2', path: 'ctl.ts:caller2' }) as any);
       await mockKgService.createRelationship(createMockRelationship({ id: 'r1', fromEntityId: 'caller-1', toEntityId: 'func-123', type: 'CALLS' as any }));
-      await mockKgService.createRelationship(createMockRelationship({ id: 'r2', fromEntityId: 'caller-2', toEntityId: 'func-123', type: 'USES' as any }));
+      await mockKgService.createRelationship(createMockRelationship({ id: 'r2', fromEntityId: 'caller-2', toEntityId: 'func-123', type: 'TYPE_USES' as any }));
 
       mockRequest.params = { entityId: 'func-123' };
 
@@ -557,12 +557,12 @@ describe('Graph Routes', () => {
           {
             entity: createMockEntity({ id: 'util-1', type: 'function' }),
             relationship: 'CALLS',
-            strength: 0.9
+            confidence: 0.9
           },
           {
             entity: createMockEntity({ id: 'config-1', type: 'class' }),
-            relationship: 'USES',
-            strength: 0.7
+            relationship: 'TYPE_USES',
+            confidence: 0.7
           }
         ],
         indirectDependencies: [
@@ -576,7 +576,7 @@ describe('Graph Routes', () => {
         reverseDependencies: [
           {
             entity: createMockEntity({ id: 'controller-1', type: 'class' }),
-            relationship: 'USES',
+            relationship: 'TYPE_USES',
             impact: 'high'
           }
         ],
@@ -630,7 +630,7 @@ describe('Graph Routes', () => {
           {
             entity: createMockEntity({ id: 'dep-1' }),
             relationship: 'CALLS',
-            strength: 0.8
+            confidence: 0.8
           }
         ],
         indirectDependencies: [],
@@ -690,12 +690,12 @@ describe('Graph Routes', () => {
         directDependencies: Array.from({ length: 5 }, (_, i) => ({
           entity: createMockEntity({ id: `direct-${i}` }),
           relationship: 'CALLS',
-          strength: 0.5 + (i * 0.1)
+          confidence: 0.5 + (i * 0.1)
         })),
         indirectDependencies: Array.from({ length: 3 }, (_, i) => ({
           entity: createMockEntity({ id: `indirect-${i}` }),
           path: Array.from({ length: i + 2 }, (_, j) => createMockEntity({ id: `path-${i}-${j}` })),
-          relationship: 'USES',
+          relationship: 'TYPE_USES',
           distance: i + 2
         })),
         reverseDependencies: Array.from({ length: 4 }, (_, i) => ({
@@ -735,7 +735,7 @@ describe('Graph Routes', () => {
           },
           {
             entity: createMockEntity({ id: 'medium-impact' }),
-            relationship: 'USES',
+            relationship: 'TYPE_USES',
             impact: 'medium'
           },
           {
@@ -974,7 +974,7 @@ describe('Graph Routes', () => {
         }),
         createMockRelationship({
           id: 'rel-2',
-          type: 'USES',
+          type: 'TYPE_USES',
           fromEntityId: 'class-1',
           toEntityId: 'util-1'
         })
@@ -1041,7 +1041,7 @@ describe('Graph Routes', () => {
       const mockRelationships = Array.from({ length: 10 }, (_, i) =>
         createMockRelationship({
           id: `rel-${i}`,
-          type: ['CALLS', 'USES', 'IMPORTS', 'EXTENDS'][i % 4],
+          type: ['CALLS', 'TYPE_USES', 'IMPORTS', 'EXTENDS'][i % 4],
           fromEntityId: `entity-${i}`,
           toEntityId: `target-${i}`
         })
@@ -1361,12 +1361,12 @@ describe('Graph Routes', () => {
           {
             entity: createMockEntity({ id: 'validator', type: 'function' }),
             relationship: 'CALLS',
-            strength: 0.85
+            confidence: 0.85
           },
           {
             entity: createMockEntity({ id: 'transformer', type: 'function' }),
-            relationship: 'USES',
-            strength: 0.75
+            relationship: 'TYPE_USES',
+            confidence: 0.75
           }
         ],
         indirectDependencies: [

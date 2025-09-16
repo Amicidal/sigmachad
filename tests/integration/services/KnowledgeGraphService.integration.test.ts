@@ -616,7 +616,7 @@ describe("KnowledgeGraphService Integration", () => {
           id: "dep-rel-2",
           fromEntityId: dependencyEntities[1].id,
           toEntityId: dependencyEntities[2].id,
-          type: RelationshipType.USES,
+          type: RelationshipType.TYPE_USES,
           created: new Date(),
           lastModified: new Date(),
           version: 1,

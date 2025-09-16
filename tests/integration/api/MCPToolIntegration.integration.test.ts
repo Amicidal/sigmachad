@@ -589,7 +589,7 @@ describe("MCP Tool Integration", () => {
       await kgService.createRelationship({
         fromEntityId: "usage-example-1",
         toEntityId: "utility-function",
-        type: RelationshipType.USES,
+        type: RelationshipType.TYPE_USES,
         confidence: 1.0,
         created: new Date(),
         lastModified: new Date(),
@@ -603,7 +603,7 @@ describe("MCP Tool Integration", () => {
       await kgService.createRelationship({
         fromEntityId: "usage-example-2",
         toEntityId: "utility-function",
-        type: RelationshipType.USES,
+        type: RelationshipType.TYPE_USES,
         confidence: 1.0,
         created: new Date(),
         lastModified: new Date(),

@@ -412,8 +412,8 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
                 filters?: {
                     tags?: string[] | undefined;
-                    checkpointId?: string | undefined;
                     path?: string | undefined;
+                    checkpointId?: string | undefined;
                     language?: string | undefined;
                     lastModified?: {
                         since?: Date | undefined;
@@ -429,8 +429,8 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
                 filters?: {
                     tags?: string[] | undefined;
-                    checkpointId?: string | undefined;
                     path?: string | undefined;
+                    checkpointId?: string | undefined;
                     language?: string | undefined;
                     lastModified?: {
                         since?: Date | undefined;

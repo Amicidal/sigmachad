@@ -202,7 +202,7 @@ export class RealisticKnowledgeGraphMock extends EventEmitter {
 
   async getEntityDependencies(entityId: string): Promise<{
     entityId: string;
-    directDependencies: Array<{ entity: any; relationship: string; strength: number }>;
+    directDependencies: Array<{ entity: any; relationship: string; confidence: number }>;
     indirectDependencies: Array<{ entity: any; path: any[]; relationship: string; distance: number }>;
     reverseDependencies: Array<{ entity: any; relationship: string; impact: 'high' | 'medium' | 'low' }>;
     circularDependencies: Array<{ cycle: any[]; severity: 'critical' | 'warning' | 'info' }>;
@@ -211,7 +211,7 @@ export class RealisticKnowledgeGraphMock extends EventEmitter {
     const reverse = await this.getRelationships({ toEntityId: entityId });
     return {
       entityId,
-      directDependencies: direct.map((r) => ({ entity: null, relationship: r.type, strength: 1 })),
+      directDependencies: direct.map((r) => ({ entity: null, relationship: r.type, confidence: 1 })),
       indirectDependencies: [],
       reverseDependencies: reverse.map((r) => ({ entity: null, relationship: r.type, impact: 'medium' })),
       circularDependencies: [],

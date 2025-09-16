@@ -415,7 +415,7 @@ describe('KnowledgeGraphService', () => {
           {
             r: [
               ['id', 'rel2'],
-              ['type', RelationshipType.USES],
+              ['type', RelationshipType.TYPE_USES],
               ['created', new Date().toISOString()],
               ['lastModified', new Date().toISOString()],
               ['version', 1],
@@ -518,7 +518,7 @@ describe('KnowledgeGraphService', () => {
         mockDb.falkordbQuery.mockResolvedValue([]);
 
         const query = {
-          type: [RelationshipType.CALLS, RelationshipType.USES, RelationshipType.REFERENCES],
+          type: [RelationshipType.CALLS, RelationshipType.TYPE_USES, RelationshipType.REFERENCES],
         };
 
         await knowledgeGraphService.getRelationships(query);
@@ -526,7 +526,7 @@ describe('KnowledgeGraphService', () => {
         const queryCall = mockDb.falkordbQuery.mock.calls[0];
         // The actual implementation uses named parameters, not pipe syntax
         expect(queryCall[1]).toHaveProperty('CALLS', RelationshipType.CALLS);
-        expect(queryCall[1]).toHaveProperty('USES', RelationshipType.USES);
+        expect(queryCall[1]).toHaveProperty('TYPE_USES', RelationshipType.TYPE_USES);
         expect(queryCall[1]).toHaveProperty('REFERENCES', RelationshipType.REFERENCES);
       });
 
@@ -825,7 +825,7 @@ describe('KnowledgeGraphService', () => {
         const query = {
           startEntityId: 'entity1',
           endEntityId: 'entity3',
-          relationshipTypes: [RelationshipType.CALLS, RelationshipType.USES],
+          relationshipTypes: [RelationshipType.CALLS, RelationshipType.TYPE_USES],
           maxDepth: 3,
         };
 
@@ -1374,7 +1374,7 @@ describe('KnowledgeGraphService', () => {
           {
             r: [
               ['id', 'rel2'],
-              ['type', RelationshipType.USES],
+              ['type', RelationshipType.TYPE_USES],
               ['created', new Date().toISOString()],
               ['metadata', '{}'],
             ],

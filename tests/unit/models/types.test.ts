@@ -1006,7 +1006,7 @@ describe('API Types and Interfaces', () => {
               sourceId: 'entity-1',
               targetId: 'entity-2',
               type: 'calls',
-              strength: 0.8,
+              confidence: 0.8,
               metadata: { line: 15 },
             },
           ],
@@ -1056,7 +1056,7 @@ describe('API Types and Interfaces', () => {
             {
               entity: mockEntity,
               relationship: 'imports',
-              strength: 0.9,
+              confidence: 0.9,
             },
           ],
           indirectDependencies: [
@@ -1096,7 +1096,7 @@ describe('API Types and Interfaces', () => {
           const dep = {
             entity: mockEntity,
             relationship,
-            strength: 0.8,
+            confidence: 0.8,
           };
 
           expect(dep.relationship).toBe(relationship);

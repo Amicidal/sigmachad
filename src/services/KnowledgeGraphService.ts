@@ -29,9 +29,10 @@ import {
   DependencyAnalysis,
   TimeRangeParams,
 } from "../models/types.js";
-import { GraphRelationship } from "../models/relationships.js";
 import { embeddingService } from "../utils/embedding.js";
+import { normalizeCodeEdge, canonicalRelationshipId, isCodeRelationship, mergeEdgeEvidence, mergeEdgeLocations } from "../utils/codeEdges.js";
 import { EventEmitter } from "events";
+import crypto from "crypto";
 
 // Simple cache interface for search results
 interface CacheEntry<T> {
@@ -115,6 +116,472 @@ export class KnowledgeGraphService extends EventEmitter {
     this.setMaxListeners(100); // Allow more listeners for WebSocket connections
     this.searchCache = new SimpleCache<Entity[]>(500, 300000); // Increased cache size to 500 results for 5 minutes
     this.entityCache = new SimpleCache<Entity>(1000, 600000); // Cache individual entities for 10 minutes
+    // Best-effort: initialize helpful indices (guarded)
+    try { this.ensureIndices().catch(() => {}); } catch {}
+  }
+
+  // --- Phase 2: Dual-write auxiliary nodes for evidence, sites, candidates, and dataflow ---
+  private async dualWriteAuxiliaryForEdge(rIn: GraphRelationship): Promise<void> {
+    const enable = String(process.env.EDGE_AUX_DUAL_WRITE || 'true').toLowerCase() !== 'false';
+    if (!enable) return;
+    const any: any = rIn as any;
+    const edgeId = any.id as string;
+    const nowISO = new Date().toISOString();
+
+    // Upsert evidence nodes
+    try {
+      const ev: any[] = Array.isArray(any.evidence) ? any.evidence : (Array.isArray(any.metadata?.evidence) ? any.metadata.evidence : []);
+      if (Array.isArray(ev) && ev.length > 0) {
+        for (const e of ev.slice(0, 50)) {
+          const k = JSON.stringify({ edgeId, s: e.source || '', p: e.location?.path || '', l: e.location?.line || 0, c: e.location?.column || 0 });
+          const eid = 'evid_' + crypto.createHash('sha1').update(k).digest('hex').slice(0, 20);
+          const props = {
+            id: eid,
+            edgeId,
+            source: e.source || null,
+            confidence: typeof e.confidence === 'number' ? e.confidence : null,
+            path: e.location?.path || null,
+            line: typeof e.location?.line === 'number' ? e.location.line : null,
+            column: typeof e.location?.column === 'number' ? e.location.column : null,
+            note: e.note || null,
+            extractorVersion: e.extractorVersion || null,
+            createdAt: nowISO,
+            updatedAt: nowISO,
+          } as any;
+          await this.db.falkordbQuery(
+            `MERGE (n:edge_evidence { id: $id })
+             ON CREATE SET n.createdAt = $createdAt
+             SET n.edgeId = $edgeId, n.source = $source, n.confidence = $confidence,
+                 n.path = $path, n.line = $line, n.column = $column, n.note = $note, n.extractorVersion = $extractorVersion,
+                 n.updatedAt = $updatedAt`, props
+          );
+        }
+      }
+    } catch {}
+
+    // Upsert site node
+    try {
+      const siteHash = any.siteHash as string | undefined;
+      if (siteHash) {
+        await this.db.falkordbQuery(
+          `MERGE (s:edge_site { id: $id })
+           SET s.edgeId = $edgeId,
+               s.siteId = $siteId,
+               s.path = $path,
+               s.line = $line,
+               s.column = $column,
+               s.accessPath = $accessPath,
+               s.updatedAt = $now`,
+          {
+            id: siteHash,
+            edgeId,
+            siteId: any.siteId || null,
+            path: any.location?.path || any.metadata?.path || null,
+            line: typeof any.location?.line === 'number' ? any.location.line : (typeof any.metadata?.line === 'number' ? any.metadata.line : null),
+            column: typeof any.location?.column === 'number' ? any.location.column : (typeof any.metadata?.column === 'number' ? any.metadata.column : null),
+            accessPath: any.accessPath || any.metadata?.accessPath || null,
+            now: nowISO,
+          }
+        );
+      }
+    } catch {}
+
+    // Upsert candidate nodes if present in metadata (from coordinator resolution)
+    try {
+      const cands: any[] = Array.isArray(any.metadata?.candidates) ? any.metadata.candidates : [];
+      if (Array.isArray(cands) && cands.length > 0) {
+        let rank = 0;
+        for (const c of cands.slice(0, 20)) {
+          rank++;
+          const cidBase = `${edgeId}|${c.id || c.name || ''}|${rank}`;
+          const cid = 'cand_' + crypto.createHash('sha1').update(cidBase).digest('hex').slice(0, 20);
+          await this.db.falkordbQuery(
+            `MERGE (n:edge_candidate { id: $id })
+             ON CREATE SET n.createdAt = $now
+             SET n.edgeId = $edgeId, n.candidateId = $candId, n.name = $name, n.path = $path,
+                 n.resolver = $resolver, n.score = $score, n.rank = $rank, n.updatedAt = $now`,
+            {
+              id: cid,
+              edgeId,
+              candId: c.id || null,
+              name: c.name || null,
+              path: c.path || null,
+              resolver: c.resolver || null,
+              score: typeof c.score === 'number' ? c.score : null,
+              rank,
+              now: nowISO,
+            }
+          );
+          // Optional: link to candidate entity if exists (guarded)
+          try {
+            if (c.id) {
+              await this.db.falkordbQuery(
+                `MATCH (cand:edge_candidate {id: $cid}), (e {id: $eid})
+                 MERGE (cand)-[:CANDIDATE_ENTITY]->(e)`,
+                { cid, eid: c.id }
+              );
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    // Phase 3: Dataflow nodes for READS/WRITES (optional)
+    try {
+      const dfEnable = String(process.env.EDGE_DATAFLOW_NODES || 'true').toLowerCase() !== 'false';
+      if (dfEnable && (rIn.type === (RelationshipType as any).READS || rIn.type === (RelationshipType as any).WRITES)) {
+        const dfId = any.dataFlowId as string | undefined;
+        if (dfId) {
+          const fromId = rIn.fromEntityId;
+          const toId = rIn.toEntityId;
+          await this.db.falkordbQuery(
+            `MERGE (df:dataflow { id: $id })
+             ON CREATE SET df.createdAt = $now
+             SET df.var = $var, df.file = $file, df.updatedAt = $now
+             WITH df
+             MATCH (a {id: $fromId})
+             MERGE (a)-[:HAS_DATAFLOW]->(df)
+             WITH df
+             MATCH (b {id: $toId})
+             MERGE (df)-[:DATAFLOW_TO]->(b)`,
+            {
+              id: dfId,
+              var: any.to_ref_symbol || null,
+              file: any.to_ref_file || null,
+              now: nowISO,
+              fromId,
+              toId,
+            }
+          );
+        }
+      }
+    } catch {}
+  }
+
+  /**
+   * Phase 3: Compute and store lightweight materialized edge stats for an entity.
+   */
+  async computeAndStoreEdgeStats(entityId: string): Promise<void> {
+    try {
+      const byType = await this.db.falkordbQuery(
+        `MATCH (a {id: $id})-[r]->()
+         RETURN type(r) as t, count(r) as c`, { id: entityId }
+      );
+      const topSymbols = await this.db.falkordbQuery(
+        `MATCH (a {id: $id})-[r]->()
+         WHERE r.to_ref_symbol IS NOT NULL
+         RETURN r.to_ref_symbol as sym, count(*) as c
+         ORDER BY c DESC LIMIT 10`,
+        { id: entityId }
+      );
+      const payload = {
+        byType: (byType || []).map((row: any) => ({ type: row.t, count: row.c })),
+        topSymbols: (topSymbols || []).map((row: any) => ({ symbol: row.sym, count: row.c })),
+        updatedAt: new Date().toISOString(),
+      };
+      await this.db.falkordbQuery(
+        `MERGE (s:edge_stats { id: $sid })
+         SET s.entityId = $eid, s.payload = $payload, s.updatedAt = $now`,
+        { sid: `stats_${entityId}`, eid: entityId, payload: JSON.stringify(payload), now: new Date().toISOString() }
+      );
+    } catch {}
+  }
+
+  // --- Shared helpers (Phase 1: normalization/merge/unify) ---
+  private dedupeBy<T>(arr: T[], keyFn: (t: T) => string): T[] {
+    const seen = new Set<string>();
+    const out: T[] = [];
+    for (const x of arr) {
+      const k = keyFn(x);
+      if (!seen.has(k)) { seen.add(k); out.push(x); }
+    }
+    return out;
+  }
+
+  private mergeEvidenceArrays(oldArr: any[], newArr: any[], limit = 20): any[] {
+    try { return mergeEdgeEvidence(oldArr as any[], newArr as any[], limit) as any[]; } catch { return (oldArr || []).slice(0, limit); }
+  }
+
+  private mergeLocationsArrays(oldArr: any[], newArr: any[], limit = 20): any[] {
+    try { return mergeEdgeLocations(oldArr as any[], newArr as any[], limit) as any[]; } catch { return (oldArr || []).slice(0, limit); }
+  }
+
+  // Best-effort: when a resolved edge is created, merge and retire placeholder edges (file:/external:/kind:)
+  private async unifyResolvedEdgePlaceholders(rel: GraphRelationship): Promise<void> {
+    try {
+      // Only unify for code-like edges and resolved targets
+      const any: any = rel as any;
+      const toKind = any.to_ref_kind as string | undefined;
+      const toId = String(rel.toEntityId || '');
+      const isResolved = (toKind === 'entity') || toId.startsWith('sym:');
+      if (!isResolved) return;
+
+      // Derive file/symbol/name for matching placeholders
+      let file: string | undefined;
+      let symbol: string | undefined;
+      let name: string | undefined;
+      try {
+        if (typeof any.to_ref_file === 'string' && typeof any.to_ref_symbol === 'string') {
+          file = any.to_ref_file; symbol = any.to_ref_symbol; name = any.to_ref_name || any.to_ref_symbol;
+        } else if (toId.startsWith('sym:')) {
+          const m = toId.match(/^sym:(.+?)#(.+?)(?:@.+)?$/);
+          if (m) { file = m[1]; symbol = m[2]; name = symbol; }
+        }
+      } catch {}
+      if (!file || !symbol) return;
+
+      const type = rel.type;
+      const fromId = rel.fromEntityId;
+      const nowISO = new Date().toISOString();
+
+      // Fetch candidate placeholder edges to merge: same from/type and matching file+symbol
+      const q = `
+        MATCH (a {id: $fromId})-[r:${type}]->(b)
+        WHERE r.id <> $newId AND coalesce(r.active, true) = true
+          AND r.to_ref_file = $file AND r.to_ref_symbol = $symbol
+        RETURN r`;
+      const rows = await this.db.falkordbQuery(q, { fromId, newId: rel.id, file, symbol });
+      const placeholdersFile: any[] = (rows || []).map((row: any) => this.parseRelationshipFromGraph(row));
+
+      // Optional: also unify 'external:<name>' placeholders by symbol name (best-effort, name-only)
+      let placeholdersExternal: any[] = [];
+      try {
+        const qext = `
+          MATCH (a {id: $fromId})-[r:${type}]->(b)
+          WHERE r.id <> $newId AND coalesce(r.active, true) = true
+            AND r.to_ref_kind = 'external' AND r.to_ref_name = $symbol
+          RETURN r`;
+        const rowsExt = await this.db.falkordbQuery(qext, { fromId, newId: rel.id, symbol });
+        placeholdersExternal = (rowsExt || []).map((row: any) => this.parseRelationshipFromGraph(row));
+      } catch {}
+      const placeholders: any[] = ([] as any[]).concat(placeholdersFile, placeholdersExternal);
+      if (placeholders.length === 0) return;
+
+      // Aggregate properties to fold into the resolved edge
+      let occTotalAdd = 0;
+      let occScanAdd = 0;
+      let confMax = -Infinity;
+      let firstSeenMin: string | null = null;
+      let lastSeenMax: string | null = null;
+      let evAgg: any[] = [];
+      let locAgg: any[] = [];
+      let sitesAgg: string[] = [];
+      for (const p of placeholders) {
+        const anyp: any = p as any;
+        occTotalAdd += (typeof anyp.occurrencesTotal === 'number' ? anyp.occurrencesTotal : 0);
+        occScanAdd += (typeof anyp.occurrencesScan === 'number' ? anyp.occurrencesScan : 0);
+        if (typeof anyp.confidence === 'number') confMax = Math.max(confMax, anyp.confidence);
+        const fs = (anyp.firstSeenAt instanceof Date ? anyp.firstSeenAt.toISOString() : (typeof anyp.firstSeenAt === 'string' ? anyp.firstSeenAt : null));
+        const ls = (anyp.lastSeenAt instanceof Date ? anyp.lastSeenAt.toISOString() : (typeof anyp.lastSeenAt === 'string' ? anyp.lastSeenAt : null));
+        if (fs) firstSeenMin = !firstSeenMin || fs < firstSeenMin ? fs : firstSeenMin;
+        if (ls) lastSeenMax = !lastSeenMax || ls > lastSeenMax ? ls : lastSeenMax;
+        if (Array.isArray(anyp.evidence)) evAgg = this.mergeEvidenceArrays(evAgg, anyp.evidence);
+        if (Array.isArray(anyp.locations)) locAgg = this.mergeLocationsArrays(locAgg, anyp.locations);
+        if (Array.isArray(anyp.sites)) sitesAgg = Array.from(new Set(sitesAgg.concat(anyp.sites))).slice(0, 50);
+      }
+
+      // Update resolved edge with aggregates
+      const update = `
+        MATCH (a {id: $fromId})-[r:${type} {id: $newId}]->(b)
+        SET r.occurrencesTotal = coalesce(r.occurrencesTotal,0) + $occTotalAdd,
+            r.occurrencesScan = coalesce(r.occurrencesScan,0) + $occScanAdd,
+            r.confidence = CASE WHEN $confMax IS NULL THEN r.confidence ELSE GREATEST(coalesce(r.confidence,0), $confMax) END,
+            r.firstSeenAt = CASE WHEN $firstSeenMin IS NULL THEN r.firstSeenAt ELSE coalesce(r.firstSeenAt, $firstSeenMin) END,
+            r.lastSeenAt = CASE WHEN $lastSeenMax IS NULL THEN r.lastSeenAt ELSE GREATEST(coalesce(r.lastSeenAt, $lastSeenMax), $lastSeenMax) END,
+            r.evidence = CASE WHEN $evidence IS NULL THEN r.evidence ELSE $evidence END,
+            r.locations = CASE WHEN $locations IS NULL THEN r.locations ELSE $locations END,
+            r.sites = CASE WHEN $sites IS NULL THEN r.sites ELSE $sites END
+      `;
+      await this.db.falkordbQuery(update, {
+        fromId,
+        newId: rel.id,
+        occTotalAdd,
+        occScanAdd,
+        confMax: Number.isFinite(confMax) ? confMax : null,
+        firstSeenMin,
+        lastSeenMax,
+        evidence: evAgg.length > 0 ? JSON.stringify(evAgg).slice(0, 200000) : null,
+        locations: locAgg.length > 0 ? JSON.stringify(locAgg).slice(0, 200000) : null,
+        sites: sitesAgg.length > 0 ? JSON.stringify(sitesAgg).slice(0, 200000) : null,
+      });
+
+      // Retire placeholder edges (deactivate and close validity)
+      const oldIds = placeholders.map((p: any) => p.id).filter(Boolean);
+      if (oldIds.length > 0) {
+        const retire = `
+          UNWIND $ids AS rid
+          MATCH ()-[r {id: rid}]-()
+          SET r.active = false,
+              r.validTo = coalesce(r.validTo, $now)
+        `;
+        await this.db.falkordbQuery(retire, { ids: oldIds, now: nowISO });
+      }
+    } catch {
+      // best-effort; do not block
+    }
+  }
+
+  // --- Internal helpers for relationship normalization and ranking ---
+  private normalizeRelationship(relIn: GraphRelationship): GraphRelationship {
+    // Create a shallow copy we can mutate safely
+    const rel: any = { ...(relIn as any) };
+
+    // Ensure timestamps and version
+    if (!(rel.created instanceof Date)) rel.created = new Date(rel.created || Date.now());
+    if (!(rel.lastModified instanceof Date)) rel.lastModified = new Date(rel.lastModified || Date.now());
+    if (typeof rel.version !== "number") rel.version = 1;
+
+    this.harmonizeRefFields(rel);
+
+    // Delegate code-edge normalization to shared normalizer to avoid drift
+    if (isCodeRelationship(rel.type)) {
+      Object.assign(rel, normalizeCodeEdge(rel));
+      this.harmonizeRefFields(rel);
+    }
+
+    // Generate a human-readable why if missing
+    if (!rel.why) {
+      const src = rel.source as string | undefined;
+      const res = rel.resolution as string | undefined;
+      const scope = rel.scope as string | undefined;
+      const hints: string[] = [];
+      if (src === 'type-checker' || res === 'type-checker') hints.push('resolved by type checker');
+      else if (res === 'via-import') hints.push('via import deep resolution');
+      else if (res === 'direct') hints.push('direct AST resolution');
+      else if (src === 'heuristic' || res === 'heuristic') hints.push('heuristic match');
+      if (scope) hints.push(`scope=${scope}`);
+      if (hints.length > 0) rel.why = hints.join('; ');
+    }
+
+    return rel as GraphRelationship;
+  }
+
+  private harmonizeRefFields(rel: any): void {
+    const sync = (dir: 'to' | 'from') => {
+      const baseIdKey = dir === 'to' ? 'toEntityId' : 'fromEntityId';
+      const refKey = dir === 'to' ? 'toRef' : 'fromRef';
+      const scalarPrefix = dir === 'to' ? 'to_ref_' : 'from_ref_';
+      const mdKey = dir === 'to' ? 'toRef' : 'fromRef';
+
+      const baseId = typeof rel[baseIdKey] === 'string' ? rel[baseIdKey] as string : undefined;
+      const existingRef = rel[refKey] && typeof rel[refKey] === 'object' ? { ...rel[refKey] } : {};
+      const scalars = {
+        kind: typeof rel[`${scalarPrefix}kind`] === 'string' ? rel[`${scalarPrefix}kind`] as string : undefined,
+        file: typeof rel[`${scalarPrefix}file`] === 'string' ? rel[`${scalarPrefix}file`] as string : undefined,
+        symbol: typeof rel[`${scalarPrefix}symbol`] === 'string' ? rel[`${scalarPrefix}symbol`] as string : undefined,
+        name: typeof rel[`${scalarPrefix}name`] === 'string' ? rel[`${scalarPrefix}name`] as string : undefined,
+      };
+
+      const ref: any = existingRef;
+      if (!ref.id && baseId) ref.id = baseId;
+      if (!ref.kind && scalars.kind) ref.kind = scalars.kind;
+      if (!ref.kind && typeof ref.id === 'string') ref.kind = this.inferRefKindFromId(ref.id);
+      if (!ref.kind) ref.kind = 'entity';
+
+      const idForParse = typeof ref.id === 'string' ? ref.id : baseId;
+
+      if (ref.kind === 'fileSymbol') {
+        const parsed = this.parseFileSymbolFromId(idForParse);
+        if (!ref.file && scalars.file) ref.file = scalars.file;
+        if (!ref.file && parsed.file) ref.file = parsed.file;
+        if (!ref.symbol && scalars.symbol) ref.symbol = scalars.symbol;
+        if (!ref.symbol && parsed.symbol) ref.symbol = parsed.symbol;
+        if (!ref.name && scalars.name) ref.name = scalars.name;
+        if (!ref.name && parsed.name) ref.name = parsed.name;
+        if (!ref.name && ref.symbol) ref.name = ref.symbol;
+      } else if (ref.kind === 'external') {
+        if (!ref.name) {
+          ref.name = scalars.name || (idForParse ? idForParse.replace(/^external:/, '') : undefined);
+        }
+      } else {
+        if (!ref.name) {
+          ref.name = scalars.name || (idForParse && idForParse.includes(':') ? idForParse.split(':').pop() : idForParse);
+        }
+      }
+
+      rel[refKey] = ref;
+
+      // Update scalar mirrors to reflect canonical ref
+      const kindKey = `${scalarPrefix}kind`;
+      const fileKey = `${scalarPrefix}file`;
+      const symbolKey = `${scalarPrefix}symbol`;
+      const nameKey = `${scalarPrefix}name`;
+
+      rel[kindKey] = ref.kind;
+      if (ref.kind === 'fileSymbol') {
+        rel[fileKey] = ref.file;
+        rel[symbolKey] = ref.symbol;
+        rel[nameKey] = ref.name;
+      } else {
+        delete rel[fileKey];
+        delete rel[symbolKey];
+        rel[nameKey] = ref.name;
+      }
+
+      // Ensure metadata mirrors the structured reference for persistence/audit
+      if (ref && typeof ref === 'object') {
+        const md: any = (rel.metadata = { ...(rel.metadata || {}) });
+        if (md[mdKey] == null) {
+          md[mdKey] = ref;
+        }
+      }
+    };
+
+    sync('to');
+    sync('from');
+  }
+
+  private inferRefKindFromId(id?: string): 'entity' | 'fileSymbol' | 'external' {
+    if (!id) return 'entity';
+    if (id.startsWith('external:')) return 'external';
+    if (id.startsWith('sym:') || id.startsWith('file:')) return 'fileSymbol';
+    return 'entity';
+  }
+
+  private parseFileSymbolFromId(id?: string): { file?: string; symbol?: string; name?: string } {
+    if (!id) return {};
+    const symMatch = id.match(/^sym:(.+?)#(.+?)(?:@.+)?$/);
+    if (symMatch) {
+      const file = symMatch[1];
+      const symbol = symMatch[2];
+      return { file, symbol, name: symbol };
+    }
+    const fileMatch = id.match(/^file:(.+?):(.+)$/);
+    if (fileMatch) {
+      const file = fileMatch[1];
+      const symbol = fileMatch[2];
+      return { file, symbol, name: symbol };
+    }
+    const importMatch = id.match(/^import:(.+?):(.+)$/);
+    if (importMatch) {
+      const file = importMatch[1];
+      const symbol = importMatch[2];
+      return { file, symbol, name: symbol };
+    }
+    return {};
+  }
+
+  private canonicalRelationshipId(fromId: string, toId: string, type: RelationshipType): string {
+    // Build a temporary relationship shell to compute canonical key
+    const rel = { fromEntityId: fromId, toEntityId: toId, type } as GraphRelationship;
+    return canonicalRelationshipId(fromId, rel);
+  }
+
+  private directoryDistance(fromFile: string, candidatePath: string): number {
+    // Compare directory prefixes; smaller distance means closer
+    const norm = (s: string) => String(s || '').replace(/\\/g, '/');
+    const from = norm(fromFile);
+    const cand = norm(candidatePath);
+    const fromDir = from.includes('/') ? from.slice(0, from.lastIndexOf('/')) : '';
+    const candFile = cand.includes(':') ? cand.slice(0, cand.lastIndexOf(':')) : cand; // symbol path has ":name"
+    const candDir = candFile.includes('/') ? candFile.slice(0, candFile.lastIndexOf('/')) : '';
+    if (!fromDir || !candDir) return 9999;
+    const fromParts = fromDir.split('/');
+    const candParts = candDir.split('/');
+    let i = 0;
+    while (i < fromParts.length && i < candParts.length && fromParts[i] === candParts[i]) i++;
+    // distance = remaining hops
+    return (fromParts.length - i) + (candParts.length - i);
   }
 
   private isHistoryEnabled(): boolean {
@@ -534,7 +1001,7 @@ export class KnowledgeGraphService extends EventEmitter {
     if (mode === 'full') {
       // Neighbor fanout
       if (sampleId) {
-        await time('neighbors.depth3', async () => await this.db.falkordbQuery(`MATCH (s {id: $id})-[:DEPENDS_ON*1..3]-(n) RETURN count(n) AS c`, { id: sampleId }));
+        await time('neighbors.depth3', async () => await this.db.falkordbQuery(`MATCH (s {id: $id})-[:DEPENDS_ON|TYPE_USES*1..3]-(n) RETURN count(n) AS c`, { id: sampleId }));
       }
     }
 
@@ -564,6 +1031,20 @@ export class KnowledgeGraphService extends EventEmitter {
     await run("CREATE INDEX rel_valid_from IF NOT EXISTS FOR ()-[r]-() ON (r.validFrom)");
     await run("CREATE INDEX rel_valid_to IF NOT EXISTS FOR ()-[r]-() ON (r.validTo)");
     await run("CREATE INDEX rel_id IF NOT EXISTS FOR ()-[r]-() ON (r.id)");
+    await run("CREATE INDEX rel_confidence IF NOT EXISTS FOR ()-[r]-() ON (r.confidence)");
+    await run("CREATE INDEX rel_kind IF NOT EXISTS FOR ()-[r]-() ON (r.kind)");
+    await run("CREATE INDEX rel_source IF NOT EXISTS FOR ()-[r]-() ON (r.source)");
+    await run("CREATE INDEX rel_firstSeen IF NOT EXISTS FOR ()-[r]-() ON (r.firstSeenAt)");
+    await run("CREATE INDEX rel_lastSeen IF NOT EXISTS FOR ()-[r]-() ON (r.lastSeenAt)");
+    await run("CREATE INDEX rel_siteHash IF NOT EXISTS FOR ()-[r]-() ON (r.siteHash)");
+    await run("CREATE INDEX rel_active IF NOT EXISTS FOR ()-[r]-() ON (r.active)");
+    await run("CREATE INDEX rel_occ_total IF NOT EXISTS FOR ()-[r]-() ON (r.occurrencesTotal)");
+    await run("CREATE INDEX rel_to_ref_kind IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_kind)");
+    await run("CREATE INDEX rel_to_ref_file IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_file)");
+    await run("CREATE INDEX rel_to_ref_symbol IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_symbol)");
+    await run("CREATE INDEX rel_from_ref_kind IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_kind)");
+    await run("CREATE INDEX rel_from_ref_file IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_file)");
+    await run("CREATE INDEX rel_from_ref_symbol IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_symbol)");
     // Fallback to legacy style
     await run("CREATE INDEX ON :file(path)");
     await run("CREATE INDEX ON :symbol(path)");
@@ -1326,9 +1807,9 @@ export class KnowledgeGraphService extends EventEmitter {
         );
       }
 
-      const deterministicId = `rel_${relationship}_${toEntityId}_${type}`;
+      // Temporary id; will be canonicalized below using final from/to/type
       relationshipObj = ({
-        id: deterministicId,
+        id: `rel_${relationship}_${toEntityId}_${type}`,
         fromEntityId: relationship,
         toEntityId: toEntityId,
         type: type,
@@ -1339,9 +1820,7 @@ export class KnowledgeGraphService extends EventEmitter {
     } else {
       // New signature: createRelationship(relationshipObject)
       const rel = { ...(relationship as any) } as any;
-      if (!rel.id) {
-        rel.id = `rel_${rel.fromEntityId}_${rel.toEntityId}_${rel.type}`;
-      }
+      // id will be canonicalized below; accept incoming for now
       if (!rel.created) rel.created = new Date();
       if (!rel.lastModified) rel.lastModified = new Date();
       if (typeof rel.version !== "number") rel.version = 1;
@@ -1380,50 +1859,63 @@ export class KnowledgeGraphService extends EventEmitter {
       }
     }
 
-    // Gate low-confidence inferred relationships
+    // Normalize via shared normalizer; apply simple gating using noiseConfig
     try {
-      const md = (relationshipObj as any).metadata || {};
-      const inferred = !!md.inferred;
-      let confidence = typeof md.confidence === 'number' ? md.confidence : undefined;
-      if (inferred && typeof confidence !== 'number') {
-        // Assign default confidence per relationship type when missing
-        const defaults: Partial<Record<RelationshipType, number>> = {
-          [RelationshipType.CALLS]: 0.8,
-          [RelationshipType.REFERENCES]: 0.5,
-          [RelationshipType.DEPENDS_ON]: 0.6,
-          [RelationshipType.IMPLEMENTS_SPEC]: 0.6,
-          [RelationshipType.REQUIRES]: 0.5,
-          [RelationshipType.IMPACTS]: 0.5,
-          [RelationshipType.OVERRIDES]: 0.8,
-          [RelationshipType.READS]: 0.6,
-          [RelationshipType.WRITES]: 0.7,
-          [RelationshipType.THROWS]: 0.7,
-          [RelationshipType.RETURNS_TYPE]: 0.9,
-          [RelationshipType.PARAM_TYPE]: 0.9,
-        };
-        confidence = defaults[relationshipObj.type as RelationshipType] ?? 0.5;
-        (relationshipObj as any).metadata = { ...md, confidence };
-      }
-      if (inferred && typeof confidence === 'number' && confidence < noiseConfig.MIN_INFERRED_CONFIDENCE) {
-        // Skip persisting low-confidence inferred edges
+      relationshipObj = this.normalizeRelationship(relationshipObj);
+      const top = relationshipObj as any;
+      // Gate low-confidence inferred relationships if below threshold
+      if (top.inferred && typeof top.confidence === 'number' && top.confidence < noiseConfig.MIN_INFERRED_CONFIDENCE) {
         return;
+      }
+      // Default confidence to 1.0 when explicitly resolved
+      if (top.resolved && typeof top.confidence !== 'number') {
+        top.confidence = 1.0;
+      }
+      // Initialize first/last seen timestamps
+      if (top.firstSeenAt == null) top.firstSeenAt = top.created || new Date();
+      if (top.lastSeenAt == null) top.lastSeenAt = top.lastModified || new Date();
+      // Set validity interval defaults for temporal consistency
+      if (this.isHistoryEnabled()) {
+        if (top.validFrom == null) top.validFrom = top.firstSeenAt;
+        if (top.active == null) top.active = true;
+      }
+    } catch {}
+
+    // Best-effort: backfill to_ref_* scalars for resolved targets using the entity's path/name
+    try {
+      const anyRel: any = relationshipObj as any;
+      const looksCode = isCodeRelationship(relationshipObj.type as any);
+      const missingFileSym = !(typeof anyRel.to_ref_file === 'string' && typeof anyRel.to_ref_symbol === 'string');
+      if (looksCode && missingFileSym) {
+        const toEnt = await this.getEntity(relationshipObj.toEntityId);
+        if (toEnt && this.hasCodebaseProperties(toEnt)) {
+          const p = (toEnt as any).path as string | undefined;
+          const name = (toEnt as any).name as string | undefined;
+          if (p && name) {
+            const fileRel = p.includes(':') ? p.split(':')[0] : p;
+            anyRel.to_ref_kind = 'fileSymbol';
+            anyRel.to_ref_file = fileRel;
+            anyRel.to_ref_symbol = name;
+            anyRel.to_ref_name = anyRel.to_ref_name || name;
+            if (!anyRel.toRef) anyRel.toRef = { kind: 'fileSymbol', file: fileRel, symbol: name, name };
+          }
+        }
       }
     } catch {}
 
     // Merge evidence with any existing relationship instance
-    let occurrences: number | undefined;
     let confidence: number | undefined;
     let inferred: boolean | undefined;
     let resolved: boolean | undefined;
     let source: string | undefined;
-    let strength: number | undefined;
     let context: string | undefined;
+    let mergedEvidence: any[] | undefined;
+    let mergedLocations: Array<{ path?: string; line?: number; column?: number }> | undefined;
 
     // Prefer explicit top-level fields, then metadata
     const mdIn = (relationshipObj as any).metadata || {};
     const topIn: any = relationshipObj as any;
     const incoming = {
-      occurrences: typeof topIn.occurrences === 'number' ? topIn.occurrences : (typeof mdIn.occurrences === 'number' ? mdIn.occurrences : undefined),
       confidence: typeof topIn.confidence === 'number' ? topIn.confidence : (typeof mdIn.confidence === 'number' ? mdIn.confidence : undefined),
       inferred: typeof topIn.inferred === 'boolean' ? topIn.inferred : (typeof mdIn.inferred === 'boolean' ? mdIn.inferred : undefined),
       resolved: typeof topIn.resolved === 'boolean' ? topIn.resolved : (typeof mdIn.resolved === 'boolean' ? mdIn.resolved : undefined),
@@ -1450,33 +1942,58 @@ export class KnowledgeGraphService extends EventEmitter {
           }
         }
         const mdOld = typeof props.metadata === 'string' ? (() => { try { return JSON.parse(props.metadata); } catch { return {}; } })() : (props.metadata || {});
-        // Merge with incoming: choose max for occurrences and confidence; preserve earlier context if not provided
-        const oldOcc = typeof props.occurrences === 'number' ? props.occurrences : (typeof mdOld.occurrences === 'number' ? mdOld.occurrences : undefined);
+        // Merge with incoming: choose max for confidence; preserve earlier context if not provided
         const oldConf = typeof props.confidence === 'number' ? props.confidence : (typeof mdOld.confidence === 'number' ? mdOld.confidence : undefined);
         const oldCtx = typeof props.context === 'string' ? props.context : undefined;
-        occurrences = Math.max(oldOcc || 0, incoming.occurrences || 0);
         confidence = Math.max(oldConf || 0, incoming.confidence || 0);
         inferred = incoming.inferred ?? (typeof mdOld.inferred === 'boolean' ? mdOld.inferred : undefined);
         resolved = incoming.resolved ?? (typeof mdOld.resolved === 'boolean' ? mdOld.resolved : undefined);
         source = incoming.source ?? (typeof mdOld.source === 'string' ? mdOld.source : undefined);
         context = incoming.context || oldCtx;
+        // Merge first/last seen
+        try {
+          const oldFirst = (props.firstSeenAt && typeof props.firstSeenAt === 'string') ? new Date(props.firstSeenAt) : null;
+          const oldLast = (props.lastSeenAt && typeof props.lastSeenAt === 'string') ? new Date(props.lastSeenAt) : null;
+          const inFirst = (relationshipObj as any).firstSeenAt instanceof Date ? (relationshipObj as any).firstSeenAt : null;
+          const inLast = (relationshipObj as any).lastSeenAt instanceof Date ? (relationshipObj as any).lastSeenAt : null;
+          (relationshipObj as any).firstSeenAt = oldFirst && inFirst ? (oldFirst < inFirst ? oldFirst : inFirst) : (oldFirst || inFirst || new Date());
+          (relationshipObj as any).lastSeenAt = oldLast && inLast ? (oldLast > inLast ? oldLast : inLast) : (oldLast || inLast || new Date());
+        } catch {}
+
+        // Merge evidence arrays and locations arrays (preserve up to 20 entries, prefer earliest lines)
+        try {
+          const mdInTop: any = (relationshipObj as any);
+          const mdIn: any = (relationshipObj as any).metadata || {};
+          const evOld = Array.isArray(mdOld.evidence) ? mdOld.evidence : [];
+          const evNew = Array.isArray(mdInTop.evidence) ? mdInTop.evidence : (Array.isArray(mdIn.evidence) ? mdIn.evidence : []);
+          const locOld = Array.isArray(mdOld.locations) ? mdOld.locations : [];
+          const locNew = Array.isArray(mdInTop.locations) ? mdInTop.locations : (Array.isArray(mdIn.locations) ? mdIn.locations : []);
+          const dedupeBy = (arr: any[], keyFn: (x: any) => string) => {
+            const seen = new Set<string>();
+            const out: any[] = [];
+            for (const it of arr) {
+              const k = keyFn(it);
+              if (!seen.has(k)) { seen.add(k); out.push(it); }
+            }
+            return out;
+          };
+          mergedEvidence = mergeEdgeEvidence(evOld, evNew, 20);
+          const locMergedRaw = [...locOld, ...locNew];
+          mergedLocations = mergeEdgeLocations(locMergedRaw, [], 20);
+        } catch {}
       }
     } catch {
       // Non-fatal; fall back to incoming only
     }
 
     // Defaults if not set from existing
-    occurrences = occurrences ?? incoming.occurrences;
     confidence = confidence ?? incoming.confidence;
     inferred = inferred ?? incoming.inferred;
     resolved = resolved ?? incoming.resolved;
     source = source ?? incoming.source;
     context = context ?? incoming.context;
-    if (typeof confidence === 'number') {
-      strength = Math.max(0, Math.min(1, confidence));
-    }
 
-    // Also merge location info in metadata: keep earliest line if both present
+    // Also merge location info in metadata: keep earliest line if both present; attach merged evidence/locations
     try {
       const md = { ...(relationshipObj.metadata || {}) } as any;
       const hasLineIn = typeof md.line === 'number';
@@ -1484,8 +2001,21 @@ export class KnowledgeGraphService extends EventEmitter {
       if (hasLineIn && typeof md._existingEarliestLine === 'number') {
         md.line = Math.min(md.line, md._existingEarliestLine);
       }
+      // Ensure evidence and locations arrays are carried over from top-level (AST) and merged with existing when available
+      const topAll: any = relationshipObj as any;
+      const evIn = Array.isArray(topAll.evidence) ? topAll.evidence : (Array.isArray(md.evidence) ? md.evidence : []);
+      const locIn = Array.isArray(topAll.locations) ? topAll.locations : (Array.isArray(md.locations) ? md.locations : []);
+      if (mergedEvidence || evIn.length > 0) {
+        md.evidence = mergedEvidence || evIn;
+      }
+      if (mergedLocations || locIn.length > 0) {
+        md.locations = mergedLocations || locIn;
+      }
       relationshipObj.metadata = md;
     } catch {}
+
+    // Canonicalize relationship id using canonical target key for stability
+    (relationshipObj as any).id = canonicalRelationshipId(relationshipObj.fromEntityId, relationshipObj);
 
     const query = `
       MATCH (a {id: $fromId}), (b {id: $toId})
@@ -1493,15 +2023,78 @@ export class KnowledgeGraphService extends EventEmitter {
       ON CREATE SET r.created = $created, r.version = $version
       SET r.lastModified = $lastModified,
           r.metadata = $metadata,
-          r.occurrences = $occurrences,
+          r.occurrencesScan = $occurrencesScan,
+          r.occurrencesTotal = coalesce(r.occurrencesTotal, 0) + coalesce($occurrencesScan, 0),
           r.confidence = $confidence,
           r.inferred = $inferred,
           r.resolved = $resolved,
           r.source = $source,
-          r.strength = $strength,
-          r.context = $context
+          r.context = $context,
+          r.kind = $kind,
+          r.resolution = $resolution,
+          r.scope = $scope,
+          r.arity = $arity,
+          r.awaited = $awaited,
+          r.operator = $operator,
+          r.importDepth = $importDepth,
+          r.usedTypeChecker = $usedTypeChecker,
+          r.isExported = $isExported,
+          r.accessPath = $accessPath,
+          r.callee = $callee,
+          r.paramName = $paramName,
+          r.importAlias = $importAlias,
+          r.receiverType = $receiverType,
+          r.dynamicDispatch = $dynamicDispatch,
+          r.overloadIndex = $overloadIndex,
+          r.genericArguments = $genericArguments,
+          r.location_path = $loc_path,
+          r.location_line = $loc_line,
+          r.location_col = $loc_col,
+          r.evidence = $evidence,
+          r.locations = $locations,
+          r.siteId = $siteId,
+          r.siteHash = $siteHash,
+          r.sites = $sites,
+          r.why = $why,
+          r.to_ref_kind = $to_ref_kind,
+          r.to_ref_file = $to_ref_file,
+          r.to_ref_symbol = $to_ref_symbol,
+          r.to_ref_name = $to_ref_name,
+          r.from_ref_kind = $from_ref_kind,
+          r.from_ref_file = $from_ref_file,
+          r.from_ref_symbol = $from_ref_symbol,
+          r.from_ref_name = $from_ref_name,
+          r.ambiguous = $ambiguous,
+          r.candidateCount = $candidateCount,
+          r.isMethod = $isMethod,
+          r.active = true,
+          r.firstSeenAt = coalesce(r.firstSeenAt, $firstSeenAt),
+          r.lastSeenAt = $lastSeenAt,
+          r.validFrom = coalesce(r.validFrom, $firstSeenAt)
     `;
 
+    const mdAll: any = (relationshipObj as any).metadata || {};
+    // Persist structured refs for auditability
+    try {
+      const topAllAny: any = relationshipObj as any;
+      if (topAllAny.fromRef && mdAll.fromRef == null) mdAll.fromRef = topAllAny.fromRef;
+      if (topAllAny.toRef && mdAll.toRef == null) mdAll.toRef = topAllAny.toRef;
+    } catch {}
+    const topAll: any = relationshipObj as any;
+    const evidenceArr = Array.isArray(topAll.evidence)
+      ? topAll.evidence
+      : (Array.isArray(mdAll.evidence) ? mdAll.evidence : []);
+    const locationsArr = Array.isArray(topAll.locations)
+      ? topAll.locations
+      : (Array.isArray(mdAll.locations) ? mdAll.locations : []);
+    const locPathEff = (topAll.location && topAll.location.path) || mdAll.path || null;
+    const locLineEff = (topAll.location && typeof topAll.location.line === 'number' ? topAll.location.line : (typeof mdAll.line === 'number' ? mdAll.line : null));
+    const locColEff = (topAll.location && typeof topAll.location.column === 'number' ? topAll.location.column : (typeof mdAll.column === 'number' ? mdAll.column : null));
+    const siteIdEff = (typeof (topAll.siteId || mdAll.siteId) === 'string')
+      ? (topAll.siteId || mdAll.siteId)
+      : (locPathEff && (typeof locLineEff === 'number')
+          ? ('site_' + crypto.createHash('sha1').update(`${locPathEff}|${locLineEff}|${locColEff ?? ''}|${topAll.accessPath || mdAll.accessPath || ''}`).digest('hex').slice(0, 12))
+          : null);
     const result = await this.db.falkordbQuery(query, {
       fromId: relationshipObj.fromEntityId,
       toId: relationshipObj.toEntityId,
@@ -1510,14 +2103,58 @@ export class KnowledgeGraphService extends EventEmitter {
       lastModified: relationshipObj.lastModified.toISOString(),
       version: relationshipObj.version,
       metadata: JSON.stringify(relationshipObj.metadata || {}),
-      occurrences: typeof occurrences === 'number' ? occurrences : null,
+      occurrencesScan: (typeof topAll.occurrencesScan === 'number' ? topAll.occurrencesScan : null),
       confidence: typeof confidence === 'number' ? confidence : null,
       inferred: typeof inferred === 'boolean' ? inferred : null,
       resolved: typeof resolved === 'boolean' ? resolved : null,
       source: typeof source === 'string' ? source : null,
-      strength: typeof strength === 'number' ? strength : null,
       context: typeof context === 'string' ? context : null,
+      kind: typeof topAll.kind === 'string' ? topAll.kind : (typeof mdAll.kind === 'string' ? mdAll.kind : null),
+      resolution: typeof topAll.resolution === 'string' ? topAll.resolution : (typeof mdAll.resolution === 'string' ? mdAll.resolution : null),
+      scope: typeof topAll.scope === 'string' ? topAll.scope : (typeof mdAll.scope === 'string' ? mdAll.scope : null),
+      arity: typeof topAll.arity === 'number' ? topAll.arity : (typeof mdAll.arity === 'number' ? mdAll.arity : null),
+      awaited: typeof topAll.awaited === 'boolean' ? topAll.awaited : (typeof mdAll.awaited === 'boolean' ? mdAll.awaited : null),
+      operator: typeof topAll.operator === 'string' ? topAll.operator : (typeof mdAll.operator === 'string' ? mdAll.operator : null),
+      importDepth: typeof topAll.importDepth === 'number' ? topAll.importDepth : (typeof mdAll.importDepth === 'number' ? mdAll.importDepth : null),
+      usedTypeChecker: typeof topAll.usedTypeChecker === 'boolean' ? topAll.usedTypeChecker : (typeof mdAll.usedTypeChecker === 'boolean' ? mdAll.usedTypeChecker : null),
+      isExported: typeof topAll.isExported === 'boolean' ? topAll.isExported : (typeof mdAll.isExported === 'boolean' ? mdAll.isExported : null),
+      accessPath: typeof topAll.accessPath === 'string' ? topAll.accessPath : (typeof mdAll.accessPath === 'string' ? mdAll.accessPath : null),
+      callee: typeof topAll.callee === 'string' ? topAll.callee : (typeof mdAll.callee === 'string' ? mdAll.callee : null),
+      paramName: typeof topAll.paramName === 'string' ? topAll.paramName : (typeof mdAll.param === 'string' ? mdAll.param : null),
+      importAlias: typeof topAll.importAlias === 'string' ? topAll.importAlias : (typeof mdAll.importAlias === 'string' ? mdAll.importAlias : null),
+      receiverType: typeof topAll.receiverType === 'string' ? topAll.receiverType : (typeof mdAll.receiverType === 'string' ? mdAll.receiverType : null),
+      dynamicDispatch: typeof topAll.dynamicDispatch === 'boolean' ? topAll.dynamicDispatch : (typeof mdAll.dynamicDispatch === 'boolean' ? mdAll.dynamicDispatch : null),
+      overloadIndex: typeof topAll.overloadIndex === 'number' ? topAll.overloadIndex : (typeof mdAll.overloadIndex === 'number' ? mdAll.overloadIndex : null),
+      genericArguments: JSON.stringify(Array.isArray(topAll.genericArguments) ? topAll.genericArguments : (Array.isArray(mdAll.genericArguments) ? mdAll.genericArguments : [])).slice(0, 200000),
+      loc_path: (topAll.location && topAll.location.path) || mdAll.path || null,
+      loc_line: (topAll.location && typeof topAll.location.line === 'number' ? topAll.location.line : (typeof mdAll.line === 'number' ? mdAll.line : null)),
+      loc_col: (topAll.location && typeof topAll.location.column === 'number' ? topAll.location.column : (typeof mdAll.column === 'number' ? mdAll.column : null)),
+      evidence: JSON.stringify(evidenceArr).slice(0, 200000),
+      locations: JSON.stringify(locationsArr).slice(0, 200000),
+      siteId: siteIdEff,
+      siteHash: typeof topAll.siteHash === 'string' ? topAll.siteHash : null,
+      sites: JSON.stringify(Array.isArray(topAll.sites) ? topAll.sites : (Array.isArray(mdAll.sites) ? mdAll.sites : [])).slice(0, 200000),
+      why: typeof (topAll.why || mdAll.why) === 'string' ? (topAll.why || mdAll.why) : null,
+      to_ref_kind: typeof topAll.to_ref_kind === 'string' ? topAll.to_ref_kind : null,
+      to_ref_file: typeof topAll.to_ref_file === 'string' ? topAll.to_ref_file : null,
+      to_ref_symbol: typeof topAll.to_ref_symbol === 'string' ? topAll.to_ref_symbol : null,
+      to_ref_name: typeof topAll.to_ref_name === 'string' ? topAll.to_ref_name : null,
+      from_ref_kind: typeof (topAll as any).from_ref_kind === 'string' ? (topAll as any).from_ref_kind : null,
+      from_ref_file: typeof (topAll as any).from_ref_file === 'string' ? (topAll as any).from_ref_file : null,
+      from_ref_symbol: typeof (topAll as any).from_ref_symbol === 'string' ? (topAll as any).from_ref_symbol : null,
+      from_ref_name: typeof (topAll as any).from_ref_name === 'string' ? (topAll as any).from_ref_name : null,
+      ambiguous: typeof topAll.ambiguous === 'boolean' ? topAll.ambiguous : (typeof mdAll.ambiguous === 'boolean' ? mdAll.ambiguous : null),
+      candidateCount: typeof topAll.candidateCount === 'number' ? topAll.candidateCount : (typeof mdAll.candidateCount === 'number' ? mdAll.candidateCount : null),
+      isMethod: typeof topAll.isMethod === 'boolean' ? topAll.isMethod : null,
+      firstSeenAt: ((relationshipObj as any).firstSeenAt instanceof Date ? (relationshipObj as any).firstSeenAt : new Date()).toISOString(),
+      lastSeenAt: ((relationshipObj as any).lastSeenAt instanceof Date ? (relationshipObj as any).lastSeenAt : new Date()).toISOString(),
     });
+
+    // Phase 1: Unify resolved edge with any prior placeholders pointing to same symbol
+    try { await this.unifyResolvedEdgePlaceholders(relationshipObj); } catch {}
+
+    // Phase 2: Dual-write auxiliary evidence/site/candidate nodes (non-blocking)
+    try { await this.dualWriteAuxiliaryForEdge(relationshipObj); } catch {}
 
     // Emit event for real-time updates
     this.emit("relationshipCreated", {
@@ -1527,6 +2164,201 @@ export class KnowledgeGraphService extends EventEmitter {
       toEntityId: relationshipObj.toEntityId,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Mark code relationships as inactive if not seen since the provided cutoff.
+   * Optionally restrict by file path (to_ref_file) to limit scope after parsing a file.
+   */
+  async markInactiveEdgesNotSeenSince(cutoff: Date, opts?: { toRefFile?: string }): Promise<number> {
+    const cutoffISO = cutoff.toISOString();
+    const where: string[] = [
+      "r.lastSeenAt < $cutoff",
+      "r.active = true OR r.active IS NULL",
+      "r.kind IS NOT NULL OR r.source IS NOT NULL", // likely code edges
+    ];
+    if (opts?.toRefFile) where.push("r.to_ref_file = $toRefFile");
+    const query = `
+      MATCH ()-[r]->()
+      WHERE ${where.join(' AND ')}
+      SET r.active = false,
+          r.validTo = coalesce(r.validTo, $cutoff)
+      RETURN count(r) AS updated
+    `;
+    const rows = await this.db.falkordbQuery(query, { cutoff: cutoffISO, toRefFile: opts?.toRefFile || null });
+    return rows?.[0]?.updated || 0;
+  }
+
+  /**
+   * Best-effort index creation to accelerate common queries.
+   * Guarded to avoid failures on engines that do not support these syntaxes.
+   */
+  async ensureIndices(): Promise<void> {
+    try {
+      // Neo4j-style index creation (if supported)
+      await this.db.falkordbQuery(`CREATE INDEX node_type IF NOT EXISTS FOR (n) ON (n.type)`, {});
+    } catch {}
+    try {
+      await this.db.falkordbQuery(`CREATE INDEX node_name IF NOT EXISTS FOR (n) ON (n.name)`, {});
+    } catch {}
+    try {
+      await this.db.falkordbQuery(`CREATE INDEX node_path IF NOT EXISTS FOR (n) ON (n.path)`, {});
+    } catch {}
+    // Relationship property indices may not be supported; attempt guarded
+    try {
+      await this.db.falkordbQuery(`CREATE INDEX rel_type IF NOT EXISTS FOR ()-[r]-() ON (type(r))`, {});
+    } catch {}
+    try {
+      await this.db.falkordbQuery(`CREATE INDEX rel_kind IF NOT EXISTS FOR ()-[r]-() ON (r.kind)`, {});
+    } catch {}
+    try {
+      await this.db.falkordbQuery(`CREATE INDEX rel_source IF NOT EXISTS FOR ()-[r]-() ON (r.source)`, {});
+    } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_confidence IF NOT EXISTS FOR ()-[r]-() ON (r.confidence)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_firstSeen IF NOT EXISTS FOR ()-[r]-() ON (r.firstSeenAt)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_lastSeen IF NOT EXISTS FOR ()-[r]-() ON (r.lastSeenAt)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_siteHash IF NOT EXISTS FOR ()-[r]-() ON (r.siteHash)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_active IF NOT EXISTS FOR ()-[r]-() ON (r.active)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_occ_total IF NOT EXISTS FOR ()-[r]-() ON (r.occurrencesTotal)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_to_ref_kind IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_kind)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_to_ref_file IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_file)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_to_ref_symbol IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_symbol)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_from_ref_kind IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_kind)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_from_ref_file IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_file)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_from_ref_symbol IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_symbol)`, {}); } catch {}
+    // Composite indices (guarded; may be unsupported depending on backend)
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_type_to_symbol IF NOT EXISTS FOR ()-[r]-() ON (type(r), r.to_ref_symbol)`, {}); } catch {}
+    try { await this.db.falkordbQuery(`CREATE INDEX rel_active_lastSeen IF NOT EXISTS FOR ()-[r]-() ON (r.active, r.lastSeenAt)`, {}); } catch {}
+  }
+
+  /**
+   * Upsert evidence and lightweight fields for existing relationships by id.
+   * Intended for incremental sync to keep occurrences, evidence, locations, and lastSeenAt updated.
+   */
+  async upsertEdgeEvidenceBulk(rels: Array<GraphRelationship & { toEntityId?: string }>): Promise<void> {
+    if (!Array.isArray(rels) || rels.length === 0) return;
+    const nowISO = new Date().toISOString();
+    for (const rIn of rels) {
+      try {
+        const normalized = this.normalizeRelationship(rIn as GraphRelationship);
+        const topIn: any = normalized as any;
+        const mdIn: any = topIn.metadata || {};
+        const rid = topIn.id || canonicalRelationshipId(topIn.fromEntityId, normalized);
+        // Fetch existing
+        let props: any = null;
+        try {
+          const rows = await this.db.falkordbQuery(`MATCH ()-[r]->() WHERE r.id = $id RETURN r LIMIT 1`, { id: rid });
+          if (rows && rows[0] && rows[0].r) {
+            const relData = rows[0].r;
+            props = {};
+            if (Array.isArray(relData)) {
+              for (const [k, v] of relData) {
+                if (k === 'properties' && Array.isArray(v)) {
+                  for (const [pk, pv] of v) props[pk] = pv;
+                } else if (k !== 'src_node' && k !== 'dest_node') {
+                  props[k] = v;
+                }
+              }
+            }
+          }
+        } catch {}
+        const incoming = {
+          occurrencesScan: (typeof topIn.occurrencesScan === 'number'
+            ? topIn.occurrencesScan
+            : (typeof mdIn.occurrencesScan === 'number' ? mdIn.occurrencesScan : 1)),
+          confidence: typeof topIn.confidence === 'number' ? topIn.confidence : (typeof mdIn.confidence === 'number' ? mdIn.confidence : undefined),
+          inferred: typeof topIn.inferred === 'boolean' ? topIn.inferred : (typeof mdIn.inferred === 'boolean' ? mdIn.inferred : undefined),
+          resolved: typeof topIn.resolved === 'boolean' ? topIn.resolved : (typeof mdIn.resolved === 'boolean' ? mdIn.resolved : undefined),
+          source: typeof topIn.source === 'string' ? topIn.source : (typeof mdIn.source === 'string' ? mdIn.source : undefined),
+          context: typeof topIn.context === 'string' ? topIn.context : undefined,
+        };
+
+        // Merge with existing
+        let occurrencesScan = incoming.occurrencesScan || 1;
+        let confidence = incoming.confidence;
+        let inferred = incoming.inferred;
+        let resolved = incoming.resolved;
+        let source = incoming.source;
+        let context = incoming.context;
+        let mergedEvidence: any[] | undefined;
+        let mergedLocations: Array<{ path?: string; line?: number; column?: number }> | undefined;
+        let firstSeenAtISO = nowISO;
+        let lastSeenAtISO = nowISO;
+
+        if (props) {
+          const mdOld = typeof props.metadata === 'string' ? (() => { try { return JSON.parse(props.metadata); } catch { return {}; } })() : (props.metadata || {});
+          const oldConf = typeof props.confidence === 'number' ? props.confidence : (typeof mdOld.confidence === 'number' ? mdOld.confidence : undefined);
+          const oldCtx = typeof props.context === 'string' ? props.context : undefined;
+          confidence = Math.max(oldConf || 0, confidence || 0);
+          inferred = inferred ?? (typeof mdOld.inferred === 'boolean' ? mdOld.inferred : undefined);
+          resolved = resolved ?? (typeof mdOld.resolved === 'boolean' ? mdOld.resolved : undefined);
+          source = source ?? (typeof mdOld.source === 'string' ? mdOld.source : undefined);
+          context = context || oldCtx;
+          // first/last seen
+          try {
+            const oldFirstISO = typeof props.firstSeenAt === 'string' ? props.firstSeenAt : null;
+            const oldLastISO = typeof props.lastSeenAt === 'string' ? props.lastSeenAt : null;
+            firstSeenAtISO = oldFirstISO ? (new Date(oldFirstISO) < new Date(nowISO) ? oldFirstISO : nowISO) : nowISO;
+            lastSeenAtISO = oldLastISO && new Date(oldLastISO) > new Date(nowISO) ? oldLastISO : nowISO;
+          } catch {}
+
+          // Merge evidence/locations
+          try {
+            const evOld = Array.isArray(mdOld.evidence) ? mdOld.evidence : [];
+            const evNew = Array.isArray((topIn as any).evidence) ? (topIn as any).evidence : (Array.isArray(mdIn.evidence) ? mdIn.evidence : []);
+            const locOld = Array.isArray(mdOld.locations) ? mdOld.locations : [];
+            const locNew = Array.isArray((topIn as any).locations) ? (topIn as any).locations : (Array.isArray(mdIn.locations) ? mdIn.locations : []);
+            const dedupeBy = (arr: any[], keyFn: (x: any) => string) => {
+              const seen = new Set<string>();
+              const out: any[] = [];
+              for (const it of arr) { const k = keyFn(it); if (!seen.has(k)) { seen.add(k); out.push(it); } }
+              return out;
+            };
+          mergedEvidence = mergeEdgeEvidence(evOld, evNew, 20);
+          const locMergedRaw = [...locOld, ...locNew];
+          mergedLocations = mergeEdgeLocations(locMergedRaw, [], 20);
+        } catch {}
+        }
+
+        // Update relationship row
+        const q = `
+          MATCH ()-[r { id: $id }]-()
+          SET r.lastModified = $now,
+              r.version = coalesce(r.version, 0) + 1,
+              r.occurrencesScan = coalesce(r.occurrencesScan, 0) + $occurrencesScan,
+              r.occurrencesTotal = coalesce(r.occurrencesTotal, 0) + $occurrencesScan,
+              r.confidence = $confidence,
+              r.inferred = $inferred,
+              r.resolved = $resolved,
+              r.source = $source,
+              r.context = COALESCE(r.context, $context),
+              r.evidence = $evidence,
+              r.locations = $locations,
+              r.firstSeenAt = COALESCE(r.firstSeenAt, $firstSeenAt),
+              r.lastSeenAt = $lastSeenAt
+        `;
+        const evidenceArr = Array.isArray(topIn.evidence) ? topIn.evidence : (Array.isArray(mdIn.evidence) ? mdIn.evidence : []);
+        const locationsArr = Array.isArray(topIn.locations) ? topIn.locations : (Array.isArray(mdIn.locations) ? mdIn.locations : []);
+        await this.db.falkordbQuery(q, {
+          id: rid,
+          now: nowISO,
+          occurrencesScan: typeof occurrencesScan === 'number' ? occurrencesScan : 1,
+          confidence: typeof confidence === 'number' ? confidence : null,
+          inferred: typeof inferred === 'boolean' ? inferred : null,
+          resolved: typeof resolved === 'boolean' ? resolved : null,
+          source: typeof source === 'string' ? source : null,
+          context: typeof context === 'string' ? context : null,
+          evidence: JSON.stringify(mergedEvidence || evidenceArr).slice(0, 200000),
+          locations: JSON.stringify(mergedLocations || locationsArr).slice(0, 200000),
+          firstSeenAt: firstSeenAtISO,
+          lastSeenAt: lastSeenAtISO,
+        });
+        // Phase 2: dual-write evidence/sites for updated edge
+        try { await this.dualWriteAuxiliaryForEdge({ ...topIn, id: rid } as any); } catch {}
+      } catch {
+        // continue on error for other items
+      }
+    }
   }
 
   async getRelationships(
@@ -1566,6 +2398,148 @@ export class KnowledgeGraphService extends EventEmitter {
       }
     }
 
+    // Extended filters for code edges
+    const qAny: any = query as any;
+    const applyEnumFilter = (value: any, column: string, key: string) => {
+      if (Array.isArray(value)) {
+        const filtered = value.filter((v) => typeof v === 'string');
+        if (filtered.length === 1) {
+          whereClause.push(`${column} = $${key}`);
+          params[key] = filtered[0];
+        } else if (filtered.length > 1) {
+          const listKey = `${key}List`;
+          whereClause.push(`${column} IN $${listKey}`);
+          params[listKey] = filtered;
+        }
+      } else if (typeof value === 'string') {
+        whereClause.push(`${column} = $${key}`);
+        params[key] = value;
+      }
+    };
+    applyEnumFilter(qAny.kind, 'r.kind', 'kind');
+    applyEnumFilter(qAny.source, 'r.source', 'source');
+    applyEnumFilter(qAny.resolution, 'r.resolution', 'resolution');
+    applyEnumFilter(qAny.scope, 'r.scope', 'scope');
+    if (typeof qAny.confidenceMin === 'number') {
+      whereClause.push("r.confidence >= $cmin");
+      params.cmin = qAny.confidenceMin;
+    }
+    if (typeof qAny.confidenceMax === 'number') {
+      whereClause.push("r.confidence <= $cmax");
+      params.cmax = qAny.confidenceMax;
+    }
+    if (typeof qAny.inferred === 'boolean') {
+      whereClause.push("r.inferred = $inferred");
+      params.inferred = qAny.inferred;
+    }
+    if (typeof qAny.resolved === 'boolean') {
+      whereClause.push("r.resolved = $resolved");
+      params.resolved = qAny.resolved;
+    }
+    if (typeof qAny.active === 'boolean') {
+      whereClause.push("r.active = $active");
+      params.active = qAny.active;
+    }
+    if (qAny.firstSeenSince instanceof Date) {
+      whereClause.push("r.firstSeenAt >= $fsince");
+      params.fsince = qAny.firstSeenSince.toISOString();
+    }
+    if (qAny.lastSeenSince instanceof Date) {
+      whereClause.push("r.lastSeenAt >= $lsince");
+      params.lsince = qAny.lastSeenSince.toISOString();
+    }
+    // Optional filters for additional code-edge attributes
+    if (typeof qAny.arityEq === 'number') {
+      whereClause.push('r.arity = $arityEq');
+      params.arityEq = qAny.arityEq;
+    }
+    if (typeof qAny.arityMin === 'number') {
+      whereClause.push('r.arity >= $arityMin');
+      params.arityMin = qAny.arityMin;
+    }
+    if (typeof qAny.arityMax === 'number') {
+      whereClause.push('r.arity <= $arityMax');
+      params.arityMax = qAny.arityMax;
+    }
+    if (typeof qAny.awaited === 'boolean') {
+      whereClause.push('r.awaited = $awaited');
+      params.awaited = qAny.awaited;
+    }
+    if (typeof qAny.isMethod === 'boolean') {
+      whereClause.push('r.isMethod = $isMethod');
+      params.isMethod = qAny.isMethod;
+    }
+    if (typeof qAny.operator === 'string') {
+      whereClause.push('r.operator = $operator');
+      params.operator = qAny.operator;
+    }
+    if (typeof qAny.callee === 'string') {
+      whereClause.push('r.callee = $callee');
+      params.callee = qAny.callee;
+    }
+    if (typeof qAny.importDepthMin === 'number') {
+      whereClause.push('r.importDepth >= $importDepthMin');
+      params.importDepthMin = qAny.importDepthMin;
+    }
+    if (typeof qAny.importDepthMax === 'number') {
+      whereClause.push('r.importDepth <= $importDepthMax');
+      params.importDepthMax = qAny.importDepthMax;
+    }
+    // Filters on promoted to_ref_* scalars and siteHash
+    if (typeof qAny.to_ref_kind === 'string') {
+      whereClause.push("r.to_ref_kind = $to_ref_kind");
+      params.to_ref_kind = qAny.to_ref_kind;
+    }
+    if (typeof qAny.to_ref_file === 'string') {
+      whereClause.push("r.to_ref_file = $to_ref_file");
+      params.to_ref_file = qAny.to_ref_file;
+    }
+    if (typeof qAny.to_ref_symbol === 'string') {
+      whereClause.push("r.to_ref_symbol = $to_ref_symbol");
+      params.to_ref_symbol = qAny.to_ref_symbol;
+    }
+    if (typeof qAny.to_ref_name === 'string') {
+      whereClause.push("r.to_ref_name = $to_ref_name");
+      params.to_ref_name = qAny.to_ref_name;
+    }
+    if (typeof qAny.siteHash === 'string') {
+      whereClause.push("r.siteHash = $siteHash");
+      params.siteHash = qAny.siteHash;
+    }
+
+    // Filters on promoted from_ref_* scalars
+    if (typeof (qAny as any).from_ref_kind === 'string') {
+      whereClause.push('r.from_ref_kind = $from_ref_kind');
+      (params as any).from_ref_kind = (qAny as any).from_ref_kind;
+    }
+    if (typeof (qAny as any).from_ref_file === 'string') {
+      whereClause.push('r.from_ref_file = $from_ref_file');
+      (params as any).from_ref_file = (qAny as any).from_ref_file;
+    }
+    if (typeof (qAny as any).from_ref_symbol === 'string') {
+      whereClause.push('r.from_ref_symbol = $from_ref_symbol');
+      (params as any).from_ref_symbol = (qAny as any).from_ref_symbol;
+    }
+    if (typeof (qAny as any).from_ref_name === 'string') {
+      whereClause.push('r.from_ref_name = $from_ref_name');
+      (params as any).from_ref_name = (qAny as any).from_ref_name;
+    }
+
+    // Default to active edges for code-edge-like queries
+    try {
+      const typeArr = Array.isArray(query.type) ? query.type : (query.type ? [query.type] : []);
+      const looksLikeCode = (
+        !!qAny.kind || !!qAny.source || typeof qAny.confidenceMin === 'number' || typeof qAny.confidenceMax === 'number' ||
+        typeof qAny.inferred === 'boolean' || typeof qAny.resolved === 'boolean' || typeof qAny.to_ref_kind === 'string' ||
+        typeof qAny.to_ref_file === 'string' || typeof qAny.to_ref_symbol === 'string' || typeof qAny.to_ref_name === 'string' ||
+        typeof (qAny as any).from_ref_kind === 'string' || typeof (qAny as any).from_ref_file === 'string' || typeof (qAny as any).from_ref_symbol === 'string' || typeof (qAny as any).from_ref_name === 'string' ||
+        typeof qAny.siteHash === 'string' || typeArr.some((t: any) => isCodeRelationship(t))
+      );
+      if (qAny.active == null && looksLikeCode) {
+        whereClause.push('coalesce(r.active, true) = true');
+      }
+    } catch {}
+
     const fullQuery = `
       ${matchClause}
       ${whereClause.length > 0 ? "WHERE " + whereClause.join(" AND ") : ""}
@@ -1579,6 +2553,54 @@ export class KnowledgeGraphService extends EventEmitter {
 
     const result = await this.db.falkordbQuery(fullQuery, params);
     return result.map((row: any) => this.parseRelationshipFromGraph(row));
+  }
+
+  /**
+   * Finalize a scan by deactivating code edges not observed during this scan window.
+   * Edges with lastSeenAt < scanStartedAt are set active=false. When history is enabled,
+   * also set validTo for those edges if not already closed.
+   */
+  async finalizeScan(scanStartedAt: Date): Promise<{ deactivated: number }> {
+    const cutoff = scanStartedAt.toISOString();
+    let deactivated = 0;
+    try {
+      const res = await this.db.falkordbQuery(
+        `MATCH ()-[r]-()
+         WHERE r.lastSeenAt < $cutoff AND coalesce(r.active, true) = true
+         WITH collect(r) AS rs
+         FOREACH (x IN rs | SET x.active = false)
+         RETURN size(rs) AS count`,
+        { cutoff }
+      );
+      deactivated = res?.[0]?.count || 0;
+    } catch {}
+
+    // Best-effort: proactively retire unresolved external placeholders that haven't been seen since cutoff
+    try {
+      const res2 = await this.db.falkordbQuery(
+        `MATCH ()-[r]-()
+         WHERE coalesce(r.active, true) = true AND r.to_ref_kind = 'external'
+           AND coalesce(r.lastSeenAt, r.created) < $cutoff
+         WITH collect(r) AS rs
+         FOREACH (x IN rs | SET x.active = false)
+         RETURN size(rs) AS count`,
+        { cutoff }
+      );
+      deactivated += res2?.[0]?.count || 0;
+    } catch {}
+
+    // If temporal history is enabled, set validTo for edges that transitioned inactive
+    try {
+      if (this.isHistoryEnabled()) {
+        await this.db.falkordbQuery(
+          `MATCH ()-[r]-()
+           WHERE r.lastSeenAt < $cutoff AND coalesce(r.active, false) = false AND r.validFrom IS NOT NULL AND r.validTo IS NULL
+           SET r.validTo = $cutoff`,
+          { cutoff }
+        );
+      }
+    } catch {}
+    return { deactivated };
   }
 
   async queryRelationships(
@@ -1619,9 +2641,11 @@ export class KnowledgeGraphService extends EventEmitter {
 
     const validate = options?.validate === true;
 
+    const normalizedRelationships = relationships.map((rel) => this.normalizeRelationship(rel));
+
     // Group by relationship type since Cypher relationship type is not parameterizable
     const byType = new Map<string, GraphRelationship[]>();
-    for (const r of relationships) {
+    for (const r of normalizedRelationships) {
       if (!r.type || !r.fromEntityId || !r.toEntityId) continue;
       const list = byType.get(r.type) || [];
       list.push(r);
@@ -1643,30 +2667,203 @@ export class KnowledgeGraphService extends EventEmitter {
         if (listEff.length === 0) continue;
       }
 
-      const rows = listEff.map((r) => ({
-        fromId: r.fromEntityId,
-        toId: r.toEntityId,
-        id: r.id || `rel_${r.fromEntityId}_${r.toEntityId}_${type}`,
-        created: (r.created instanceof Date ? r.created : new Date(r.created as any)).toISOString(),
-        lastModified: (r.lastModified instanceof Date ? r.lastModified : new Date(r.lastModified as any)).toISOString(),
-        version: r.version,
-        metadata: JSON.stringify(r.metadata || {}),
-        // Hoisted evidence fields for code edges (kept nullable for non-code types)
-        occurrences: (r as any).occurrences ?? null,
-        confidence: (r as any).confidence ?? null,
-        inferred: (r as any).inferred ?? null,
-        resolved: (r as any).resolved ?? null,
-        source: (r as any).source ?? null,
-        // Map confidence to strength if present (clamped 0..1)
-        strength: typeof (r as any).confidence === 'number'
-          ? Math.max(0, Math.min(1, (r as any).confidence as number))
-          : ((r as any).strength ?? null),
-        context: (r as any).context ?? null,
-        // Structured location if present
-        loc_path: (r as any).location?.path ?? null,
-        loc_line: (r as any).location?.line ?? null,
-        loc_col: (r as any).location?.column ?? null,
-      }));
+      // Best-effort: backfill to_ref_* scalars for resolved targets using the entity's path/name (bulk)
+      try {
+        const candidates: string[] = [];
+        for (const r of listEff) {
+          const anyR: any = r as any;
+          if (!isCodeRelationship(r.type as any)) continue;
+          const missing = !(typeof anyR.to_ref_file === 'string' && typeof anyR.to_ref_symbol === 'string');
+          if (missing && typeof r.toEntityId === 'string') candidates.push(r.toEntityId);
+        }
+        const uniq = Array.from(new Set(candidates));
+        if (uniq.length > 0) {
+          const rows = await this.db.falkordbQuery(
+            `UNWIND $ids AS id MATCH (n {id: id}) RETURN n.id as id, n.path as path, n.name as name`,
+            { ids: uniq }
+          );
+          const toMap = new Map<string, { fileRel?: string; name?: string }>();
+          for (const row of rows || []) {
+            const id = row.id as string;
+            const p = row.path as string | null;
+            const name = row.name as string | null;
+            if (id && p && name) {
+              const fileRel = p.includes(':') ? p.split(':')[0] : p;
+              toMap.set(id, { fileRel, name });
+            }
+          }
+          for (const r of listEff) {
+            const anyR: any = r as any;
+            if (!isCodeRelationship(r.type as any)) continue;
+            const missing = !(typeof anyR.to_ref_file === 'string' && typeof anyR.to_ref_symbol === 'string');
+            if (!missing) continue;
+            const hit = toMap.get(r.toEntityId);
+            if (hit && hit.fileRel && hit.name) {
+              anyR.to_ref_kind = 'fileSymbol';
+              anyR.to_ref_file = hit.fileRel;
+              anyR.to_ref_symbol = hit.name;
+              anyR.to_ref_name = anyR.to_ref_name || hit.name;
+              if (!anyR.toRef) anyR.toRef = { kind: 'fileSymbol', file: hit.fileRel, symbol: hit.name, name: hit.name };
+            }
+          }
+        }
+      } catch {}
+
+      // Map each relationship to a normalized row, then pre-dedupe by id merging counts/evidence
+      const rowsRaw = listEff.map((r) => {
+        const top: any = r as any;
+        const mdIn: any = top.metadata || {};
+        // Carry top-level evidence/locations into metadata for persistence
+        const evTop = Array.isArray(top.evidence) ? top.evidence : [];
+        const locTop = Array.isArray(top.locations) ? top.locations : [];
+        const md: any = { ...mdIn };
+        if (top.fromRef && md.fromRef == null) md.fromRef = top.fromRef;
+        if (top.toRef && md.toRef == null) md.toRef = top.toRef;
+        if (evTop.length > 0 || Array.isArray(md.evidence)) {
+          const evOld = Array.isArray(md.evidence) ? md.evidence : [];
+          md.evidence = [...evOld, ...evTop].slice(0, 20);
+        }
+        if (locTop.length > 0 || Array.isArray(md.locations)) {
+          const locOld = Array.isArray(md.locations) ? md.locations : [];
+          md.locations = [...locOld, ...locTop].slice(0, 20);
+        }
+        // Normalize/hoist fields similar to single create
+        const normalizeSource = (s?: string) => {
+          if (!s) return undefined;
+          if (s === 'call-typecheck') return 'type-checker';
+          if (s === 'ts' || s === 'checker' || s === 'tc') return 'type-checker';
+          if (s === 'ts-ast') return 'ast';
+          if (s === 'heuristic' || s === 'inferred') return 'heuristic';
+          return s as any;
+        };
+        let source = typeof top.source === 'string' ? top.source : (typeof md.source === 'string' ? md.source : undefined);
+        source = normalizeSource(source);
+        let confidence = typeof top.confidence === 'number' ? top.confidence : (typeof md.confidence === 'number' ? md.confidence : undefined);
+        const resolved = typeof top.resolved === 'boolean' ? top.resolved : (typeof md.resolved === 'boolean' ? md.resolved : false);
+        if (resolved && typeof confidence !== 'number') confidence = 1.0;
+        if (typeof confidence === 'number') {
+          confidence = Math.max(0, Math.min(1, confidence));
+        }
+        const occurrencesScan = (typeof top.occurrencesScan === 'number'
+          ? top.occurrencesScan
+          : (typeof md.occurrencesScan === 'number' ? md.occurrencesScan : undefined));
+        const context = (typeof top.context === 'string' ? top.context : (typeof md.path === 'string' && typeof md.line === 'number' ? `${md.path}:${md.line}` : undefined));
+        // evidence/locations/site sampling
+        const evidence = JSON.stringify(Array.isArray(top.evidence) ? top.evidence : (Array.isArray(md.evidence) ? md.evidence : [])).slice(0, 200000);
+        const locations = JSON.stringify(Array.isArray(top.locations) ? top.locations : (Array.isArray(md.locations) ? md.locations : [])).slice(0, 200000);
+        const siteId = typeof top.siteId === 'string' ? top.siteId : (typeof md.siteId === 'string' ? md.siteId : null);
+        const sites = JSON.stringify(Array.isArray(top.sites) ? top.sites : (Array.isArray(md.sites) ? md.sites : [])).slice(0, 200000);
+        const why = typeof top.why === 'string' ? top.why : (typeof md.why === 'string' ? md.why : null);
+        const createdISO = (r.created instanceof Date ? r.created : new Date(r.created as any)).toISOString();
+        const lastISO = (r.lastModified instanceof Date ? r.lastModified : new Date(r.lastModified as any)).toISOString();
+        // Canonical id by final from/to/type (fallback if not provided by upstream)
+        const id = top.id || canonicalRelationshipId(r.fromEntityId, { toEntityId: r.toEntityId, type } as any);
+        return {
+          fromId: r.fromEntityId,
+          toId: r.toEntityId,
+          id,
+          created: createdISO,
+          lastModified: lastISO,
+          version: r.version,
+          metadata: JSON.stringify(md),
+          // Note: above uses r.metadata; we instead want to persist our merged md
+          // (FalkorDB query below uses row.metadata directly)
+          occurrencesScan: occurrencesScan ?? null,
+          confidence: typeof confidence === 'number' ? confidence : null,
+          inferred: (typeof top.inferred === 'boolean' ? top.inferred : (typeof md.inferred === 'boolean' ? md.inferred : null)),
+          resolved: (typeof top.resolved === 'boolean' ? top.resolved : (typeof md.resolved === 'boolean' ? md.resolved : null)),
+          source: source ?? null,
+          context: context ?? null,
+          // Extra code-edge fields
+          kind: (typeof top.kind === 'string' ? top.kind : (typeof md.kind === 'string' ? md.kind : null)),
+          resolution: (typeof top.resolution === 'string' ? top.resolution : (typeof md.resolution === 'string' ? md.resolution : null)),
+          scope: (typeof top.scope === 'string' ? top.scope : (typeof md.scope === 'string' ? md.scope : null)),
+          arity: (typeof top.arity === 'number' ? top.arity : (typeof md.arity === 'number' ? md.arity : null)),
+          awaited: (typeof top.awaited === 'boolean' ? top.awaited : (typeof md.awaited === 'boolean' ? md.awaited : null)),
+          operator: (typeof top.operator === 'string' ? top.operator : (typeof md.operator === 'string' ? md.operator : null)),
+          importDepth: (typeof top.importDepth === 'number' ? top.importDepth : (typeof md.importDepth === 'number' ? md.importDepth : null)),
+          usedTypeChecker: (typeof top.usedTypeChecker === 'boolean' ? top.usedTypeChecker : (typeof md.usedTypeChecker === 'boolean' ? md.usedTypeChecker : null)),
+          isExported: (typeof top.isExported === 'boolean' ? top.isExported : (typeof md.isExported === 'boolean' ? md.isExported : null)),
+          accessPath: (typeof top.accessPath === 'string' ? top.accessPath : (typeof md.accessPath === 'string' ? md.accessPath : null)),
+          callee: (typeof top.callee === 'string' ? top.callee : (typeof md.callee === 'string' ? md.callee : null)),
+          paramName: (typeof top.paramName === 'string' ? top.paramName : (typeof md.param === 'string' ? md.param : null)),
+          importAlias: (typeof top.importAlias === 'string' ? top.importAlias : (typeof md.importAlias === 'string' ? md.importAlias : null)),
+          receiverType: (typeof top.receiverType === 'string' ? top.receiverType : (typeof md.receiverType === 'string' ? md.receiverType : null)),
+          dynamicDispatch: (typeof top.dynamicDispatch === 'boolean' ? top.dynamicDispatch : (typeof md.dynamicDispatch === 'boolean' ? md.dynamicDispatch : null)),
+          overloadIndex: (typeof top.overloadIndex === 'number' ? top.overloadIndex : (typeof md.overloadIndex === 'number' ? md.overloadIndex : null)),
+          genericArguments: JSON.stringify(Array.isArray(top.genericArguments) ? top.genericArguments : (Array.isArray(md.genericArguments) ? md.genericArguments : [])).slice(0, 200000),
+          siteHash: (typeof top.siteHash === 'string' ? top.siteHash : null),
+          to_ref_kind: (typeof top.to_ref_kind === 'string' ? top.to_ref_kind : null),
+          to_ref_file: (typeof top.to_ref_file === 'string' ? top.to_ref_file : null),
+          to_ref_symbol: (typeof top.to_ref_symbol === 'string' ? top.to_ref_symbol : null),
+          to_ref_name: (typeof top.to_ref_name === 'string' ? top.to_ref_name : null),
+          from_ref_kind: (typeof (top as any).from_ref_kind === 'string' ? (top as any).from_ref_kind : null),
+          from_ref_file: (typeof (top as any).from_ref_file === 'string' ? (top as any).from_ref_file : null),
+          from_ref_symbol: (typeof (top as any).from_ref_symbol === 'string' ? (top as any).from_ref_symbol : null),
+          from_ref_name: (typeof (top as any).from_ref_name === 'string' ? (top as any).from_ref_name : null),
+          ambiguous: (typeof top.ambiguous === 'boolean' ? top.ambiguous : (typeof md.ambiguous === 'boolean' ? md.ambiguous : null)),
+          candidateCount: (typeof top.candidateCount === 'number' ? top.candidateCount : (typeof md.candidateCount === 'number' ? md.candidateCount : null)),
+          isMethod: (typeof top.isMethod === 'boolean' ? top.isMethod : null),
+          firstSeenAt: createdISO,
+          lastSeenAt: lastISO,
+          loc_path: (top.location && top.location.path) ?? md.path ?? null,
+          loc_line: (top.location && typeof top.location.line === 'number' ? top.location.line : (typeof md.line === 'number' ? md.line : null)),
+          loc_col: (top.location && typeof top.location.column === 'number' ? top.location.column : (typeof md.column === 'number' ? md.column : null)),
+          evidence,
+          locations,
+          siteId,
+          sites,
+          why,
+        };
+      });
+
+      // Pre-dedupe rows by id: merge occurrencesScan (sum), and merge evidence/locations/sites/context conservatively
+      const mergeArrJson = (a: string | null, b: string | null, limit: number, keyFn?: (x: any) => string) => {
+        try {
+          const arrA: any[] = a ? JSON.parse(a) : [];
+          const arrB: any[] = b ? JSON.parse(b) : [];
+          const raw = [...arrA, ...arrB].filter(Boolean);
+          if (!keyFn) return JSON.stringify(raw.slice(0, limit));
+          const seen = new Set<string>();
+          const out: any[] = [];
+          for (const it of raw) {
+            const k = keyFn(it);
+            if (!seen.has(k)) { seen.add(k); out.push(it); }
+            if (out.length >= limit) break;
+          }
+          return JSON.stringify(out);
+        } catch { return a || b || null; }
+      };
+      const dedup = new Map<string, any>();
+      for (const row of rowsRaw) {
+        const prev = dedup.get(row.id);
+        if (!prev) { dedup.set(row.id, row); continue; }
+        // Merge counts
+        const occA = typeof prev.occurrencesScan === 'number' ? prev.occurrencesScan : 0;
+        const occB = typeof row.occurrencesScan === 'number' ? row.occurrencesScan : 0;
+        prev.occurrencesScan = occA + occB;
+        // Keep earliest created, latest lastModified
+        try {
+          if (new Date(row.created) < new Date(prev.created)) prev.created = row.created;
+        } catch {}
+        try {
+          if (new Date(row.lastModified) > new Date(prev.lastModified)) prev.lastModified = row.lastModified;
+        } catch {}
+        // Merge context (keep earliest line; prefer existing if set)
+        if (!prev.context && row.context) prev.context = row.context;
+        // Merge evidence/locations/sites with dedupe and bounds
+        prev.evidence = mergeArrJson(prev.evidence, row.evidence, 20, (e) => `${e.source || ''}|${e.location?.path || ''}|${e.location?.line || ''}|${e.location?.column || ''}`);
+        prev.locations = mergeArrJson(prev.locations, row.locations, 20, (l) => `${l.path || ''}|${l.line || ''}|${l.column || ''}`);
+        prev.sites = mergeArrJson(prev.sites, row.sites, 20, (s) => String(s));
+        // Preserve stronger confidence
+        if (typeof row.confidence === 'number') prev.confidence = Math.max(prev.confidence ?? 0, row.confidence);
+        // Combine candidate count
+        if (typeof row.candidateCount === 'number') {
+          const a = prev.candidateCount ?? 0; const b = row.candidateCount ?? 0;
+          prev.candidateCount = Math.max(a, b);
+        }
+      }
+      const rows = Array.from(dedup.values());
 
       const query = `
         UNWIND $rows AS row
@@ -1675,19 +2872,169 @@ export class KnowledgeGraphService extends EventEmitter {
         ON CREATE SET r.created = row.created, r.version = row.version, r.metadata = row.metadata
         SET r.lastModified = row.lastModified,
             r.metadata = row.metadata,
-            r.occurrences = row.occurrences,
+            r.occurrencesScan = row.occurrencesScan,
+            r.occurrencesTotal = coalesce(r.occurrencesTotal, 0) + coalesce(row.occurrencesScan, 0),
             r.confidence = row.confidence,
             r.inferred = row.inferred,
             r.resolved = row.resolved,
             r.source = row.source,
-            r.strength = row.strength,
             r.context = row.context,
+            r.kind = row.kind,
+            r.resolution = row.resolution,
+            r.scope = row.scope,
+            r.arity = row.arity,
+            r.awaited = row.awaited,
+            r.operator = row.operator,
+            r.importDepth = row.importDepth,
+            r.usedTypeChecker = row.usedTypeChecker,
+            r.isExported = row.isExported,
+            r.accessPath = row.accessPath,
+            r.callee = row.callee,
+            r.paramName = row.paramName,
+            r.importAlias = row.importAlias,
+            r.receiverType = row.receiverType,
+            r.dynamicDispatch = row.dynamicDispatch,
+            r.overloadIndex = row.overloadIndex,
+            r.genericArguments = row.genericArguments,
+            r.siteHash = row.siteHash,
             r.location_path = row.loc_path,
             r.location_line = row.loc_line,
-            r.location_col = row.loc_col
+            r.location_col = row.loc_col,
+            r.evidence = row.evidence,
+            r.locations = row.locations,
+            r.siteId = row.siteId,
+            r.sites = row.sites,
+            r.why = row.why,
+            r.to_ref_kind = row.to_ref_kind,
+            r.to_ref_file = row.to_ref_file,
+            r.to_ref_symbol = row.to_ref_symbol,
+            r.to_ref_name = row.to_ref_name,
+            r.from_ref_kind = row.from_ref_kind,
+            r.from_ref_file = row.from_ref_file,
+            r.from_ref_symbol = row.from_ref_symbol,
+            r.from_ref_name = row.from_ref_name,
+            r.ambiguous = row.ambiguous,
+            r.candidateCount = row.candidateCount,
+            r.isMethod = row.isMethod,
+            r.active = true,
+            r.firstSeenAt = coalesce(r.firstSeenAt, row.firstSeenAt),
+            r.lastSeenAt = row.lastSeenAt,
+            r.validFrom = coalesce(r.validFrom, row.firstSeenAt)
       `;
       await this.db.falkordbQuery(query, { rows });
+
+      // Batched unification: only one unifier call per unique (fromId,type,file,symbol)
+      try {
+        await this.unifyResolvedEdgesBatch(rows.map((row: any) => ({
+          id: row.id,
+          fromId: row.fromId,
+          toId: row.toId,
+          type,
+          to_ref_kind: row.to_ref_kind,
+          to_ref_file: row.to_ref_file,
+          to_ref_symbol: row.to_ref_symbol,
+          to_ref_name: row.to_ref_name,
+          created: row.created,
+          lastModified: row.lastModified,
+          version: row.version || 1,
+        })));
+      } catch {}
+
+      // Dual-write auxiliaries for each edge (best-effort)
+      try {
+        for (const row of rows) {
+          const relObj: GraphRelationship = {
+            id: row.id,
+            fromEntityId: row.fromId,
+            toEntityId: row.toId,
+            type: type as any,
+            created: new Date(row.created),
+            lastModified: new Date(row.lastModified),
+            version: row.version || 1,
+          } as any;
+          (relObj as any).to_ref_kind = row.to_ref_kind;
+          (relObj as any).to_ref_file = row.to_ref_file;
+          (relObj as any).to_ref_symbol = row.to_ref_symbol;
+          (relObj as any).to_ref_name = row.to_ref_name;
+          try { await this.dualWriteAuxiliaryForEdge(relObj); } catch {}
+        }
+      } catch {}
     }
+  }
+
+  // Phase 1+: grouped unifier to reduce duplicate scans per batch
+  private async unifyResolvedEdgesBatch(rows: Array<{ id: string; fromId: string; toId: string; type: string; to_ref_kind?: string; to_ref_file?: string; to_ref_symbol?: string; to_ref_name?: string; created?: string; lastModified?: string; version?: number; }>): Promise<void> {
+    const groups = new Map<string, { any: any; }>();
+    for (const r of rows) {
+      const resolved = (r.to_ref_kind === 'entity') || (String(r.toId || '').startsWith('sym:'));
+      const file = r.to_ref_file || '';
+      const symbol = r.to_ref_symbol || '';
+      if (!resolved || !file || !symbol) continue;
+      const key = `${r.fromId}|${r.type}|${file}|${symbol}`;
+      if (!groups.has(key)) groups.set(key, { any: r });
+    }
+    for (const { any } of groups.values()) {
+      const relObj: GraphRelationship = {
+        id: any.id,
+        fromEntityId: any.fromId,
+        toEntityId: any.toId,
+        type: any.type as any,
+        created: new Date(any.created || Date.now()),
+        lastModified: new Date(any.lastModified || Date.now()),
+        version: any.version || 1,
+      } as any;
+      (relObj as any).to_ref_kind = any.to_ref_kind;
+      (relObj as any).to_ref_file = any.to_ref_file;
+      (relObj as any).to_ref_symbol = any.to_ref_symbol;
+      (relObj as any).to_ref_name = any.to_ref_name;
+      await this.unifyResolvedEdgePlaceholders(relObj);
+    }
+  }
+
+  // --- Read paths for auxiliary nodes (evidence, sites, candidates) ---
+  async getEdgeEvidenceNodes(edgeId: string, limit: number = 200): Promise<Array<{
+    id: string; edgeId: string; source?: string; confidence?: number; path?: string; line?: number; column?: number; note?: string; extractorVersion?: string; createdAt?: string; updatedAt?: string;
+  }>> {
+    try {
+      const rows = await this.db.falkordbQuery(
+        `MATCH (n:edge_evidence) WHERE n.edgeId = $edgeId
+         RETURN n.id AS id, n.edgeId AS edgeId, n.source AS source, n.confidence AS confidence,
+                n.path AS path, n.line AS line, n.column AS column, n.note AS note,
+                n.extractorVersion AS extractorVersion, n.createdAt AS createdAt, n.updatedAt AS updatedAt
+         ORDER BY n.updatedAt DESC LIMIT $limit`,
+        { edgeId, limit }
+      );
+      return (rows || []) as any;
+    } catch { return []; }
+  }
+
+  async getEdgeSites(edgeId: string, limit: number = 50): Promise<Array<{
+    id: string; edgeId: string; siteId?: string; path?: string; line?: number; column?: number; accessPath?: string; updatedAt?: string;
+  }>> {
+    try {
+      const rows = await this.db.falkordbQuery(
+        `MATCH (s:edge_site) WHERE s.edgeId = $edgeId
+         RETURN s.id AS id, s.edgeId AS edgeId, s.siteId AS siteId, s.path AS path, s.line AS line, s.column AS column, s.accessPath AS accessPath, s.updatedAt AS updatedAt
+         ORDER BY s.updatedAt DESC LIMIT $limit`,
+        { edgeId, limit }
+      );
+      return (rows || []) as any;
+    } catch { return []; }
+  }
+
+  async getEdgeCandidates(edgeId: string, limit: number = 50): Promise<Array<{
+    id: string; edgeId: string; candidateId?: string; name?: string; path?: string; resolver?: string; score?: number; rank?: number; updatedAt?: string;
+  }>> {
+    try {
+      const rows = await this.db.falkordbQuery(
+        `MATCH (c:edge_candidate) WHERE c.edgeId = $edgeId
+         RETURN c.id AS id, c.edgeId AS edgeId, c.candidateId AS candidateId, c.name AS name, c.path AS path,
+                c.resolver AS resolver, c.score AS score, c.rank AS rank, c.updatedAt AS updatedAt
+         ORDER BY c.rank ASC, c.updatedAt DESC LIMIT $limit`,
+        { edgeId, limit }
+      );
+      return (rows || []) as any;
+    } catch { return []; }
   }
 
   // Graph search operations
@@ -1853,13 +3200,20 @@ export class KnowledgeGraphService extends EventEmitter {
         RETURN n
         LIMIT $limit
       `;
-      const result = await this.db.falkordbQuery(query, {
+      // Fetch more and rank in memory by directory distance
+      const raw = await this.db.falkordbQuery(query, {
         type: 'symbol',
         name,
         dirPrefix,
-        limit,
+        limit: Math.max(limit * 3, limit),
       });
-      return (result || []).map((row: any) => this.parseEntityFromGraph(row));
+      const entities = (raw || []).map((row: any) => this.parseEntityFromGraph(row));
+      const ranked = entities
+        .map((e) => ({ e, d: this.directoryDistance(filePath, (e as any).path || '') }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, limit)
+        .map((x) => x.e);
+      return ranked;
     } catch {
       return [];
     }
@@ -2362,7 +3716,7 @@ export class KnowledgeGraphService extends EventEmitter {
       directDependencies: directDeps.map((rel) => ({
         entity: null as any, // Would need to fetch entity
         relationship: rel.type,
-        strength: 1,
+        confidence: typeof (rel as any).confidence === 'number' ? Math.max(0, Math.min(1, (rel as any).confidence)) : 1,
       })),
       indirectDependencies: [],
       reverseDependencies: reverseDeps.map((rel) => ({
@@ -2843,6 +4197,27 @@ export class KnowledgeGraphService extends EventEmitter {
           delete (properties as any).location_path;
           delete (properties as any).location_line;
           delete (properties as any).location_col;
+          // Evidence and locations as first-class JSON; if stored as JSON strings, parse them
+          const ev = (properties as any).evidence;
+          if (typeof ev === 'string') {
+            try { (properties as any).evidence = JSON.parse(ev); } catch {}
+          }
+          const locs = (properties as any).locations;
+          if (typeof locs === 'string') {
+            try { (properties as any).locations = JSON.parse(locs); } catch {}
+          }
+          // genericArguments may be stored as JSON string
+          const gargs = (properties as any).genericArguments;
+          if (typeof gargs === 'string') {
+            try { (properties as any).genericArguments = JSON.parse(gargs); } catch {}
+          }
+          // first/last seen timestamps
+          if ((properties as any).firstSeenAt && typeof (properties as any).firstSeenAt === 'string') {
+            try { (properties as any).firstSeenAt = new Date((properties as any).firstSeenAt); } catch {}
+          }
+          if ((properties as any).lastSeenAt && typeof (properties as any).lastSeenAt === 'string') {
+            try { (properties as any).lastSeenAt = new Date((properties as any).lastSeenAt); } catch {}
+          }
         } catch {}
 
         return properties as GraphRelationship;

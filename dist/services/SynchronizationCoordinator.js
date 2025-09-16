@@ -4,6 +4,7 @@
  */
 import { EventEmitter } from "events";
 import { RelationshipType } from "../models/relationships.js";
+import { GitService } from "./GitService.js";
 export class SynchronizationCoordinator extends EventEmitter {
     constructor(kgService, astParser, dbService) {
         super();
@@ -278,7 +279,15 @@ export class SynchronizationCoordinator extends EventEmitter {
     async performFullSync(operation) {
         var _a, _b, _c, _d;
         // Implementation for full synchronization
+        const scanStart = new Date();
         this.emit("syncProgress", operation, { phase: "scanning", progress: 0 });
+        // Ensure a Module entity exists for the root package if applicable (best-effort)
+        try {
+            const { ModuleIndexer } = await import('./ModuleIndexer.js');
+            const mi = new ModuleIndexer(this.kgService);
+            await mi.indexRootPackage().catch(() => { });
+        }
+        catch (_e) { }
         // Scan all source files
         const files = await this.scanSourceFiles();
         this.emit("syncProgress", operation, { phase: "parsing", progress: 0.2 });
@@ -406,7 +415,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                             continue;
                         }
                     }
-                    catch (_e) { }
+                    catch (_f) { }
                     try {
                         const resolvedId = await this.resolveRelationshipTarget(relationship, relationship.__sourceFile || undefined);
                         if (resolvedId) {
@@ -478,6 +487,11 @@ export class SynchronizationCoordinator extends EventEmitter {
         }
         // Post-pass: attempt to resolve and create any deferred relationships now that all entities exist
         await this.runPostResolution(operation);
+        // Deactivate edges not seen during this scan window (best-effort)
+        try {
+            await this.kgService.finalizeScan(scanStart);
+        }
+        catch (_g) { }
         this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
         // Fire-and-forget background embeddings if they were skipped during full sync
         const pendingToEmbed = operation._embedQueue || [];
@@ -511,6 +525,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     async performIncrementalSync(operation) {
         var _a;
         // Implementation for incremental synchronization
+        const scanStart = new Date();
         this.emit("syncProgress", operation, {
             phase: "processing_changes",
             progress: 0,
@@ -549,6 +564,35 @@ export class SynchronizationCoordinator extends EventEmitter {
         // Track entities to embed in batch and session relationships buffer
         const toEmbed = [];
         const sessionRelBuffer = [];
+        // Track changed entities for checkpointing and change metadata
+        const changedSeeds = new Set();
+        // Create a Change entity to associate temporal edges for this batch
+        const changeId = `change_${operation.id}`;
+        try {
+            await this.kgService.createOrUpdateEntity({
+                id: changeId,
+                type: "change",
+                changeType: "update",
+                entityType: "batch",
+                entityId: operation.id,
+                timestamp: new Date(),
+                sessionId,
+            });
+            // Link session to this change descriptor
+            try {
+                await this.kgService.createRelationship({
+                    id: `rel_${sessionId}_${changeId}_DEPENDS_ON_CHANGE`,
+                    fromEntityId: sessionId,
+                    toEntityId: changeId,
+                    type: RelationshipType.DEPENDS_ON_CHANGE,
+                    created: new Date(),
+                    lastModified: new Date(),
+                    version: 1,
+                }, undefined, undefined, { validate: false });
+            }
+            catch (_c) { }
+        }
+        catch (_d) { }
         for (const change of changes) {
             await awaitIfPaused();
             try {
@@ -643,6 +687,50 @@ export class SynchronizationCoordinator extends EventEmitter {
                         if (parseResult.isIncremental && parseResult.removedEntities) {
                             for (const entity of parseResult.removedEntities) {
                                 try {
+                                    // Before deletion, attach temporal relationship to change and session impact
+                                    const now2 = new Date();
+                                    try {
+                                        await this.kgService.createRelationship({
+                                            id: `rel_${entity.id}_${changeId}_REMOVED_IN`,
+                                            fromEntityId: entity.id,
+                                            toEntityId: changeId,
+                                            type: RelationshipType.REMOVED_IN,
+                                            created: now2,
+                                            lastModified: now2,
+                                            version: 1,
+                                        }, undefined, undefined, { validate: false });
+                                    }
+                                    catch (_e) { }
+                                    // Attach MODIFIED_BY with git metadata (best-effort)
+                                    try {
+                                        const git = new GitService();
+                                        const info = await git.getLastCommitInfo(change.path);
+                                        await this.kgService.createRelationship({
+                                            id: `rel_${entity.id}_${sessionId}_MODIFIED_BY`,
+                                            fromEntityId: entity.id,
+                                            toEntityId: sessionId,
+                                            type: RelationshipType.MODIFIED_BY,
+                                            created: now2,
+                                            lastModified: now2,
+                                            version: 1,
+                                            metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
+                                        }, undefined, undefined, { validate: false });
+                                    }
+                                    catch (_f) { }
+                                    try {
+                                        sessionRelBuffer.push({
+                                            id: `rel_${sessionId}_${entity.id}_SESSION_IMPACTED`,
+                                            fromEntityId: sessionId,
+                                            toEntityId: entity.id,
+                                            type: RelationshipType.SESSION_IMPACTED,
+                                            created: now2,
+                                            lastModified: now2,
+                                            version: 1,
+                                            metadata: { severity: 'high', file: change.path },
+                                        });
+                                    }
+                                    catch (_g) { }
+                                    changedSeeds.add(entity.id);
                                     await this.kgService.deleteEntity(entity.id);
                                     operation.entitiesDeleted++;
                                 }
@@ -668,16 +756,101 @@ export class SynchronizationCoordinator extends EventEmitter {
                                         await this.kgService.appendVersion(ent, { timestamp: now });
                                         operation.entitiesUpdated++;
                                         // Queue session relationship for modified entity
+                                        try {
+                                            const git = new GitService();
+                                            const diff = await git.getUnifiedDiff(change.path, 3);
+                                            // Extract small before/after snippets from first hunk
+                                            let beforeSnippet = '';
+                                            let afterSnippet = '';
+                                            if (diff) {
+                                                const lines = diff.split('\n');
+                                                for (const ln of lines) {
+                                                    if (ln.startsWith('---') || ln.startsWith('+++') || ln.startsWith('@@'))
+                                                        continue;
+                                                    if (ln.startsWith('-') && beforeSnippet.length < 400)
+                                                        beforeSnippet += ln.substring(1) + '\n';
+                                                    if (ln.startsWith('+') && afterSnippet.length < 400)
+                                                        afterSnippet += ln.substring(1) + '\n';
+                                                    if (beforeSnippet.length >= 400 && afterSnippet.length >= 400)
+                                                        break;
+                                                }
+                                            }
+                                            sessionRelBuffer.push({
+                                                id: `rel_${sessionId}_${ent.id}_SESSION_MODIFIED`,
+                                                fromEntityId: sessionId,
+                                                toEntityId: ent.id,
+                                                type: RelationshipType.SESSION_MODIFIED,
+                                                created: now,
+                                                lastModified: now,
+                                                version: 1,
+                                                metadata: {
+                                                    file: change.path,
+                                                    stateTransition: {
+                                                        from: 'unknown',
+                                                        to: 'working',
+                                                        verifiedBy: 'manual',
+                                                        confidence: 0.5,
+                                                        criticalChange: {
+                                                            entityId: ent.id,
+                                                            beforeSnippet: beforeSnippet.trim() || undefined,
+                                                            afterSnippet: afterSnippet.trim() || undefined,
+                                                        },
+                                                    },
+                                                },
+                                            });
+                                        }
+                                        catch (_h) {
+                                            sessionRelBuffer.push({
+                                                id: `rel_${sessionId}_${ent.id}_SESSION_MODIFIED`,
+                                                fromEntityId: sessionId,
+                                                toEntityId: ent.id,
+                                                type: RelationshipType.SESSION_MODIFIED,
+                                                created: now,
+                                                lastModified: now,
+                                                version: 1,
+                                                metadata: { file: change.path },
+                                            });
+                                        }
+                                        // Also mark session impacted and link entity to the change
                                         sessionRelBuffer.push({
-                                            id: `rel_${sessionId}_${ent.id}_SESSION_MODIFIED`,
+                                            id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
                                             fromEntityId: sessionId,
                                             toEntityId: ent.id,
-                                            type: RelationshipType.SESSION_MODIFIED,
+                                            type: RelationshipType.SESSION_IMPACTED,
                                             created: now,
                                             lastModified: now,
                                             version: 1,
-                                            metadata: { file: change.path },
+                                            metadata: { severity: 'medium', file: change.path },
                                         });
+                                        try {
+                                            await this.kgService.createRelationship({
+                                                id: `rel_${ent.id}_${changeId}_MODIFIED_IN`,
+                                                fromEntityId: ent.id,
+                                                toEntityId: changeId,
+                                                type: RelationshipType.MODIFIED_IN,
+                                                created: now,
+                                                lastModified: now,
+                                                version: 1,
+                                            }, undefined, undefined, { validate: false });
+                                        }
+                                        catch (_j) { }
+                                        // Attach MODIFIED_BY with git metadata (best-effort)
+                                        try {
+                                            const git = new GitService();
+                                            const info = await git.getLastCommitInfo(change.path);
+                                            await this.kgService.createRelationship({
+                                                id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
+                                                fromEntityId: ent.id,
+                                                toEntityId: sessionId,
+                                                type: RelationshipType.MODIFIED_BY,
+                                                created: now,
+                                                lastModified: now,
+                                                version: 1,
+                                                metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
+                                            }, undefined, undefined, { validate: false });
+                                        }
+                                        catch (_k) { }
+                                        changedSeeds.add(ent.id);
                                     }
                                     catch (err) {
                                         operation.errors.push({
@@ -703,6 +876,12 @@ export class SynchronizationCoordinator extends EventEmitter {
                                         }
                                         if (toId && rel.fromEntityId) {
                                             await this.kgService.openEdge(rel.fromEntityId, toId, rel.type, now);
+                                            // Keep edge evidence/properties in sync during incremental updates
+                                            try {
+                                                const enriched = { ...rel, toEntityId: toId };
+                                                await this.kgService.upsertEdgeEvidenceBulk([enriched]);
+                                            }
+                                            catch (_l) { }
                                             operation.relationshipsUpdated++;
                                         }
                                     }
@@ -741,6 +920,92 @@ export class SynchronizationCoordinator extends EventEmitter {
                                             recoverable: true,
                                         });
                                     }
+                                }
+                            }
+                            // Created entities: attach CREATED_IN and mark impacted
+                            if (Array.isArray(parseResult.addedEntities)) {
+                                for (const ent of parseResult.addedEntities) {
+                                    try {
+                                        const now3 = new Date();
+                                        await this.kgService.createRelationship({
+                                            id: `rel_${ent.id}_${changeId}_CREATED_IN`,
+                                            fromEntityId: ent.id,
+                                            toEntityId: changeId,
+                                            type: RelationshipType.CREATED_IN,
+                                            created: now3,
+                                            lastModified: now3,
+                                            version: 1,
+                                        }, undefined, undefined, { validate: false });
+                                        // Also MODIFIED_BY with git metadata (best-effort)
+                                        try {
+                                            const git = new GitService();
+                                            const info = await git.getLastCommitInfo(change.path);
+                                            await this.kgService.createRelationship({
+                                                id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
+                                                fromEntityId: ent.id,
+                                                toEntityId: sessionId,
+                                                type: RelationshipType.MODIFIED_BY,
+                                                created: now3,
+                                                lastModified: now3,
+                                                version: 1,
+                                                metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
+                                            }, undefined, undefined, { validate: false });
+                                        }
+                                        catch (_m) { }
+                                        try {
+                                            const git = new GitService();
+                                            const diff = await git.getUnifiedDiff(change.path, 2);
+                                            let afterSnippet = '';
+                                            if (diff) {
+                                                const lines = diff.split('\n');
+                                                for (const ln of lines) {
+                                                    if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@'))
+                                                        continue;
+                                                    if (ln.startsWith('+') && afterSnippet.length < 300)
+                                                        afterSnippet += ln.substring(1) + '\n';
+                                                    if (afterSnippet.length >= 300)
+                                                        break;
+                                                }
+                                            }
+                                            sessionRelBuffer.push({
+                                                id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
+                                                fromEntityId: sessionId,
+                                                toEntityId: ent.id,
+                                                type: RelationshipType.SESSION_IMPACTED,
+                                                created: now3,
+                                                lastModified: now3,
+                                                version: 1,
+                                                metadata: {
+                                                    severity: 'low',
+                                                    file: change.path,
+                                                    stateTransition: {
+                                                        from: 'unknown',
+                                                        to: 'working',
+                                                        verifiedBy: 'manual',
+                                                        confidence: 0.4,
+                                                        criticalChange: {
+                                                            entityId: ent.id,
+                                                            afterSnippet: afterSnippet.trim() || undefined,
+                                                        },
+                                                    },
+                                                },
+                                            });
+                                        }
+                                        catch (_o) {
+                                            sessionRelBuffer.push({
+                                                id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
+                                                fromEntityId: sessionId,
+                                                toEntityId: ent.id,
+                                                type: RelationshipType.SESSION_IMPACTED,
+                                                created: now3,
+                                                lastModified: now3,
+                                                version: 1,
+                                                metadata: { severity: 'low', file: change.path },
+                                            });
+                                        }
+                                        changedSeeds.add(ent.id);
+                                    }
+                                    catch (_p) { }
                                 }
                             }
                         }
@@ -798,6 +1063,26 @@ export class SynchronizationCoordinator extends EventEmitter {
                 });
             }
         }
+        // Create a small checkpoint for changed neighborhood and link session -> checkpoint
+        try {
+            const seeds = Array.from(changedSeeds);
+            if (seeds.length > 0) {
+                const { checkpointId } = await this.kgService.createCheckpoint(seeds, "manual", 2);
+                try {
+                    await this.kgService.createRelationship({
+                        id: `rel_${sessionId}_${checkpointId}_SESSION_CHECKPOINT`,
+                        fromEntityId: sessionId,
+                        toEntityId: checkpointId,
+                        type: RelationshipType.SESSION_CHECKPOINT,
+                        created: new Date(),
+                        lastModified: new Date(),
+                        version: 1,
+                    }, undefined, undefined, { validate: false });
+                }
+                catch (_q) { }
+            }
+        }
+        catch (_r) { }
         // Batch-generate embeddings for affected entities
         if (toEmbed.length > 0) {
             try {
@@ -813,6 +1098,11 @@ export class SynchronizationCoordinator extends EventEmitter {
                 });
             }
         }
+        // Deactivate edges not seen during this scan window (best-effort)
+        try {
+            await this.kgService.finalizeScan(scanStart);
+        }
+        catch (_s) { }
         this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
     }
     async performPartialSync(operation) {
@@ -1148,17 +1438,105 @@ SynchronizationCoordinator.prototype.resolveAndCreateRelationship = async functi
         }
     }
     catch (_a) { }
-    const resolvedId = await this.resolveRelationshipTarget(relationship, sourceFilePath);
+    const resolvedResult = await this.resolveRelationshipTarget(relationship, sourceFilePath);
+    const resolvedId = typeof resolvedResult === 'string' ? resolvedResult : ((resolvedResult === null || resolvedResult === void 0 ? void 0 : resolvedResult.id) || null);
     if (!resolvedId)
         return false;
-    const resolvedRel = { ...relationship, toEntityId: resolvedId };
+    const enrichedMeta = { ...relationship.metadata };
+    if (resolvedResult && typeof resolvedResult === 'object') {
+        if (Array.isArray(resolvedResult.candidates) && resolvedResult.candidates.length > 0) {
+            enrichedMeta.candidates = resolvedResult.candidates.slice(0, 5);
+            relationship.ambiguous = (resolvedResult.candidates.length > 1);
+            relationship.candidateCount = resolvedResult.candidates.length;
+        }
+        if (resolvedResult.resolutionPath)
+            enrichedMeta.resolutionPath = resolvedResult.resolutionPath;
+        enrichedMeta.resolvedTo = { kind: 'entity', id: resolvedId };
+    }
+    const resolvedRel = { ...relationship, toEntityId: resolvedId, metadata: enrichedMeta };
     await this.kgService.createRelationship(resolvedRel, undefined, undefined, { validate: false });
     return true;
 };
 SynchronizationCoordinator.prototype.resolveRelationshipTarget = async function (relationship, sourceFilePath) {
     var _a, _b;
     const to = relationship.toEntityId || "";
+    // Prefer structured toRef when present to avoid brittle string parsing
+    const toRef = relationship.toRef;
+    // Establish a currentFilePath context early using fromRef if provided
     let currentFilePath = sourceFilePath;
+    const candidates = [];
+    try {
+        const fromRef = relationship.fromRef;
+        if (!currentFilePath && fromRef && typeof fromRef === 'object') {
+            if (fromRef.kind === 'fileSymbol' && fromRef.file) {
+                currentFilePath = fromRef.file;
+            }
+            else if (fromRef.kind === 'entity' && fromRef.id) {
+                const ent = await this.kgService.getEntity(fromRef.id);
+                const p = ent === null || ent === void 0 ? void 0 : ent.path;
+                if (p)
+                    currentFilePath = p.includes(':') ? p.split(':')[0] : p;
+            }
+        }
+    }
+    catch (_c) { }
+    if (toRef && typeof toRef === 'object') {
+        try {
+            if (toRef.kind === 'entity' && toRef.id) {
+                return { id: toRef.id, candidates, resolutionPath: 'entity' };
+            }
+            if (toRef.kind === 'fileSymbol' && toRef.file && (toRef.symbol || toRef.name)) {
+                const ent = await this.kgService.findSymbolInFile(toRef.file, (toRef.symbol || toRef.name));
+                if (ent)
+                    return { id: ent.id, candidates, resolutionPath: 'fileSymbol' };
+            }
+            if (toRef.kind === 'external' && toRef.name) {
+                const name = toRef.name;
+                if (!currentFilePath) {
+                    try {
+                        const fromEntity = await this.kgService.getEntity(relationship.fromEntityId);
+                        if (fromEntity && fromEntity.path) {
+                            const p = fromEntity.path;
+                            currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+                        }
+                    }
+                    catch (_d) { }
+                }
+                if (currentFilePath) {
+                    const local = await this.kgService.findSymbolInFile(currentFilePath, name);
+                    if (local) {
+                        candidates.push({ id: local.id, name: local.name, path: local.path, resolver: 'local', score: 1.0 });
+                    }
+                    const near = await this.kgService.findNearbySymbols(currentFilePath, name, 5);
+                    for (const n of near)
+                        candidates.push({ id: n.id, name: n.name, path: n.path, resolver: 'nearby' });
+                }
+                const global = await this.kgService.findSymbolsByName(name);
+                for (const g of global)
+                    candidates.push({ id: g.id, name: g.name, path: g.path, resolver: 'name' });
+                if (candidates.length > 0)
+                    return { id: candidates[0].id, candidates, resolutionPath: 'external-name' };
+            }
+        }
+        catch (_e) { }
+    }
+    // Explicit file placeholder: file:<relPath>:<name>
+    {
+        const fileMatch = to.match(/^file:(.+?):(.+)$/);
+        if (fileMatch) {
+            const relPath = fileMatch[1];
+            const name = fileMatch[2];
+            try {
+                const ent = await this.kgService.findSymbolInFile(relPath, name);
+                if (ent)
+                    return { id: ent.id, candidates, resolutionPath: 'file-placeholder' };
+            }
+            catch (_f) { }
+            return null;
+        }
+    }
+    // Ensure we still have a usable file context for subsequent heuristics
+    // (do not redeclare currentFilePath; just populate if missing)
     if (!currentFilePath) {
         try {
             const fromEntity = await this.kgService.getEntity(relationship.fromEntityId);
@@ -1167,7 +1545,7 @@ SynchronizationCoordinator.prototype.resolveRelationshipTarget = async function 
                 currentFilePath = p.includes(":") ? p.split(":")[0] : p;
             }
         }
-        catch (_c) { }
+        catch (_g) { }
     }
     const kindMatch = to.match(/^(class|interface|function|typeAlias):(.+)$/);
     if (kindMatch) {
@@ -1178,14 +1556,21 @@ SynchronizationCoordinator.prototype.resolveRelationshipTarget = async function 
             const key = `${currentFilePath}:${name}`;
             const localId = (_b = (_a = this.localSymbolIndex) === null || _a === void 0 ? void 0 : _a.get) === null || _b === void 0 ? void 0 : _b.call(_a, key);
             if (localId)
-                return localId;
+                return { id: localId, candidates, resolutionPath: 'local-index' };
             const local = await this.kgService.findSymbolInFile(currentFilePath, name);
-            if (local)
-                return local.id;
+            if (local) {
+                candidates.push({ id: local.id, name: local.name, path: local.path, resolver: 'local' });
+            }
+            // Prefer nearby directory symbols if available
+            const near = await this.kgService.findNearbySymbols(currentFilePath, name, 3);
+            for (const n of near)
+                candidates.push({ id: n.id, name: n.name, path: n.path, resolver: 'nearby' });
         }
-        const candidates = await this.kgService.findSymbolByKindAndName(kind, name);
+        const byKind = await this.kgService.findSymbolByKindAndName(kind, name);
+        for (const c of byKind)
+            candidates.push({ id: c.id, name: c.name, path: c.path, resolver: 'kind-name' });
         if (candidates.length > 0)
-            return candidates[0].id;
+            return { id: candidates[0].id, candidates, resolutionPath: 'kind-name' };
         return null;
     }
     const importMatch = to.match(/^import:(.+?):(.+)$/);
@@ -1193,12 +1578,19 @@ SynchronizationCoordinator.prototype.resolveRelationshipTarget = async function 
         const name = importMatch[2];
         if (currentFilePath) {
             const local = await this.kgService.findSymbolInFile(currentFilePath, name);
-            if (local)
-                return local.id;
+            if (local) {
+                candidates.push({ id: local.id, name: local.name, path: local.path, resolver: 'local' });
+            }
+            // Prefer nearby directory symbols for imported names
+            const near = await this.kgService.findNearbySymbols(currentFilePath, name, 5);
+            for (const n of near)
+                candidates.push({ id: n.id, name: n.name, path: n.path, resolver: 'nearby' });
         }
-        const candidates = await this.kgService.findSymbolsByName(name);
+        const byName = await this.kgService.findSymbolsByName(name);
+        for (const c of byName)
+            candidates.push({ id: c.id, name: c.name, path: c.path, resolver: 'name' });
         if (candidates.length > 0)
-            return candidates[0].id;
+            return { id: candidates[0].id, candidates, resolutionPath: 'import-name' };
         return null;
     }
     const externalMatch = to.match(/^external:(.+)$/);
@@ -1206,12 +1598,19 @@ SynchronizationCoordinator.prototype.resolveRelationshipTarget = async function 
         const name = externalMatch[1];
         if (currentFilePath) {
             const local = await this.kgService.findSymbolInFile(currentFilePath, name);
-            if (local)
-                return local.id;
+            if (local) {
+                candidates.push({ id: local.id, name: local.name, path: local.path, resolver: 'local' });
+            }
+            // Prefer nearby matches
+            const near = await this.kgService.findNearbySymbols(currentFilePath, name, 5);
+            for (const n of near)
+                candidates.push({ id: n.id, name: n.name, path: n.path, resolver: 'nearby' });
         }
-        const candidates = await this.kgService.findSymbolsByName(name);
+        const global = await this.kgService.findSymbolsByName(name);
+        for (const g of global)
+            candidates.push({ id: g.id, name: g.name, path: g.path, resolver: 'name' });
         if (candidates.length > 0)
-            return candidates[0].id;
+            return { id: candidates[0].id, candidates, resolutionPath: 'external-name' };
         return null;
     }
     return null;

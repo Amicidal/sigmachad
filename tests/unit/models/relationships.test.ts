@@ -55,7 +55,7 @@ describe('Relationship Types and Enums', () => {
       expect(RelationshipType.IMPLEMENTS).toBe('IMPLEMENTS');
       expect(RelationshipType.EXTENDS).toBe('EXTENDS');
       expect(RelationshipType.DEPENDS_ON).toBe('DEPENDS_ON');
-      expect(RelationshipType.USES).toBe('USES');
+      expect(RelationshipType.TYPE_USES).toBe('TYPE_USES');
     });
 
     it('should contain all test relationship types', () => {
@@ -276,25 +276,25 @@ describe('Code Relationship Interface', () => {
       created: testDate,
       lastModified: testDate,
       version: 1,
-      strength: 0.8,
+      confidence: 0.8,
       context: 'direct function call',
     };
   });
 
   it('should create a valid CodeRelationship', () => {
     expect(codeRelationship.type).toBe(RelationshipType.CALLS);
-    expect(codeRelationship.strength).toBe(0.8);
+    expect(codeRelationship.confidence).toBe(0.8);
     expect(codeRelationship.context).toBe('direct function call');
   });
 
   it('should accept all code relationship types', () => {
-    const codeTypes: Array<RelationshipType.CALLS | RelationshipType.REFERENCES | RelationshipType.IMPLEMENTS | RelationshipType.EXTENDS | RelationshipType.DEPENDS_ON | RelationshipType.USES> = [
+    const codeTypes: Array<RelationshipType.CALLS | RelationshipType.REFERENCES | RelationshipType.IMPLEMENTS | RelationshipType.EXTENDS | RelationshipType.DEPENDS_ON | RelationshipType.TYPE_USES> = [
       RelationshipType.CALLS,
       RelationshipType.REFERENCES,
       RelationshipType.IMPLEMENTS,
       RelationshipType.EXTENDS,
       RelationshipType.DEPENDS_ON,
-      RelationshipType.USES,
+      RelationshipType.TYPE_USES,
     ];
 
     codeTypes.forEach(type => {
@@ -314,11 +314,11 @@ describe('Code Relationship Interface', () => {
       type: RelationshipType.CALLS,
       fromEntityId: 'UserService.createUser',
       toEntityId: 'Database.save',
-      strength: 1.0,
+      confidence: 1.0,
       context: 'synchronous call',
     };
 
-    expect(functionCall.strength).toBe(1.0);
+    expect(functionCall.confidence).toBe(1.0);
     expect(functionCall.context).toBe('synchronous call');
   });
 
@@ -328,37 +328,37 @@ describe('Code Relationship Interface', () => {
       type: RelationshipType.EXTENDS,
       fromEntityId: 'UserController',
       toEntityId: 'BaseController',
-      strength: 1.0,
+      confidence: 1.0,
       context: 'class inheritance',
     };
 
     expect(extendsRelationship.type).toBe(RelationshipType.EXTENDS);
-    expect(extendsRelationship.strength).toBe(1.0);
+    expect(extendsRelationship.confidence).toBe(1.0);
   });
 
-  it('should handle strength values correctly', () => {
+  it('should handle confidence values correctly', () => {
     const weakRelationship: CodeRelationship = {
       ...codeRelationship,
-      strength: 0.2,
+      confidence: 0.2,
     };
 
     const strongRelationship: CodeRelationship = {
       ...codeRelationship,
-      strength: 0.95,
+      confidence: 0.95,
     };
 
-    expect(weakRelationship.strength).toBe(0.2);
-    expect(strongRelationship.strength).toBe(0.95);
+    expect(weakRelationship.confidence).toBe(0.2);
+    expect(strongRelationship.confidence).toBe(0.95);
   });
 
-  it('should handle optional strength and context', () => {
+  it('should handle optional confidence and context', () => {
     const minimalRelationship: CodeRelationship = {
       ...codeRelationship,
-      strength: undefined,
+      confidence: undefined,
       context: undefined,
     };
 
-    expect(minimalRelationship.strength).toBeUndefined();
+    expect(minimalRelationship.confidence).toBeUndefined();
     expect(minimalRelationship.context).toBeUndefined();
   });
 });
@@ -945,10 +945,10 @@ describe('Query and Filter Interfaces', () => {
 
     it('should handle array of relationship types', () => {
       const query: RelationshipQuery = {
-        type: [RelationshipType.DEPENDS_ON, RelationshipType.USES],
+        type: [RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES],
       };
 
-      expect(query.type).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.USES]);
+      expect(query.type).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES]);
     });
 
     it('should handle optional fields', () => {
@@ -967,7 +967,7 @@ describe('Query and Filter Interfaces', () => {
   describe('RelationshipFilter', () => {
     it('should create a valid RelationshipFilter', () => {
       const filter: RelationshipFilter = {
-        types: [RelationshipType.DEPENDS_ON, RelationshipType.USES],
+        types: [RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES],
         directions: ['outgoing', 'incoming'],
         depths: [1, 2, 3],
         weights: {
@@ -976,7 +976,7 @@ describe('Query and Filter Interfaces', () => {
         },
       };
 
-      expect(filter.types).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.USES]);
+      expect(filter.types).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES]);
       expect(filter.directions).toEqual(['outgoing', 'incoming']);
       expect(filter.depths).toEqual([1, 2, 3]);
       expect(filter.weights?.min).toBe(0.5);
@@ -1018,14 +1018,14 @@ describe('Path Finding and Traversal Interfaces', () => {
       const pathQuery: PathQuery = {
         startEntityId: 'entity-a',
         endEntityId: 'entity-z',
-        relationshipTypes: [RelationshipType.DEPENDS_ON, RelationshipType.USES],
+        relationshipTypes: [RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES],
         maxDepth: 5,
         direction: 'outgoing',
       };
 
       expect(pathQuery.startEntityId).toBe('entity-a');
       expect(pathQuery.endEntityId).toBe('entity-z');
-      expect(pathQuery.relationshipTypes).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.USES]);
+      expect(pathQuery.relationshipTypes).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES]);
       expect(pathQuery.maxDepth).toBe(5);
       expect(pathQuery.direction).toBe('outgoing');
     });
@@ -1073,20 +1073,20 @@ describe('Path Finding and Traversal Interfaces', () => {
             id: 'rel-2',
             fromEntityId: 'b',
             toEntityId: 'c',
-            type: RelationshipType.USES,
+            type: RelationshipType.TYPE_USES,
             created: new Date(),
             lastModified: new Date(),
             version: 1,
           },
         ],
         totalLength: 2,
-        relationshipTypes: [RelationshipType.DEPENDS_ON, RelationshipType.USES],
+        relationshipTypes: [RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES],
         entities: ['a', 'b', 'c'],
       };
 
       expect(pathResult.path).toHaveLength(2);
       expect(pathResult.totalLength).toBe(2);
-      expect(pathResult.relationshipTypes).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.USES]);
+      expect(pathResult.relationshipTypes).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES]);
       expect(pathResult.entities).toEqual(['a', 'b', 'c']);
     });
 
@@ -1109,7 +1109,7 @@ describe('Path Finding and Traversal Interfaces', () => {
     it('should create a valid TraversalQuery', () => {
       const traversalQuery: TraversalQuery = {
         startEntityId: 'entity-a',
-        relationshipTypes: [RelationshipType.DEPENDS_ON, RelationshipType.USES],
+        relationshipTypes: [RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES],
         direction: 'outgoing',
         maxDepth: 3,
         limit: 100,
@@ -1120,7 +1120,7 @@ describe('Path Finding and Traversal Interfaces', () => {
       };
 
       expect(traversalQuery.startEntityId).toBe('entity-a');
-      expect(traversalQuery.relationshipTypes).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.USES]);
+      expect(traversalQuery.relationshipTypes).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES]);
       expect(traversalQuery.direction).toBe('outgoing');
       expect(traversalQuery.maxDepth).toBe(3);
       expect(traversalQuery.limit).toBe(100);
@@ -1186,14 +1186,14 @@ describe('Impact Analysis Interfaces', () => {
         changeType: 'modify',
         includeIndirect: true,
         maxDepth: 5,
-        relationshipTypes: [RelationshipType.DEPENDS_ON, RelationshipType.USES],
+        relationshipTypes: [RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES],
       };
 
       expect(impactQuery.entityId).toBe('entity-a');
       expect(impactQuery.changeType).toBe('modify');
       expect(impactQuery.includeIndirect).toBe(true);
       expect(impactQuery.maxDepth).toBe(5);
-      expect(impactQuery.relationshipTypes).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.USES]);
+      expect(impactQuery.relationshipTypes).toEqual([RelationshipType.DEPENDS_ON, RelationshipType.TYPE_USES]);
     });
 
     it('should handle different change types', () => {
@@ -1239,7 +1239,7 @@ describe('Impact Analysis Interfaces', () => {
             entities: [
               { id: 'entity-c', type: 'file', path: '/c.ts', hash: 'hash2', language: 'typescript', lastModified: new Date(), created: new Date() },
             ],
-            relationship: RelationshipType.USES,
+            relationship: RelationshipType.TYPE_USES,
             confidence: 0.8,
           },
         ],
@@ -1323,7 +1323,7 @@ describe('GraphRelationship Union Type', () => {
       created: new Date(),
       lastModified: new Date(),
       version: 1,
-      strength: 0.8,
+      confidence: 0.8,
     };
     relationships.push(codeRel);
 
@@ -1421,13 +1421,13 @@ describe('GraphRelationship Union Type', () => {
       created: new Date(),
       lastModified: new Date(),
       version: 1,
-      strength: 0.9,
+      confidence: 0.9,
       context: 'function call',
     };
 
     if (relationship.type === RelationshipType.CALLS) {
       // TypeScript should know this is a CodeRelationship
-      expect(relationship.strength).toBe(0.9);
+      expect((relationship as CodeRelationship).confidence).toBe(0.9);
       expect(relationship.context).toBe('function call');
     }
 

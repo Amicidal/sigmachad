@@ -2024,6 +2024,7 @@ export class MCPRouter {
                     created: new Date(),
                     lastModified: new Date(),
                     version: 1,
+                    metadata: { inferred: true, confidence: 0.6, source: 'mcp-doc-cluster' }
                 });
                 // Also link cluster to any business domains described by this document
                 try {
@@ -2040,6 +2041,7 @@ export class MCPRouter {
                             created: new Date(),
                             lastModified: new Date(),
                             version: 1,
+                            metadata: { inferred: true, confidence: 0.6, source: 'mcp-cluster-domain' }
                         });
                     }
                 }
@@ -2054,6 +2056,7 @@ export class MCPRouter {
                         created: new Date(),
                         lastModified: new Date(),
                         version: 1,
+                        metadata: { inferred: true, confidence: 0.6, source: 'mcp-cluster-member' }
                     });
                 }
             }

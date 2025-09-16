@@ -44,6 +44,8 @@ export const noiseConfig = {
   AST_BOOST_EXPORTED: floatFromEnv('AST_BOOST_EXPORTED', 0.0, 0, 1),
   AST_STEP_NAME_LEN: floatFromEnv('AST_STEP_NAME_LEN', 0.0, 0, 1),
   AST_PENALTY_IMPORT_DEPTH: floatFromEnv('AST_PENALTY_IMPORT_DEPTH', 0.0, 0, 1),
+  // Gate expensive TypeScript checker lookups per file to improve performance at scale
+  AST_MAX_TC_LOOKUPS_PER_FILE: intFromEnv('AST_MAX_TC_LOOKUPS_PER_FILE', 200, 0, 100000),
 
   // Doc/spec linking
   DOC_LINK_MIN_OCCURRENCES: intFromEnv('DOC_LINK_MIN_OCCURRENCES', 2, 1, 10),

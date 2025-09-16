@@ -5,6 +5,7 @@
  */
 import { TestResultParser } from "./TestResultParser.js";
 import { RelationshipType } from "../models/relationships.js";
+import { noiseConfig } from "../config/noise.js";
 import * as fs from "fs/promises";
 export class TestEngine {
     constructor(kgService, dbService) {
@@ -171,6 +172,9 @@ export class TestEngine {
             },
         };
         // Add execution to test history (avoid duplicates)
+        const priorStatus = testEntity.executionHistory.length > 0
+            ? testEntity.executionHistory[testEntity.executionHistory.length - 1].status
+            : undefined;
         const existingExecutionIndex = testEntity.executionHistory.findIndex((exec) => exec.id === execution.id);
         if (existingExecutionIndex === -1) {
             testEntity.executionHistory.push(execution);
@@ -186,6 +190,64 @@ export class TestEngine {
         await this.updatePerformanceMetrics(testEntity);
         // Save test entity first
         await this.kgService.createOrUpdateEntity(testEntity);
+        // Link tests to specs they validate via IMPLEMENTS_SPEC on target symbol
+        try {
+            if (testEntity.targetSymbol) {
+                const impls = await this.kgService.getRelationships({
+                    fromEntityId: testEntity.targetSymbol,
+                    type: RelationshipType.IMPLEMENTS_SPEC,
+                    limit: 50,
+                });
+                for (const r of impls) {
+                    try {
+                        await this.kgService.createRelationship({
+                            id: `rel_${testEntity.id}_${r.toEntityId}_VALIDATES`,
+                            fromEntityId: testEntity.id,
+                            toEntityId: r.toEntityId,
+                            type: RelationshipType.VALIDATES,
+                            created: timestamp,
+                            lastModified: timestamp,
+                            version: 1,
+                        }, undefined, undefined, { validate: false });
+                    }
+                    catch (_a) { }
+                }
+            }
+        }
+        catch (_b) { }
+        // Emit BROKE_IN / FIXED_IN signals between test and its target symbol on status transition
+        try {
+            const curr = result.status;
+            const prev = priorStatus;
+            const target = testEntity.targetSymbol;
+            if (target) {
+                if ((prev === 'passed' || prev === 'skipped' || prev === undefined) && curr === 'failed') {
+                    await this.kgService.createRelationship({
+                        id: `rel_${testEntity.id}_${target}_BROKE_IN`,
+                        fromEntityId: testEntity.id,
+                        toEntityId: target,
+                        type: RelationshipType.BROKE_IN,
+                        created: timestamp,
+                        lastModified: timestamp,
+                        version: 1,
+                        metadata: { verifiedBy: 'test' },
+                    }, undefined, undefined, { validate: false });
+                }
+                if (prev === 'failed' && curr === 'passed') {
+                    await this.kgService.createRelationship({
+                        id: `rel_${testEntity.id}_${target}_FIXED_IN`,
+                        fromEntityId: testEntity.id,
+                        toEntityId: target,
+                        type: RelationshipType.FIXED_IN,
+                        created: timestamp,
+                        lastModified: timestamp,
+                        version: 1,
+                        metadata: { verifiedBy: 'test' },
+                    }, undefined, undefined, { validate: false });
+                }
+            }
+        }
+        catch (_c) { }
         // Update coverage if provided
         if (result.coverage) {
             console.log(`📊 Setting coverage for test ${testEntity.id}:`, result.coverage);
@@ -736,8 +798,20 @@ export class TestEngine {
             if (testEntity.targetSymbol) {
                 const target = await this.kgService.getEntity(testEntity.targetSymbol);
                 if (target) {
-                    // Regression if trend is degrading
-                    if (testEntity.performanceMetrics.trend === "degrading") {
+                    const hist = Array.isArray(testEntity.performanceMetrics.historicalData)
+                        ? testEntity.performanceMetrics.historicalData
+                        : [];
+                    const historyOk = hist.length >= noiseConfig.PERF_MIN_HISTORY;
+                    const lastN = hist.slice(-Math.max(1, noiseConfig.PERF_TREND_MIN_RUNS));
+                    const lastExecs = lastN.map((h) => h.executionTime);
+                    const monotonicIncrease = lastExecs.every((v, i, arr) => i === 0 || v >= arr[i - 1]);
+                    const increaseDelta = lastExecs.length >= 2 ? (lastExecs[lastExecs.length - 1] - lastExecs[0]) : 0;
+                    const degradingOk = testEntity.performanceMetrics.trend === "degrading" &&
+                        historyOk &&
+                        monotonicIncrease &&
+                        increaseDelta >= noiseConfig.PERF_DEGRADING_MIN_DELTA_MS;
+                    // Regression if degrading meets sustained and delta thresholds
+                    if (degradingOk) {
                         this.perfRelBuffer.push({
                             id: `${testEntity.id}_perf_regression_${testEntity.targetSymbol}`,
                             fromEntityId: testEntity.id,
@@ -754,9 +828,9 @@ export class TestEngine {
                         this.perfIncidentSeeds.add(testEntity.id);
                     }
                     else if (
-                    // Performance impact if latency is above a high-water mark
-                    testEntity.performanceMetrics.p95ExecutionTime >= 2000 ||
-                        testEntity.performanceMetrics.averageExecutionTime >= 1500) {
+                    // Performance impact if latency is above configurable high-water marks
+                    historyOk && (testEntity.performanceMetrics.p95ExecutionTime >= noiseConfig.PERF_IMPACT_P95_MS ||
+                        testEntity.performanceMetrics.averageExecutionTime >= noiseConfig.PERF_IMPACT_AVG_MS)) {
                         this.perfRelBuffer.push({
                             id: `${testEntity.id}_perf_impact_${testEntity.targetSymbol}`,
                             fromEntityId: testEntity.id,

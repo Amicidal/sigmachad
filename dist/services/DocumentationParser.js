@@ -725,6 +725,7 @@ export class DocumentationParser {
                     created: new Date(),
                     lastModified: new Date(),
                     version: 1,
+                    metadata: { inferred: true, confidence: 0.6, source: 'doc-domain-extract' }
                 });
             }
             catch (_a) {
@@ -780,6 +781,7 @@ export class DocumentationParser {
                     created: new Date(),
                     lastModified: new Date(),
                     version: 1,
+                    metadata: { inferred: true, confidence: 0.6, source: 'doc-cluster-link' }
                 });
             }
             catch (_a) { }
@@ -794,6 +796,7 @@ export class DocumentationParser {
                     created: new Date(),
                     lastModified: new Date(),
                     version: 1,
+                    metadata: { inferred: true, confidence: 0.6, source: 'cluster-domain' }
                 });
             }
             catch (_b) { }

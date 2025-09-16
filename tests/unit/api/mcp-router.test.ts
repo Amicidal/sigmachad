@@ -287,7 +287,7 @@ describe('MCPRouter', () => {
       it('should include relationships when includeRelated is true', async () => {
         const mockEntities = [{ id: 'entity1', name: 'TestEntity', type: 'class' }];
         const mockRelationships = [
-          { id: 'rel1', fromEntityId: 'entity1', toEntityId: 'entity2', type: 'USES' }
+          { id: 'rel1', fromEntityId: 'entity1', toEntityId: 'entity2', type: 'TYPE_USES' }
         ];
 
         mockKgService.search.mockResolvedValue(mockEntities);

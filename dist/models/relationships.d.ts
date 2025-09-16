@@ -24,6 +24,13 @@ export declare enum RelationshipType {
     IMPLEMENTS = "IMPLEMENTS",
     EXTENDS = "EXTENDS",
     DEPENDS_ON = "DEPENDS_ON",
+    OVERRIDES = "OVERRIDES",
+    READS = "READS",
+    WRITES = "WRITES",
+    THROWS = "THROWS",
+    TYPE_USES = "TYPE_USES",
+    RETURNS_TYPE = "RETURNS_TYPE",
+    PARAM_TYPE = "PARAM_TYPE",
     TESTS = "TESTS",
     VALIDATES = "VALIDATES",
     REQUIRES = "REQUIRES",
@@ -55,11 +62,96 @@ export declare enum RelationshipType {
 export interface StructuralRelationship extends Relationship {
     type: RelationshipType.CONTAINS | RelationshipType.DEFINES | RelationshipType.EXPORTS | RelationshipType.IMPORTS;
 }
+export type CodeEdgeSource = 'ast' | 'type-checker' | 'heuristic' | 'index' | 'runtime' | 'lsp';
+export type CodeEdgeKind = 'call' | 'identifier' | 'instantiation' | 'type' | 'read' | 'write' | 'override' | 'inheritance' | 'return' | 'param' | 'decorator' | 'annotation' | 'throw';
+export interface EdgeEvidence {
+    source: CodeEdgeSource;
+    confidence?: number;
+    location?: {
+        path?: string;
+        line?: number;
+        column?: number;
+    };
+    note?: string;
+    extractorVersion?: string;
+}
 export interface CodeRelationship extends Relationship {
-    type: RelationshipType.CALLS | RelationshipType.REFERENCES | RelationshipType.IMPLEMENTS | RelationshipType.EXTENDS | RelationshipType.DEPENDS_ON;
+    type: RelationshipType.CALLS | RelationshipType.REFERENCES | RelationshipType.IMPLEMENTS | RelationshipType.EXTENDS | RelationshipType.DEPENDS_ON | RelationshipType.OVERRIDES | RelationshipType.READS | RelationshipType.WRITES | RelationshipType.THROWS | RelationshipType.TYPE_USES | RelationshipType.RETURNS_TYPE | RelationshipType.PARAM_TYPE;
     strength?: number;
     context?: string;
+    occurrences?: number;
+    occurrencesScan?: number;
+    occurrencesTotal?: number;
+    occurrencesRecent?: number;
+    confidence?: number;
+    inferred?: boolean;
+    resolved?: boolean;
+    source?: CodeEdgeSource;
+    kind?: CodeEdgeKind;
+    location?: {
+        path?: string;
+        line?: number;
+        column?: number;
+    };
+    usedTypeChecker?: boolean;
+    isExported?: boolean;
+    active?: boolean;
+    evidence?: EdgeEvidence[];
+    locations?: Array<{
+        path?: string;
+        line?: number;
+        column?: number;
+    }>;
+    siteId?: string;
+    sites?: string[];
+    siteHash?: string;
+    why?: string;
+    callee?: string;
+    paramName?: string;
+    importDepth?: number;
+    importAlias?: string;
+    isMethod?: boolean;
+    resolution?: CodeResolution;
+    scope?: CodeScope;
+    accessPath?: string;
+    ambiguous?: boolean;
+    candidateCount?: number;
+    arity?: number;
+    awaited?: boolean;
+    receiverType?: string;
+    dynamicDispatch?: boolean;
+    overloadIndex?: number;
+    genericArguments?: string[];
+    operator?: string;
+    dataFlowId?: string;
+    purity?: 'pure' | 'impure' | 'unknown';
+    fromRef?: {
+        kind: 'entity' | 'fileSymbol' | 'external';
+        id?: string;
+        file?: string;
+        symbol?: string;
+        name?: string;
+    };
+    toRef?: {
+        kind: 'entity' | 'fileSymbol' | 'external';
+        id?: string;
+        file?: string;
+        symbol?: string;
+        name?: string;
+    };
+    to_ref_kind?: 'entity' | 'fileSymbol' | 'external' | undefined;
+    to_ref_file?: string;
+    to_ref_symbol?: string;
+    to_ref_name?: string;
+    from_ref_kind?: 'entity' | 'fileSymbol' | 'external' | undefined;
+    from_ref_file?: string;
+    from_ref_symbol?: string;
+    from_ref_name?: string;
+    firstSeenAt?: Date;
+    lastSeenAt?: Date;
 }
+export type CodeResolution = 'direct' | 'via-import' | 'type-checker' | 'heuristic';
+export type CodeScope = 'local' | 'imported' | 'external' | 'unknown';
 export interface TestRelationship extends Relationship {
     type: RelationshipType.TESTS | RelationshipType.VALIDATES;
     testType?: 'unit' | 'integration' | 'e2e';
@@ -136,6 +228,29 @@ export interface RelationshipQuery {
     until?: Date;
     limit?: number;
     offset?: number;
+    kind?: string;
+    source?: string;
+    confidenceMin?: number;
+    confidenceMax?: number;
+    inferred?: boolean;
+    resolved?: boolean;
+    active?: boolean;
+    firstSeenSince?: Date;
+    lastSeenSince?: Date;
+    to_ref_kind?: 'entity' | 'fileSymbol' | 'external';
+    to_ref_file?: string;
+    to_ref_symbol?: string;
+    to_ref_name?: string;
+    from_ref_kind?: 'entity' | 'fileSymbol' | 'external';
+    from_ref_file?: string;
+    from_ref_symbol?: string;
+    from_ref_name?: string;
+    siteHash?: string;
+    arityEq?: number;
+    arityMin?: number;
+    arityMax?: number;
+    awaited?: boolean;
+    isMethod?: boolean;
 }
 export interface RelationshipFilter {
     types?: RelationshipType[];

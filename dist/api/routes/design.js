@@ -3,6 +3,8 @@
  * Handles spec creation, validation, and management
  */
 import { v4 as uuidv4 } from "uuid";
+import { RelationshipType } from "../../models/relationships.js";
+import { noiseConfig } from "../../config/noise.js";
 export function registerDesignRoutes(app, kgService, dbService) {
     // Create specification
     app.post("/design/create-spec", {
@@ -213,6 +215,71 @@ async function createSpec(params, kgService, dbService) {
     ]);
     // Create entity in knowledge graph
     await kgService.createEntity(spec);
+    // Heuristic REQUIRES/IMPACTS edges from acceptance criteria / description
+    try {
+        const namesFromAC = Array.from(new Set((spec.acceptanceCriteria || [])
+            .flatMap((s) => String(s || '').match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || [])));
+        const namesFromDesc = Array.from(new Set(String(spec.description || '')
+            .match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []));
+        const pickTop = (arr, n) => arr.slice(0, n);
+        for (const name of pickTop(namesFromAC, 25)) {
+            try {
+                const syms = (await kgService.findSymbolsByName(name, 3))
+                    .filter((s) => ((s === null || s === void 0 ? void 0 : s.isExported) === true))
+                    .filter((s) => ['function', 'class', 'interface', 'typeAlias'].includes(String((s === null || s === void 0 ? void 0 : s.kind) || '').toLowerCase()));
+                const seen = new Set();
+                for (const s of syms) {
+                    if (!(s === null || s === void 0 ? void 0 : s.id) || seen.has(s.id))
+                        continue;
+                    seen.add(s.id);
+                    const nm = String(s.name || '');
+                    const conf = Math.min(1, (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF));
+                    if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
+                        await kgService.createRelationship({
+                            id: `rel_${spec.id}_${s.id}_REQUIRES`,
+                            fromEntityId: spec.id,
+                            toEntityId: s.id,
+                            type: RelationshipType.REQUIRES,
+                            created: new Date(),
+                            lastModified: new Date(),
+                            version: 1,
+                            metadata: { inferred: true, confidence: conf, source: 'spec-acceptance' }
+                        }, undefined, undefined, { validate: false });
+                    }
+                }
+            }
+            catch (_a) { }
+        }
+        for (const name of pickTop(namesFromDesc, 25)) {
+            try {
+                const syms = (await kgService.findSymbolsByName(name, 2))
+                    .filter((s) => ((s === null || s === void 0 ? void 0 : s.isExported) === true))
+                    .filter((s) => ['function', 'class', 'interface', 'typeAlias'].includes(String((s === null || s === void 0 ? void 0 : s.kind) || '').toLowerCase()));
+                const seen = new Set();
+                for (const s of syms) {
+                    if (!(s === null || s === void 0 ? void 0 : s.id) || seen.has(s.id))
+                        continue;
+                    seen.add(s.id);
+                    const nm = String(s.name || '');
+                    const conf = Math.min(1, (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF));
+                    if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
+                        await kgService.createRelationship({
+                            id: `rel_${spec.id}_${s.id}_IMPACTS`,
+                            fromEntityId: spec.id,
+                            toEntityId: s.id,
+                            type: RelationshipType.IMPACTS,
+                            created: new Date(),
+                            lastModified: new Date(),
+                            version: 1,
+                            metadata: { inferred: true, confidence: conf, source: 'spec-description' }
+                        }, undefined, undefined, { validate: false });
+                    }
+                }
+            }
+            catch (_b) { }
+        }
+    }
+    catch (_c) { }
     return {
         specId,
         spec,
@@ -275,6 +342,71 @@ async function updateSpec(specId, updates, kgService, dbService) {
     await dbService.postgresQuery("UPDATE documents SET content = $1, updated_at = $2 WHERE id = $3", [JSON.stringify(updatedSpec), updatedSpec.updated.toISOString(), specId]);
     // Update in knowledge graph
     await kgService.updateEntity(specId, updatedSpec);
+    // Refresh REQUIRES/IMPACTS edges using same heuristics
+    try {
+        const namesFromAC = Array.from(new Set((updatedSpec.acceptanceCriteria || [])
+            .flatMap((s) => String(s || '').match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || [])));
+        const namesFromDesc = Array.from(new Set(String(updatedSpec.description || '')
+            .match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []));
+        const pickTop = (arr, n) => arr.slice(0, n);
+        for (const name of pickTop(namesFromAC, 25)) {
+            try {
+                const syms = (await kgService.findSymbolsByName(name, 3))
+                    .filter((s) => ((s === null || s === void 0 ? void 0 : s.isExported) === true))
+                    .filter((s) => ['function', 'class', 'interface', 'typeAlias'].includes(String((s === null || s === void 0 ? void 0 : s.kind) || '').toLowerCase()));
+                const seen = new Set();
+                for (const s of syms) {
+                    if (!(s === null || s === void 0 ? void 0 : s.id) || seen.has(s.id))
+                        continue;
+                    seen.add(s.id);
+                    const nm = String(s.name || '');
+                    const conf = Math.min(1, (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF));
+                    if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
+                        await kgService.createRelationship({
+                            id: `rel_${updatedSpec.id}_${s.id}_REQUIRES`,
+                            fromEntityId: updatedSpec.id,
+                            toEntityId: s.id,
+                            type: RelationshipType.REQUIRES,
+                            created: new Date(),
+                            lastModified: new Date(),
+                            version: 1,
+                            metadata: { inferred: true, confidence: conf, source: 'spec-acceptance' }
+                        }, undefined, undefined, { validate: false });
+                    }
+                }
+            }
+            catch (_b) { }
+        }
+        for (const name of pickTop(namesFromDesc, 25)) {
+            try {
+                const syms = (await kgService.findSymbolsByName(name, 2))
+                    .filter((s) => ((s === null || s === void 0 ? void 0 : s.isExported) === true))
+                    .filter((s) => ['function', 'class', 'interface', 'typeAlias'].includes(String((s === null || s === void 0 ? void 0 : s.kind) || '').toLowerCase()));
+                const seen = new Set();
+                for (const s of syms) {
+                    if (!(s === null || s === void 0 ? void 0 : s.id) || seen.has(s.id))
+                        continue;
+                    seen.add(s.id);
+                    const nm = String(s.name || '');
+                    const conf = Math.min(1, (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF));
+                    if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
+                        await kgService.createRelationship({
+                            id: `rel_${updatedSpec.id}_${s.id}_IMPACTS`,
+                            fromEntityId: updatedSpec.id,
+                            toEntityId: s.id,
+                            type: RelationshipType.IMPACTS,
+                            created: new Date(),
+                            lastModified: new Date(),
+                            version: 1,
+                            metadata: { inferred: true, confidence: conf, source: 'spec-description' }
+                        }, undefined, undefined, { validate: false });
+                    }
+                }
+            }
+            catch (_c) { }
+        }
+    }
+    catch (_d) { }
     return updatedSpec;
 }
 async function listSpecs(params, kgService, dbService) {

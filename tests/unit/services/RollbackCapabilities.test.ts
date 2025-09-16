@@ -587,7 +587,7 @@ describe('RollbackCapabilities', () => {
             id: 'extra-rel',
             fromEntityId: 'existing-entity-1',
             toEntityId: 'extra-entity',
-            type: RelationshipType.USES,
+            type: RelationshipType.TYPE_USES,
           }, // Should be deleted
         ];
 

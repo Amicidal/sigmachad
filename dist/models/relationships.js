@@ -16,6 +16,14 @@ export var RelationshipType;
     RelationshipType["IMPLEMENTS"] = "IMPLEMENTS";
     RelationshipType["EXTENDS"] = "EXTENDS";
     RelationshipType["DEPENDS_ON"] = "DEPENDS_ON";
+    RelationshipType["OVERRIDES"] = "OVERRIDES";
+    RelationshipType["READS"] = "READS";
+    RelationshipType["WRITES"] = "WRITES";
+    RelationshipType["THROWS"] = "THROWS";
+    // Type usage relationships (distinct from module/package deps)
+    RelationshipType["TYPE_USES"] = "TYPE_USES";
+    RelationshipType["RETURNS_TYPE"] = "RETURNS_TYPE";
+    RelationshipType["PARAM_TYPE"] = "PARAM_TYPE";
     // Test relationships
     RelationshipType["TESTS"] = "TESTS";
     RelationshipType["VALIDATES"] = "VALIDATES";

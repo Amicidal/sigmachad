@@ -13,6 +13,18 @@ export declare class KnowledgeGraphService extends EventEmitter {
     private entityCache;
     private _lastPruneSummary;
     constructor(db: DatabaseService);
+    private dualWriteAuxiliaryForEdge;
+    /**
+     * Phase 3: Compute and store lightweight materialized edge stats for an entity.
+     */
+    computeAndStoreEdgeStats(entityId: string): Promise<void>;
+    private dedupeBy;
+    private mergeEvidenceArrays;
+    private mergeLocationsArrays;
+    private unifyResolvedEdgePlaceholders;
+    private normalizeRelationship;
+    private canonicalRelationshipId;
+    private directoryDistance;
     private isHistoryEnabled;
     /**
      * Append a compact version snapshot for an entity when its content changes.
@@ -205,7 +217,34 @@ export declare class KnowledgeGraphService extends EventEmitter {
     createRelationship(relationship: GraphRelationship | string, toEntityId?: string, type?: RelationshipType, options?: {
         validate?: boolean;
     }): Promise<void>;
+    /**
+     * Mark code relationships as inactive if not seen since the provided cutoff.
+     * Optionally restrict by file path (to_ref_file) to limit scope after parsing a file.
+     */
+    markInactiveEdgesNotSeenSince(cutoff: Date, opts?: {
+        toRefFile?: string;
+    }): Promise<number>;
+    /**
+     * Best-effort index creation to accelerate common queries.
+     * Guarded to avoid failures on engines that do not support these syntaxes.
+     */
+    ensureIndices(): Promise<void>;
+    /**
+     * Upsert evidence and lightweight fields for existing relationships by id.
+     * Intended for incremental sync to keep occurrences, evidence, locations, and lastSeenAt updated.
+     */
+    upsertEdgeEvidenceBulk(rels: Array<GraphRelationship & {
+        toEntityId?: string;
+    }>): Promise<void>;
     getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
+    /**
+     * Finalize a scan by deactivating code edges not observed during this scan window.
+     * Edges with lastSeenAt < scanStartedAt are set active=false. When history is enabled,
+     * also set validTo for those edges if not already closed.
+     */
+    finalizeScan(scanStartedAt: Date): Promise<{
+        deactivated: number;
+    }>;
     queryRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
     getRelationshipById(relationshipId: string): Promise<GraphRelationship | null>;
     /**
@@ -215,6 +254,41 @@ export declare class KnowledgeGraphService extends EventEmitter {
     createRelationshipsBulk(relationships: GraphRelationship[], options?: {
         validate?: boolean;
     }): Promise<void>;
+    private unifyResolvedEdgesBatch;
+    getEdgeEvidenceNodes(edgeId: string, limit?: number): Promise<Array<{
+        id: string;
+        edgeId: string;
+        source?: string;
+        confidence?: number;
+        path?: string;
+        line?: number;
+        column?: number;
+        note?: string;
+        extractorVersion?: string;
+        createdAt?: string;
+        updatedAt?: string;
+    }>>;
+    getEdgeSites(edgeId: string, limit?: number): Promise<Array<{
+        id: string;
+        edgeId: string;
+        siteId?: string;
+        path?: string;
+        line?: number;
+        column?: number;
+        accessPath?: string;
+        updatedAt?: string;
+    }>>;
+    getEdgeCandidates(edgeId: string, limit?: number): Promise<Array<{
+        id: string;
+        edgeId: string;
+        candidateId?: string;
+        name?: string;
+        path?: string;
+        resolver?: string;
+        score?: number;
+        rank?: number;
+        updatedAt?: string;
+    }>>;
     search(request: GraphSearchRequest): Promise<Entity[]>;
     private entityMatchesRequestedTypes;
     /**
@@ -241,6 +315,11 @@ export declare class KnowledgeGraphService extends EventEmitter {
      * Find a symbol defined in a specific file by name
      */
     findSymbolInFile(filePath: string, name: string): Promise<Entity | null>;
+    /**
+     * Find symbols by name that are "nearby" a given file, using directory prefix.
+     * This helps resolve placeholders by preferring local modules over global matches.
+     */
+    findNearbySymbols(filePath: string, name: string, limit?: number): Promise<Entity[]>;
     /**
      * Get a file entity by path
      */

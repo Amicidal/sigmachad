@@ -45,11 +45,27 @@ export interface ChangeRange {
     content: string;
 }
 export declare class ASTParser {
+    private readonly stopNames;
     private tsProject;
     private jsParser;
     private fileCache;
+    private exportMapCache;
+    private tsPathOptions;
+    private globalSymbolIndex;
+    private nameIndex;
+    private tcBudgetRemaining;
+    private takeTcBudget;
+    private shouldUseTypeChecker;
     constructor();
+    private resolveWithTypeChecker;
+    private resolveCallTargetWithChecker;
     initialize(): Promise<void>;
+    private removeFileFromIndexes;
+    private addSymbolsToIndexes;
+    private resolveModuleSpecifierToSourceFile;
+    private resolveReexportTarget;
+    private getModuleExportMap;
+    private resolveImportedMemberToFileAndName;
     parseFile(filePath: string): Promise<ParseResult>;
     parseFileIncremental(filePath: string): Promise<IncrementalParseResult>;
     private createSymbolMap;
@@ -71,6 +87,12 @@ export declare class ASTParser {
     private extractReferenceRelationships;
     private extractImportRelationships;
     private createRelationship;
+    private normalizeRelPath;
+    /**
+     * Create directory entities for the path and CONTAINS edges for dir->dir and dir->file.
+     * Returns entities and relationships to be merged into the parse result.
+     */
+    private createDirectoryHierarchy;
     private getSymbolName;
     private getJavaScriptSymbolName;
     private getSymbolSignature;

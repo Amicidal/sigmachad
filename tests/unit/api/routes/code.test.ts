@@ -1346,7 +1346,7 @@ describe('Code Routes', () => {
 
       const mockRelationships = [
         { toEntityId: 'util-1', type: 'CALLS' },
-        { toEntityId: 'helper-1', type: 'USES' }
+        { toEntityId: 'helper-1', type: 'TYPE_USES' }
       ];
 
       mockKgService.search.mockResolvedValue(mockEntities);
@@ -1362,7 +1362,7 @@ describe('Code Routes', () => {
 
       expect(mockKgService.getRelationships).toHaveBeenCalledWith({
         fromEntityId: 'service-1',
-        type: ['CALLS', 'USES', 'IMPORTS']
+        type: ['CALLS', 'TYPE_USES', 'IMPORTS']
       });
 
       expect(mockReply.send).toHaveBeenCalledWith({
@@ -2559,7 +2559,7 @@ describe('Code Routes', () => {
 
       const mockRelationships = [
         { toEntityId: 'util-1', type: 'CALLS' },
-        { toEntityId: 'helper-1', type: 'USES' },
+        { toEntityId: 'helper-1', type: 'TYPE_USES' },
         { toEntityId: 'config-1', type: 'IMPORTS' }
       ];
 

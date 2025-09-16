@@ -270,7 +270,7 @@ export interface DependencyAnalysis {
   directDependencies: {
     entity: Entity;
     relationship: RelationshipType;
-    strength: number;
+    confidence: number;
   }[];
   indirectDependencies: {
     entity: Entity;

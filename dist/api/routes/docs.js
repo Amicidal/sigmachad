@@ -3,6 +3,7 @@
  * Handles documentation synchronization, domain analysis, and content management
  */
 import { RelationshipType } from '../../models/relationships.js';
+import { noiseConfig } from '../../config/noise.js';
 export async function registerDocsRoutes(app, kgService, dbService, docParser) {
     // POST /docs/sync - Synchronize documentation with knowledge graph
     const syncRouteOptions = {
@@ -20,20 +21,73 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
         try {
             const { docsPath } = request.body;
             const result = await docParser.syncDocumentation(docsPath);
-            // After documents are synced, link code symbols to spec-like docs
+            // After documents are synced, link code symbols to spec-like docs with stricter rules
             try {
                 const docs = await kgService.findEntitiesByType('documentation');
                 const symbols = await kgService.findEntitiesByType('symbol');
+                const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Pre-bucket symbols by kind and export status for efficiency
+                const byKind = new Map();
+                for (const s of symbols) {
+                    const kind = String(s.kind || '').toLowerCase();
+                    const list = byKind.get(kind) || [];
+                    list.push(s);
+                    byKind.set(kind, list);
+                }
+                const pickSymbols = (docType) => {
+                    const t = String(docType || '').toLowerCase();
+                    let kinds = [];
+                    switch (t) {
+                        case 'api-docs':
+                            kinds = ['function'];
+                            break;
+                        case 'design-doc':
+                        case 'architecture':
+                            kinds = ['class', 'interface'];
+                            break;
+                        default:
+                            kinds = ['function'];
+                            break;
+                    }
+                    const out = [];
+                    for (const k of kinds) {
+                        const list = (byKind.get(k) || [])
+                            .filter((s) => s && s.name && String(s.name).length >= 4)
+                            // Reduce noise: only consider exported symbols for all kinds
+                            .filter((s) => s.isExported === true);
+                        out.push(...list);
+                    }
+                    return out;
+                };
                 let created = 0;
+                let pruned = 0;
                 for (const doc of docs) {
                     const docType = doc.docType || '';
                     const isSpec = ["design-doc", "api-docs", "architecture"].includes(String(docType));
                     if (!isSpec)
                         continue;
-                    const content = String(doc.content || '').toLowerCase();
-                    for (const sym of symbols) {
-                        const name = String(sym.name || '').toLowerCase();
-                        if (name && name.length > 2 && content.includes(name)) {
+                    const content = String(doc.content || '');
+                    const allowed = pickSymbols(docType);
+                    // Create bounded matches using word boundaries; require stronger evidence
+                    // Pre-scan content for heading lines to boost confidence
+                    const lines = content.split(/\r?\n/);
+                    const headingText = lines.filter(l => /^\s*#/.test(l)).join('\n');
+                    for (const sym of allowed) {
+                        const name = String(sym.name || '');
+                        if (!name || name.length < 4)
+                            continue;
+                        const re = new RegExp(`\\b${escapeRegExp(name)}\\b`, 'gi');
+                        const matches = content.match(re);
+                        const count = matches ? matches.length : 0;
+                        const strongName = name.length >= noiseConfig.DOC_LINK_LONG_NAME;
+                        if (count >= noiseConfig.DOC_LINK_MIN_OCCURRENCES || strongName) {
+                            // Base + step*occurrences, configurable; boost if mentioned in headings
+                            const base = noiseConfig.DOC_LINK_BASE_CONF;
+                            const step = noiseConfig.DOC_LINK_STEP_CONF;
+                            let confidence = strongName ? noiseConfig.DOC_LINK_STRONG_NAME_CONF : Math.min(1, base + step * Math.min(count, 5));
+                            if (headingText && new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(headingText)) {
+                                confidence = Math.min(1, confidence + 0.1);
+                            }
                             await kgService.createRelationship({
                                 id: `rel_${sym.id}_${doc.id}_IMPLEMENTS_SPEC`,
                                 fromEntityId: sym.id,
@@ -42,14 +96,28 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
                                 created: new Date(),
                                 lastModified: new Date(),
                                 version: 1,
+                                metadata: { method: 'regex_word_boundary', occurrences: count, docType, inferred: true, confidence }
                             });
                             created++;
                         }
                     }
+                    // Prune existing IMPLEMENTS_SPEC that do not meet new constraints
+                    try {
+                        const rels = await kgService.getRelationships({ toEntityId: doc.id, type: RelationshipType.IMPLEMENTS_SPEC, limit: 10000 });
+                        const allowedIds = new Set(allowed.map((s) => s.id));
+                        for (const r of rels) {
+                            if (!allowedIds.has(r.fromEntityId)) {
+                                await kgService.deleteRelationship(r.id);
+                                pruned++;
+                            }
+                        }
+                    }
+                    catch (_a) { }
                 }
                 result.createdImplementsSpec = created;
+                result.prunedImplementsSpec = pruned;
             }
-            catch (_a) { }
+            catch (_b) { }
             reply.send({
                 success: true,
                 data: result

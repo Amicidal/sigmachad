@@ -66,6 +66,16 @@ export function scoreInferredEdge(features: InferredEdgeFeatures): number {
     // ignore safe boosts
   }
 
+  // Phase 3: lightweight calibration via env overrides
+  try {
+    const mult = parseFloat(process.env.AST_CONF_MULTIPLIER || '1');
+    if (Number.isFinite(mult)) score *= mult;
+    const minClamp = process.env.AST_CONF_MIN ? parseFloat(process.env.AST_CONF_MIN) : undefined;
+    const maxClamp = process.env.AST_CONF_MAX ? parseFloat(process.env.AST_CONF_MAX) : undefined;
+    if (Number.isFinite(minClamp as number)) score = Math.max(score, minClamp as number);
+    if (Number.isFinite(maxClamp as number)) score = Math.min(score, maxClamp as number);
+  } catch {}
+
   // Clamp
   if (!Number.isFinite(score)) score = 0.5;
   return Math.max(0, Math.min(1, score));

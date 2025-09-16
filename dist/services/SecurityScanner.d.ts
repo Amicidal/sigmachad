@@ -42,6 +42,9 @@ export declare class SecurityScanner extends EventEmitter {
     private rules;
     private monitoringConfig;
     private scanHistory;
+    private osvCache;
+    private suppressionRules;
+    private issueSuppressionRules;
     constructor(db: DatabaseService, kgService: KnowledgeGraphService);
     initialize(): Promise<void>;
     private initializeSecurityRules;
@@ -59,7 +62,15 @@ export declare class SecurityScanner extends EventEmitter {
     private getCodeSnippet;
     private readFileContent;
     private checkPackageVulnerabilities;
+    private fetchOSVVulnerabilities;
+    private mapOSVVulns;
+    private fetchOSVVulnerabilitiesBatch;
+    private httpPostJSON;
+    private loadSuppressions;
+    private filterSuppressed;
     private isVersionVulnerable;
+    private pathMatches;
+    private isIssueSuppressed;
     private generateScanSummary;
     private storeScanResults;
     getVulnerabilityReport(): Promise<VulnerabilityReport>;

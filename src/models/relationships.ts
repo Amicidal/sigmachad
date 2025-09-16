@@ -35,6 +35,8 @@ export enum RelationshipType {
   READS = 'READS',
   WRITES = 'WRITES',
   THROWS = 'THROWS',
+  // Type usage relationships (distinct from module/package deps)
+  TYPE_USES = 'TYPE_USES',
   RETURNS_TYPE = 'RETURNS_TYPE',
   PARAM_TYPE = 'PARAM_TYPE',
 
@@ -88,9 +90,28 @@ export interface StructuralRelationship extends Relationship {
 }
 
 // Normalized code-edge source and kind enums (string unions)
-export type CodeEdgeSource = 'ast' | 'type-checker' | 'heuristic' | 'index' | 'call-typecheck' | string;
+// Tightened to a known set to avoid downstream drift; map producer-specific tags to these centrally.
+export type CodeEdgeSource = 'ast' | 'type-checker' | 'heuristic' | 'index' | 'runtime' | 'lsp';
 // Added 'throw' to align with THROWS edge metadata; keep narrow, purposeful union
-export type CodeEdgeKind = 'call' | 'identifier' | 'instantiation' | 'type' | 'read' | 'write' | 'override' | 'inheritance' | 'return' | 'param' | 'decorator' | 'annotation' | 'throw';
+export type CodeEdgeKind = 'call' | 'identifier' | 'instantiation' | 'type' | 'read' | 'write' | 'override' | 'inheritance' | 'return' | 'param' | 'decorator' | 'annotation' | 'throw' | 'dependency';
+
+// Shared list of relationship types that describe code edges.
+export const CODE_RELATIONSHIP_TYPES = [
+  RelationshipType.CALLS,
+  RelationshipType.REFERENCES,
+  RelationshipType.IMPLEMENTS,
+  RelationshipType.EXTENDS,
+  RelationshipType.DEPENDS_ON,
+  RelationshipType.OVERRIDES,
+  RelationshipType.READS,
+  RelationshipType.WRITES,
+  RelationshipType.THROWS,
+  RelationshipType.TYPE_USES,
+  RelationshipType.RETURNS_TYPE,
+  RelationshipType.PARAM_TYPE,
+] as const;
+
+export type CodeRelationshipType = (typeof CODE_RELATIONSHIP_TYPES)[number];
 
 // Structured evidence entries allowing multiple sources per edge
 export interface EdgeEvidence {
@@ -98,20 +119,21 @@ export interface EdgeEvidence {
   confidence?: number; // 0-1
   location?: { path?: string; line?: number; column?: number };
   note?: string;
+  // Optional extractor/schema versioning for auditability
+  extractorVersion?: string;
 }
 
 export interface CodeRelationship extends Relationship {
-  type: RelationshipType.CALLS | RelationshipType.REFERENCES |
-        RelationshipType.IMPLEMENTS | RelationshipType.EXTENDS |
-        RelationshipType.DEPENDS_ON | RelationshipType.OVERRIDES |
-        RelationshipType.READS | RelationshipType.WRITES |
-        RelationshipType.THROWS | RelationshipType.RETURNS_TYPE |
-        RelationshipType.PARAM_TYPE;
-  strength?: number; // 0-1, how strong the relationship is
+  type: CodeRelationshipType;
+  /** @deprecated prefer confidence */
+  strength?: number;
   context?: string; // human-readable context like "path:line"
 
   // Promoted evidence fields for consistent access across code-edge types
-  occurrences?: number; // count of occurrences (e.g., call sites)
+  // Per-scan occurrences (emission-local). For lifetime counts see occurrencesTotal
+  occurrencesScan?: number; // occurrences observed in this ingestion/scan
+  occurrencesTotal?: number; // monotonic total occurrences accumulated over time
+  occurrencesRecent?: number; // optional decayed or windowed count
   confidence?: number; // 0-1 confidence in inferred edge
   inferred?: boolean; // whether edge was inferred (vs resolved deterministically)
   resolved?: boolean; // whether the target was resolved deterministically
@@ -121,23 +143,34 @@ export interface CodeRelationship extends Relationship {
   // Extra flags used by AST/type-checker based extraction
   usedTypeChecker?: boolean;
   isExported?: boolean;
+  // Edge liveness
+  active?: boolean; // whether this edge is currently observed in code
 
   // Richer evidence: optional multi-source backing data and sampled locations
   evidence?: EdgeEvidence[];
   locations?: Array<{ path?: string; line?: number; column?: number }>;
+
+  // Multiplicity-aware fields (sampling, without changing canonical edge identity)
+  siteId?: string; // hash of path:line:column:accessPath for this emission
+  sites?: string[]; // bounded list of siteIds observed
+  siteHash?: string; // stable semantic-ish hash for the site to survive minor line shifts
+
+  // Human-friendly explanation for inferred edges
+  why?: string;
 
   // Optional hoisted details when available
   callee?: string; // for CALLS edges
   paramName?: string; // for PARAM_TYPE edges
   importDepth?: number; // for deep import resolution
   importAlias?: string; // alias used for imported reference, if any
-  usedTypeChecker?: boolean; // whether TS checker was used
-  isExported?: boolean; // whether target was exported
+  isMethod?: boolean; // for CALLS: whether it was a method (obj.method())
 
   // Structured semantics and context (optional; also present in metadata)
   resolution?: CodeResolution; // how the target was resolved
   scope?: CodeScope; // local/imported/external
   accessPath?: string; // full symbol/call access path if applicable
+  ambiguous?: boolean; // whether multiple candidates were plausible
+  candidateCount?: number; // number of candidates when ambiguous
 
   // CALLS-only convenience fields (optional)
   arity?: number; // number of call arguments
@@ -157,6 +190,21 @@ export interface CodeRelationship extends Relationship {
   // Future target reference structure (non-breaking optional)
   fromRef?: { kind: 'entity' | 'fileSymbol' | 'external'; id?: string; file?: string; symbol?: string; name?: string };
   toRef?: { kind: 'entity' | 'fileSymbol' | 'external'; id?: string; file?: string; symbol?: string; name?: string };
+  // Promoted toRef scalars for efficient querying/indexing (kept in sync with toRef when present)
+  to_ref_kind?: 'entity' | 'fileSymbol' | 'external' | undefined;
+  to_ref_file?: string;
+  to_ref_symbol?: string;
+  to_ref_name?: string;
+
+  // Promoted fromRef scalars for efficient querying/indexing (mirrors to_ref_*)
+  from_ref_kind?: 'entity' | 'fileSymbol' | 'external' | undefined;
+  from_ref_file?: string;
+  from_ref_symbol?: string;
+  from_ref_name?: string;
+
+  // Observation window (peristence): when this edge was first/last seen in code
+  firstSeenAt?: Date;
+  lastSeenAt?: Date;
 }
 
 // Resolution and scope helpers for code edges
@@ -273,6 +321,41 @@ export interface RelationshipQuery {
   until?: Date;
   limit?: number;
   offset?: number;
+  // Extended filters for code edges (optional)
+  kind?: CodeEdgeKind | CodeEdgeKind[];
+  source?: CodeEdgeSource | CodeEdgeSource[];
+  resolution?: CodeResolution | CodeResolution[];
+  scope?: CodeScope | CodeScope[];
+  confidenceMin?: number;
+  confidenceMax?: number;
+  inferred?: boolean;
+  resolved?: boolean;
+  active?: boolean;
+  firstSeenSince?: Date;
+  lastSeenSince?: Date;
+  // Promoted toRef scalars for efficient querying
+  to_ref_kind?: 'entity' | 'fileSymbol' | 'external';
+  to_ref_file?: string;
+  to_ref_symbol?: string;
+  to_ref_name?: string;
+  // Promoted fromRef scalars for efficient querying (optional)
+  from_ref_kind?: 'entity' | 'fileSymbol' | 'external';
+  from_ref_file?: string;
+  from_ref_symbol?: string;
+  from_ref_name?: string;
+  // Site identity filtering
+  siteHash?: string;
+  // Additional code-edge filters (optional)
+  arityEq?: number;
+  arityMin?: number;
+  arityMax?: number;
+  awaited?: boolean;
+  isMethod?: boolean;
+  // CALLS/WRITES convenience filters
+  operator?: string;
+  callee?: string;
+  importDepthMin?: number;
+  importDepthMax?: number;
 }
 
 export interface RelationshipFilter {

@@ -370,6 +370,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   private async performFullSync(operation: SyncOperation): Promise<void> {
     // Implementation for full synchronization
+    const scanStart = new Date();
     this.emit("syncProgress", operation, { phase: "scanning", progress: 0 });
 
     // Ensure a Module entity exists for the root package if applicable (best-effort)
@@ -596,6 +597,9 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Post-pass: attempt to resolve and create any deferred relationships now that all entities exist
     await this.runPostResolution(operation);
 
+    // Deactivate edges not seen during this scan window (best-effort)
+    try { await this.kgService.finalizeScan(scanStart); } catch {}
+
     this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
 
     // Fire-and-forget background embeddings if they were skipped during full sync
@@ -625,6 +629,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     operation: SyncOperation
   ): Promise<void> {
     // Implementation for incremental synchronization
+    const scanStart = new Date();
     this.emit("syncProgress", operation, {
       phase: "processing_changes",
       progress: 0,
@@ -991,6 +996,11 @@ export class SynchronizationCoordinator extends EventEmitter {
                     }
                     if (toId && rel.fromEntityId) {
                       await this.kgService.openEdge(rel.fromEntityId, toId as any, rel.type, now);
+                      // Keep edge evidence/properties in sync during incremental updates
+                      try {
+                        const enriched = { ...rel, toEntityId: toId } as GraphRelationship;
+                        await this.kgService.upsertEdgeEvidenceBulk([enriched]);
+                      } catch {}
                       operation.relationshipsUpdated++;
                     }
                   } catch (err) {
@@ -1206,6 +1216,9 @@ export class SynchronizationCoordinator extends EventEmitter {
         });
       }
     }
+
+    // Deactivate edges not seen during this scan window (best-effort)
+    try { await this.kgService.finalizeScan(scanStart); } catch {}
 
     this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
   }
@@ -1672,12 +1685,23 @@ declare module "./SynchronizationCoordinator" {
     }
   } catch {}
 
-  const resolvedId = await (this as any).resolveRelationshipTarget(
+  const resolvedResult = await (this as any).resolveRelationshipTarget(
     relationship,
     sourceFilePath
   );
+  const resolvedId = typeof resolvedResult === 'string' ? resolvedResult : (resolvedResult?.id || null);
   if (!resolvedId) return false;
-  const resolvedRel = { ...relationship, toEntityId: resolvedId } as GraphRelationship;
+  const enrichedMeta = { ...(relationship as any).metadata } as any;
+  if (resolvedResult && typeof resolvedResult === 'object') {
+    if (Array.isArray((resolvedResult as any).candidates) && (resolvedResult as any).candidates.length > 0) {
+      enrichedMeta.candidates = (resolvedResult as any).candidates.slice(0, 5);
+      (relationship as any).ambiguous = ((resolvedResult as any).candidates.length > 1);
+      (relationship as any).candidateCount = (resolvedResult as any).candidates.length;
+    }
+    if ((resolvedResult as any).resolutionPath) enrichedMeta.resolutionPath = (resolvedResult as any).resolutionPath;
+    enrichedMeta.resolvedTo = { kind: 'entity', id: resolvedId };
+  }
+  const resolvedRel = { ...relationship, toEntityId: resolvedId, metadata: enrichedMeta } as GraphRelationship;
   await (this as any).kgService.createRelationship(resolvedRel, undefined, undefined, { validate: false });
   return true;
 };
@@ -1686,8 +1710,58 @@ declare module "./SynchronizationCoordinator" {
   this: SynchronizationCoordinator,
   relationship: GraphRelationship,
   sourceFilePath?: string
-): Promise<string | null> {
+): Promise<string | { id: string | null; candidates?: Array<{ id: string; name?: string; path?: string; resolver?: string; score?: number }>; resolutionPath?: string } | null> {
   const to = (relationship.toEntityId as any) || "";
+
+  // Prefer structured toRef when present to avoid brittle string parsing
+  const toRef: any = (relationship as any).toRef;
+  // Establish a currentFilePath context early using fromRef if provided
+  let currentFilePath = sourceFilePath;
+  const candidates: Array<{ id: string; name?: string; path?: string; resolver?: string; score?: number }> = [];
+  try {
+    const fromRef: any = (relationship as any).fromRef;
+    if (!currentFilePath && fromRef && typeof fromRef === 'object') {
+      if (fromRef.kind === 'fileSymbol' && fromRef.file) {
+        currentFilePath = fromRef.file;
+      } else if (fromRef.kind === 'entity' && fromRef.id) {
+        const ent = await (this as any).kgService.getEntity(fromRef.id);
+        const p = (ent as any)?.path as string | undefined;
+        if (p) currentFilePath = p.includes(':') ? p.split(':')[0] : p;
+      }
+    }
+  } catch {}
+  if (toRef && typeof toRef === 'object') {
+    try {
+      if (toRef.kind === 'entity' && toRef.id) {
+        return { id: toRef.id, candidates, resolutionPath: 'entity' };
+      }
+      if (toRef.kind === 'fileSymbol' && toRef.file && (toRef.symbol || toRef.name)) {
+        const ent = await (this as any).kgService.findSymbolInFile(toRef.file, (toRef.symbol || toRef.name));
+        if (ent) return { id: ent.id, candidates, resolutionPath: 'fileSymbol' };
+      }
+      if (toRef.kind === 'external' && toRef.name) {
+        const name = toRef.name as string;
+        if (!currentFilePath) {
+          try {
+            const fromEntity = await (this as any).kgService.getEntity(relationship.fromEntityId);
+            if (fromEntity && (fromEntity as any).path) {
+              const p = (fromEntity as any).path as string;
+              currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+            }
+          } catch {}
+        }
+        if (currentFilePath) {
+          const local = await (this as any).kgService.findSymbolInFile(currentFilePath, name);
+          if (local) { candidates.push({ id: local.id, name: (local as any).name, path: (local as any).path, resolver: 'local', score: 1.0 }); }
+          const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 5);
+          for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
+        }
+        const global = await (this as any).kgService.findSymbolsByName(name);
+        for (const g of global) candidates.push({ id: g.id, name: (g as any).name, path: (g as any).path, resolver: 'name' });
+        if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'external-name' };
+      }
+    } catch {}
+  }
 
   // Explicit file placeholder: file:<relPath>:<name>
   {
@@ -1697,13 +1771,14 @@ declare module "./SynchronizationCoordinator" {
       const name = fileMatch[2];
       try {
         const ent = await (this as any).kgService.findSymbolInFile(relPath, name);
-        if (ent) return ent.id;
+        if (ent) return { id: ent.id, candidates, resolutionPath: 'file-placeholder' };
       } catch {}
       return null;
     }
   }
 
-  let currentFilePath = sourceFilePath;
+  // Ensure we still have a usable file context for subsequent heuristics
+  // (do not redeclare currentFilePath; just populate if missing)
   if (!currentFilePath) {
     try {
       const fromEntity = await (this as any).kgService.getEntity(
@@ -1724,18 +1799,19 @@ declare module "./SynchronizationCoordinator" {
       // Use local index first to avoid DB roundtrips
       const key = `${currentFilePath}:${name}`;
       const localId = (this as any).localSymbolIndex?.get?.(key);
-      if (localId) return localId;
+      if (localId) return { id: localId, candidates, resolutionPath: 'local-index' };
       const local = await (this as any).kgService.findSymbolInFile(currentFilePath, name);
-      if (local) return local.id;
+      if (local) { candidates.push({ id: local.id, name: (local as any).name, path: (local as any).path, resolver: 'local' }); }
       // Prefer nearby directory symbols if available
       const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 3);
-      if (near && near.length > 0) return near[0].id;
+      for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
     }
-    const candidates = await (this as any).kgService.findSymbolByKindAndName(
+    const byKind = await (this as any).kgService.findSymbolByKindAndName(
       kind,
       name
     );
-    if (candidates.length > 0) return candidates[0].id;
+    for (const c of byKind) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'kind-name' });
+    if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'kind-name' };
     return null;
   }
 
@@ -1747,13 +1823,14 @@ declare module "./SynchronizationCoordinator" {
         currentFilePath,
         name
       );
-      if (local) return local.id;
+      if (local) { candidates.push({ id: local.id, name: (local as any).name, path: (local as any).path, resolver: 'local' }); }
       // Prefer nearby directory symbols for imported names
       const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 5);
-      if (near && near.length > 0) return near[0].id;
+      for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
     }
-    const candidates = await (this as any).kgService.findSymbolsByName(name);
-    if (candidates.length > 0) return candidates[0].id;
+    const byName = await (this as any).kgService.findSymbolsByName(name);
+    for (const c of byName) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'name' });
+    if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'import-name' };
     return null;
   }
 
@@ -1765,13 +1842,14 @@ declare module "./SynchronizationCoordinator" {
         currentFilePath,
         name
       );
-      if (local) return local.id;
+      if (local) { candidates.push({ id: local.id, name: (local as any).name, path: (local as any).path, resolver: 'local' }); }
       // Prefer nearby matches
       const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 5);
-      if (near && near.length > 0) return near[0].id;
+      for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
     }
-    const candidates = await (this as any).kgService.findSymbolsByName(name);
-    if (candidates.length > 0) return candidates[0].id;
+    const global = await (this as any).kgService.findSymbolsByName(name);
+    for (const g of global) candidates.push({ id: g.id, name: (g as any).name, path: (g as any).path, resolver: 'name' });
+    if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'external-name' };
     return null;
   }
 
