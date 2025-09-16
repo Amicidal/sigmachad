@@ -3,6 +3,7 @@
  * Tests graph operations, vector embeddings, and entity relationships across databases
  */
 
+import crypto from "crypto";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
 import { DatabaseService } from "../../../src/services/DatabaseService";
@@ -15,6 +16,7 @@ import {
 import { CodebaseEntity, RelationshipType } from "../../../src/models/entities";
 import { GraphRelationship } from "../../../src/models/relationships";
 import { GraphSearchRequest } from "../../../src/models/types";
+import { canonicalRelationshipId } from "../../../src/utils/codeEdges";
 
 describe("KnowledgeGraphService Integration", () => {
   let kgService: KnowledgeGraphService;
@@ -299,6 +301,127 @@ describe("KnowledgeGraphService Integration", () => {
 
       expect(timeRangeResults.length).toBe(1);
       expect(timeRangeResults[0].id).toBe(relationship.id);
+    });
+
+    it("normalizes code edges when persisting relationships", async () => {
+      const now = new Date();
+      const fromSymbol = {
+        id: "sym:src/foo.ts#useLocal@abc",
+        path: "src/foo.ts",
+        hash: "foo123",
+        language: "typescript",
+        lastModified: now,
+        created: now,
+        type: "symbol",
+        kind: "function",
+        signature: "function useLocal(): number",
+        startLine: 5,
+        endLine: 25,
+        metadata: {},
+        name: "useLocal",
+      } as unknown as CodebaseEntity;
+
+      const toSymbol = {
+        id: "sym:src/bar.ts#Symbol@def",
+        path: "src/bar.ts",
+        hash: "bar123",
+        language: "typescript",
+        lastModified: now,
+        created: now,
+        type: "symbol",
+        kind: "class",
+        signature: "class Symbol {}",
+        startLine: 1,
+        endLine: 30,
+        metadata: {},
+        name: "Symbol",
+      } as unknown as CodebaseEntity;
+
+      await kgService.createEntity(fromSymbol);
+      await kgService.createEntity(toSymbol);
+
+      const codeEdge = {
+        id: "code-edge-int-1",
+        fromEntityId: fromSymbol.id,
+        toEntityId: toSymbol.id,
+        type: "USES" as unknown as RelationshipType,
+        created: now,
+        lastModified: now,
+        version: 1,
+        metadata: {
+          path: "src/foo.ts",
+          line: 7,
+          column: 2,
+          confidence: 0.7,
+          source: "ts",
+          evidence: [
+            { source: "ast", location: { path: "src/foo.ts", line: 7, column: 3 }, note: "Meta note", extractorVersion: "v42" },
+            { source: "ast", location: { path: "src/foo.ts", line: 7, column: 3 } },
+          ],
+          toRef: { kind: "fileSymbol", file: "src/bar.ts", symbol: "Symbol", name: "Symbol" },
+          fromRef: { kind: "fileSymbol", file: "src/foo.ts", symbol: "useLocal", name: "useLocal" },
+          inferred: true,
+        },
+        evidence: [
+          { source: "type-checker", location: { path: "src/foo.ts", line: 5 } },
+          { source: "type-checker", location: { path: "src/foo.ts", line: 5 } },
+          { source: "heuristic", location: { path: "src/foo.ts", line: 12 } },
+        ],
+        locations: [
+          { path: "src/foo.ts", line: 5 },
+          { path: "src/foo.ts", line: 5 },
+          { path: "", line: Number.NaN },
+        ],
+        accessPath: "useLocal",
+      } as unknown as GraphRelationship;
+
+      await kgService.createRelationship(codeEdge);
+
+      const results = await kgService.getRelationships({ fromEntityId: fromSymbol.id });
+      expect(results.length).toBe(1);
+
+      const stored = results[0];
+      const expectedSiteIdBase = "src/foo.ts|7|2|useLocal";
+      const expectedSiteId =
+        "site_" + crypto.createHash("sha1").update(expectedSiteIdBase).digest("hex").slice(0, 12);
+
+      expect(stored.id).toBe(canonicalRelationshipId(stored.fromEntityId, stored));
+      expect(stored.type).toBe(RelationshipType.TYPE_USES);
+      expect(stored.source).toBe("type-checker");
+      expect(stored.confidence).toBeCloseTo(0.7, 5);
+      expect(stored.context).toBe("src/foo.ts:7");
+      expect(stored.location).toEqual({ path: "src/foo.ts", line: 7, column: 2 });
+      expect(stored.evidence).toEqual([
+        { source: "type-checker", location: { path: "src/foo.ts", line: 5 } },
+        { source: "ast", location: { path: "src/foo.ts", line: 7, column: 3 }, note: "Meta note", extractorVersion: "v42" },
+        { source: "heuristic", location: { path: "src/foo.ts", line: 12 } },
+      ]);
+      expect(Array.isArray(stored.locations)).toBe(true);
+      expect(stored.locations).toEqual(
+        expect.arrayContaining([{ path: "src/foo.ts", line: 5 }])
+      );
+      expect(stored.siteId).toBe(expectedSiteId);
+      expect(stored.siteHash).toMatch(/^sh_[0-9a-f]{16}$/);
+      expect(stored.accessPath).toBe("useLocal");
+      expect(stored.to_ref_kind).toBe("fileSymbol");
+      expect(stored.to_ref_file).toBe("src/bar.ts");
+      expect(stored.to_ref_symbol).toBe("Symbol");
+      expect(stored.metadata).toMatchObject({
+        path: "src/foo.ts",
+        line: 7,
+        column: 2,
+        confidence: 0.7,
+        source: "ts",
+        inferred: true,
+        toRef: { kind: "fileSymbol", file: "src/bar.ts", symbol: "Symbol", name: "Symbol" },
+        fromRef: { kind: "fileSymbol", file: "src/foo.ts", symbol: "useLocal", name: "useLocal" },
+      });
+      expect(stored.metadata && Array.isArray((stored.metadata as any).evidence)).toBe(true);
+      if (Array.isArray(stored.sites)) {
+        expect(stored.sites).toContain(expectedSiteId);
+      } else if (typeof stored.sites === "string") {
+        expect(stored.sites).toContain(expectedSiteId);
+      }
     });
   });
 
