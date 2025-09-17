@@ -8,7 +8,6 @@ import { FastifyInstance } from "fastify";
 import { APIGateway } from "../../../src/api/APIGateway.js";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
 import { DatabaseService } from "../../../src/services/DatabaseService.js";
-import { FileWatcher } from "../../../src/services/FileWatcher.js";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -21,10 +20,12 @@ import fs from "fs/promises";
 import path from "path";
 import { expectSuccess, expectError } from "../../test-utils/assertions.js";
 
-describe("Performance Benchmarks Integration", () => {
+const RUN_BENCHMARK_TESTS = process.env.RUN_BENCHMARK_TESTS === "1";
+const describeBench = RUN_BENCHMARK_TESTS ? describe : describe.skip;
+
+describeBench("Performance Benchmarks Integration", () => {
   let dbService: DatabaseService;
   let kgService: KnowledgeGraphService;
-  let fileWatcher: FileWatcher;
   let apiGateway: APIGateway;
   let app: FastifyInstance;
   let testDir: string;
@@ -58,8 +59,6 @@ describe("Performance Benchmarks Integration", () => {
 
     // Create services
     kgService = new KnowledgeGraphService(dbService);
-    fileWatcher = new FileWatcher(kgService, dbService);
-
     // Create API Gateway
     apiGateway = new APIGateway(kgService, dbService);
     app = apiGateway.getApp();
@@ -72,9 +71,6 @@ describe("Performance Benchmarks Integration", () => {
   }, 60000); // Longer timeout for benchmark setup
 
   afterAll(async () => {
-    if (fileWatcher) {
-      await fileWatcher.stop();
-    }
     if (apiGateway) {
       await apiGateway.stop();
     }

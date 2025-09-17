@@ -26,22 +26,18 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _input_in: {
             limit?: number | undefined;
             since?: string | undefined;
-            component?: string | undefined;
             level?: "info" | "error" | "warn" | "debug" | undefined;
+            component?: string | undefined;
         };
         _input_out: {
             limit: number;
             since?: string | undefined;
-            component?: string | undefined;
             level?: "info" | "error" | "warn" | "debug" | undefined;
+            component?: string | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        items: any[];
-        total: number;
-        limit: number;
-    }>;
+    }, never>;
     getMetrics: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -118,11 +114,7 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        success: boolean;
-        syncedPaths: string[];
-        timestamp: string;
-    }>;
+    }, never>;
     clearCache: import("@trpc/server").BuildProcedure<"mutation", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -146,11 +138,7 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        success: boolean;
-        clearedType: "search" | "entities" | "relationships" | "all";
-        timestamp: string;
-    }>;
+    }, never>;
     getConfig: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -171,7 +159,7 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        version: any;
+        version: string;
         environment: string;
         features: {
             websocket: boolean;
@@ -204,11 +192,7 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        success: boolean;
-        key: string;
-        updated: string;
-    }>;
+    }, never>;
     indexHealth: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;

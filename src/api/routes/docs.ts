@@ -15,6 +15,9 @@ interface SyncDocumentationResponse {
   newDomains: number;
   updatedClusters: number;
   errors: string[];
+  refreshedRelationships?: number;
+  staleRelationships?: number;
+  sectionsLinked?: number;
 }
 
 export async function registerDocsRoutes(
@@ -484,14 +487,18 @@ export async function registerDocsRoutes(
       };
 
       // Basic validation implementation
-      const validationResults = [];
+      const validationResults: Array<{
+        file: string;
+        status: string;
+        issues: string[];
+      }> = [];
       let passed = 0;
       let failed = 0;
 
       for (const filePath of files) {
         try {
           const parsedDoc = await docParser.parseFile(filePath);
-          const issues = [];
+          const issues: string[] = [];
 
           // Check for completeness
           if (!parsedDoc.title || parsedDoc.title === 'Untitled Document') {

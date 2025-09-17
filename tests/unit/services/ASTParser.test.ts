@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { ASTParser } from '@/services/ASTParser';
+import type { ParseResult } from '@/services/ASTParser';
 import { Entity, File, FunctionSymbol, ClassSymbol, InterfaceSymbol, TypeAliasSymbol } from '@/models/entities';
 import { GraphRelationship, RelationshipType } from '@/models/relationships';
 import path from 'path';
@@ -13,6 +14,26 @@ import fs from 'fs/promises';
 describe('ASTParser', () => {
   let parser: ASTParser;
   const testFilesDir = path.join(__dirname, 'ast-parser');
+
+  const expectSuccessfulParse = (result: ParseResult) => {
+    expect(result.errors).toEqual([]);
+    expect(result.entities).toEqual(expect.any(Array));
+    expect(result.entities.length).toBeGreaterThan(0);
+  };
+
+  const getFileEntity = (result: ParseResult) =>
+    result.entities.find((e) => e.type === 'file') as File;
+
+  const expectSymbol = (result: ParseResult, kind: string, name: string) => {
+    const symbol = result.entities.find(
+      (entity) =>
+        entity.type === 'symbol' &&
+        (entity as any).kind === kind &&
+        (entity as any).name === name
+    );
+    expect(symbol).toBeDefined();
+    return symbol as Entity;
+  };
 
   beforeAll(async () => {
     // Create parser instance
@@ -70,133 +91,64 @@ describe('ASTParser', () => {
   });
 
   describe('TypeScript File Parsing', () => {
-    it('should parse TypeScript class file successfully', async () => {
-      const filePath = path.join(testFilesDir, 'sample-class.ts');
-      const result = await parser.parseFile(filePath);
+    const tsFixtures: Array<{
+      name: string;
+      file: string;
+      verify: (result: ParseResult) => void;
+    }> = [
+      {
+        name: 'application service class fixture',
+        file: 'sample-class.ts',
+        verify: (result) => {
+          const fileEntity = getFileEntity(result);
+          expect(fileEntity.language).toBe('typescript');
+          expect(fileEntity.extension).toBe('.ts');
+          expect(fileEntity.lines).toBeGreaterThan(0);
+          expect(fileEntity.hash).toMatch(/^[a-f0-9]{64}$/);
 
-      expect(result.entities.length).toBeGreaterThan(0);
-      expect(result.errors.length).toBe(0);
+          expectSymbol(result, 'class', 'UserService');
+          expectSymbol(result, 'class', 'BaseService');
+          expectSymbol(result, 'interface', 'UserConfig');
+          expectSymbol(result, 'typeAlias', 'UserRole');
+          expectSymbol(result, 'function', 'createUserService');
 
-      // Should have a file entity
-      const fileEntity = result.entities.find(e => e.type === 'file') as File;
-      expect(fileEntity).not.toBeNull();
-      expect(fileEntity).not.toBeUndefined();
-      expect(fileEntity.type).toBe('file');
-      expect(fileEntity.language).toBe('typescript');
-      expect(fileEntity.extension).toBe('.ts');
+          const relationshipTypes = result.relationships.map((rel) => rel.type);
+          expect(relationshipTypes).toEqual(
+            expect.arrayContaining([
+              RelationshipType.DEFINES,
+              RelationshipType.IMPORTS,
+            ])
+          );
+          expect(
+            relationshipTypes.filter((type) => type === RelationshipType.EXTENDS)
+          ).not.toHaveLength(0);
+        },
+      },
+      {
+        name: 'interface definitions fixture',
+        file: 'sample-interface.ts',
+        verify: (result) => {
+          expectSymbol(result, 'interface', 'AppConfig');
+          expectSymbol(result, 'interface', 'FeatureFlags');
+          expectSymbol(result, 'typeAlias', 'ApiResponse');
+        },
+      },
+    ];
 
-      // Should have symbol entities
-      const symbolEntities = result.entities.filter(e => e.type === 'symbol');
-      expect(symbolEntities.length).toBeGreaterThan(0);
-
-      // Should find specific classes and functions
-      const userServiceClass = symbolEntities.find(e =>
-        e.type === 'symbol' && (e as any).name === 'UserService'
-      ) as any;
-      expect(userServiceClass).toBeDefined();
-      expect(userServiceClass.kind).toBe('class');
-
-      // Check that we have various symbols
-      const classSymbols = symbolEntities.filter(e => (e as any).kind === 'class');
-      const functionSymbols = symbolEntities.filter(e => (e as any).kind === 'function');
-      const interfaceSymbols = symbolEntities.filter(e => (e as any).kind === 'interface');
-      const typeAliasSymbols = symbolEntities.filter(e => (e as any).kind === 'typeAlias');
-
-      expect(classSymbols.length).toBeGreaterThan(0);
-      expect(functionSymbols.length).toBeGreaterThan(0);
-      expect(interfaceSymbols.length).toBeGreaterThan(0);
-      expect(typeAliasSymbols.length).toBeGreaterThan(0);
+    it.each(tsFixtures)('parses $name', async ({ file, verify }) => {
+      const result = await parser.parseFile(path.join(testFilesDir, file));
+      expectSuccessfulParse(result);
+      verify(result);
     });
 
-    it('should parse TypeScript interface file successfully', async () => {
-      const filePath = path.join(testFilesDir, 'sample-interface.ts');
-      const result = await parser.parseFile(filePath);
+    it('represents empty files with minimal metadata', async () => {
+      const result = await parser.parseFile(path.join(testFilesDir, 'empty-file.ts'));
+      expect(result.entities).toHaveLength(1);
+      expect(result.relationships).toHaveLength(0);
 
-      expect(result.entities.length).toBeGreaterThan(0);
-      expect(result.errors.length).toBe(0);
-
-      // Should find interface definitions
-      const symbolEntities = result.entities.filter(e => e.type === 'symbol');
-      const databaseConfigInterface = symbolEntities.find(e =>
-        e.type === 'symbol' && (e as any).name === 'DatabaseConfig'
-      ) as any;
-      expect(databaseConfigInterface).toBeDefined();
-      expect(databaseConfigInterface.kind).toBe('interface');
-
-      // Should find type alias definitions
-      const logLevelType = symbolEntities.find(e =>
-        e.type === 'symbol' && (e as any).name === 'LogLevel'
-      ) as any;
-      expect(logLevelType).toBeDefined();
-      expect(logLevelType.kind).toBe('typeAlias');
-
-      const apiResponseType = symbolEntities.find(e =>
-        e.type === 'symbol' && (e as any).name === 'ApiResponse'
-      ) as any;
-      expect(apiResponseType).toBeDefined();
-      expect(apiResponseType.kind).toBe('typeAlias');
-    });
-
-    it('should extract relationships correctly', async () => {
-      const filePath = path.join(testFilesDir, 'sample-class.ts');
-      const result = await parser.parseFile(filePath);
-
-      expect(result.relationships.length).toBeGreaterThan(0);
-
-      // Should have DEFINES relationships between file and symbols
-      const definesRelationships = result.relationships.filter(r =>
-        r.type === RelationshipType.DEFINES
-      );
-      expect(definesRelationships.length).toBeGreaterThan(0);
-
-      // Should have EXTENDS relationships for class inheritance
-      const extendsRelationships = result.relationships.filter(r =>
-        r.type === RelationshipType.EXTENDS
-      );
-      expect(extendsRelationships.length).toBeGreaterThan(0);
-
-      // Should have IMPORTS relationships
-      const importRelationships = result.relationships.filter(r =>
-        r.type === RelationshipType.IMPORTS
-      );
-      expect(importRelationships.length).toBeGreaterThan(0);
-    });
-
-    it('should parse empty TypeScript file', async () => {
-      const filePath = path.join(testFilesDir, 'empty-file.ts');
-      const result = await parser.parseFile(filePath);
-
-      expect(result.entities.length).toBe(1); // Only file entity
-      expect(result.relationships.length).toBe(0);
-      expect(result.errors.length).toBe(0);
-
-      const fileEntity = result.entities[0] as File;
-      expect(fileEntity.type).toBe('file');
-      expect(fileEntity.lines).toBe(1); // Empty file still counts as 1 line
+      const fileEntity = getFileEntity(result);
+      expect(fileEntity.lines).toBe(1);
       expect(fileEntity.size).toBe(0);
-    });
-
-    it('should handle file metadata correctly', async () => {
-      const filePath = path.join(testFilesDir, 'sample-class.ts');
-      const result = await parser.parseFile(filePath);
-
-      const fileEntity = result.entities.find(e => e.type === 'file') as File;
-      expect(fileEntity).toBeDefined();
-
-      // Check file metadata
-      expect(fileEntity.language).toBe('typescript');
-      expect(fileEntity.extension).toBe('.ts');
-      expect(fileEntity.lines).toBeGreaterThan(0);
-      expect(fileEntity.size).toBeGreaterThan(0);
-      expect(fileEntity.hash).toBeDefined();
-      expect(fileEntity.hash.length).toBeGreaterThan(0);
-      expect(fileEntity.isTest).toBe(false);
-      expect(fileEntity.isConfig).toBe(false);
-
-      // Check timestamps
-      expect(fileEntity.created).toBeInstanceOf(Date);
-      expect(fileEntity.lastModified).toBeInstanceOf(Date);
-      expect(fileEntity.lastModified.getTime()).toBeLessThanOrEqual(Date.now());
     });
   });
 

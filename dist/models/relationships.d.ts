@@ -11,6 +11,11 @@ export interface Relationship {
     lastModified: Date;
     version: number;
     metadata?: Record<string, any>;
+    siteId?: string;
+    siteHash?: string;
+    evidence?: any[];
+    locations?: any[];
+    sites?: any[];
     validFrom?: Date;
     validTo?: Date | null;
 }
@@ -46,6 +51,9 @@ export declare enum RelationshipType {
     BELONGS_TO_DOMAIN = "BELONGS_TO_DOMAIN",
     DOCUMENTED_BY = "DOCUMENTED_BY",
     CLUSTER_MEMBER = "CLUSTER_MEMBER",
+    DOMAIN_RELATED = "DOMAIN_RELATED",
+    GOVERNED_BY = "GOVERNED_BY",
+    DOCUMENTS_SECTION = "DOCUMENTS_SECTION",
     HAS_SECURITY_ISSUE = "HAS_SECURITY_ISSUE",
     DEPENDS_ON_VULNERABLE = "DEPENDS_ON_VULNERABLE",
     SECURITY_IMPACTS = "SECURITY_IMPACTS",
@@ -63,7 +71,19 @@ export interface StructuralRelationship extends Relationship {
     type: RelationshipType.CONTAINS | RelationshipType.DEFINES | RelationshipType.EXPORTS | RelationshipType.IMPORTS;
 }
 export type CodeEdgeSource = 'ast' | 'type-checker' | 'heuristic' | 'index' | 'runtime' | 'lsp';
-export type CodeEdgeKind = 'call' | 'identifier' | 'instantiation' | 'type' | 'read' | 'write' | 'override' | 'inheritance' | 'return' | 'param' | 'decorator' | 'annotation' | 'throw';
+export type CodeEdgeKind = 'call' | 'identifier' | 'instantiation' | 'type' | 'read' | 'write' | 'override' | 'inheritance' | 'return' | 'param' | 'decorator' | 'annotation' | 'throw' | 'dependency';
+export declare const CODE_RELATIONSHIP_TYPES: readonly [RelationshipType.CALLS, RelationshipType.REFERENCES, RelationshipType.IMPLEMENTS, RelationshipType.EXTENDS, RelationshipType.DEPENDS_ON, RelationshipType.OVERRIDES, RelationshipType.READS, RelationshipType.WRITES, RelationshipType.THROWS, RelationshipType.TYPE_USES, RelationshipType.RETURNS_TYPE, RelationshipType.PARAM_TYPE];
+export type CodeRelationshipType = (typeof CODE_RELATIONSHIP_TYPES)[number];
+export declare const DOCUMENTATION_RELATIONSHIP_TYPES: readonly [RelationshipType.DESCRIBES_DOMAIN, RelationshipType.BELONGS_TO_DOMAIN, RelationshipType.DOCUMENTED_BY, RelationshipType.CLUSTER_MEMBER, RelationshipType.DOMAIN_RELATED, RelationshipType.GOVERNED_BY, RelationshipType.DOCUMENTS_SECTION];
+export type DocumentationRelationshipType = (typeof DOCUMENTATION_RELATIONSHIP_TYPES)[number];
+export declare const isDocumentationRelationshipType: (type: RelationshipType) => type is DocumentationRelationshipType;
+export type DocumentationSource = 'parser' | 'manual' | 'llm' | 'imported' | 'sync' | 'other';
+export type DocumentationIntent = 'ai-context' | 'governance' | 'mixed';
+export type DocumentationNodeType = 'readme' | 'api-docs' | 'design-doc' | 'architecture' | 'user-guide';
+export type DocumentationStatus = 'active' | 'deprecated' | 'draft';
+export type DocumentationCoverageScope = 'api' | 'behavior' | 'operational' | 'security' | 'compliance';
+export type DocumentationQuality = 'complete' | 'partial' | 'outdated';
+export type DocumentationPolicyType = 'adr' | 'runbook' | 'compliance' | 'manual' | 'decision-log';
 export interface EdgeEvidence {
     source: CodeEdgeSource;
     confidence?: number;
@@ -76,10 +96,10 @@ export interface EdgeEvidence {
     extractorVersion?: string;
 }
 export interface CodeRelationship extends Relationship {
-    type: RelationshipType.CALLS | RelationshipType.REFERENCES | RelationshipType.IMPLEMENTS | RelationshipType.EXTENDS | RelationshipType.DEPENDS_ON | RelationshipType.OVERRIDES | RelationshipType.READS | RelationshipType.WRITES | RelationshipType.THROWS | RelationshipType.TYPE_USES | RelationshipType.RETURNS_TYPE | RelationshipType.PARAM_TYPE;
+    type: CodeRelationshipType;
+    /** @deprecated prefer confidence */
     strength?: number;
     context?: string;
-    occurrences?: number;
     occurrencesScan?: number;
     occurrencesTotal?: number;
     occurrencesRecent?: number;
@@ -169,10 +189,40 @@ export interface TemporalRelationship extends Relationship {
     commitHash?: string;
 }
 export interface DocumentationRelationship extends Relationship {
-    type: RelationshipType.DESCRIBES_DOMAIN | RelationshipType.BELONGS_TO_DOMAIN | RelationshipType.DOCUMENTED_BY | RelationshipType.CLUSTER_MEMBER;
+    type: DocumentationRelationshipType;
     confidence?: number;
     inferred?: boolean;
-    source?: string;
+    source?: DocumentationSource;
+    docIntent?: DocumentationIntent;
+    sectionAnchor?: string;
+    sectionTitle?: string;
+    summary?: string;
+    docVersion?: string;
+    docHash?: string;
+    documentationQuality?: DocumentationQuality;
+    coverageScope?: DocumentationCoverageScope;
+    evidence?: Array<{
+        type: 'heading' | 'snippet' | 'link';
+        value: string;
+    }>;
+    tags?: string[];
+    stakeholders?: string[];
+    domainPath?: string;
+    taxonomyVersion?: string;
+    updatedFromDocAt?: Date;
+    lastValidated?: Date;
+    strength?: number;
+    similarityScore?: number;
+    clusterVersion?: string;
+    role?: 'core' | 'supporting' | 'entry-point' | 'integration';
+    docEvidenceId?: string;
+    docAnchor?: string;
+    embeddingVersion?: string;
+    policyType?: DocumentationPolicyType;
+    effectiveFrom?: Date;
+    expiresAt?: Date | null;
+    relationshipType?: 'depends_on' | 'overlaps' | 'shares_owner' | string;
+    docLocale?: string;
 }
 export interface SecurityRelationship extends Relationship {
     type: RelationshipType.HAS_SECURITY_ISSUE | RelationshipType.DEPENDS_ON_VULNERABLE | RelationshipType.SECURITY_IMPACTS;
@@ -228,8 +278,24 @@ export interface RelationshipQuery {
     until?: Date;
     limit?: number;
     offset?: number;
-    kind?: string;
-    source?: string;
+    domainPath?: string | string[];
+    domainPrefix?: string | string[];
+    docIntent?: DocumentationIntent | DocumentationIntent[];
+    docType?: DocumentationNodeType | DocumentationNodeType[];
+    docStatus?: DocumentationStatus | DocumentationStatus[];
+    docLocale?: string | string[];
+    coverageScope?: DocumentationCoverageScope | DocumentationCoverageScope[];
+    embeddingVersion?: string | string[];
+    clusterId?: string | string[];
+    clusterVersion?: string | string[];
+    stakeholder?: string | string[];
+    tag?: string | string[];
+    lastValidatedAfter?: Date;
+    lastValidatedBefore?: Date;
+    kind?: CodeEdgeKind | CodeEdgeKind[];
+    source?: CodeEdgeSource | CodeEdgeSource[];
+    resolution?: CodeResolution | CodeResolution[];
+    scope?: CodeScope | CodeScope[];
     confidenceMin?: number;
     confidenceMax?: number;
     inferred?: boolean;
@@ -251,6 +317,10 @@ export interface RelationshipQuery {
     arityMax?: number;
     awaited?: boolean;
     isMethod?: boolean;
+    operator?: string;
+    callee?: string;
+    importDepthMin?: number;
+    importDepthMax?: number;
 }
 export interface RelationshipFilter {
     types?: RelationshipType[];

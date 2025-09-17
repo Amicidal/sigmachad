@@ -4,7 +4,7 @@
  */
 
 import { DatabaseService } from "./DatabaseService.js";
-import type { DatabaseConfig } from "./database";
+import type { DatabaseConfig } from "./database/index.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -569,7 +569,7 @@ export class BackupService {
       throw new Error(`Backup metadata not found for ${backupId}`);
     }
 
-    const changes = [];
+    const changes: Array<{ component: string; action: string; status: string }> = [];
 
     // Validate each component
     if (metadata.components.falkordb) {
@@ -814,7 +814,7 @@ export class BackupService {
       }
 
       // Split by complete statements (handling multiline statements)
-      const statements = [];
+      const statements: string[] = [];
       let currentStatement = "";
       let inParentheses = 0;
       let inQuotes = false;
@@ -854,8 +854,8 @@ export class BackupService {
       }
 
       // Execute statements in order: CREATE TABLE first, then INSERT
-      const createStatements = [];
-      const insertStatements = [];
+      const createStatements: string[] = [];
+      const insertStatements: string[] = [];
 
       for (const statement of statements) {
         if (statement.toUpperCase().includes("CREATE TABLE")) {
@@ -1023,8 +1023,8 @@ export class BackupService {
       }
 
       // Verify all backup files exist
-      const backupFiles = [];
-      const missingFiles = [];
+      const backupFiles: string[] = [];
+      const missingFiles: string[] = [];
 
       if (metadata.components.falkordb) {
         backupFiles.push(

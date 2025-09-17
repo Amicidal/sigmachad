@@ -11,25 +11,24 @@ import { FastifyInstance } from 'fastify';
 import { APIGateway } from '../../../src/api/APIGateway.js';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
 import { DatabaseService } from '../../../src/services/DatabaseService.js';
-import { TestEngine } from '../../../src/services/TestEngine.js';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
   insertTestFixtures,
   checkDatabaseHealth,
+  TEST_FIXTURE_IDS,
 } from '../../test-utils/database-helpers.js';
 
 describe('REST API Endpoints Integration', () => {
   let dbService: DatabaseService;
   let kgService: KnowledgeGraphService;
-  let testEngine: TestEngine;
   let apiGateway: APIGateway;
   let app: FastifyInstance;
 
   beforeAll(async () => {
     // Setup test database
-    dbService = await setupTestDatabase();
+    dbService = await setupTestDatabase({ silent: true });
     const isHealthy = await checkDatabaseHealth(dbService);
     if (!isHealthy) {
       throw new Error('Database health check failed - cannot run integration tests');
@@ -37,8 +36,6 @@ describe('REST API Endpoints Integration', () => {
 
     // Create services
     kgService = new KnowledgeGraphService(dbService);
-    testEngine = new TestEngine(kgService, dbService);
-
     // Create API Gateway
     apiGateway = new APIGateway(kgService, dbService);
     app = apiGateway.getApp();
@@ -58,16 +55,21 @@ describe('REST API Endpoints Integration', () => {
 
   beforeEach(async () => {
     if (dbService && dbService.isInitialized()) {
-      await clearTestData(dbService);
+      await clearTestData(dbService, {
+        includeVector: false,
+        includeCache: false,
+        silent: true,
+      });
     }
   });
 
   describe('Graph API Endpoints', () => {
+    beforeEach(async () => {
+      await insertTestFixtures(dbService);
+    });
+
     describe('POST /api/v1/graph/search', () => {
       it('should perform semantic search successfully', async () => {
-        // Insert test data first
-        await insertTestFixtures(dbService);
-
         const searchRequest = {
           query: 'function',
           entityTypes: ['function'],
@@ -94,6 +96,10 @@ describe('REST API Endpoints Integration', () => {
           relationships: expect.any(Array),
         }));
         expect(typeof body.data.relevanceScore).toBe('number');
+        const entityPaths = (body.data.entities || []).map(
+          (entity: any) => entity.path || entity.metadata?.path
+        );
+        expect(entityPaths).toContain('test.ts');
       });
 
       it('should handle search with filters', async () => {
@@ -119,6 +125,12 @@ describe('REST API Endpoints Integration', () => {
 
         const body = JSON.parse(response.payload);
         expectSuccess(body);
+        const everyEntityMatches = (body.data.entities || []).every(
+          (entity: any) =>
+            entity.language === 'typescript' ||
+            entity.metadata?.language === 'typescript'
+        );
+        expect(everyEntityMatches).toBe(true);
       });
 
       it('should return empty results for non-existent queries', async () => {
@@ -158,35 +170,22 @@ describe('REST API Endpoints Integration', () => {
 
     describe('GET /api/v1/graph/examples/:entityId', () => {
       it('should return usage examples for existing entity', async () => {
-        // Insert test data first
-        await insertTestFixtures(dbService);
-
-        // First, let's find an entity to test with
-        const entitiesResponse = await app.inject({
+        const response = await app.inject({
           method: 'GET',
-          url: '/api/v1/graph/entities?limit=1',
+          url: `/api/v1/graph/examples/${TEST_FIXTURE_IDS.falkorEntities.typescriptFile}`,
         });
 
-        if (entitiesResponse.statusCode === 200) {
-          const entitiesBody = JSON.parse(entitiesResponse.payload);
-          if (entitiesBody.data && entitiesBody.data.length > 0) {
-            const entityId = entitiesBody.data[0].id;
+        expect(response.statusCode).toBe(200);
 
-            const response = await app.inject({
-              method: 'GET',
-              url: `/api/v1/graph/examples/${entityId}`,
-            });
-
-            expect(response.statusCode).toBe(200);
-
-            if (response.statusCode === 200) {
-              const body = JSON.parse(response.payload);
-              expect(body).toEqual(
-                expect.objectContaining({ success: true, data: expect.anything() })
-              );
-            }
-          }
-        }
+        const body = JSON.parse(response.payload);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            data: expect.objectContaining({
+              usageExamples: expect.arrayContaining([expect.any(Object)]),
+            }),
+          })
+        );
       });
 
       it('should handle non-existent entity gracefully', async () => {
@@ -195,49 +194,41 @@ describe('REST API Endpoints Integration', () => {
           url: '/api/v1/graph/examples/non-existent-entity-123',
         });
 
-        expect(response.statusCode).toBeGreaterThanOrEqual(400);
+        expect(response.statusCode).toBe(404);
+        const body = JSON.parse(response.payload);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: false,
+            error: expect.objectContaining({ code: 'ENTITY_NOT_FOUND' }),
+          })
+        );
       });
     });
 
     describe('GET /api/v1/graph/dependencies/:entityId', () => {
       it('should return dependency analysis for entity', async () => {
-        // Insert test data first
-        await insertTestFixtures(dbService);
-
-        // Find an entity to test with
-        const entitiesResponse = await app.inject({
+        const response = await app.inject({
           method: 'GET',
-          url: '/api/v1/graph/entities?limit=1',
+          url: `/api/v1/graph/dependencies/${TEST_FIXTURE_IDS.falkorEntities.typescriptFile}`,
         });
 
-        if (entitiesResponse.statusCode === 200) {
-          const entitiesBody = JSON.parse(entitiesResponse.payload);
-          if (entitiesBody.data && entitiesBody.data.length > 0) {
-            const entityId = entitiesBody.data[0].id;
+        expect(response.statusCode).toBe(200);
 
-            const response = await app.inject({
-              method: 'GET',
-              url: `/api/v1/graph/dependencies/${entityId}`,
-            });
-
-            expect(response.statusCode).toBe(200);
-
-            if (response.statusCode === 200) {
-              const body = JSON.parse(response.payload);
-              expect(body).toEqual(
-                expect.objectContaining({ success: true, data: expect.anything() })
-              );
-            }
-          }
-        }
+        const body = JSON.parse(response.payload);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            data: expect.objectContaining({
+              directDependencies: expect.arrayContaining([expect.any(Object)]),
+              reverseDependencies: expect.arrayContaining([expect.any(Object)]),
+            }),
+          })
+        );
       });
     });
 
     describe('GET /api/v1/graph/entities', () => {
       it('should return paginated list of entities', async () => {
-        // Insert test data first
-        await insertTestFixtures(dbService);
-
         const response = await app.inject({
           method: 'GET',
           url: '/api/v1/graph/entities?limit=5&offset=0',
@@ -254,6 +245,8 @@ describe('REST API Endpoints Integration', () => {
         expect(typeof body.pagination.pageSize).toBe('number');
         expect(typeof body.pagination.total).toBe('number');
         expect(typeof body.pagination.hasMore).toBe('boolean');
+        const entityIds = (body.data as any[]).map((entity) => entity.id);
+        expect(entityIds).toContain(TEST_FIXTURE_IDS.falkorEntities.typescriptFile);
       });
 
       it('should handle filtering by type', async () => {
@@ -280,6 +273,10 @@ describe('REST API Endpoints Integration', () => {
         const body = JSON.parse(response.payload);
         expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(Array.isArray(body.data)).toBe(true);
+        const everyTypeMatches = (body.data as any[]).every(
+          (entity) => entity.language === 'typescript' || entity?.metadata?.language === 'typescript'
+        );
+        expect(everyTypeMatches).toBe(true);
       });
     });
 
@@ -296,6 +293,9 @@ describe('REST API Endpoints Integration', () => {
         expect(body).toEqual(expect.objectContaining({ success: true }));
         expect(Array.isArray(body.data)).toBe(true);
         expect(body.pagination).toEqual(expect.any(Object));
+        const relationshipTypes = (body.data as any[]).map((rel) => rel.type);
+        expect(relationshipTypes).toEqual(expect.arrayContaining(['CALLS']));
+        expect(relationshipTypes).toEqual(expect.arrayContaining(['REFERENCES']));
       });
 
       it('should handle filtering by relationship type', async () => {
@@ -494,16 +494,13 @@ describe('REST API Endpoints Integration', () => {
         });
 
         expect(response.statusCode).toBe(200);
-
-        if (response.statusCode === 200) {
-          const body = JSON.parse(response.payload);
-          expect(body).toEqual(
-            expect.objectContaining({
-              success: true,
-              data: expect.any(Object),
-            })
-          );
-        }
+        const body = JSON.parse(response.payload);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            data: expect.any(Object),
+          })
+        );
       });
     });
 
@@ -522,16 +519,13 @@ describe('REST API Endpoints Integration', () => {
         });
 
         expect(response.statusCode).toBe(200);
-
-        if (response.statusCode === 200) {
-          const body = JSON.parse(response.payload);
-          expect(body).toEqual(
-            expect.objectContaining({
-              success: true,
-              data: expect.any(Object),
-            })
-          );
-        }
+        const body = JSON.parse(response.payload);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            data: expect.any(Object),
+          })
+        );
       });
     });
   });

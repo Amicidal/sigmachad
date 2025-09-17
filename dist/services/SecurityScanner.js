@@ -5,6 +5,7 @@
 import { EventEmitter } from "events";
 import { noiseConfig } from "../config/noise.js";
 import * as fs from "fs";
+import { createHash } from "crypto";
 export class SecurityScanner extends EventEmitter {
     constructor(db, kgService) {
         super();
@@ -361,7 +362,7 @@ export class SecurityScanner extends EventEmitter {
         // This is similar to SCA but focuses on dependency analysis
         return await this.performSCAScan(entities, options);
     }
-    scanFileForIssues(content, entity, options, rules) {
+    scanFileForIssues(content, file, options, rules) {
         const issues = [];
         const applicableRules = rules ||
             this.rules.filter((rule) => this.shouldIncludeRule(rule, options));
@@ -373,8 +374,8 @@ export class SecurityScanner extends EventEmitter {
                 const lineNumber = this.getLineNumber(lines, match.index || 0);
                 const codeSnippet = this.getCodeSnippet(lines, lineNumber);
                 // Stable fingerprint: entity, rule, line, snippet hash
-                const fpInput = `${entity.id}|${rule.id}|${lineNumber}|${codeSnippet}`;
-                const uniqueId = `sec_${crypto.createHash('sha1').update(fpInput).digest('hex')}`;
+                const fpInput = `${file.id}|${rule.id}|${lineNumber}|${codeSnippet}`;
+                const uniqueId = `sec_${createHash("sha1").update(fpInput).digest("hex")}`;
                 const issue = {
                     id: uniqueId,
                     type: "securityIssue",
@@ -385,7 +386,7 @@ export class SecurityScanner extends EventEmitter {
                     description: rule.description,
                     cwe: rule.cwe,
                     owasp: rule.owasp,
-                    affectedEntityId: entity.id,
+                    affectedEntityId: file.id,
                     lineNumber,
                     codeSnippet,
                     remediation: rule.remediation,
@@ -395,7 +396,7 @@ export class SecurityScanner extends EventEmitter {
                     confidence: 0.8, // Basic confidence score
                 };
                 // Suppression for issues by ruleId/path
-                if (this.isIssueSuppressed(issue, fileEntity)) {
+                if (this.isIssueSuppressed(issue, file)) {
                     continue;
                 }
                 issues.push(issue);

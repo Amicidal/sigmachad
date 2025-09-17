@@ -1,5 +1,5 @@
 import { RedisClientType } from 'redis';
-import { IRedisService } from './interfaces';
+import { IRedisService } from './interfaces.js';
 export declare class RedisService implements IRedisService {
     private redisClient;
     private initialized;
@@ -14,6 +14,7 @@ export declare class RedisService implements IRedisService {
     get(key: string): Promise<string | null>;
     set(key: string, value: string, ttl?: number): Promise<void>;
     del(key: string): Promise<number>;
+    flushDb(): Promise<void>;
     healthCheck(): Promise<boolean>;
 }
 //# sourceMappingURL=RedisService.d.ts.map

@@ -1,6 +1,5 @@
-export * from './interfaces';
-export { FalkorDBService } from './FalkorDBService';
-export { QdrantService } from './QdrantService';
-export { PostgreSQLService } from './PostgreSQLService';
-export { RedisService } from './RedisService';
-
+export * from './interfaces.js';
+export { FalkorDBService } from './FalkorDBService.js';
+export { QdrantService } from './QdrantService.js';
+export { PostgreSQLService } from './PostgreSQLService.js';
+export { RedisService } from './RedisService.js';

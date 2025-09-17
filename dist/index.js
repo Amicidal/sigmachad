@@ -128,6 +128,45 @@ async function main() {
         });
         // Start file watcher
         await fileWatcher.start();
+        const waitForSyncCompletion = async (operationId, timeoutMs = 5 * 60 * 1000, pollMs = 1000) => {
+            const startedAt = Date.now();
+            return new Promise((resolve, reject) => {
+                const checkStatus = () => {
+                    const op = syncCoordinator.getOperationStatus(operationId);
+                    if (op && ["completed", "failed", "rolled_back"].includes(op.status)) {
+                        if (op.status === "completed") {
+                            resolve();
+                        }
+                        else {
+                            reject(new Error(`Initial sync ${op.status}`));
+                        }
+                        return;
+                    }
+                    if (Date.now() - startedAt > timeoutMs) {
+                        reject(new Error("Timed out waiting for initial synchronization"));
+                        return;
+                    }
+                    setTimeout(checkStatus, pollMs);
+                };
+                checkStatus();
+            });
+        };
+        const skipInitialSync = String(process.env.SKIP_INITIAL_FULL_SYNC || "").toLowerCase() === "true";
+        if (!skipInitialSync) {
+            try {
+                console.log("🔁 Performing initial full synchronization...");
+                const fullSyncId = await syncCoordinator.startFullSynchronization({ includeEmbeddings: false });
+                await waitForSyncCompletion(fullSyncId).catch((error) => {
+                    console.warn("⚠️ Initial synchronization did not complete cleanly:", error instanceof Error ? error.message : error);
+                });
+            }
+            catch (error) {
+                console.warn("⚠️ Failed to start initial synchronization:", error);
+            }
+        }
+        else {
+            console.log("⏭️ SKIP_INITIAL_FULL_SYNC enabled – skipping boot-time synchronization");
+        }
         // Initialize API Gateway with enhanced services
         console.log('🌐 Initializing API Gateway...');
         const apiGateway = new APIGateway(kgService, dbService, fileWatcher, astParser, docParser, securityScanner, {

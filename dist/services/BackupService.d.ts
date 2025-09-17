@@ -3,7 +3,7 @@
  * Handles system backup and restore operations across all databases
  */
 import { DatabaseService } from "./DatabaseService.js";
-import type { DatabaseConfig } from "./database";
+import type { DatabaseConfig } from "./database/index.js";
 export interface BackupOptions {
     type: "full" | "incremental";
     includeData: boolean;

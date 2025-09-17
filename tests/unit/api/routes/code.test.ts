@@ -1453,6 +1453,45 @@ describe('Code Routes', () => {
       });
     });
 
+    it('should surface heuristic suggestions when patterns are detected', async () => {
+      mockRequest.params = { file: 'src/heavy.ts' };
+      mockRequest.query = {};
+
+      (fs.readFile as any).mockResolvedValueOnce(`
+        // TODO: refine
+        export function heavy(arg1: any, arg2: any, arg3: any, arg4: any, arg5: any) {
+          console.log('debug');
+          return arg1 + arg2 + arg3 + arg4 + arg5;
+        }
+      `);
+
+      mockAstParser.parseFile.mockResolvedValueOnce({
+        entities: [
+          createMockFunctionSymbol({
+            name: 'heavy',
+            complexity: 22,
+            parameters: [
+              { name: 'a', type: 'number', optional: false },
+              { name: 'b', type: 'number', optional: false },
+              { name: 'c', type: 'number', optional: false },
+              { name: 'd', type: 'number', optional: false },
+              { name: 'e', type: 'number', optional: false }
+            ],
+            location: { line: 2, column: 0 } as any
+          })
+        ],
+        relationships: [],
+        errors: []
+      } as ParseResult);
+
+      await suggestionsHandler(mockRequest, mockReply);
+
+      const payload = mockReply.send.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.data.suggestions.some((s: any) => s.type === 'maintainability')).toBe(true);
+      expect(payload.data.suggestions.some((s: any) => s.type === 'best-practices')).toBe(true);
+    });
+
     // Track missing negative-path coverage until endpoint is fully implemented
     it.todo('should return 400 or structured error for invalid query params');
   });
@@ -1484,6 +1523,40 @@ describe('Code Routes', () => {
           suggestedRefactorings: expect.any(Array)
         })
       });
+    });
+
+    it('should recommend extracting complex functions', async () => {
+      const mockRefactorRequest = {
+        files: ['src/heavy.ts'],
+        refactorType: 'extract-function'
+      };
+
+      mockRequest.body = mockRefactorRequest;
+
+      mockAstParser.parseFile.mockResolvedValueOnce({
+        entities: [
+          createMockFunctionSymbol({
+            name: 'heavy',
+            complexity: 26,
+            parameters: [
+              { name: 'p1', type: 'string', optional: false },
+              { name: 'p2', type: 'string', optional: false },
+              { name: 'p3', type: 'string', optional: false },
+              { name: 'p4', type: 'string', optional: false },
+              { name: 'p5', type: 'string', optional: false }
+            ],
+            location: { line: 10, column: 0 } as any
+          })
+        ],
+        relationships: [],
+        errors: []
+      } as ParseResult);
+
+      await refactorHandler(mockRequest, mockReply);
+
+      const payload = mockReply.send.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.data.suggestedRefactorings.some((s: any) => s.type === 'extract-function')).toBe(true);
     });
 
     // Track missing negative-path coverage until endpoint is fully implemented

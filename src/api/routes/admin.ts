@@ -17,7 +17,7 @@ import { ConflictResolution } from '../../services/ConflictResolution.js';
 import { RollbackCapabilities } from '../../services/RollbackCapabilities.js';
 import { BackupService } from '../../services/BackupService.js';
 import { LoggingService } from '../../services/LoggingService.js';
-import { MaintenanceService } from '../../services/MaintenanceService.js';
+import { MaintenanceService, MaintenanceResult } from '../../services/MaintenanceService.js';
 import { ConfigurationService } from '../../services/ConfigurationService.js';
 
 interface SystemHealth {
@@ -964,7 +964,11 @@ export async function registerAdminRoutes(
         schedule?: string;
       };
 
-      const results = [];
+      const results: Array<MaintenanceResult | {
+        taskId: string;
+        success: boolean;
+        error: string;
+      }> = [];
 
       for (const taskType of tasks) {
         try {
@@ -1076,14 +1080,35 @@ export async function registerAdminRoutes(
         message: 'Configuration updated successfully'
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update system configuration';
+      const validationPatterns = [
+        'must be at least',
+        'cannot be negative',
+        'must be at least 1000ms',
+      ];
+
+      if (
+        error instanceof Error &&
+        validationPatterns.some((pattern) => message.includes(pattern))
+      ) {
+        reply.status(400).send({
+          success: false,
+          error: {
+            code: 'CONFIG_VALIDATION_FAILED',
+            message,
+          }
+        });
+        return;
+      }
+
       reply.status(500).send({
         success: false,
         error: {
           code: 'CONFIG_UPDATE_FAILED',
-          message: error instanceof Error ? error.message : 'Failed to update system configuration'
+          message,
         }
       });
     }
   });
-  }
+}
 }

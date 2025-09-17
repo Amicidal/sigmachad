@@ -19,6 +19,10 @@ export class ASTParser {
         if (this.tcBudgetRemaining <= 0)
             return false;
         this.tcBudgetRemaining -= 1;
+        try {
+            this.tcBudgetSpent += 1;
+        }
+        catch (_a) { }
         return true;
     }
     // Heuristic policy for using the TS type checker; consumes budget when returning true
@@ -56,6 +60,7 @@ export class ASTParser {
         this.nameIndex = new Map(); // key: name -> symbols
         // Budget for TypeScript checker lookups per file to control performance
         this.tcBudgetRemaining = 0;
+        this.tcBudgetSpent = 0;
         // Initialize TypeScript project
         this.tsProject = new Project({
             compilerOptions: {
@@ -184,7 +189,6 @@ export class ASTParser {
     }
     // --- Global index maintenance helpers ---
     removeFileFromIndexes(fileRelPath) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
         try {
             const norm = this.normalizeRelPath(fileRelPath);
             // Remove keys from globalSymbolIndex
@@ -204,87 +208,8 @@ export class ASTParser {
                     this.globalSymbolIndex.delete(key);
                 }
             }
-            // ++/-- update expressions: treat as READ and WRITES of the operand
-            try {
-                const pre = sourceFile.getDescendantsOfKind(SyntaxKind.PrefixUnaryExpression);
-                const post = sourceFile.getDescendantsOfKind(SyntaxKind.PostfixUnaryExpression);
-                const all = [].concat(pre, post);
-                for (const ux of all) {
-                    try {
-                        const opTok = ((_d = (_c = (_b = (_a = ux).getOperatorToken) === null || _b === void 0 ? void 0 : _b.call(_a)) === null || _c === void 0 ? void 0 : _c.getText) === null || _d === void 0 ? void 0 : _d.call(_c)) || '';
-                        if (opTok !== '++' && opTok !== '--')
-                            continue;
-                        const operand = (_f = (_e = ux).getOperand) === null || _f === void 0 ? void 0 : _f.call(_e);
-                        const fromId = enclosingSymbolId(ux);
-                        if (operand && typeof operand.getText === 'function') {
-                            const t = operand.getText();
-                            const key = `${fileEntity.path}:${t}`;
-                            const local = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(t) ? localSymbols.find(ls => ls.entity.path === key) : null;
-                            const to = local ? local.entity.id : `external:${t.split('.').pop() || t}`;
-                            addRel(fromId, to, RelationshipType.READS, operand, { kindHint: 'read', accessPath: t });
-                            addRel(fromId, to, RelationshipType.WRITES, operand, { kindHint: 'write', operator: opTok, accessPath: t });
-                        }
-                    }
-                    catch (_r) { }
-                }
-            }
-            catch (_s) { }
-            // Destructuring writes in variable declarations: const {a} = rhs; const [x] = rhs;
-            try {
-                const vardecls = sourceFile.getDescendantsOfKind(SyntaxKind.VariableDeclaration);
-                for (const vd of vardecls) {
-                    try {
-                        const name = (_h = (_g = vd).getNameNode) === null || _h === void 0 ? void 0 : _h.call(_g);
-                        const init = (_k = (_j = vd).getInitializer) === null || _k === void 0 ? void 0 : _k.call(_j);
-                        if (!name || !init)
-                            continue;
-                        const fromId = enclosingSymbolId(vd);
-                        // Reads from RHS identifiers
-                        const ids = ((_l = init.getDescendantsOfKind) === null || _l === void 0 ? void 0 : _l.call(init, SyntaxKind.Identifier)) || [];
-                        for (const idn of ids) {
-                            const t = idn.getText();
-                            if (!t || isDeclarationName(idn))
-                                continue;
-                            const key = `${fileEntity.path}:${t}`;
-                            const local = localSymbols.find(ls => ls.entity.path === key);
-                            if (local)
-                                addRel(fromId, local.entity.id, RelationshipType.READS, idn, { kindHint: 'read', scope: 'local', resolution: 'direct' });
-                            else
-                                addRel(fromId, `external:${t}`, RelationshipType.READS, idn, { kindHint: 'read', scope: 'external', resolution: 'heuristic' });
-                        }
-                        // Writes for bound names in the pattern
-                        const emitWrite = (bound) => {
-                            var _a;
-                            try {
-                                const txt = (_a = bound === null || bound === void 0 ? void 0 : bound.getText) === null || _a === void 0 ? void 0 : _a.call(bound);
-                                if (!txt)
-                                    return;
-                                if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(txt)) {
-                                    const key = `${fileEntity.path}:${txt}`;
-                                    const local = localSymbols.find(ls => ls.entity.path === key);
-                                    const to = local ? local.entity.id : `external:${txt}`;
-                                    addRel(fromId, to, RelationshipType.WRITES, bound, { kindHint: 'write', operator: '=' });
-                                }
-                            }
-                            catch (_b) { }
-                        };
-                        if (name.getKind && name.getKind() === SyntaxKind.ObjectBindingPattern) {
-                            const elems = ((_m = name.getElements) === null || _m === void 0 ? void 0 : _m.call(name)) || [];
-                            for (const e of elems)
-                                emitWrite((_o = e.getNameNode) === null || _o === void 0 ? void 0 : _o.call(e));
-                        }
-                        else if (name.getKind && name.getKind() === SyntaxKind.ArrayBindingPattern) {
-                            const elems = ((_p = name.getElements) === null || _p === void 0 ? void 0 : _p.call(name)) || [];
-                            for (const e of elems)
-                                emitWrite((_q = e.getNameNode) === null || _q === void 0 ? void 0 : _q.call(e));
-                        }
-                    }
-                    catch (_t) { }
-                }
-            }
-            catch (_u) { }
         }
-        catch (_v) { }
+        catch (_a) { }
     }
     addSymbolsToIndexes(fileRelPath, symbols) {
         try {
@@ -367,7 +292,9 @@ export class ASTParser {
                     }
                 }
                 // export * from './x' -> recurse
-                if (ed.isExportAll()) {
+                const hasNamespace = typeof ed.getNamespaceExport === 'function' ? !!ed.getNamespaceExport() : false;
+                const isStarExport = !hasNamespace && (!named || named.length === 0);
+                if (isStarExport) {
                     const specSf = spec;
                     const res = this.resolveReexportTarget(symbolName, specSf, depth + 1, seen);
                     if (res)
@@ -440,35 +367,33 @@ export class ASTParser {
                         specSf = this.resolveModuleSpecifierToSourceFile(modText, moduleSf) || undefined;
                     }
                 }
-                if (ed.isExportAll()) {
-                    // export * from '...'
+                const namespaceExport = typeof ed.getNamespaceExport === 'function' ? ed.getNamespaceExport() : undefined;
+                const named = ed.getNamedExports();
+                const isStarExport = !namespaceExport && named.length === 0;
+                if (isStarExport) {
                     const child = this.getModuleExportMap(specSf, depth + 1, seen);
                     for (const [k, v] of child.entries()) {
                         if (!out.has(k))
                             out.set(k, { fileRel: v.fileRel, name: v.name, depth: v.depth });
                     }
+                    continue;
                 }
-                else {
-                    const named = ed.getNamedExports();
-                    for (const ne of named) {
-                        const name = ne.getNameNode().getText();
-                        const alias = (_e = ne.getAliasNode()) === null || _e === void 0 ? void 0 : _e.getText();
-                        if (specSf) {
-                            const child = this.getModuleExportMap(specSf, depth + 1, seen);
-                            const chosen = child.get(name) || child.get(alias || '');
-                            if (chosen) {
-                                addExport(alias || name, chosen.name, chosen.fileRel, chosen.depth);
-                            }
-                            else {
-                                // No child mapping; point to that module file with provided name
-                                const childRel = path.relative(process.cwd(), specSf.getFilePath());
-                                addExport(alias || name, name, childRel, depth + 1);
-                            }
+                for (const ne of named) {
+                    const name = ne.getNameNode().getText();
+                    const alias = (_e = ne.getAliasNode()) === null || _e === void 0 ? void 0 : _e.getText();
+                    if (specSf) {
+                        const child = this.getModuleExportMap(specSf, depth + 1, seen);
+                        const chosen = child.get(name) || child.get(alias || '');
+                        if (chosen) {
+                            addExport(alias || name, chosen.name, chosen.fileRel, chosen.depth);
                         }
                         else {
-                            // Re-export local symbol
-                            addExport(alias || name, name, undefined, depth);
+                            const childRel = path.relative(process.cwd(), specSf.getFilePath());
+                            addExport(alias || name, name, childRel, depth + 1);
                         }
+                    }
+                    else {
+                        addExport(alias || name, name, undefined, depth);
                     }
                 }
             }
@@ -503,11 +428,9 @@ export class ASTParser {
             const content = await fs.readFile(absolutePath, 'utf-8');
             const extension = path.extname(filePath).toLowerCase();
             // Determine parser based on file extension
-            if (['.ts', '.tsx'].includes(extension)) {
+            // Unify JS/TS handling via ts-morph for better consistency and stability
+            if (['.ts', '.tsx', '.js', '.jsx'].includes(extension)) {
                 return this.parseTypeScriptFile(filePath, content);
-            }
-            else if (['.js', '.jsx'].includes(extension)) {
-                return this.parseJavaScriptFile(filePath, content);
             }
             else {
                 return this.parseOtherFile(filePath, content);
@@ -807,7 +730,7 @@ export class ASTParser {
         };
     }
     async parseTypeScriptFile(filePath, content) {
-        var _a;
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         const entities = [];
         const relationships = [];
         const errors = [];
@@ -816,11 +739,12 @@ export class ASTParser {
             const sourceFile = this.tsProject.createSourceFile(filePath, content, { overwrite: true });
             // Reset and set TypeScript checker budget for this file
             this.tcBudgetRemaining = noiseConfig.AST_MAX_TC_LOOKUPS_PER_FILE || 0;
+            this.tcBudgetSpent = 0;
             // Conservative cache invalidation to avoid stale re-export data after file edits
             try {
                 this.exportMapCache.clear();
             }
-            catch (_b) { }
+            catch (_j) { }
             // Build import map: importedName -> resolved file relative path
             const importMap = new Map();
             try {
@@ -866,7 +790,57 @@ export class ASTParser {
                     }
                 }
             }
-            catch (_c) { }
+            catch (_k) { }
+            // CommonJS require() mapping: const X = require('mod'); const {A, B: Alias} = require('mod')
+            try {
+                const vds = sourceFile.getVariableDeclarations();
+                for (const vd of vds) {
+                    const init = vd.getInitializer();
+                    if (!init || !Node.isCallExpression(init))
+                        continue;
+                    const callee = init.getExpression();
+                    const calleeText = ((_b = callee === null || callee === void 0 ? void 0 : callee.getText) === null || _b === void 0 ? void 0 : _b.call(callee)) || '';
+                    if (calleeText !== 'require')
+                        continue;
+                    const args = init.getArguments();
+                    if (!args || args.length === 0)
+                        continue;
+                    const arg0 = args[0];
+                    const modText = typeof arg0.getText === 'function' ? String(arg0.getText()).replace(/^['"]|['"]$/g, '') : '';
+                    if (!modText)
+                        continue;
+                    const modSf = this.resolveModuleSpecifierToSourceFile(modText, sourceFile);
+                    const targetPath = (_c = modSf === null || modSf === void 0 ? void 0 : modSf.getFilePath) === null || _c === void 0 ? void 0 : _c.call(modSf);
+                    if (!targetPath)
+                        continue;
+                    const relTarget = path.relative(process.cwd(), targetPath);
+                    const nameNode = vd.getNameNode();
+                    // Identifier: const X = require('mod') -> map X
+                    if (Node.isIdentifier(nameNode)) {
+                        const name = nameNode.getText();
+                        if (name)
+                            importMap.set(name, relTarget);
+                        continue;
+                    }
+                    // Object destructuring: const { A, B: Alias } = require('mod')
+                    if (Node.isObjectBindingPattern(nameNode)) {
+                        for (const el of nameNode.getElements()) {
+                            try {
+                                const bindingName = (_e = (_d = el.getNameNode()) === null || _d === void 0 ? void 0 : _d.getText) === null || _e === void 0 ? void 0 : _e.call(_d); // Alias or same as property when no alias
+                                const propName = (_h = (_g = (_f = el.getPropertyNameNode) === null || _f === void 0 ? void 0 : _f.call(el)) === null || _g === void 0 ? void 0 : _g.getText) === null || _h === void 0 ? void 0 : _h.call(_g); // Original property
+                                if (bindingName)
+                                    importMap.set(bindingName, relTarget);
+                                if (propName)
+                                    importMap.set(propName, relTarget);
+                            }
+                            catch (_l) { }
+                        }
+                        continue;
+                    }
+                    // Array destructuring not mapped
+                }
+            }
+            catch (_m) { }
             // Parse file entity
             const fileEntity = await this.createFileEntity(filePath, content);
             entities.push(fileEntity);
@@ -876,12 +850,12 @@ export class ASTParser {
                 entities.push(...dirEntities);
                 relationships.push(...dirRelationships);
             }
-            catch (_d) { }
+            catch (_o) { }
             // Before extracting symbols, clear old index entries for this file
             try {
                 this.removeFileFromIndexes(fileEntity.path);
             }
-            catch (_e) { }
+            catch (_p) { }
             // Extract symbols and relationships
             const symbols = sourceFile.getDescendants().filter(node => Node.isClassDeclaration(node) ||
                 Node.isFunctionDeclaration(node) ||
@@ -908,7 +882,7 @@ export class ASTParser {
                                 this.nameIndex.set(nm, arr);
                             }
                         }
-                        catch (_f) { }
+                        catch (_q) { }
                         // Create relationship between file and symbol
                         relationships.push(this.createRelationship(fileEntity.id, symbolEntity.id, RelationshipType.DEFINES));
                         // Also record structural containment
@@ -925,7 +899,7 @@ export class ASTParser {
                                 }
                             }
                         }
-                        catch (_g) { }
+                        catch (_r) { }
                         // If symbol is exported, record EXPORTS relationship
                         if (symbolEntity.isExported) {
                             relationships.push(this.createRelationship(fileEntity.id, symbolEntity.id, RelationshipType.EXPORTS));
@@ -972,7 +946,7 @@ export class ASTParser {
                 this.removeFileFromIndexes(fileEntity.path);
                 this.addSymbolsToIndexes(fileEntity.path, syms);
             }
-            catch (_h) {
+            catch (_s) {
                 // ignore cache update errors
             }
         }
@@ -988,6 +962,13 @@ export class ASTParser {
         finally {
             // Clear budget to avoid bleed-over
             this.tcBudgetRemaining = 0;
+            try {
+                if ((process.env.AST_TC_DEBUG || '0') === '1') {
+                    const rel = path.relative(process.cwd(), filePath);
+                    console.log(`[ast-tc] ${rel} used ${this.tcBudgetSpent}/${noiseConfig.AST_MAX_TC_LOOKUPS_PER_FILE}`);
+                }
+            }
+            catch (_t) { }
         }
         return { entities, relationships, errors };
     }
@@ -1012,8 +993,9 @@ export class ASTParser {
                 relationships.push(...dirRelationships);
             }
             catch (_a) { }
-            // Walk the AST and extract symbols
-            this.walkJavaScriptAST(tree.rootNode, fileEntity, entities, relationships, filePath);
+            // Walk the AST and extract symbols and code edges
+            const jsLocals = new Map(); // name -> entityId
+            this.walkJavaScriptAST(tree.rootNode, fileEntity, entities, relationships, filePath, { ownerId: fileEntity.id, locals: jsLocals });
         }
         catch (error) {
             errors.push({
@@ -1039,7 +1021,8 @@ export class ASTParser {
         catch (_a) { }
         return { entities, relationships, errors: [] };
     }
-    walkJavaScriptAST(node, fileEntity, entities, relationships, filePath) {
+    walkJavaScriptAST(node, fileEntity, entities, relationships, filePath, ctx) {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
         // Extract function declarations
         if (node.type === 'function_declaration' || node.type === 'function') {
             const functionEntity = this.createJavaScriptFunctionEntity(node, fileEntity);
@@ -1047,6 +1030,17 @@ export class ASTParser {
                 entities.push(functionEntity);
                 relationships.push(this.createRelationship(fileEntity.id, functionEntity.id, RelationshipType.DEFINES));
                 relationships.push(this.createRelationship(fileEntity.id, functionEntity.id, RelationshipType.CONTAINS));
+                // Track local JS symbol for basic resolution
+                try {
+                    if (functionEntity.name)
+                        ctx === null || ctx === void 0 ? void 0 : ctx.locals.set(functionEntity.name, functionEntity.id);
+                }
+                catch (_r) { }
+                // Update owner for nested traversal
+                for (const child of node.children || []) {
+                    this.walkJavaScriptAST(child, fileEntity, entities, relationships, filePath, { ownerId: functionEntity.id, locals: ((ctx === null || ctx === void 0 ? void 0 : ctx.locals) || new Map()) });
+                }
+                return;
             }
         }
         // Extract class declarations
@@ -1056,11 +1050,124 @@ export class ASTParser {
                 entities.push(classEntity);
                 relationships.push(this.createRelationship(fileEntity.id, classEntity.id, RelationshipType.DEFINES));
                 relationships.push(this.createRelationship(fileEntity.id, classEntity.id, RelationshipType.CONTAINS));
+                // Track local JS symbol for basic resolution
+                try {
+                    if (classEntity.name)
+                        ctx === null || ctx === void 0 ? void 0 : ctx.locals.set(classEntity.name, classEntity.id);
+                }
+                catch (_s) { }
+                // Update owner for nested traversal
+                for (const child of node.children || []) {
+                    this.walkJavaScriptAST(child, fileEntity, entities, relationships, filePath, { ownerId: classEntity.id, locals: ((ctx === null || ctx === void 0 ? void 0 : ctx.locals) || new Map()) });
+                }
+                return;
             }
+        }
+        // CALLS: basic detection for JavaScript
+        if (node.type === 'call_expression') {
+            try {
+                const calleeNode = (_a = node.children) === null || _a === void 0 ? void 0 : _a[0];
+                let callee = '';
+                let isMethod = false;
+                let accessPath;
+                if (calleeNode) {
+                    if (calleeNode.type === 'identifier') {
+                        callee = String(calleeNode.text || '');
+                    }
+                    else if (calleeNode.type === 'member_expression') {
+                        // member_expression: object . property
+                        const prop = (calleeNode.children || []).find((c) => c.type === 'property_identifier' || c.type === 'identifier');
+                        callee = String((prop === null || prop === void 0 ? void 0 : prop.text) || '');
+                        isMethod = true;
+                        accessPath = String(calleeNode.text || '');
+                    }
+                    else {
+                        callee = String(calleeNode.text || '');
+                    }
+                }
+                const argsNode = (node.children || []).find((c) => c.type === 'arguments');
+                let arity = undefined;
+                if (argsNode && Array.isArray(argsNode.children)) {
+                    // Count non-punctuation children as rough arity
+                    const count = argsNode.children.filter((c) => !['(', ')', ','].includes(c.type)).length;
+                    arity = count;
+                }
+                const fromId = (ctx === null || ctx === void 0 ? void 0 : ctx.ownerId) || fileEntity.id;
+                let toId;
+                if (callee && ((_b = ctx === null || ctx === void 0 ? void 0 : ctx.locals) === null || _b === void 0 ? void 0 : _b.has(callee)))
+                    toId = ctx.locals.get(callee);
+                else
+                    toId = callee ? `external:${callee}` : `external:call`;
+                const line = ((_d = (_c = node.startPosition) === null || _c === void 0 ? void 0 : _c.row) !== null && _d !== void 0 ? _d : 0) + 1;
+                const column = ((_f = (_e = node.startPosition) === null || _e === void 0 ? void 0 : _e.column) !== null && _f !== void 0 ? _f : 0) + 1;
+                const meta = {
+                    kind: 'call',
+                    callee,
+                    isMethod,
+                    accessPath,
+                    ...(typeof arity === 'number' ? { arity } : {}),
+                    path: fileEntity.path,
+                    line,
+                    column,
+                    scope: toId.startsWith('external:') ? 'external' : 'local',
+                    resolution: toId.startsWith('external:') ? 'heuristic' : 'direct',
+                };
+                relationships.push(this.createRelationship(fromId, toId, RelationshipType.CALLS, meta));
+            }
+            catch (_t) { }
+        }
+        // READS/WRITES: simple assignment heuristic
+        if (node.type === 'assignment_expression') {
+            try {
+                const left = (_g = node.children) === null || _g === void 0 ? void 0 : _g[0];
+                const right = (_h = node.children) === null || _h === void 0 ? void 0 : _h[2];
+                const opNode = (_j = node.children) === null || _j === void 0 ? void 0 : _j[1];
+                const op = String((opNode === null || opNode === void 0 ? void 0 : opNode.text) || '=');
+                const lineBase = ((_l = (_k = node.startPosition) === null || _k === void 0 ? void 0 : _k.row) !== null && _l !== void 0 ? _l : 0) + 1;
+                const colBase = ((_o = (_m = node.startPosition) === null || _m === void 0 ? void 0 : _m.column) !== null && _o !== void 0 ? _o : 0) + 1;
+                const fromId = (ctx === null || ctx === void 0 ? void 0 : ctx.ownerId) || fileEntity.id;
+                // LHS: identifier write
+                const leftName = ((left === null || left === void 0 ? void 0 : left.type) === 'identifier') ? String(left.text || '') : undefined;
+                if (leftName) {
+                    const toId = ((_p = ctx === null || ctx === void 0 ? void 0 : ctx.locals) === null || _p === void 0 ? void 0 : _p.get(leftName)) || `external:${leftName}`;
+                    relationships.push(this.createRelationship(fromId, toId, RelationshipType.WRITES, { kind: 'write', operator: op, path: fileEntity.path, line: lineBase, column: colBase, scope: toId.startsWith('external:') ? 'external' : 'local', resolution: toId.startsWith('external:') ? 'heuristic' : 'direct' }));
+                }
+                // LHS: member_expression property write
+                if ((left === null || left === void 0 ? void 0 : left.type) === 'member_expression') {
+                    const prop = (left.children || []).find((c) => c.type === 'property_identifier' || c.type === 'identifier');
+                    const propName = prop ? String(prop.text || '') : '';
+                    const accessPath = String(left.text || '');
+                    if (propName) {
+                        relationships.push(this.createRelationship(fromId, `external:${propName}`, RelationshipType.WRITES, { kind: 'write', operator: op, accessPath, path: fileEntity.path, line: lineBase, column: colBase, scope: 'external', resolution: 'heuristic' }));
+                    }
+                }
+                // Basic READS for identifiers on RHS
+                if (right && Array.isArray(right.children)) {
+                    for (const child of right.children) {
+                        if (child.type === 'identifier') {
+                            const nm = String(child.text || '');
+                            if (!nm)
+                                continue;
+                            const toId = ((_q = ctx === null || ctx === void 0 ? void 0 : ctx.locals) === null || _q === void 0 ? void 0 : _q.get(nm)) || `external:${nm}`;
+                            relationships.push(this.createRelationship(fromId, toId, RelationshipType.READS, { kind: 'read', path: fileEntity.path, line: lineBase, column: colBase, scope: toId.startsWith('external:') ? 'external' : 'local', resolution: toId.startsWith('external:') ? 'heuristic' : 'direct' }));
+                        }
+                        // Property READS on RHS
+                        if (child.type === 'member_expression') {
+                            const prop = (child.children || []).find((c) => c.type === 'property_identifier' || c.type === 'identifier');
+                            const propName = prop ? String(prop.text || '') : '';
+                            const accessPath = String(child.text || '');
+                            if (propName) {
+                                relationships.push(this.createRelationship(fromId, `external:${propName}`, RelationshipType.READS, { kind: 'read', accessPath, path: fileEntity.path, line: lineBase, column: colBase, scope: 'external', resolution: 'heuristic' }));
+                            }
+                        }
+                    }
+                }
+            }
+            catch (_u) { }
         }
         // Recursively walk child nodes
         for (const child of node.children || []) {
-            this.walkJavaScriptAST(child, fileEntity, entities, relationships, filePath);
+            this.walkJavaScriptAST(child, fileEntity, entities, relationships, filePath, ctx);
         }
     }
     async createFileEntity(filePath, content) {
@@ -1211,7 +1318,7 @@ export class ASTParser {
         };
     }
     extractSymbolRelationships(node, symbolEntity, sourceFile, importMap) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40;
         const relationships = [];
         // Aggregate repeated CALLS per target for this symbol
         const callAgg = new Map();
@@ -1242,7 +1349,7 @@ export class ASTParser {
                 }
             }
         }
-        catch (_32) { }
+        catch (_41) { }
         // Extract function calls with best-effort resolution to local symbols first
         if (Node.isFunctionDeclaration(node) || Node.isMethodDeclaration(node)) {
             const calls = node.getDescendants().filter((descendant) => Node.isCallExpression(descendant));
@@ -1272,7 +1379,7 @@ export class ASTParser {
                         const args = ((_f = (_e = call).getArguments) === null || _f === void 0 ? void 0 : _f.call(_e)) || [];
                         arity = Array.isArray(args) ? args.length : 0;
                     }
-                    catch (_33) { }
+                    catch (_42) { }
                     let awaited = false;
                     try {
                         let p = (_h = (_g = call).getParent) === null || _h === void 0 ? void 0 : _h.call(_g);
@@ -1280,10 +1387,11 @@ export class ASTParser {
                             p = (_j = p.getParent) === null || _j === void 0 ? void 0 : _j.call(p);
                         awaited = !!(p && typeof p.getKind === 'function' && p.getKind() === SyntaxKind.AwaitExpression);
                     }
-                    catch (_34) { }
+                    catch (_43) { }
                     // Track resolution/scope hints for richer evidence
                     let resHint;
                     let scopeHint;
+                    const baseMeta = {};
                     // Property access calls: try to resolve base object type to declaration and method symbol name
                     try {
                         if (ts.isPropertyAccessExpression && call.getExpression && call.getExpression().getExpression) {
@@ -1315,11 +1423,11 @@ export class ASTParser {
                                     if (isUnion || isInterface)
                                         baseMeta.dynamicDispatch = true;
                                 }
-                                catch (_35) { }
+                                catch (_44) { }
                             }
                         }
                     }
-                    catch (_36) { }
+                    catch (_45) { }
                     // Namespace/default alias usage: ns.method() or alias.method()
                     if (importMap && parts.length > 0) {
                         const root = parts[0];
@@ -1360,7 +1468,7 @@ export class ASTParser {
                             }
                         }
                     }
-                    catch (_37) { }
+                    catch (_46) { }
                     // If call refers to an imported binding, prefer cross-file placeholder target (deep resolution)
                     if (!toId && importMap && simpleName && importMap.has(simpleName)) {
                         const deep = this.resolveImportedMemberToFileAndName(simpleName, 'default', sourceFile, importMap)
@@ -1399,7 +1507,7 @@ export class ASTParser {
                             column = lc.column;
                         }
                     }
-                    catch (_38) { }
+                    catch (_47) { }
                     // default scope inference from toId shape if no hint set
                     if (!scopeHint && toId) {
                         if (toId.startsWith('external:'))
@@ -1409,7 +1517,7 @@ export class ASTParser {
                         else
                             scopeHint = 'unknown';
                     }
-                    const baseMeta = {
+                    Object.assign(baseMeta, {
                         path: path.relative(process.cwd(), sourceFile.getFilePath()),
                         ...(typeof line === 'number' ? { line } : {}),
                         ...(typeof column === 'number' ? { column } : {}),
@@ -1420,7 +1528,7 @@ export class ASTParser {
                         awaited,
                         ...(resHint ? { resolution: resHint } : {}),
                         ...(scopeHint ? { scope: scopeHint } : {}),
-                    };
+                    });
                     if (!('isMethod' in baseMeta) && targetName.includes('.'))
                         baseMeta.isMethod = true;
                     // Aggregate CALLS instead of emitting duplicates directly
@@ -1450,7 +1558,7 @@ export class ASTParser {
                             }
                         }
                     }
-                    catch (_39) { }
+                    catch (_48) { }
                     if (toId && !toId.startsWith('external:') && !toId.startsWith('file:')) {
                         const keyAgg = `${symbolEntity.id}|${toId}`;
                         const prev = callAgg.get(keyAgg);
@@ -1489,7 +1597,7 @@ export class ASTParser {
                         // Skip external-only unresolved calls to reduce noise
                     }
                 }
-                catch (_40) {
+                catch (_49) {
                     // Fallback to generic placeholder
                     // Intentionally skip emitting a relationship on failure to avoid noise
                 }
@@ -1505,7 +1613,7 @@ export class ASTParser {
                             const sfPath = path.relative(process.cwd(), sourceFile.getFilePath());
                             const simple = type.getText();
                             const key = `${sfPath}:${simple}`;
-                            const toId = localIndex.get(key);
+                            let toId = localIndex.get(key);
                             if (toId) {
                                 // Concretize file placeholder to symbol id when available
                                 try {
@@ -1518,7 +1626,7 @@ export class ASTParser {
                                         }
                                     }
                                 }
-                                catch (_41) { }
+                                catch (_50) { }
                                 relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.EXTENDS, { resolved: true }));
                             }
                             else {
@@ -1547,11 +1655,11 @@ export class ASTParser {
                                             placeholder = list[0].id;
                                     }
                                 }
-                                catch (_42) { }
+                                catch (_51) { }
                                 relationships.push(this.createRelationship(symbolEntity.id, placeholder, RelationshipType.EXTENDS, resolved ? { resolved: true, importDepth: resolved.depth } : undefined));
                             }
                         }
-                        catch (_43) {
+                        catch (_52) {
                             relationships.push(this.createRelationship(symbolEntity.id, `class:${type.getText()}`, RelationshipType.EXTENDS));
                         }
                     }
@@ -1562,7 +1670,7 @@ export class ASTParser {
                             const sfPath = path.relative(process.cwd(), sourceFile.getFilePath());
                             const simple = type.getText();
                             const key = `${sfPath}:${simple}`;
-                            const toId = localIndex.get(key);
+                            let toId = localIndex.get(key);
                             if (toId) {
                                 try {
                                     if (toId.startsWith('file:')) {
@@ -1574,7 +1682,7 @@ export class ASTParser {
                                         }
                                     }
                                 }
-                                catch (_44) { }
+                                catch (_53) { }
                                 relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.IMPLEMENTS, { resolved: true }));
                             }
                             else {
@@ -1602,11 +1710,11 @@ export class ASTParser {
                                             placeholder = list[0].id;
                                     }
                                 }
-                                catch (_45) { }
+                                catch (_54) { }
                                 relationships.push(this.createRelationship(symbolEntity.id, placeholder, RelationshipType.IMPLEMENTS, resolved ? { resolved: true, importDepth: resolved.depth } : undefined));
                             }
                         }
-                        catch (_46) {
+                        catch (_55) {
                             relationships.push(this.createRelationship(symbolEntity.id, `interface:${type.getText()}`, RelationshipType.IMPLEMENTS));
                         }
                     }
@@ -1640,7 +1748,7 @@ export class ASTParser {
                                 toId = `file:${tc.fileRel}:${tc.name}`;
                         }
                     }
-                    catch (_47) { }
+                    catch (_56) { }
                     // Try import map using root of accessPath
                     if (!toId && importMap) {
                         const root = accessPath.split(/[.(]/)[0];
@@ -1662,14 +1770,14 @@ export class ASTParser {
                             column = lc.column;
                         }
                     }
-                    catch (_48) { }
+                    catch (_57) { }
                     const meta = { kind: 'decorator', accessPath, path: path.relative(process.cwd(), sourceFile.getFilePath()), ...(typeof line === 'number' ? { line } : {}), ...(typeof column === 'number' ? { column } : {}) };
                     relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.REFERENCES, meta));
                 }
-                catch (_49) { }
+                catch (_58) { }
             }
         }
-        catch (_50) { }
+        catch (_59) { }
         // Method-level semantics: OVERRIDES, THROWS, RETURNS_TYPE, PARAM_TYPE
         if (Node.isMethodDeclaration(node) || Node.isFunctionDeclaration(node)) {
             try {
@@ -1684,6 +1792,7 @@ export class ASTParser {
                             if (clause.getToken() === SyntaxKind.ExtendsKeyword) {
                                 for (const type of clause.getTypeNodes()) {
                                     let baseFile = null;
+                                    let usedTc = false;
                                     try {
                                         if (importMap) {
                                             const simple = type.getText();
@@ -1693,14 +1802,28 @@ export class ASTParser {
                                         }
                                         if (!baseFile) {
                                             const tc = this.shouldUseTypeChecker({ context: 'heritage', imported: true, ambiguous: true, nameLength: String(type.getText() || '').length }) ? this.resolveWithTypeChecker(type, sourceFile) : null;
-                                            if (tc)
+                                            if (tc) {
                                                 baseFile = tc.fileRel;
+                                                usedTc = true;
+                                            }
                                         }
                                     }
-                                    catch (_51) { }
+                                    catch (_60) { }
                                     if (baseFile) {
+                                        // Prefer linking to exact base method symbol if known
+                                        let toId = `file:${baseFile}:${methodName}`;
+                                        try {
+                                            const hit = this.globalSymbolIndex.get(`${baseFile}:${methodName}`);
+                                            if (hit)
+                                                toId = hit.id;
+                                        }
+                                        catch (_61) { }
                                         const meta = { path: path.relative(process.cwd(), sourceFile.getFilePath()), kind: 'override' };
-                                        relationships.push(this.createRelationship(symbolEntity.id, `file:${baseFile}:${methodName}`, RelationshipType.OVERRIDES, meta));
+                                        if (usedTc) {
+                                            meta.usedTypeChecker = true;
+                                            meta.resolution = 'type-checker';
+                                        }
+                                        relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.OVERRIDES, meta));
                                     }
                                 }
                             }
@@ -1708,7 +1831,7 @@ export class ASTParser {
                     }
                 }
             }
-            catch (_52) { }
+            catch (_62) { }
             try {
                 // THROWS: throw new ErrorType()
                 const throws = ((_14 = (_13 = node).getDescendantsOfKind) === null || _14 === void 0 ? void 0 : _14.call(_13, SyntaxKind.ThrowStatement)) || [];
@@ -1752,7 +1875,7 @@ export class ASTParser {
                                 tcol = lc.column;
                             }
                         }
-                        catch (_53) { }
+                        catch (_63) { }
                         const meta = { path: path.relative(process.cwd(), sourceFile.getFilePath()), kind: 'throw', ...(typeof tline === 'number' ? { line: tline } : {}), ...(typeof tcol === 'number' ? { column: tcol } : {}) };
                         let placeholder = toId || `class:${typeName}`;
                         try {
@@ -1773,13 +1896,13 @@ export class ASTParser {
                                 }
                             }
                         }
-                        catch (_54) { }
+                        catch (_64) { }
                         relationships.push(this.createRelationship(symbolEntity.id, placeholder, RelationshipType.THROWS, meta));
                     }
-                    catch (_55) { }
+                    catch (_65) { }
                 }
             }
-            catch (_56) { }
+            catch (_66) { }
             try {
                 // RETURNS_TYPE
                 const rt = (_21 = (_20 = node).getReturnTypeNode) === null || _21 === void 0 ? void 0 : _21.call(_20);
@@ -1809,7 +1932,7 @@ export class ASTParser {
                                 }
                             }
                         }
-                        catch (_57) { }
+                        catch (_67) { }
                         let line;
                         let column;
                         try {
@@ -1820,7 +1943,7 @@ export class ASTParser {
                                 column = lc.column;
                             }
                         }
-                        catch (_58) { }
+                        catch (_68) { }
                         const meta = { inferred: true, kind: 'type', ...(typeof line === 'number' ? { line } : {}), ...(typeof column === 'number' ? { column } : {}) };
                         try {
                             if (toId.startsWith('external:')) {
@@ -1832,18 +1955,64 @@ export class ASTParser {
                                 }
                             }
                         }
-                        catch (_59) { }
+                        catch (_69) { }
                         relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.RETURNS_TYPE, meta));
                     }
                 }
+                else {
+                    // Fallback: infer return type via type checker when annotation is missing
+                    try {
+                        const t = (_25 = (_24 = node).getReturnType) === null || _25 === void 0 ? void 0 : _25.call(_24);
+                        // Attempt to obtain a readable base name
+                        let tname = '';
+                        try {
+                            tname = (((_28 = (_27 = (_26 = t === null || t === void 0 ? void 0 : t.getSymbol) === null || _26 === void 0 ? void 0 : _26.call(t)) === null || _27 === void 0 ? void 0 : _27.getName) === null || _28 === void 0 ? void 0 : _28.call(_27)) || '').toString();
+                        }
+                        catch (_70) { }
+                        if (!tname) {
+                            try {
+                                tname = (typeof (t === null || t === void 0 ? void 0 : t.getText) === 'function' ? String(t.getText()) : '');
+                            }
+                            catch (_71) { }
+                        }
+                        if (tname)
+                            tname = String(tname).split(/[<|&]/)[0].trim();
+                        if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
+                            let toId = `external:${tname}`;
+                            if (importMap) {
+                                const deep = this.resolveImportedMemberToFileAndName(tname, tname, sourceFile, importMap);
+                                if (deep)
+                                    toId = `file:${deep.fileRel}:${deep.name}`;
+                            }
+                            try {
+                                const m = toId.match(/^file:(.+?):(.+)$/);
+                                if (m) {
+                                    const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
+                                    if (hit)
+                                        toId = hit.id;
+                                }
+                                else if (toId.startsWith('external:')) {
+                                    const nm = toId.slice('external:'.length);
+                                    const list = this.nameIndex.get(nm) || [];
+                                    if (list.length === 1)
+                                        toId = list[0].id;
+                                }
+                            }
+                            catch (_72) { }
+                            const meta = { inferred: true, kind: 'type', usedTypeChecker: true, resolution: 'type-checker' };
+                            relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.RETURNS_TYPE, meta));
+                        }
+                    }
+                    catch (_73) { }
+                }
             }
-            catch (_60) { }
+            catch (_74) { }
             try {
                 // PARAM_TYPE per parameter
-                const params = ((_25 = (_24 = node).getParameters) === null || _25 === void 0 ? void 0 : _25.call(_24)) || [];
+                const params = ((_30 = (_29 = node).getParameters) === null || _30 === void 0 ? void 0 : _30.call(_29)) || [];
                 for (const p of params) {
-                    const tn = (_26 = p.getTypeNode) === null || _26 === void 0 ? void 0 : _26.call(p);
-                    const pname = ((_27 = p.getName) === null || _27 === void 0 ? void 0 : _27.call(p)) || '';
+                    const tn = (_31 = p.getTypeNode) === null || _31 === void 0 ? void 0 : _31.call(p);
+                    const pname = ((_32 = p.getName) === null || _32 === void 0 ? void 0 : _32.call(p)) || '';
                     if (tn && typeof tn.getText === 'function') {
                         const tname = tn.getText();
                         if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
@@ -1865,39 +2034,72 @@ export class ASTParser {
                                     const list = this.nameIndex.get(nm) || [];
                                     if (list.length === 1)
                                         toId = list[0].id;
-                                    else if (list.length > 1) { /* keep placeholder and mark ambiguous below */ }
                                 }
                             }
-                            catch (_61) { }
+                            catch (_75) { }
                             let pline;
                             let pcol;
                             try {
-                                const pos = (_29 = (_28 = tn).getStart) === null || _29 === void 0 ? void 0 : _29.call(_28);
+                                const pos = (_34 = (_33 = tn).getStart) === null || _34 === void 0 ? void 0 : _34.call(_33);
                                 if (typeof pos === 'number') {
                                     const lc = sourceFile.getLineAndColumnAtPos(pos);
                                     pline = lc.line;
                                     pcol = lc.column;
                                 }
                             }
-                            catch (_62) { }
-                            const meta = { inferred: true, kind: 'type', param: pname, ...(typeof pline === 'number' ? { line: pline } : {}), ...(typeof pcol === 'number' ? { column: pcol } : {}) };
-                            try {
-                                if (toId.startsWith('external:')) {
-                                    const nm = toId.slice('external:'.length);
-                                    const list = this.nameIndex.get(nm) || [];
-                                    if (list.length > 1) {
-                                        meta.ambiguous = true;
-                                        meta.candidateCount = list.length;
-                                    }
-                                }
-                            }
-                            catch (_63) { }
+                            catch (_76) { }
+                            const meta = { inferred: true, kind: 'type', param: pname };
                             relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.PARAM_TYPE, meta));
                         }
                     }
+                    else {
+                        // Fallback: infer param type via type checker
+                        try {
+                            const t = (_35 = p.getType) === null || _35 === void 0 ? void 0 : _35.call(p);
+                            let tname = '';
+                            try {
+                                tname = (((_38 = (_37 = (_36 = t === null || t === void 0 ? void 0 : t.getSymbol) === null || _36 === void 0 ? void 0 : _36.call(t)) === null || _37 === void 0 ? void 0 : _37.getName) === null || _38 === void 0 ? void 0 : _38.call(_37)) || '').toString();
+                            }
+                            catch (_77) { }
+                            if (!tname) {
+                                try {
+                                    tname = (typeof (t === null || t === void 0 ? void 0 : t.getText) === 'function' ? String(t.getText()) : '');
+                                }
+                                catch (_78) { }
+                            }
+                            if (tname)
+                                tname = String(tname).split(/[<|&]/)[0].trim();
+                            if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
+                                let toId = `external:${tname}`;
+                                if (importMap) {
+                                    const deep = this.resolveImportedMemberToFileAndName(tname, tname, sourceFile, importMap);
+                                    if (deep)
+                                        toId = `file:${deep.fileRel}:${deep.name}`;
+                                }
+                                try {
+                                    const m = toId.match(/^file:(.+?):(.+)$/);
+                                    if (m) {
+                                        const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
+                                        if (hit)
+                                            toId = hit.id;
+                                    }
+                                    else if (toId.startsWith('external:')) {
+                                        const nm = toId.slice('external:'.length);
+                                        const list = this.nameIndex.get(nm) || [];
+                                        if (list.length === 1)
+                                            toId = list[0].id;
+                                    }
+                                }
+                                catch (_79) { }
+                                const meta = { inferred: true, kind: 'type', param: pname, usedTypeChecker: true, resolution: 'type-checker' };
+                                relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.PARAM_TYPE, meta));
+                            }
+                        }
+                        catch (_80) { }
+                    }
                 }
             }
-            catch (_64) { }
+            catch (_81) { }
             // Flush aggregated CALLS for this symbol (if any were recorded)
             if (callAgg.size > 0) {
                 for (const [k, v] of callAgg.entries()) {
@@ -1905,11 +2107,11 @@ export class ASTParser {
                     const meta = { ...v.meta, occurrencesScan: v.count };
                     relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.CALLS, meta));
                     try {
-                        if (((_30 = v.meta) === null || _30 === void 0 ? void 0 : _30.scope) === 'imported') {
-                            relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.DEPENDS_ON, { scope: 'imported', resolution: ((_31 = v.meta) === null || _31 === void 0 ? void 0 : _31.resolution) || 'via-import' }));
+                        if (((_39 = v.meta) === null || _39 === void 0 ? void 0 : _39.scope) === 'imported') {
+                            relationships.push(this.createRelationship(symbolEntity.id, toId, RelationshipType.DEPENDS_ON, { scope: 'imported', resolution: ((_40 = v.meta) === null || _40 === void 0 ? void 0 : _40.resolution) || 'via-import', kind: 'dependency' }));
                         }
                     }
-                    catch (_65) { }
+                    catch (_82) { }
                 }
                 callAgg.clear();
             }
@@ -1918,7 +2120,7 @@ export class ASTParser {
     }
     // Advanced reference extraction using TypeScript AST with best-effort resolution
     extractReferenceRelationships(sourceFile, fileEntity, localSymbols, importMap) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
         const relationships = [];
         const dedupe = new Set();
         // Aggregators to collapse duplicates and record occurrences while keeping earliest location
@@ -2022,7 +2224,7 @@ export class ASTParser {
             // Enrich metadata with lightweight dataflow grouping for READS/WRITES
             if (type === RelationshipType.READS || type === RelationshipType.WRITES) {
                 try {
-                    const owner = enclosingSymbolId(node);
+                    const owner = locNode ? enclosingSymbolId(locNode) : fileEntity.id;
                     let varName = '';
                     if (toId.startsWith('file:')) {
                         const parts = toId.split(':');
@@ -2071,6 +2273,11 @@ export class ASTParser {
                     if (typeof metadata.line === 'number' && (typeof prev.meta.line !== 'number' || metadata.line < prev.meta.line))
                         prev.meta = metadata;
                 }
+                try {
+                    if (metadata.scope === 'imported')
+                        depAgg.add(aggKey);
+                }
+                catch (_e) { }
                 return;
             }
             if (type === RelationshipType.WRITES) {
@@ -2082,6 +2289,11 @@ export class ASTParser {
                     if (typeof metadata.line === 'number' && (typeof prev.meta.line !== 'number' || metadata.line < prev.meta.line))
                         prev.meta = metadata;
                 }
+                try {
+                    if (metadata.scope === 'imported')
+                        depAgg.add(aggKey);
+                }
+                catch (_f) { }
                 return;
             }
             relationships.push(this.createRelationship(fromId, toId, type, metadata));
@@ -2115,6 +2327,26 @@ export class ASTParser {
         };
         // Type dependencies (e.g., Foo<T>, param: Bar) — prefer same-file resolution if possible
         for (const tr of sourceFile.getDescendantsOfKind(SyntaxKind.TypeReference)) {
+            // Dedupe rule: skip TypeReference nodes that are directly the return type of a function/method
+            try {
+                const fnOwner = tr.getFirstAncestor((a) => Node.isFunctionDeclaration(a) || Node.isMethodDeclaration(a));
+                if (fnOwner) {
+                    const rtNode = (_b = (_a = fnOwner).getReturnTypeNode) === null || _b === void 0 ? void 0 : _b.call(_a);
+                    if (rtNode && rtNode === tr)
+                        continue;
+                }
+            }
+            catch (_u) { }
+            // Dedupe rule: skip when it's exactly the type annotation of a parameter
+            try {
+                const paramOwner = tr.getFirstAncestor((a) => a.getTypeNode && a.getName && Node.isParameterDeclaration(a));
+                if (paramOwner) {
+                    const tn = (_d = (_c = paramOwner).getTypeNode) === null || _d === void 0 ? void 0 : _d.call(_c);
+                    if (tn && tn === tr)
+                        continue;
+                }
+            }
+            catch (_v) { }
             const typeName = tr.getTypeName().getText();
             if (!typeName)
                 continue;
@@ -2220,11 +2452,11 @@ export class ASTParser {
             const bins = sourceFile.getDescendantsOfKind(SyntaxKind.BinaryExpression);
             for (const be of bins) {
                 try {
-                    const op = ((_d = (_c = (_b = (_a = be).getOperatorToken) === null || _b === void 0 ? void 0 : _b.call(_a)) === null || _c === void 0 ? void 0 : _c.getText) === null || _d === void 0 ? void 0 : _d.call(_c)) || '';
+                    const op = ((_h = (_g = (_f = (_e = be).getOperatorToken) === null || _f === void 0 ? void 0 : _f.call(_e)) === null || _g === void 0 ? void 0 : _g.getText) === null || _h === void 0 ? void 0 : _h.call(_g)) || '';
                     if (!assignOps.has(op))
                         continue;
-                    const lhs = (_f = (_e = be).getLeft) === null || _f === void 0 ? void 0 : _f.call(_e);
-                    const rhs = (_h = (_g = be).getRight) === null || _h === void 0 ? void 0 : _h.call(_g);
+                    const lhs = (_k = (_j = be).getLeft) === null || _k === void 0 ? void 0 : _k.call(_j);
+                    const rhs = (_m = (_l = be).getRight) === null || _m === void 0 ? void 0 : _m.call(_l);
                     const fromId = enclosingSymbolId(be);
                     // Resolve LHS identifier writes: prefer local symbol or file-qualified symbol, do NOT use RHS type
                     const resolveNameToId = (nm) => {
@@ -2249,7 +2481,7 @@ export class ASTParser {
                         catch (_a) { }
                         return `external:${nm}`;
                     };
-                    // WRITES edge for simple identifier LHS
+                    // WRITES edge for simple identifier or property LHS
                     if (lhs && typeof lhs.getText === 'function') {
                         const ltxt = lhs.getText();
                         if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(ltxt)) {
@@ -2260,14 +2492,99 @@ export class ASTParser {
                             // Property writes like obj.prop = value
                             try {
                                 const hasName = lhs.getName && typeof lhs.getName === 'function';
-                                if (hasName) {
-                                    const prop = lhs.getName();
-                                    const accessPath = ltxt;
-                                    if (prop)
-                                        addRel(fromId, `external:${prop}`, RelationshipType.WRITES, lhs, { kindHint: 'write', operator: op, accessPath });
+                                const getExpr = lhs.getExpression && typeof lhs.getExpression === 'function' ? lhs.getExpression.bind(lhs) : null;
+                                const prop = hasName ? lhs.getName() : undefined;
+                                const baseExpr = getExpr ? getExpr() : null;
+                                const baseText = baseExpr && typeof baseExpr.getText === 'function' ? baseExpr.getText() : '';
+                                const accessPath = ltxt;
+                                let wrote = false;
+                                let toIdProp = null;
+                                // 1) Try type-checker to resolve the property symbol directly
+                                try {
+                                    if (this.takeTcBudget()) {
+                                        const tc = this.resolveWithTypeChecker(lhs, sourceFile);
+                                        if (tc && tc.fileRel && tc.name) {
+                                            toIdProp = `file:${tc.fileRel}:${tc.name}`;
+                                            addRel(fromId, toIdProp, RelationshipType.WRITES, lhs, { kindHint: 'write', operator: op, accessPath, usedTypeChecker: true, resolution: 'type-checker', scope: 'imported' });
+                                            wrote = true;
+                                        }
+                                    }
+                                }
+                                catch (_w) { }
+                                // 2) Try import map for namespace/member: alias.prop
+                                if (!wrote && importMap && prop && baseText && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(baseText)) {
+                                    try {
+                                        if (importMap.has(baseText)) {
+                                            const deep = this.resolveImportedMemberToFileAndName(baseText, prop, sourceFile, importMap);
+                                            if (deep) {
+                                                toIdProp = `file:${deep.fileRel}:${deep.name}`;
+                                                addRel(fromId, toIdProp, RelationshipType.WRITES, lhs, { kindHint: 'write', operator: op, accessPath, importDepth: deep.depth, resolution: 'via-import', scope: 'imported' });
+                                                wrote = true;
+                                            }
+                                        }
+                                    }
+                                    catch (_x) { }
+                                }
+                                // 3) Prefer same-file symbol with matching property name as fallback
+                                if (!wrote && prop) {
+                                    try {
+                                        const sfRel = fileEntity.path; // relative file path
+                                        const list = this.nameIndex.get(prop) || [];
+                                        const sameFile = list.filter((s) => {
+                                            const p = s.path;
+                                            return typeof p === 'string' && p.startsWith(`${sfRel}:`);
+                                        });
+                                        if (sameFile.length === 1) {
+                                            addRel(fromId, sameFile[0].id, RelationshipType.WRITES, lhs, { kindHint: 'write', operator: op, accessPath, scope: 'local', resolution: 'direct' });
+                                            wrote = true;
+                                        }
+                                        else if (sameFile.length > 1) {
+                                            // Ambiguous: record as external placeholder with ambiguity info
+                                            const meta = { kind: 'write', operator: op, accessPath, ambiguous: true, candidateCount: sameFile.length, scope: 'local', resolution: 'heuristic' };
+                                            addRel(fromId, `external:${prop}`, RelationshipType.WRITES, lhs, meta);
+                                            wrote = true;
+                                        }
+                                    }
+                                    catch (_y) { }
+                                }
+                                // 4) Fallback to external:prop if nothing else resolved
+                                if (!wrote && prop) {
+                                    addRel(fromId, `external:${prop}`, RelationshipType.WRITES, lhs, { kindHint: 'write', operator: op, accessPath, scope: 'external', resolution: 'heuristic' });
+                                    wrote = true;
                                 }
                             }
-                            catch (_l) { }
+                            catch (_z) { }
+                            // Destructuring assignment writes: ({a} = rhs) or ([x] = rhs)
+                            try {
+                                const kind = lhs.getKind && lhs.getKind();
+                                if (kind === SyntaxKind.ObjectLiteralExpression) {
+                                    const props = ((_p = (_o = lhs).getProperties) === null || _p === void 0 ? void 0 : _p.call(_o)) || [];
+                                    for (const pr of props) {
+                                        try {
+                                            const nm = typeof pr.getName === 'function' ? pr.getName() : undefined;
+                                            if (nm && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(nm)) {
+                                                const tid = resolveNameToId(nm);
+                                                addRel(fromId, tid, RelationshipType.WRITES, pr, { kindHint: 'write', operator: op });
+                                            }
+                                        }
+                                        catch (_0) { }
+                                    }
+                                }
+                                else if (kind === SyntaxKind.ArrayLiteralExpression) {
+                                    const elems = ((_r = (_q = lhs).getElements) === null || _r === void 0 ? void 0 : _r.call(_q)) || [];
+                                    for (const el of elems) {
+                                        try {
+                                            const nm = typeof el.getText === 'function' ? el.getText() : '';
+                                            if (nm && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(nm)) {
+                                                const tid = resolveNameToId(nm);
+                                                addRel(fromId, tid, RelationshipType.WRITES, el, { kindHint: 'write', operator: op });
+                                            }
+                                        }
+                                        catch (_1) { }
+                                    }
+                                }
+                            }
+                            catch (_2) { }
                         }
                     }
                     // READS: collect identifiers from RHS (basic)
@@ -2282,12 +2599,12 @@ export class ASTParser {
                             // detect access path if part of a property access
                             let accessPath;
                             try {
-                                const parent = (_k = (_j = idn).getParent) === null || _k === void 0 ? void 0 : _k.call(_j);
+                                const parent = (_t = (_s = idn).getParent) === null || _t === void 0 ? void 0 : _t.call(_s);
                                 if (parent && typeof parent.getKind === 'function' && parent.getKind() === SyntaxKind.PropertyAccessExpression && typeof parent.getText === 'function') {
                                     accessPath = parent.getText();
                                 }
                             }
-                            catch (_m) { }
+                            catch (_3) { }
                             if (local) {
                                 addRel(fromId, local.entity.id, RelationshipType.READS, idn, { kindHint: 'read', accessPath, scope: 'local', resolution: 'direct' });
                             }
@@ -2306,12 +2623,76 @@ export class ASTParser {
                                     addRel(fromId, `external:${t}`, RelationshipType.READS, idn, { kindHint: 'read', accessPath, scope: 'external', resolution: 'heuristic' });
                             }
                         }
+                        // READS: property accesses on RHS (e.g., foo.bar)
+                        try {
+                            const props = rhs.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression) || [];
+                            const seen = new Set();
+                            for (const pa of props) {
+                                try {
+                                    const accessPath = typeof pa.getText === 'function' ? pa.getText() : undefined;
+                                    const propName = typeof pa.getName === 'function' ? pa.getName() : undefined;
+                                    const baseExpr = (typeof pa.getExpression === 'function' ? pa.getExpression() : null);
+                                    const baseText = baseExpr && typeof baseExpr.getText === 'function' ? baseExpr.getText() : '';
+                                    if (!propName)
+                                        continue;
+                                    const key = `${propName}|${accessPath || ''}`;
+                                    if (seen.has(key))
+                                        continue;
+                                    seen.add(key);
+                                    let toIdProp = null;
+                                    // 1) Type-checker resolution of the property
+                                    try {
+                                        if (this.takeTcBudget()) {
+                                            const tc = this.resolveWithTypeChecker(pa, sourceFile);
+                                            if (tc && tc.fileRel && tc.name) {
+                                                toIdProp = `file:${tc.fileRel}:${tc.name}`;
+                                                addRel(fromId, toIdProp, RelationshipType.READS, pa, { kindHint: 'read', accessPath, usedTypeChecker: true, resolution: 'type-checker', scope: 'imported' });
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                    catch (_4) { }
+                                    // 2) Import alias deep resolution for alias.prop
+                                    if (importMap && baseText && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(baseText) && importMap.has(baseText)) {
+                                        const deep = this.resolveImportedMemberToFileAndName(baseText, propName, sourceFile, importMap);
+                                        if (deep) {
+                                            toIdProp = `file:${deep.fileRel}:${deep.name}`;
+                                            addRel(fromId, toIdProp, RelationshipType.READS, pa, { kindHint: 'read', accessPath, importDepth: deep.depth, resolution: 'via-import', scope: 'imported' });
+                                            continue;
+                                        }
+                                    }
+                                    // 3) Same-file symbol fallback by name
+                                    try {
+                                        const sfRel = fileEntity.path;
+                                        const list = this.nameIndex.get(propName) || [];
+                                        const sameFile = list.filter((s) => {
+                                            const p = s.path;
+                                            return typeof p === 'string' && p.startsWith(`${sfRel}:`);
+                                        });
+                                        if (sameFile.length === 1) {
+                                            addRel(fromId, sameFile[0].id, RelationshipType.READS, pa, { kindHint: 'read', accessPath, scope: 'local', resolution: 'direct' });
+                                            continue;
+                                        }
+                                        else if (sameFile.length > 1) {
+                                            const meta = { kind: 'read', accessPath, ambiguous: true, candidateCount: sameFile.length, scope: 'local', resolution: 'heuristic' };
+                                            addRel(fromId, `external:${propName}`, RelationshipType.READS, pa, meta);
+                                            continue;
+                                        }
+                                    }
+                                    catch (_5) { }
+                                    // 4) Fallback external
+                                    addRel(fromId, `external:${propName}`, RelationshipType.READS, pa, { kindHint: 'read', accessPath, scope: 'external', resolution: 'heuristic' });
+                                }
+                                catch (_6) { }
+                            }
+                        }
+                        catch (_7) { }
                     }
                 }
-                catch (_o) { }
+                catch (_8) { }
             }
         }
-        catch (_p) { }
+        catch (_9) { }
         // Flush aggregations into final relationships with occurrences metadata
         if (refAgg.size > 0) {
             for (const [k, v] of refAgg.entries()) {
@@ -2341,7 +2722,7 @@ export class ASTParser {
         if (depAgg.size > 0) {
             for (const k of depAgg.values()) {
                 const [fromId, toId] = k.split('|');
-                relationships.push(this.createRelationship(fromId, toId, RelationshipType.DEPENDS_ON, { scope: 'imported', resolution: 'via-import' }));
+                relationships.push(this.createRelationship(fromId, toId, RelationshipType.DEPENDS_ON, { scope: 'imported', resolution: 'via-import', kind: 'dependency' }));
             }
         }
         return relationships;
@@ -2423,6 +2804,17 @@ export class ASTParser {
         return relationships;
     }
     createRelationship(fromId, toId, type, metadata) {
+        // Ensure a sensible default for code-edge source to aid querying
+        try {
+            if (metadata && metadata.source == null) {
+                const md = metadata;
+                if (md.usedTypeChecker === true || md.resolution === 'type-checker')
+                    md.source = 'type-checker';
+                else
+                    md.source = 'ast';
+            }
+        }
+        catch (_a) { }
         // Deterministic relationship id using canonical target key for stable identity across resolutions
         const rid = canonicalRelationshipId(fromId, { toEntityId: toId, type });
         const rel = {
@@ -2471,7 +2863,7 @@ export class ASTParser {
                 }
             }
         }
-        catch (_a) { }
+        catch (_b) { }
         // Attach a basic fromRef to aid coordinator context (file resolution, etc.)
         try {
             if (!rel.fromRef) {
@@ -2479,7 +2871,7 @@ export class ASTParser {
                 rel.fromRef = { kind: 'entity', id: fromId };
             }
         }
-        catch (_b) { }
+        catch (_c) { }
         // Normalize code-edge evidence and fields consistently
         return normalizeCodeEdge(rel);
     }

@@ -1,4 +1,18 @@
-import { GraphRelationship, RelationshipType, CodeEdgeSource } from '../models/relationships.js';
+import { GraphRelationship, RelationshipType, CodeEdgeSource, EdgeEvidence } from '../models/relationships.js';
+export declare function mergeEdgeEvidence(a?: EdgeEvidence[], b?: EdgeEvidence[], limit?: number): EdgeEvidence[];
+export declare function mergeEdgeLocations(a?: Array<{
+    path?: string;
+    line?: number;
+    column?: number;
+}>, b?: Array<{
+    path?: string;
+    line?: number;
+    column?: number;
+}>, limit?: number): Array<{
+    path?: string;
+    line?: number;
+    column?: number;
+}>;
 export declare function isCodeRelationship(type: RelationshipType): boolean;
 export declare function normalizeSource(s?: string): CodeEdgeSource | undefined;
 export declare function canonicalTargetKeyFor(rel: GraphRelationship): string;

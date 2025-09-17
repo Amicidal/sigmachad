@@ -23,7 +23,7 @@ describe("KnowledgeGraphService Integration", () => {
   let dbService: DatabaseService;
 
   beforeAll(async () => {
-    dbService = await setupTestDatabase();
+    dbService = await setupTestDatabase({ silent: true });
     kgService = new KnowledgeGraphService(dbService);
     await kgService.initialize();
   }, 30000);
@@ -33,7 +33,11 @@ describe("KnowledgeGraphService Integration", () => {
   });
 
   beforeEach(async () => {
-    await clearTestData(dbService);
+    await clearTestData(dbService, {
+      includeVector: false,
+      includeCache: false,
+      silent: true,
+    });
   });
 
   describe("Entity CRUD Operations", () => {
@@ -422,6 +426,151 @@ describe("KnowledgeGraphService Integration", () => {
       } else if (typeof stored.sites === "string") {
         expect(stored.sites).toContain(expectedSiteId);
       }
+    });
+
+    it("bulk merges code edges when using createRelationshipsBulk", async () => {
+      const now = new Date();
+      const fromSymbol = {
+        id: "sym:src/bulkSource.ts#caller@hash",
+        path: "src/bulkSource.ts",
+        hash: "bulk-src-1",
+        language: "typescript",
+        lastModified: now,
+        created: now,
+        type: "symbol",
+        kind: "function",
+        signature: "function caller(): void",
+        startLine: 1,
+        endLine: 20,
+        metadata: {},
+        name: "caller",
+      } as unknown as CodebaseEntity;
+
+      const toSymbol = {
+        id: "sym:src/bulkTarget.ts#BulkTarget@hash",
+        path: "src/bulkTarget.ts",
+        hash: "bulk-tgt-1",
+        language: "typescript",
+        lastModified: now,
+        created: now,
+        type: "symbol",
+        kind: "class",
+        signature: "class BulkTarget {}",
+        startLine: 1,
+        endLine: 50,
+        metadata: {},
+        name: "BulkTarget",
+      } as unknown as CodebaseEntity;
+
+      await kgService.createEntity(fromSymbol);
+      await kgService.createEntity(toSymbol);
+
+      const relationships: GraphRelationship[] = [
+        {
+          fromEntityId: fromSymbol.id,
+          toEntityId: toSymbol.id,
+          type: RelationshipType.CALLS,
+          created: new Date("2024-05-01T00:00:00Z"),
+          lastModified: new Date("2024-05-01T00:00:00Z"),
+          version: 1,
+          occurrencesScan: 1,
+          accessPath: "useBulk",
+          evidence: [
+            { source: "type-checker", location: { path: "src/bulkSource.ts", line: 12 } },
+          ] as any,
+          locations: [{ path: "src/bulkSource.ts", line: 12 }],
+          sites: ["seed_site"],
+          metadata: {
+            path: "src/bulkSource.ts",
+            line: 12,
+            scope: "imported",
+            evidence: [
+              { source: "ast", location: { path: "src/bulkSource.ts", line: 12, column: 2 } },
+            ],
+            toRef: {
+              kind: "fileSymbol",
+              file: "src/bulkTarget.ts",
+              symbol: "BulkTarget",
+              name: "BulkTarget",
+            },
+          },
+        },
+        {
+          fromEntityId: fromSymbol.id,
+          toEntityId: toSymbol.id,
+          type: RelationshipType.CALLS,
+          created: new Date("2024-05-03T00:00:00Z"),
+          lastModified: new Date("2024-05-04T00:00:00Z"),
+          version: 1,
+          occurrencesScan: 2,
+          resolved: true,
+          evidence: [
+            { source: "heuristic", location: { path: "src/bulkSource.ts", line: 18 } },
+          ] as any,
+          sites: ["another_site"],
+          metadata: {
+            path: "src/bulkSource.ts",
+            line: 18,
+            evidence: [
+              { source: "type-checker", location: { path: "src/bulkSource.ts", line: 18 } },
+            ],
+            locations: [{ path: "src/bulkSource.ts", line: 18 }],
+          },
+        },
+      ];
+
+      await kgService.createRelationshipsBulk(relationships);
+
+      const storedRelationships = await kgService.getRelationships({
+        fromEntityId: fromSymbol.id,
+      });
+
+      expect(storedRelationships).toHaveLength(1);
+
+      const stored = storedRelationships[0];
+      const expectedId = canonicalRelationshipId(
+        fromSymbol.id,
+        {
+          toEntityId: toSymbol.id,
+          type: RelationshipType.CALLS,
+        } as GraphRelationship,
+      );
+
+      expect(stored.id).toBe(expectedId);
+      expect(stored.type).toBe(RelationshipType.CALLS);
+      expect(stored.occurrencesScan).toBe(3);
+      expect(stored.context).toBe("src/bulkSource.ts:12");
+      expect(stored.to_ref_kind).toBe("fileSymbol");
+      expect(stored.to_ref_file).toBe("src/bulkTarget.ts");
+      expect(stored.to_ref_symbol).toBe("BulkTarget");
+      expect(stored.confidence).toBe(1);
+      expect(stored.resolved).toBe(true);
+
+      expect(stored.evidence).toEqual(
+        expect.arrayContaining([
+          { source: "type-checker", location: { path: "src/bulkSource.ts", line: 12 } },
+          { source: "type-checker", location: { path: "src/bulkSource.ts", line: 18 } },
+          { source: "ast", location: { path: "src/bulkSource.ts", line: 12, column: 2 } },
+          { source: "heuristic", location: { path: "src/bulkSource.ts", line: 18 } },
+        ]),
+      );
+
+      expect(stored.locations).toEqual(
+        expect.arrayContaining([
+          { path: "src/bulkSource.ts", line: 12 },
+          { path: "src/bulkSource.ts", line: 18 },
+        ]),
+      );
+
+      const sites = Array.isArray(stored.sites)
+        ? stored.sites
+        : (stored.sites ? [stored.sites] : []);
+      expect(sites).toEqual(expect.arrayContaining(["seed_site", "another_site"]));
+      expect(stored.siteId).toBeDefined();
+      if (stored.siteId) {
+        expect(sites).toContain(stored.siteId);
+      }
+      expect(stored.siteHash).toMatch(/^sh_[0-9a-f]{16}$/);
     });
   });
 

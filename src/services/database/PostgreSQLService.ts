@@ -655,7 +655,11 @@ export class PostgreSQLService implements IPostgreSQLService {
     const result = await this.transaction(async (client) => {
       let insertedCount = 0;
       let updatedCount = 0;
-      const processedAnalyses = [];
+      const processedAnalyses: Array<{
+        testId: string;
+        testName: string;
+        inserted: boolean;
+      }> = [];
 
       for (const analysis of analyses) {
         // First check if the record exists

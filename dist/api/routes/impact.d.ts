@@ -1,6 +1,6 @@
 /**
  * Impact Analysis Routes
- * Handles cascading impact analysis for code changes
+ * Provides cascading impact analysis for proposed changes.
  */
 import { FastifyInstance } from "fastify";
 import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";

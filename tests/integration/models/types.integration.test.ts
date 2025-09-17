@@ -751,9 +751,17 @@ describe("Types Integration Tests", () => {
             },
             documentationImpact: {
               staleDocs: [],
+              missingDocs: [],
               requiredUpdates: [
                 `Update API documentation for ${scenario.description}`,
               ],
+              freshnessPenalty: 0,
+            },
+            deploymentGate: {
+              blocked: false,
+              level: "none",
+              reasons: [],
+              stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
             },
             recommendations: [
               {

@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import { router, publicProcedure } from '../base.js';
+import { TRPCError } from '@trpc/server';
 export const codeRouter = router({
     // Analyze code and get suggestions
     analyze: publicProcedure
@@ -14,16 +15,7 @@ export const codeRouter = router({
         types: z.array(z.string()).optional(),
     }))
         .query(async ({ input, ctx }) => {
-        // TODO: Implement code analysis
-        const suggestions = [];
-        return {
-            file: input.file,
-            lineRange: {
-                start: input.lineStart || 1,
-                end: input.lineEnd || 100,
-            },
-            suggestions,
-        };
+        throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'Static code analysis is not available in this build.' });
     }),
     // Get refactoring suggestions
     refactor: publicProcedure
@@ -33,13 +25,7 @@ export const codeRouter = router({
         options: z.record(z.any()).optional(),
     }))
         .query(async ({ input, ctx }) => {
-        // TODO: Implement refactoring analysis
-        const refactorings = [];
-        return {
-            refactorType: input.refactorType,
-            files: input.files,
-            suggestedRefactorings: refactorings,
-        };
+        throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'Refactoring suggestions are not available in this build.' });
     }),
     // Parse and analyze file
     parseFile: publicProcedure

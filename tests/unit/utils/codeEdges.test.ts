@@ -288,6 +288,27 @@ describe('normalizeCodeEdge', () => {
     expect(normalized.to_ref_kind).toBe('external');
   });
 
+  it('retains fractional occurrence counts when provided', () => {
+    const normalized = normalizeCodeEdge({
+      ...makeRelationship({
+        id: 'code-fractional',
+        fromEntityId: 'sym:src/foo.ts#caller@hash',
+        toEntityId: 'file:src/bar.ts:Symbol',
+        type: RelationshipType.CALLS,
+      }),
+      occurrencesScan: 5.9 as any,
+      occurrencesTotal: '3.4' as any,
+      occurrencesRecent: '0.42' as any,
+      metadata: {
+        occurrencesScan: '7.1',
+      },
+    } as GraphRelationship);
+
+    expect(normalized.occurrencesScan).toBe(5);
+    expect(normalized.occurrencesTotal).toBe(3);
+    expect(normalized.occurrencesRecent).toBeCloseTo(0.42, 5);
+  });
+
   it('falls back to synthesized evidence when merged list is empty', () => {
     const normalized = normalizeCodeEdge({
       ...makeRelationship({
@@ -308,6 +329,85 @@ describe('normalizeCodeEdge', () => {
     expect(normalized.evidence).toEqual([
       { source: 'ast', location: { path: 'src/foo.ts', line: 4 } },
     ]);
+  });
+
+  it('synthesizes fallback evidence with metadata annotations when available', () => {
+    const normalized = normalizeCodeEdge({
+      ...makeRelationship({
+        id: 'code-3b',
+        fromEntityId: 'sym:src/foo.ts#fn@abc',
+        toEntityId: 'file:src/bar.ts:Symbol',
+        type: RelationshipType.CALLS,
+      }),
+      metadata: {
+        path: 'src/foo.ts',
+        line: 8,
+        note: 'Synthesized evidence note',
+        extractorVersion: 'v100',
+        confidence: 0.9,
+        evidence: [],
+      },
+      evidence: [],
+    } as GraphRelationship);
+
+    expect(normalized.evidence).toHaveLength(1);
+    const entry = normalized.evidence[0];
+    expect(entry.source).toBe('ast');
+    expect(entry.confidence).toBe(0.9);
+    expect(entry.note).toBe('Synthesized evidence note');
+    expect(entry.extractorVersion).toBe('v100');
+    expect(entry.location).toEqual({ path: 'src/foo.ts', line: 8 });
+  });
+
+  it('clamps oversize evidence metadata fields', () => {
+    const longNote = 'n'.repeat(2105);
+    const longVersion = 'v'.repeat(250);
+    const longPath = 'a'.repeat(4200);
+
+    const normalized = normalizeCodeEdge({
+      ...makeRelationship({
+        id: 'code-long',
+        type: RelationshipType.CALLS,
+      }),
+      source: 'type-checker' as any,
+      evidence: [
+        {
+          source: 'ast',
+          note: longNote,
+          extractorVersion: longVersion,
+          location: { path: longPath, line: 3.4, column: 8.2 },
+        },
+      ] as any,
+    } as GraphRelationship);
+
+    expect(normalized.evidence).toHaveLength(1);
+    const entry = normalized.evidence[0];
+    expect(entry.note).toBeDefined();
+    expect(entry.note!.length).toBe(2000);
+    expect(entry.extractorVersion).toBeDefined();
+    expect(entry.extractorVersion!.length).toBe(200);
+    expect(entry.location?.path?.length).toBe(4096);
+    expect(entry.location?.line).toBe(3);
+    expect(entry.location?.column).toBe(8);
+  });
+
+  it('defaults evidence source when missing', () => {
+    const normalized = normalizeCodeEdge({
+      ...makeRelationship({
+        id: 'code-missing-source',
+        type: RelationshipType.CALLS,
+      }),
+      source: 'type-checker' as any,
+      evidence: [
+        {
+          source: undefined,
+          location: { path: 'src/foo.ts', line: 1 },
+        },
+      ] as any,
+    } as GraphRelationship);
+
+    const fallback = normalized.evidence.find((entry) => entry.location?.line === 1);
+    expect(fallback?.source).toBe('type-checker');
   });
 
   it('omits generated site identifiers when no location information is present', () => {
@@ -415,6 +515,66 @@ describe('normalizeCodeEdge', () => {
     expect((withSymFallback as any).from_ref_file).toBe('src/from.ts');
     expect((withSymFallback as any).from_ref_symbol).toBe('fn');
   });
+
+  it('hoists advanced metadata fields to the normalized relationship', () => {
+    const normalized = normalizeCodeEdge({
+      ...makeRelationship({
+        id: 'code-advanced',
+        type: RelationshipType.CALLS,
+      }),
+      metadata: {
+        dynamicDispatch: true,
+        overloadIndex: 2,
+        genericArguments: ['T', 'K'],
+        ambiguous: true,
+        candidateCount: 3,
+        isMethod: false,
+      },
+    } as GraphRelationship);
+
+    expect(normalized.dynamicDispatch).toBe(true);
+    expect(normalized.overloadIndex).toBe(2);
+    expect(normalized.genericArguments).toEqual(['T', 'K']);
+    expect(normalized.ambiguous).toBe(true);
+    expect(normalized.candidateCount).toBe(3);
+    expect(normalized.isMethod).toBe(false);
+  });
+
+  it('hoists supplemental metadata (resolution, import depth, param name, checker usage)', () => {
+    const normalized = normalizeCodeEdge({
+      ...makeRelationship({
+        id: 'code-hoist',
+        type: RelationshipType.CALLS,
+      }),
+      metadata: {
+        resolution: 'type-checker',
+        scope: 'imported',
+        importDepth: 2,
+        usedTypeChecker: true,
+        isExported: false,
+        importAlias: 'aliasName',
+        receiverType: 'SomeReceiver',
+        arity: 2,
+        awaited: true,
+        operator: 'new',
+        callee: 'makeThing',
+        param: 'arg0',
+      },
+    } as GraphRelationship);
+
+    expect(normalized.resolution).toBe('type-checker');
+    expect(normalized.scope).toBe('imported');
+    expect(normalized.importDepth).toBe(2);
+    expect(normalized.usedTypeChecker).toBe(true);
+    expect(normalized.isExported).toBe(false);
+    expect(normalized.importAlias).toBe('aliasName');
+    expect(normalized.receiverType).toBe('SomeReceiver');
+    expect(normalized.arity).toBe(2);
+    expect(normalized.awaited).toBe(true);
+    expect(normalized.operator).toBe('new');
+    expect(normalized.callee).toBe('makeThing');
+    expect(normalized.paramName).toBe('arg0');
+  });
 });
 
 it('leaves non-code relationships unchanged', () => {
@@ -446,7 +606,15 @@ describe('normalizeCodeEdge kind inference', () => {
     { type: RelationshipType.CALLS, expected: 'call' },
     { type: RelationshipType.REFERENCES, expected: 'identifier' },
     { type: RelationshipType.EXTENDS, expected: 'inheritance' },
+    { type: RelationshipType.IMPLEMENTS, expected: 'inheritance' },
+    { type: RelationshipType.OVERRIDES, expected: 'override' },
+    { type: RelationshipType.DEPENDS_ON, expected: 'dependency' },
     { type: RelationshipType.READS, expected: 'read' },
+    { type: RelationshipType.WRITES, expected: 'write' },
+    { type: RelationshipType.THROWS, expected: 'throw' },
+    { type: RelationshipType.TYPE_USES, expected: 'type' },
+    { type: RelationshipType.RETURNS_TYPE, expected: 'return' },
+    { type: RelationshipType.PARAM_TYPE, expected: 'param' },
   ];
 
   it.each(cases)('infers %expected for %type relationships', ({ type, expected }) => {

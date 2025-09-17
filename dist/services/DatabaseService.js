@@ -268,6 +268,12 @@ export class DatabaseService {
         }
         return this.redisService.del(key);
     }
+    async redisFlushDb() {
+        if (!this.redisService) {
+            throw new Error("Redis not configured");
+        }
+        await this.redisService.flushDb();
+    }
     // Health checks
     async healthCheck() {
         var _a, _b;

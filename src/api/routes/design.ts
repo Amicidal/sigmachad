@@ -4,27 +4,22 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { v4 as uuidv4 } from "uuid";
 import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
 import { DatabaseService } from "../../services/DatabaseService.js";
+import { SpecService } from "../../services/SpecService.js";
 import {
   CreateSpecRequest,
-  CreateSpecResponse,
-  GetSpecResponse,
   UpdateSpecRequest,
   ListSpecsParams,
-  APIResponse,
-  PaginatedResponse,
 } from "../../models/types.js";
-import { Spec } from "../../models/entities.js";
-import { RelationshipType } from "../../models/relationships.js";
-import { noiseConfig } from "../../config/noise.js";
 
 export function registerDesignRoutes(
   app: FastifyInstance,
   kgService: KnowledgeGraphService,
   dbService: DatabaseService
 ): void {
+  const specService = new SpecService(kgService, dbService);
+
   // Create specification
   app.post(
     "/design/create-spec",
@@ -71,10 +66,8 @@ export function registerDesignRoutes(
     },
     async (request, reply) => {
       try {
-        const result = await createSpec(
-          request.body as CreateSpecRequest,
-          kgService,
-          dbService
+        const result = await specService.createSpec(
+          request.body as CreateSpecRequest
         );
         reply.send({
           success: true,
@@ -102,7 +95,7 @@ export function registerDesignRoutes(
   app.get("/design/specs/:specId", async (request, reply) => {
     try {
       const { specId } = request.params as { specId: string };
-      const result = await getSpec(specId, kgService, dbService);
+      const result = await specService.getSpec(specId);
 
       reply.send({
         success: true,
@@ -132,11 +125,9 @@ export function registerDesignRoutes(
   registerUpdate("/design/specs/:specId", async (request: any, reply: any) => {
     try {
       const { specId } = request.params as { specId: string };
-      const result = await updateSpec(
+      const result = await specService.updateSpec(
         specId,
-        request.body as UpdateSpecRequest,
-        kgService,
-        dbService
+        request.body as UpdateSpecRequest
       );
 
       reply.send({
@@ -164,7 +155,7 @@ export function registerDesignRoutes(
   app.get("/design/specs", async (request, reply) => {
     try {
       const params = request.query as ListSpecsParams;
-      const result = await listSpecs(params, kgService, dbService);
+      const result = await specService.listSpecs(params);
 
       reply.send({
         success: true,
@@ -217,452 +208,4 @@ export function registerDesignRoutes(
         });
     }
   });
-}
-
-// Business logic functions
-async function createSpec(
-  params: CreateSpecRequest,
-  kgService: KnowledgeGraphService,
-  dbService: DatabaseService
-): Promise<CreateSpecResponse> {
-  const specId = uuidv4();
-
-  const spec: Spec = {
-    id: specId,
-    type: "spec",
-    path: `specs/${specId}`,
-    hash: "", // Will be calculated from content
-    language: "text",
-    lastModified: new Date(),
-    created: new Date(),
-    title: params.title,
-    description: params.description,
-    acceptanceCriteria: params.acceptanceCriteria,
-    status: "draft",
-    priority: params.priority || "medium",
-    assignee: params.assignee,
-    tags: params.tags || [],
-    updated: new Date(),
-  };
-
-  // Validate acceptance criteria
-  const validationResults = validateSpec(spec);
-
-  // Store in database
-  await dbService.postgresQuery(
-    `INSERT INTO documents (id, type, content, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`,
-    [
-      specId,
-      "spec",
-      JSON.stringify(spec),
-      spec.created.toISOString(),
-      spec.updated.toISOString(),
-    ]
-  );
-
-  // Create entity in knowledge graph
-  await kgService.createEntity(spec);
-
-  // Heuristic REQUIRES/IMPACTS edges from acceptance criteria / description
-  try {
-    const namesFromAC = Array.from(new Set((spec.acceptanceCriteria || [])
-      .flatMap((s) => String(s || '').match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || [])));
-    const namesFromDesc = Array.from(new Set(String(spec.description || '')
-      .match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []));
-    const pickTop = (arr: string[], n: number) => arr.slice(0, n);
-    for (const name of pickTop(namesFromAC, 25)) {
-      try {
-        const syms = (await kgService.findSymbolsByName(name, 3))
-          .filter((s: any) => (s?.isExported === true))
-          .filter((s: any) => ['function','class','interface','typeAlias'].includes(String(s?.kind || '').toLowerCase()));
-        const seen = new Set<string>();
-        for (const s of syms) {
-          if (!s?.id || seen.has(s.id)) continue; seen.add(s.id);
-          const nm = String((s as any).name || '');
-          const conf = Math.min(
-            1,
-            (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF)
-          );
-          if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
-            await kgService.createRelationship({
-              id: `rel_${spec.id}_${s.id}_REQUIRES`,
-              fromEntityId: spec.id,
-              toEntityId: s.id,
-              type: RelationshipType.REQUIRES as any,
-              created: new Date(),
-              lastModified: new Date(),
-              version: 1,
-              metadata: { inferred: true, confidence: conf, source: 'spec-acceptance' }
-            } as any, undefined, undefined, { validate: false });
-          }
-        }
-      } catch {}
-    }
-    for (const name of pickTop(namesFromDesc, 25)) {
-      try {
-        const syms = (await kgService.findSymbolsByName(name, 2))
-          .filter((s: any) => (s?.isExported === true))
-          .filter((s: any) => ['function','class','interface','typeAlias'].includes(String(s?.kind || '').toLowerCase()));
-        const seen = new Set<string>();
-        for (const s of syms) {
-          if (!s?.id || seen.has(s.id)) continue; seen.add(s.id);
-          const nm = String((s as any).name || '');
-          const conf = Math.min(
-            1,
-            (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF)
-          );
-          if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
-            await kgService.createRelationship({
-              id: `rel_${spec.id}_${s.id}_IMPACTS`,
-              fromEntityId: spec.id,
-              toEntityId: s.id,
-              type: RelationshipType.IMPACTS as any,
-              created: new Date(),
-              lastModified: new Date(),
-              version: 1,
-              metadata: { inferred: true, confidence: conf, source: 'spec-description' }
-            } as any, undefined, undefined, { validate: false });
-          }
-        }
-      } catch {}
-    }
-  } catch {}
-
-  return {
-    specId,
-    spec,
-    validationResults,
-  };
-}
-
-async function getSpec(
-  specId: string,
-  kgService: KnowledgeGraphService,
-  dbService: DatabaseService
-): Promise<GetSpecResponse> {
-  const result = await dbService.postgresQuery(
-    "SELECT content FROM documents WHERE id = $1 AND type = $2",
-    [specId, "spec"]
-  );
-
-  const rows = (result as any)?.rows ?? [];
-  if (rows.length === 0) {
-    throw new Error(`Specification ${specId} not found`);
-  }
-
-  const spec: Spec = JSON.parse(rows[0].content);
-
-  // Get related specs and affected entities (placeholder for now)
-  const relatedSpecs: Spec[] = [];
-  const affectedEntities: any[] = [];
-  const testCoverage = {
-    entityId: spec.id,
-    overallCoverage: { lines: 0, branches: 0, functions: 0, statements: 0 },
-    testBreakdown: {
-      unitTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
-      integrationTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
-      e2eTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
-    },
-    uncoveredLines: [],
-    uncoveredBranches: [],
-    testCases: [],
-  };
-
-  return {
-    spec,
-    relatedSpecs,
-    affectedEntities,
-    testCoverage,
-  };
-}
-
-async function updateSpec(
-  specId: string,
-  updates: UpdateSpecRequest,
-  kgService: KnowledgeGraphService,
-  dbService: DatabaseService
-): Promise<Spec> {
-  // Get existing spec
-  const result = await dbService.postgresQuery(
-    "SELECT content FROM documents WHERE id = $1 AND type = $2",
-    [specId, "spec"]
-  );
-
-  const rows2 = (result as any)?.rows ?? [];
-  if (rows2.length === 0) {
-    throw new Error(`Specification ${specId} not found`);
-  }
-
-  const existingSpec: Spec = JSON.parse(rows2[0].content);
-
-  // Apply updates
-  const updatedSpec: Spec = {
-    ...existingSpec,
-    ...updates,
-    updated: new Date(),
-  };
-
-  // Validate updated spec
-  const validationResults = validateSpec(updatedSpec);
-  if (!validationResults.isValid) {
-    throw new Error(
-      `Validation failed: ${validationResults.issues
-        .map((i) => i.message)
-        .join(", ")}`
-    );
-  }
-
-  // Update in database
-  await dbService.postgresQuery(
-    "UPDATE documents SET content = $1, updated_at = $2 WHERE id = $3",
-    [JSON.stringify(updatedSpec), updatedSpec.updated.toISOString(), specId]
-  );
-
-  // Update in knowledge graph
-  await kgService.updateEntity(specId, updatedSpec);
-
-  // Refresh REQUIRES/IMPACTS edges using same heuristics
-  try {
-    const namesFromAC = Array.from(new Set((updatedSpec.acceptanceCriteria || [])
-      .flatMap((s) => String(s || '').match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || [])));
-    const namesFromDesc = Array.from(new Set(String(updatedSpec.description || '')
-      .match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []));
-    const pickTop = (arr: string[], n: number) => arr.slice(0, n);
-    for (const name of pickTop(namesFromAC, 25)) {
-      try {
-        const syms = (await kgService.findSymbolsByName(name, 3))
-          .filter((s: any) => (s?.isExported === true))
-          .filter((s: any) => ['function','class','interface','typeAlias'].includes(String(s?.kind || '').toLowerCase()));
-        const seen = new Set<string>();
-        for (const s of syms) {
-          if (!s?.id || seen.has(s.id)) continue; seen.add(s.id);
-          const nm = String((s as any).name || '');
-          const conf = Math.min(
-            1,
-            (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF)
-          );
-          if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
-            await kgService.createRelationship({
-              id: `rel_${updatedSpec.id}_${s.id}_REQUIRES`,
-              fromEntityId: updatedSpec.id,
-              toEntityId: s.id,
-              type: RelationshipType.REQUIRES as any,
-              created: new Date(),
-              lastModified: new Date(),
-              version: 1,
-              metadata: { inferred: true, confidence: conf, source: 'spec-acceptance' }
-            } as any, undefined, undefined, { validate: false });
-          }
-        }
-      } catch {}
-    }
-    for (const name of pickTop(namesFromDesc, 25)) {
-      try {
-        const syms = (await kgService.findSymbolsByName(name, 2))
-          .filter((s: any) => (s?.isExported === true))
-          .filter((s: any) => ['function','class','interface','typeAlias'].includes(String(s?.kind || '').toLowerCase()));
-        const seen = new Set<string>();
-        for (const s of syms) {
-          if (!s?.id || seen.has(s.id)) continue; seen.add(s.id);
-          const nm = String((s as any).name || '');
-          const conf = Math.min(
-            1,
-            (noiseConfig.DOC_LINK_BASE_CONF) + (Math.max(0, nm.length - noiseConfig.AST_MIN_NAME_LENGTH) * noiseConfig.DOC_LINK_STEP_CONF)
-          );
-          if (conf >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
-            await kgService.createRelationship({
-              id: `rel_${updatedSpec.id}_${s.id}_IMPACTS`,
-              fromEntityId: updatedSpec.id,
-              toEntityId: s.id,
-              type: RelationshipType.IMPACTS as any,
-              created: new Date(),
-              lastModified: new Date(),
-              version: 1,
-              metadata: { inferred: true, confidence: conf, source: 'spec-description' }
-            } as any, undefined, undefined, { validate: false });
-          }
-        }
-      } catch {}
-    }
-  } catch {}
-
-  return updatedSpec;
-}
-
-async function listSpecs(
-  params: ListSpecsParams,
-  kgService: KnowledgeGraphService,
-  dbService: DatabaseService
-): Promise<{ specs: Spec[]; pagination: any }> {
-  let query = "SELECT content FROM documents WHERE type = $1";
-  const queryParams: any[] = ["spec"];
-  let paramIndex = 2;
-
-  // Add filters
-  if (params.status && params.status.length > 0) {
-    query += ` AND content->>'status' = ANY($${paramIndex})`;
-    queryParams.push(params.status);
-    paramIndex++;
-  }
-
-  if (params.priority && params.priority.length > 0) {
-    query += ` AND content->>'priority' = ANY($${paramIndex})`;
-    queryParams.push(params.priority);
-    paramIndex++;
-  }
-
-  if (params.assignee) {
-    query += ` AND content->>'assignee' = $${paramIndex}`;
-    queryParams.push(params.assignee);
-    paramIndex++;
-  }
-
-  if (params.search) {
-    query += ` AND (content->>'title' ILIKE $${paramIndex} OR content->>'description' ILIKE $${paramIndex})`;
-    queryParams.push(`%${params.search}%`);
-    paramIndex++;
-  }
-
-  // Add sorting
-  const sortBy = params.sortBy || "created";
-  const sortOrder = params.sortOrder || "desc";
-  query += ` ORDER BY content->>'${sortBy}' ${sortOrder.toUpperCase()}`;
-
-  // Add pagination
-  const limit = params.limit || 20;
-  const offset = params.offset || 0;
-  query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-  queryParams.push(limit, offset);
-
-  const result = await dbService.postgresQuery(query, queryParams);
-  const rows3 = (result as any)?.rows ?? [];
-  const specs = rows3.map((row: any) => JSON.parse(row.content));
-
-  return {
-    specs,
-    pagination: {
-      page: Math.floor(offset / limit) + 1,
-      pageSize: limit,
-      total: specs.length, // Simplified - would need a separate COUNT query
-      hasMore: specs.length === limit,
-    },
-  };
-}
-
-function validateSpec(spec: Spec): {
-  isValid: boolean;
-  issues: Array<{
-    field: string;
-    message: string;
-    severity: "error" | "warning";
-    file: string;
-    line: number;
-    column: number;
-    rule: string;
-    suggestion?: string;
-  }>;
-  suggestions: string[];
-} {
-  const issues: Array<{
-    field: string;
-    message: string;
-    severity: "error" | "warning";
-    file: string;
-    line: number;
-    column: number;
-    rule: string;
-    suggestion?: string;
-  }> = [];
-  const suggestions: string[] = [];
-
-  // Validate title
-  if (!spec.title || spec.title.trim().length === 0) {
-    issues.push({
-      field: "title",
-      message: "Title is required",
-      severity: "error",
-      file: spec.path,
-      line: 0,
-      column: 0,
-      rule: "required-field",
-    });
-  } else if (spec.title.length < 5) {
-    issues.push({
-      field: "title",
-      message: "Title should be more descriptive (at least 5 characters)",
-      severity: "warning",
-      file: spec.path,
-      line: 0,
-      column: 0,
-      rule: "minimum-length",
-      suggestion: "Consider making the title more descriptive",
-    });
-  }
-
-  // Validate description
-  if (!spec.description || spec.description.trim().length === 0) {
-    issues.push({
-      field: "description",
-      message: "Description is required",
-      severity: "error",
-      file: spec.path,
-      line: 0,
-      column: 0,
-      rule: "required-field",
-    });
-  } else if (spec.description.length < 20) {
-    issues.push({
-      field: "description",
-      message:
-        "Description should provide more context (at least 20 characters)",
-      severity: "warning",
-      file: spec.path,
-      line: 0,
-      column: 0,
-      rule: "minimum-length",
-      suggestion: "Consider adding more context to the description",
-    });
-  }
-
-  // Validate acceptance criteria
-  if (!spec.acceptanceCriteria || spec.acceptanceCriteria.length === 0) {
-    issues.push({
-      field: "acceptanceCriteria",
-      message: "At least one acceptance criterion is required",
-      severity: "error",
-      file: spec.path,
-      line: 0,
-      column: 0,
-      rule: "required-field",
-    });
-  } else {
-    spec.acceptanceCriteria.forEach((criterion, index) => {
-      if (criterion.trim().length < 10) {
-        issues.push({
-          field: `acceptanceCriteria[${index}]`,
-          message: `Acceptance criterion ${
-            index + 1
-          } should be more specific (at least 10 characters)`,
-          severity: "warning",
-          file: spec.path,
-          line: 0,
-          column: 0,
-          rule: "minimum-length",
-          suggestion: "Consider making the acceptance criterion more specific",
-        });
-      }
-    });
-
-    if (spec.acceptanceCriteria.length < 3) {
-      suggestions.push(
-        "Consider adding more acceptance criteria for better test coverage"
-      );
-    }
-  }
-
-  return {
-    isValid: issues.filter((issue) => issue.severity === "error").length === 0,
-    issues,
-    suggestions,
-  };
 }

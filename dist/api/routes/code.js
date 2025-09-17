@@ -4,6 +4,7 @@
  */
 import { RelationshipType } from "../../models/relationships.js";
 import fs from "fs/promises";
+import path from "path";
 import console from "console";
 // Type definitions for validation issues
 // Using ValidationResult, ValidationIssue, and SecurityIssue from types.ts
@@ -318,11 +319,36 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
             },
         },
     }, async (request, reply) => {
+        var _a;
         try {
             const { file } = request.params;
             const { lineStart, lineEnd } = request.query;
-            // TODO: Generate code improvement suggestions
-            const suggestions = [];
+            const resolvedPath = path.isAbsolute(file)
+                ? file
+                : path.resolve(process.cwd(), file);
+            let fileContent = null;
+            try {
+                fileContent = await fs.readFile(resolvedPath, "utf-8");
+            }
+            catch (_b) {
+                fileContent = null;
+            }
+            let parseResult = null;
+            try {
+                parseResult = await astParser.parseFile(resolvedPath);
+            }
+            catch (error) {
+                console.warn("Could not parse file for suggestions:", error);
+            }
+            const suggestions = generateCodeSuggestions({
+                file,
+                resolvedPath,
+                lineStart,
+                lineEnd,
+                types: (_a = request.query) === null || _a === void 0 ? void 0 : _a.types,
+                parseResult,
+                fileContent,
+            });
             reply.send({
                 success: true,
                 data: {
@@ -332,12 +358,13 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
                 },
             });
         }
-        catch (_a) {
+        catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
                     code: "SUGGESTIONS_FAILED",
                     message: "Failed to generate code suggestions",
+                    details: error instanceof Error ? error.message : undefined,
                 },
             });
         }
@@ -366,27 +393,272 @@ export async function registerCodeRoutes(app, kgService, dbService, astParser) {
     }, async (request, reply) => {
         try {
             const { files, refactorType } = request.body;
-            // TODO: Analyze and suggest refactoring opportunities
-            const refactorings = [];
+            const suggestions = await generateRefactorSuggestions({
+                files,
+                refactorType,
+                astParser,
+            });
             reply.send({
                 success: true,
                 data: {
                     refactorType,
                     files,
-                    suggestedRefactorings: refactorings,
+                    suggestedRefactorings: suggestions,
                 },
             });
         }
-        catch (_a) {
+        catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
                     code: "REFACTORING_FAILED",
                     message: "Failed to analyze refactoring opportunities",
+                    details: error instanceof Error ? error.message : undefined,
                 },
             });
         }
     });
+}
+function generateCodeSuggestions(opts) {
+    var _a, _b, _c;
+    const suggestions = [];
+    const filterTypes = Array.isArray(opts.types) && opts.types.length > 0
+        ? new Set(opts.types.map((t) => t.toLowerCase()))
+        : null;
+    const withinRange = (line) => {
+        if (line == null)
+            return true;
+        const numeric = line;
+        if (typeof opts.lineStart === "number" && numeric < opts.lineStart) {
+            return false;
+        }
+        if (typeof opts.lineEnd === "number" && numeric > opts.lineEnd) {
+            return false;
+        }
+        return true;
+    };
+    const addSuggestion = (suggestion) => {
+        var _a;
+        if (!withinRange(suggestion.line)) {
+            return;
+        }
+        if (filterTypes && !filterTypes.has(suggestion.type.toLowerCase())) {
+            return;
+        }
+        const key = `${suggestion.type}|${(_a = suggestion.line) !== null && _a !== void 0 ? _a : ""}|${suggestion.message}`;
+        if (!unique.has(key)) {
+            unique.set(key, suggestion);
+        }
+    };
+    const unique = new Map();
+    if (opts.fileContent) {
+        const lines = opts.fileContent.split(/\r?\n/);
+        lines.forEach((text, index) => {
+            const lineNumber = index + 1;
+            if (/todo/i.test(text)) {
+                addSuggestion({
+                    type: "best-practices",
+                    message: "Found TODO comment; consider resolving before shipping.",
+                    line: lineNumber,
+                });
+            }
+            if (/console\.(log|warn|error|info)/.test(text)) {
+                addSuggestion({
+                    type: "best-practices",
+                    message: "Remove console statements from production code.",
+                    line: lineNumber,
+                });
+            }
+            if (/\bany\b/.test(text)) {
+                addSuggestion({
+                    type: "maintainability",
+                    message: "Avoid using the 'any' type; prefer stricter typings.",
+                    line: lineNumber,
+                });
+            }
+            if (/eval\s*\(/.test(text)) {
+                addSuggestion({
+                    type: "security",
+                    message: "Avoid using eval for security reasons.",
+                    line: lineNumber,
+                });
+            }
+            if (/\/\/\s*@ts-ignore/.test(text)) {
+                addSuggestion({
+                    type: "maintainability",
+                    message: "Remove '@ts-ignore' by addressing the underlying issue.",
+                    line: lineNumber,
+                });
+            }
+        });
+    }
+    const parseResult = opts.parseResult;
+    if (parseResult) {
+        if (Array.isArray(parseResult.errors)) {
+            for (const error of parseResult.errors) {
+                addSuggestion({
+                    type: "maintainability",
+                    message: `Parser reported: ${error.message || "Unknown error"}`,
+                    line: ((_a = error.line) !== null && _a !== void 0 ? _a : 0) + 1,
+                    column: error.column,
+                });
+            }
+        }
+        if (Array.isArray(parseResult.entities)) {
+            for (const entity of parseResult.entities) {
+                if (entity.type !== "symbol")
+                    continue;
+                const symbol = entity;
+                const lineNumber = ((_c = (_b = symbol.location) === null || _b === void 0 ? void 0 : _b.line) !== null && _c !== void 0 ? _c : 0) + 1;
+                if (!withinRange(lineNumber))
+                    continue;
+                if (symbol.kind === "function") {
+                    const fn = symbol;
+                    if (typeof fn.complexity === "number" && fn.complexity >= 15) {
+                        addSuggestion({
+                            type: "maintainability",
+                            message: `Function ${fn.name} has high complexity (${fn.complexity}). Consider extracting helper functions.`,
+                            line: lineNumber,
+                        });
+                    }
+                    if (Array.isArray(fn.parameters) && fn.parameters.length >= 5) {
+                        addSuggestion({
+                            type: "maintainability",
+                            message: `Function ${fn.name} takes ${fn.parameters.length} parameters. Consider grouping parameters into an object.`,
+                            line: lineNumber,
+                        });
+                    }
+                }
+                if (symbol.kind === "class") {
+                    const cls = symbol;
+                    const methodCount = Array.isArray(cls.methods) ? cls.methods.length : 0;
+                    const propertyCount = Array.isArray(cls.properties) ? cls.properties.length : 0;
+                    if (methodCount + propertyCount >= 12) {
+                        addSuggestion({
+                            type: "maintainability",
+                            message: `Class ${cls.name} is large (${methodCount} methods, ${propertyCount} properties). Consider splitting responsibilities.`,
+                            line: lineNumber,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    return Array.from(unique.values());
+}
+async function generateRefactorSuggestions(opts) {
+    var _a, _b, _c, _d;
+    const { files, refactorType, astParser } = opts;
+    const resolvedFiles = files.map((file) => path.isAbsolute(file) ? file : path.resolve(process.cwd(), file));
+    const parseCache = new Map();
+    const ensureParse = async (file) => {
+        var _a;
+        if (parseCache.has(file)) {
+            return (_a = parseCache.get(file)) !== null && _a !== void 0 ? _a : null;
+        }
+        try {
+            const result = await astParser.parseFile(file);
+            parseCache.set(file, result);
+            return result;
+        }
+        catch (error) {
+            console.warn(`Could not parse ${file} for refactor analysis:`, error);
+            parseCache.set(file, null);
+            return null;
+        }
+    };
+    const suggestions = [];
+    const pushSuggestion = (suggestion) => {
+        suggestions.push(suggestion);
+    };
+    if (refactorType === "consolidate-duplicates") {
+        const duplicateAnalysis = await analyzeCodeDuplicates(resolvedFiles, astParser);
+        for (const duplicate of duplicateAnalysis.results || []) {
+            if ((duplicate.locations || []).length <= 1)
+                continue;
+            pushSuggestion({
+                type: refactorType,
+                description: `Duplicate code detected at ${duplicate.locations.join(", ")}. Consolidate shared logic.`,
+                confidence: Math.min(1, duplicate.count / 5),
+                effort: duplicate.count > 3 ? "medium" : "low",
+            });
+        }
+    }
+    else {
+        for (const file of resolvedFiles) {
+            const parseResult = await ensureParse(file);
+            if (!parseResult || !Array.isArray(parseResult.entities))
+                continue;
+            const relative = path.relative(process.cwd(), file);
+            if (refactorType === "extract-function") {
+                for (const entity of parseResult.entities) {
+                    if (entity.type !== "symbol" || entity.kind !== "function")
+                        continue;
+                    const fn = entity;
+                    const complexity = (_a = fn.complexity) !== null && _a !== void 0 ? _a : 0;
+                    const paramCount = Array.isArray(fn.parameters) ? fn.parameters.length : 0;
+                    if (complexity >= 18 || paramCount >= 5) {
+                        pushSuggestion({
+                            type: refactorType,
+                            description: `Function ${fn.name} in ${relative} is complex (${complexity}) with ${paramCount} parameters. Extract helper functions.`,
+                            confidence: Math.min(1, (complexity + paramCount) / 25),
+                            effort: complexity > 25 ? "high" : "medium",
+                            file: relative,
+                            target: fn.name,
+                        });
+                    }
+                }
+            }
+            else if (refactorType === "extract-class") {
+                for (const entity of parseResult.entities) {
+                    if (entity.type !== "symbol" || entity.kind !== "class")
+                        continue;
+                    const cls = entity;
+                    const methods = Array.isArray(cls.methods) ? cls.methods.length : 0;
+                    const props = Array.isArray(cls.properties) ? cls.properties.length : 0;
+                    if (methods + props >= 12) {
+                        pushSuggestion({
+                            type: refactorType,
+                            description: `Class ${cls.name} in ${relative} has ${methods} methods and ${props} properties. Consider extracting smaller classes.`,
+                            confidence: Math.min(1, (methods + props) / 20),
+                            effort: methods + props > 18 ? "high" : "medium",
+                            file: relative,
+                            target: cls.name,
+                        });
+                    }
+                }
+            }
+            else if (refactorType === "rename") {
+                for (const entity of parseResult.entities) {
+                    if (entity.type !== "symbol")
+                        continue;
+                    const lineNumber = ((_c = (_b = entity.location) === null || _b === void 0 ? void 0 : _b.line) !== null && _c !== void 0 ? _c : 0) + 1;
+                    const name = (_d = entity.name) !== null && _d !== void 0 ? _d : "";
+                    if (name && name.length <= 3) {
+                        pushSuggestion({
+                            type: refactorType,
+                            description: `Identifier '${name}' in ${relative}:${lineNumber} is terse. Rename to a more descriptive name.`,
+                            confidence: 0.6,
+                            effort: "low",
+                            file: relative,
+                            target: name,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    if (suggestions.length === 0) {
+        return [
+            {
+                type: refactorType,
+                description: "No significant opportunities detected based on available heuristics.",
+                confidence: 0.3,
+                effort: "low",
+            },
+        ];
+    }
+    return suggestions;
 }
 // Helper function to analyze proposed code changes
 async function analyzeCodeChanges(proposal, astParser, kgService) {

@@ -2,12 +2,13 @@
  * Knowledge Graph Service for Memento
  * Manages graph operations, vector embeddings, and entity relationships
  */
-import { RelationshipType, } from "../models/relationships.js";
+import { RelationshipType, isDocumentationRelationshipType, DOCUMENTATION_RELATIONSHIP_TYPES, } from "../models/relationships.js";
 import { noiseConfig } from "../config/noise.js";
 import { embeddingService } from "../utils/embedding.js";
-import { normalizeCodeEdge, canonicalRelationshipId, isCodeRelationship } from "../utils/codeEdges.js";
+import { normalizeCodeEdge, canonicalRelationshipId, isCodeRelationship, mergeEdgeEvidence, mergeEdgeLocations } from "../utils/codeEdges.js";
 import { EventEmitter } from "events";
 import crypto from "crypto";
+import path from "path";
 class SimpleCache {
     constructor(maxSize = 100, defaultTTL = 300000) {
         this.cache = new Map();
@@ -35,7 +36,9 @@ class SimpleCache {
         // If cache is at max size, remove oldest entry
         if (this.cache.size >= this.maxSize) {
             const oldestKey = this.cache.keys().next().value;
-            this.cache.delete(oldestKey);
+            if (typeof oldestKey !== "undefined") {
+                this.cache.delete(oldestKey);
+            }
         }
         this.cache.set(cacheKey, {
             data: value,
@@ -234,12 +237,20 @@ export class KnowledgeGraphService extends EventEmitter {
         return out;
     }
     mergeEvidenceArrays(oldArr, newArr, limit = 20) {
-        const merged = this.dedupeBy([...(oldArr || []), ...(newArr || [])], (e) => { var _a, _b, _c; return `${e.source || ''}|${((_a = e.location) === null || _a === void 0 ? void 0 : _a.path) || ''}|${((_b = e.location) === null || _b === void 0 ? void 0 : _b.line) || ''}|${((_c = e.location) === null || _c === void 0 ? void 0 : _c.column) || ''}`; });
-        return merged.slice(0, limit);
+        try {
+            return mergeEdgeEvidence(oldArr, newArr, limit);
+        }
+        catch (_a) {
+            return (oldArr || []).slice(0, limit);
+        }
     }
     mergeLocationsArrays(oldArr, newArr, limit = 20) {
-        const merged = this.dedupeBy([...(oldArr || []), ...(newArr || [])], (l) => `${l.path || ''}|${l.line || ''}|${l.column || ''}`);
-        return merged.slice(0, limit);
+        try {
+            return mergeEdgeLocations(oldArr, newArr, limit);
+        }
+        catch (_a) {
+            return (oldArr || []).slice(0, limit);
+        }
     }
     // Best-effort: when a resolved edge is created, merge and retire placeholder edges (file:/external:/kind:)
     async unifyResolvedEdgePlaceholders(rel) {
@@ -283,10 +294,22 @@ export class KnowledgeGraphService extends EventEmitter {
           AND r.to_ref_file = $file AND r.to_ref_symbol = $symbol
         RETURN r`;
             const rows = await this.db.falkordbQuery(q, { fromId, newId: rel.id, file, symbol });
-            if (!rows || rows.length === 0)
+            const placeholdersFile = (rows || []).map((row) => this.parseRelationshipFromGraph(row));
+            // Optional: also unify 'external:<name>' placeholders by symbol name (best-effort, name-only)
+            let placeholdersExternal = [];
+            try {
+                const qext = `
+          MATCH (a {id: $fromId})-[r:${type}]->(b)
+          WHERE r.id <> $newId AND coalesce(r.active, true) = true
+            AND r.to_ref_kind = 'external' AND r.to_ref_name = $symbol
+          RETURN r`;
+                const rowsExt = await this.db.falkordbQuery(qext, { fromId, newId: rel.id, symbol });
+                placeholdersExternal = (rowsExt || []).map((row) => this.parseRelationshipFromGraph(row));
+            }
+            catch (_b) { }
+            const placeholders = [].concat(placeholdersFile, placeholdersExternal);
+            if (placeholders.length === 0)
                 return;
-            // Parse placeholder edge props
-            const placeholders = rows.map((row) => this.parseRelationshipFromGraph(row));
             // Aggregate properties to fold into the resolved edge
             let occTotalAdd = 0;
             let occScanAdd = 0;
@@ -351,7 +374,7 @@ export class KnowledgeGraphService extends EventEmitter {
                 await this.db.falkordbQuery(retire, { ids: oldIds, now: nowISO });
             }
         }
-        catch (_b) {
+        catch (_c) {
             // best-effort; do not block
         }
     }
@@ -366,9 +389,14 @@ export class KnowledgeGraphService extends EventEmitter {
             rel.lastModified = new Date(rel.lastModified || Date.now());
         if (typeof rel.version !== "number")
             rel.version = 1;
+        this.harmonizeRefFields(rel);
         // Delegate code-edge normalization to shared normalizer to avoid drift
         if (isCodeRelationship(rel.type)) {
             Object.assign(rel, normalizeCodeEdge(rel));
+            this.harmonizeRefFields(rel);
+        }
+        if (isDocumentationRelationshipType(rel.type)) {
+            Object.assign(rel, this.normalizeDocumentationEdge(rel));
         }
         // Generate a human-readable why if missing
         if (!rel.why) {
@@ -390,6 +418,481 @@ export class KnowledgeGraphService extends EventEmitter {
                 rel.why = hints.join('; ');
         }
         return rel;
+    }
+    normalizeDocumentationEdge(relIn) {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3;
+        const rel = relIn;
+        const md = { ...(rel.metadata || {}) };
+        rel.metadata = md;
+        const source = this.normalizeDocSource(rel.source || md.source);
+        if (source) {
+            rel.source = source;
+            md.source = source;
+        }
+        const docIntent = this.normalizeDocIntent((_a = rel.docIntent) !== null && _a !== void 0 ? _a : md.docIntent, source, rel.type);
+        if (docIntent) {
+            rel.docIntent = docIntent;
+            md.docIntent = docIntent;
+        }
+        const sectionAnchor = this.normalizeSectionAnchor((_c = (_b = rel.sectionAnchor) !== null && _b !== void 0 ? _b : md.sectionAnchor) !== null && _c !== void 0 ? _c : md.anchor, rel.type === RelationshipType.DOCUMENTED_BY ||
+            rel.type === RelationshipType.DOCUMENTS_SECTION);
+        if (sectionAnchor) {
+            rel.sectionAnchor = sectionAnchor;
+            md.sectionAnchor = sectionAnchor;
+        }
+        const summary = this.normalizeSummary((_d = rel.summary) !== null && _d !== void 0 ? _d : md.summary);
+        if (summary !== undefined) {
+            if (summary) {
+                rel.summary = summary;
+                md.summary = summary;
+            }
+            else {
+                delete rel.summary;
+                delete md.summary;
+            }
+        }
+        const docVersion = this.normalizeString((_e = rel.docVersion) !== null && _e !== void 0 ? _e : md.docVersion);
+        if (docVersion) {
+            rel.docVersion = docVersion;
+            md.docVersion = docVersion;
+        }
+        const docHash = this.normalizeString((_f = rel.docHash) !== null && _f !== void 0 ? _f : md.docHash);
+        if (docHash) {
+            rel.docHash = docHash;
+            md.docHash = docHash;
+        }
+        const coverageScope = this.normalizeCoverageScope((_g = rel.coverageScope) !== null && _g !== void 0 ? _g : md.coverageScope);
+        if (coverageScope) {
+            rel.coverageScope = coverageScope;
+            md.coverageScope = coverageScope;
+        }
+        else {
+            delete rel.coverageScope;
+            delete md.coverageScope;
+        }
+        const documentationQuality = this.normalizeDocumentationQuality((_h = rel.documentationQuality) !== null && _h !== void 0 ? _h : md.documentationQuality);
+        if (documentationQuality) {
+            rel.documentationQuality = documentationQuality;
+            md.documentationQuality = documentationQuality;
+        }
+        else {
+            delete rel.documentationQuality;
+            delete md.documentationQuality;
+        }
+        const docLocale = this.normalizeLocale((_j = rel.docLocale) !== null && _j !== void 0 ? _j : md.docLocale);
+        if (docLocale) {
+            rel.docLocale = docLocale;
+            md.docLocale = docLocale;
+        }
+        const tags = this.normalizeStringArray((_k = rel.tags) !== null && _k !== void 0 ? _k : md.tags);
+        if (tags) {
+            rel.tags = tags;
+            md.tags = tags;
+        }
+        const stakeholders = this.normalizeStringArray((_l = rel.stakeholders) !== null && _l !== void 0 ? _l : md.stakeholders);
+        if (stakeholders) {
+            rel.stakeholders = stakeholders;
+            md.stakeholders = stakeholders;
+        }
+        const confidence = this.clamp01((_m = rel.confidence) !== null && _m !== void 0 ? _m : md.confidence);
+        if (confidence !== undefined) {
+            rel.confidence = confidence;
+            md.confidence = confidence;
+        }
+        if (rel.type === RelationshipType.BELONGS_TO_DOMAIN &&
+            rel.strength === undefined) {
+            rel.strength = (_o = this.clamp01(md.strength)) !== null && _o !== void 0 ? _o : 0.5;
+        }
+        else if (rel.strength !== undefined) {
+            rel.strength = (_p = this.clamp01(rel.strength)) !== null && _p !== void 0 ? _p : undefined;
+        }
+        if (rel.strength !== undefined) {
+            md.strength = rel.strength;
+        }
+        if (rel.type === RelationshipType.CLUSTER_MEMBER) {
+            const similarity = this.clampRange((_q = rel.similarityScore) !== null && _q !== void 0 ? _q : md.similarityScore, -1, 1);
+            if (similarity !== undefined) {
+                rel.similarityScore = similarity;
+                md.similarityScore = similarity;
+            }
+            const clusterVersion = this.normalizeString((_r = rel.clusterVersion) !== null && _r !== void 0 ? _r : md.clusterVersion) || "v1";
+            rel.clusterVersion = clusterVersion;
+            md.clusterVersion = clusterVersion;
+            const docAnchor = this.normalizeSectionAnchor((_s = rel.docAnchor) !== null && _s !== void 0 ? _s : md.docAnchor) || sectionAnchor;
+            if (docAnchor) {
+                rel.docAnchor = docAnchor;
+                md.docAnchor = docAnchor;
+            }
+        }
+        if (rel.type === RelationshipType.DESCRIBES_DOMAIN ||
+            rel.type === RelationshipType.BELONGS_TO_DOMAIN) {
+            const domainPath = this.normalizeDomainPath((_u = (_t = rel.domainPath) !== null && _t !== void 0 ? _t : md.domainPath) !== null && _u !== void 0 ? _u : md.taxonomyPath);
+            if (domainPath) {
+                rel.domainPath = domainPath;
+                md.domainPath = domainPath;
+            }
+        }
+        if (rel.type === RelationshipType.DESCRIBES_DOMAIN) {
+            const taxonomyVersion = this.normalizeString((_v = rel.taxonomyVersion) !== null && _v !== void 0 ? _v : md.taxonomyVersion) || "v1";
+            rel.taxonomyVersion = taxonomyVersion;
+            md.taxonomyVersion = taxonomyVersion;
+        }
+        if (rel.type === RelationshipType.DOMAIN_RELATED) {
+            const relationshipType = this.normalizeDomainRelationship((_w = rel.relationshipType) !== null && _w !== void 0 ? _w : md.relationshipType);
+            if (relationshipType) {
+                rel.relationshipType = relationshipType;
+                md.relationshipType = relationshipType;
+            }
+        }
+        if (rel.type === RelationshipType.GOVERNED_BY) {
+            const policyType = this.normalizePolicyType((_x = rel.policyType) !== null && _x !== void 0 ? _x : md.policyType);
+            if (policyType) {
+                rel.policyType = policyType;
+                md.policyType = policyType;
+            }
+        }
+        const lastValidated = this.toDate((_y = rel.lastValidated) !== null && _y !== void 0 ? _y : md.lastValidated);
+        if (lastValidated) {
+            rel.lastValidated = lastValidated;
+            md.lastValidated = lastValidated.toISOString();
+        }
+        const updatedFromDocAt = this.toDate((_z = rel.updatedFromDocAt) !== null && _z !== void 0 ? _z : md.updatedFromDocAt);
+        if (updatedFromDocAt) {
+            rel.updatedFromDocAt = updatedFromDocAt;
+            md.updatedFromDocAt = updatedFromDocAt.toISOString();
+        }
+        const lastComputed = this.toDate((_0 = rel.lastComputed) !== null && _0 !== void 0 ? _0 : md.lastComputed);
+        if (lastComputed) {
+            rel.lastComputed = lastComputed;
+            md.lastComputed = lastComputed.toISOString();
+        }
+        const effectiveFrom = this.toDate((_1 = rel.effectiveFrom) !== null && _1 !== void 0 ? _1 : md.effectiveFrom);
+        if (effectiveFrom) {
+            rel.effectiveFrom = effectiveFrom;
+            md.effectiveFrom = effectiveFrom.toISOString();
+        }
+        const expiresAtRaw = (_2 = rel.expiresAt) !== null && _2 !== void 0 ? _2 : md.expiresAt;
+        if (expiresAtRaw === null) {
+            rel.expiresAt = null;
+            md.expiresAt = null;
+        }
+        else {
+            const expiresAt = this.toDate(expiresAtRaw);
+            if (expiresAt) {
+                rel.expiresAt = expiresAt;
+                md.expiresAt = expiresAt.toISOString();
+            }
+        }
+        if (Array.isArray(rel.evidence)) {
+            rel.evidence = rel.evidence.slice(0, 5);
+        }
+        if (Array.isArray(md.evidence)) {
+            md.evidence = md.evidence.slice(0, 5);
+        }
+        const embeddingVersion = this.normalizeString((_3 = rel.embeddingVersion) !== null && _3 !== void 0 ? _3 : md.embeddingVersion);
+        if (embeddingVersion) {
+            rel.embeddingVersion = embeddingVersion;
+            md.embeddingVersion = embeddingVersion;
+        }
+        else if (docIntent === "ai-context") {
+            const defaultEmbeddingVersion = process.env.EMBEDDING_MODEL_VERSION ||
+                process.env.DEFAULT_EMBEDDING_VERSION;
+            if (defaultEmbeddingVersion) {
+                rel.embeddingVersion = defaultEmbeddingVersion;
+                md.embeddingVersion = defaultEmbeddingVersion;
+            }
+        }
+        return rel;
+    }
+    normalizeDocSource(source) {
+        if (!source)
+            return undefined;
+        const normalized = String(source).toLowerCase();
+        switch (normalized) {
+            case "parser":
+            case "manual":
+            case "llm":
+            case "imported":
+            case "sync":
+            case "other":
+                return normalized;
+            default:
+                return "other";
+        }
+    }
+    normalizeDocIntent(intent, source, type) {
+        const normalized = typeof intent === "string" ? intent.toLowerCase() : undefined;
+        if (normalized === "ai-context" || normalized === "governance" || normalized === "mixed") {
+            return normalized;
+        }
+        if (type === RelationshipType.GOVERNED_BY) {
+            return "governance";
+        }
+        if (source === "manual") {
+            return "governance";
+        }
+        return source === "llm" ? "ai-context" : "ai-context";
+    }
+    normalizeCoverageScope(scope) {
+        if (!scope)
+            return undefined;
+        const normalized = String(scope).toLowerCase();
+        switch (normalized) {
+            case "api":
+            case "behavior":
+            case "operational":
+            case "security":
+            case "compliance":
+                return normalized;
+            default:
+                return undefined;
+        }
+    }
+    normalizeDocumentationQuality(quality) {
+        if (!quality)
+            return undefined;
+        const normalized = String(quality).toLowerCase();
+        switch (normalized) {
+            case "complete":
+            case "partial":
+            case "outdated":
+                return normalized;
+            default:
+                return undefined;
+        }
+    }
+    normalizePolicyType(policyType) {
+        if (!policyType)
+            return undefined;
+        const normalized = String(policyType).toLowerCase();
+        switch (normalized) {
+            case "adr":
+            case "runbook":
+            case "compliance":
+            case "manual":
+            case "decision-log":
+                return normalized;
+            default:
+                return undefined;
+        }
+    }
+    normalizeDomainRelationship(value) {
+        if (!value)
+            return undefined;
+        const normalized = String(value).toLowerCase();
+        switch (normalized) {
+            case "depends_on":
+            case "overlaps":
+            case "shares_owner":
+                return normalized;
+            default:
+                return normalized;
+        }
+    }
+    normalizeSectionAnchor(anchor, enforceRoot = false) {
+        if (!anchor && enforceRoot) {
+            return "_root";
+        }
+        if (!anchor)
+            return undefined;
+        const normalized = String(anchor)
+            .trim()
+            .replace(/^#+/, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9\-_/\s]+/g, "-")
+            .replace(/\s+/g, "-")
+            .replace(/-+/g, "-")
+            .replace(/^-/g, "")
+            .replace(/-$/g, "");
+        return normalized.length > 0 ? normalized.slice(0, 128) : enforceRoot ? "_root" : undefined;
+    }
+    normalizeDomainPath(value) {
+        if (!value)
+            return undefined;
+        const normalized = String(value)
+            .trim()
+            .toLowerCase()
+            .replace(/>+/g, "/")
+            .replace(/\s+/g, "/")
+            .replace(/[^a-z0-9/_-]+/g, "-")
+            .replace(/-+/g, "-")
+            .replace(/\/+/, "/")
+            .replace(/^\/+|\/+$/g, "");
+        return normalized;
+    }
+    normalizeSummary(value) {
+        if (!value)
+            return undefined;
+        const text = String(value).trim();
+        if (text.length === 0)
+            return undefined;
+        return text.length > 500 ? `${text.slice(0, 497)}...` : text;
+    }
+    normalizeStringArray(value) {
+        if (!Array.isArray(value))
+            return undefined;
+        const normalized = value
+            .map((v) => String(v).trim())
+            .filter((v) => v.length > 0);
+        if (normalized.length === 0)
+            return undefined;
+        return Array.from(new Set(normalized)).slice(0, 20);
+    }
+    normalizeString(value) {
+        if (typeof value !== "string")
+            return undefined;
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+    }
+    normalizeLocale(value) {
+        if (typeof value !== "string")
+            return undefined;
+        const trimmed = value.trim();
+        if (!trimmed)
+            return undefined;
+        return trimmed.slice(0, 16);
+    }
+    clamp01(value) {
+        if (typeof value !== "number")
+            return undefined;
+        if (Number.isNaN(value))
+            return undefined;
+        if (!Number.isFinite(value))
+            return undefined;
+        return Math.min(1, Math.max(0, value));
+    }
+    clampRange(value, min, max) {
+        if (typeof value !== "number")
+            return undefined;
+        if (Number.isNaN(value))
+            return undefined;
+        if (!Number.isFinite(value))
+            return undefined;
+        if (value < min)
+            return min;
+        if (value > max)
+            return max;
+        return value;
+    }
+    toDate(value) {
+        if (!value)
+            return undefined;
+        if (value instanceof Date && !Number.isNaN(value.getTime())) {
+            return value;
+        }
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? undefined : date;
+    }
+    harmonizeRefFields(rel) {
+        const sync = (dir) => {
+            const baseIdKey = dir === 'to' ? 'toEntityId' : 'fromEntityId';
+            const refKey = dir === 'to' ? 'toRef' : 'fromRef';
+            const scalarPrefix = dir === 'to' ? 'to_ref_' : 'from_ref_';
+            const mdKey = dir === 'to' ? 'toRef' : 'fromRef';
+            const baseId = typeof rel[baseIdKey] === 'string' ? rel[baseIdKey] : undefined;
+            const existingRef = rel[refKey] && typeof rel[refKey] === 'object' ? { ...rel[refKey] } : {};
+            const scalars = {
+                kind: typeof rel[`${scalarPrefix}kind`] === 'string' ? rel[`${scalarPrefix}kind`] : undefined,
+                file: typeof rel[`${scalarPrefix}file`] === 'string' ? rel[`${scalarPrefix}file`] : undefined,
+                symbol: typeof rel[`${scalarPrefix}symbol`] === 'string' ? rel[`${scalarPrefix}symbol`] : undefined,
+                name: typeof rel[`${scalarPrefix}name`] === 'string' ? rel[`${scalarPrefix}name`] : undefined,
+            };
+            const ref = existingRef;
+            if (!ref.id && baseId)
+                ref.id = baseId;
+            if (!ref.kind && scalars.kind)
+                ref.kind = scalars.kind;
+            if (!ref.kind && typeof ref.id === 'string')
+                ref.kind = this.inferRefKindFromId(ref.id);
+            if (!ref.kind)
+                ref.kind = 'entity';
+            const idForParse = typeof ref.id === 'string' ? ref.id : baseId;
+            if (ref.kind === 'fileSymbol') {
+                const parsed = this.parseFileSymbolFromId(idForParse);
+                if (!ref.file && scalars.file)
+                    ref.file = scalars.file;
+                if (!ref.file && parsed.file)
+                    ref.file = parsed.file;
+                if (!ref.symbol && scalars.symbol)
+                    ref.symbol = scalars.symbol;
+                if (!ref.symbol && parsed.symbol)
+                    ref.symbol = parsed.symbol;
+                if (!ref.name && scalars.name)
+                    ref.name = scalars.name;
+                if (!ref.name && parsed.name)
+                    ref.name = parsed.name;
+                if (!ref.name && ref.symbol)
+                    ref.name = ref.symbol;
+            }
+            else if (ref.kind === 'external') {
+                if (!ref.name) {
+                    ref.name = scalars.name || (idForParse ? idForParse.replace(/^external:/, '') : undefined);
+                }
+            }
+            else {
+                if (!ref.name) {
+                    ref.name = scalars.name || (idForParse && idForParse.includes(':') ? idForParse.split(':').pop() : idForParse);
+                }
+            }
+            rel[refKey] = ref;
+            // Update scalar mirrors to reflect canonical ref
+            const kindKey = `${scalarPrefix}kind`;
+            const fileKey = `${scalarPrefix}file`;
+            const symbolKey = `${scalarPrefix}symbol`;
+            const nameKey = `${scalarPrefix}name`;
+            rel[kindKey] = ref.kind;
+            if (ref.kind === 'fileSymbol') {
+                rel[fileKey] = ref.file;
+                rel[symbolKey] = ref.symbol;
+                rel[nameKey] = ref.name;
+            }
+            else {
+                delete rel[fileKey];
+                delete rel[symbolKey];
+                rel[nameKey] = ref.name;
+            }
+            // Ensure metadata mirrors the structured reference for persistence/audit
+            if (ref && typeof ref === 'object') {
+                const md = (rel.metadata = { ...(rel.metadata || {}) });
+                if (md[mdKey] == null) {
+                    md[mdKey] = ref;
+                }
+            }
+        };
+        sync('to');
+        sync('from');
+    }
+    inferRefKindFromId(id) {
+        if (!id)
+            return 'entity';
+        if (id.startsWith('external:'))
+            return 'external';
+        if (id.startsWith('sym:') || id.startsWith('file:'))
+            return 'fileSymbol';
+        return 'entity';
+    }
+    parseFileSymbolFromId(id) {
+        if (!id)
+            return {};
+        const symMatch = id.match(/^sym:(.+?)#(.+?)(?:@.+)?$/);
+        if (symMatch) {
+            const file = symMatch[1];
+            const symbol = symMatch[2];
+            return { file, symbol, name: symbol };
+        }
+        const fileMatch = id.match(/^file:(.+?):(.+)$/);
+        if (fileMatch) {
+            const file = fileMatch[1];
+            const symbol = fileMatch[2];
+            return { file, symbol, name: symbol };
+        }
+        const importMatch = id.match(/^import:(.+?):(.+)$/);
+        if (importMatch) {
+            const file = importMatch[1];
+            const symbol = importMatch[2];
+            return { file, symbol, name: symbol };
+        }
+        return {};
     }
     canonicalRelationshipId(fromId, toId, type) {
         // Build a temporary relationship shell to compute canonical key
@@ -1376,7 +1879,7 @@ export class KnowledgeGraphService extends EventEmitter {
     }
     // Relationship operations
     async createRelationship(relationship, toEntityId, type, options) {
-        var _a, _b, _c, _d, _e;
+        var _a, _b, _c, _d, _e, _f;
         // Handle backward compatibility with old calling signature
         let relationshipObj;
         if (typeof relationship === "string") {
@@ -1430,7 +1933,7 @@ export class KnowledgeGraphService extends EventEmitter {
         }
         // Normalize via shared normalizer; apply simple gating using noiseConfig
         try {
-            relationshipObj = normalizeCodeEdge(relationshipObj);
+            relationshipObj = this.normalizeRelationship(relationshipObj);
             const top = relationshipObj;
             // Gate low-confidence inferred relationships if below threshold
             if (top.inferred && typeof top.confidence === 'number' && top.confidence < noiseConfig.MIN_INFERRED_CONFIDENCE) {
@@ -1439,7 +1942,6 @@ export class KnowledgeGraphService extends EventEmitter {
             // Default confidence to 1.0 when explicitly resolved
             if (top.resolved && typeof top.confidence !== 'number') {
                 top.confidence = 1.0;
-                top.strength = 1.0;
             }
             // Initialize first/last seen timestamps
             if (top.firstSeenAt == null)
@@ -1454,13 +1956,35 @@ export class KnowledgeGraphService extends EventEmitter {
                     top.active = true;
             }
         }
-        catch (_f) { }
+        catch (_g) { }
+        // Best-effort: backfill to_ref_* scalars for resolved targets using the entity's path/name
+        try {
+            const anyRel = relationshipObj;
+            const looksCode = isCodeRelationship(relationshipObj.type);
+            const missingFileSym = !(typeof anyRel.to_ref_file === 'string' && typeof anyRel.to_ref_symbol === 'string');
+            if (looksCode && missingFileSym) {
+                const toEnt = await this.getEntity(relationshipObj.toEntityId);
+                if (toEnt && this.hasCodebaseProperties(toEnt)) {
+                    const p = toEnt.path;
+                    const name = toEnt.name;
+                    if (p && name) {
+                        const fileRel = p.includes(':') ? p.split(':')[0] : p;
+                        anyRel.to_ref_kind = 'fileSymbol';
+                        anyRel.to_ref_file = fileRel;
+                        anyRel.to_ref_symbol = name;
+                        anyRel.to_ref_name = anyRel.to_ref_name || name;
+                        if (!anyRel.toRef)
+                            anyRel.toRef = { kind: 'fileSymbol', file: fileRel, symbol: name, name };
+                    }
+                }
+            }
+        }
+        catch (_h) { }
         // Merge evidence with any existing relationship instance
         let confidence;
         let inferred;
         let resolved;
         let source;
-        let strength;
         let context;
         let mergedEvidence;
         let mergedLocations;
@@ -1514,7 +2038,7 @@ export class KnowledgeGraphService extends EventEmitter {
                     relationshipObj.firstSeenAt = oldFirst && inFirst ? (oldFirst < inFirst ? oldFirst : inFirst) : (oldFirst || inFirst || new Date());
                     relationshipObj.lastSeenAt = oldLast && inLast ? (oldLast > inLast ? oldLast : inLast) : (oldLast || inLast || new Date());
                 }
-                catch (_g) { }
+                catch (_j) { }
                 // Merge evidence arrays and locations arrays (preserve up to 20 entries, prefer earliest lines)
                 try {
                     const mdInTop = relationshipObj;
@@ -1535,17 +2059,14 @@ export class KnowledgeGraphService extends EventEmitter {
                         }
                         return out;
                     };
-                    const evMergedRaw = [...evOld, ...evNew];
-                    const evMerged = dedupeBy(evMergedRaw, (e) => { var _a, _b, _c; return `${e.source || ''}|${((_a = e.location) === null || _a === void 0 ? void 0 : _a.path) || ''}|${((_b = e.location) === null || _b === void 0 ? void 0 : _b.line) || ''}|${((_c = e.location) === null || _c === void 0 ? void 0 : _c.column) || ''}`; });
-                    mergedEvidence = evMerged.slice(0, 20);
+                    mergedEvidence = mergeEdgeEvidence(evOld, evNew, 20);
                     const locMergedRaw = [...locOld, ...locNew];
-                    const locMergedDedupe = dedupeBy(locMergedRaw, (l) => `${l.path || ''}|${l.line || ''}|${l.column || ''}`);
-                    mergedLocations = locMergedDedupe.slice(0, 20);
+                    mergedLocations = mergeEdgeLocations(locMergedRaw, [], 20);
                 }
-                catch (_h) { }
+                catch (_k) { }
             }
         }
-        catch (_j) {
+        catch (_l) {
             // Non-fatal; fall back to incoming only
         }
         // Defaults if not set from existing
@@ -1554,9 +2075,6 @@ export class KnowledgeGraphService extends EventEmitter {
         resolved = resolved !== null && resolved !== void 0 ? resolved : incoming.resolved;
         source = source !== null && source !== void 0 ? source : incoming.source;
         context = context !== null && context !== void 0 ? context : incoming.context;
-        if (typeof confidence === 'number') {
-            strength = Math.max(0, Math.min(1, confidence));
-        }
         // Also merge location info in metadata: keep earliest line if both present; attach merged evidence/locations
         try {
             const md = { ...(relationshipObj.metadata || {}) };
@@ -1577,7 +2095,7 @@ export class KnowledgeGraphService extends EventEmitter {
             }
             relationshipObj.metadata = md;
         }
-        catch (_k) { }
+        catch (_m) { }
         // Canonicalize relationship id using canonical target key for stability
         relationshipObj.id = canonicalRelationshipId(relationshipObj.fromEntityId, relationshipObj);
         const query = `
@@ -1592,7 +2110,6 @@ export class KnowledgeGraphService extends EventEmitter {
           r.inferred = $inferred,
           r.resolved = $resolved,
           r.source = $source,
-          r.strength = $strength,
           r.context = $context,
           r.kind = $kind,
           r.resolution = $resolution,
@@ -1634,7 +2151,31 @@ export class KnowledgeGraphService extends EventEmitter {
           r.active = true,
           r.firstSeenAt = coalesce(r.firstSeenAt, $firstSeenAt),
           r.lastSeenAt = $lastSeenAt,
-          r.validFrom = coalesce(r.validFrom, $firstSeenAt)
+          r.validFrom = coalesce(r.validFrom, $firstSeenAt),
+          r.sectionAnchor = $sectionAnchor,
+          r.sectionTitle = $sectionTitle,
+          r.summary = $summary,
+          r.docVersion = $docVersion,
+          r.docHash = $docHash,
+          r.documentationQuality = $documentationQuality,
+          r.coverageScope = $coverageScope,
+          r.domainPath = $domainPath,
+          r.taxonomyVersion = $taxonomyVersion,
+          r.updatedFromDocAt = $updatedFromDocAt,
+          r.lastValidated = $lastValidated,
+          r.strength = coalesce($strength, r.strength),
+          r.similarityScore = coalesce($similarityScore, r.similarityScore),
+          r.clusterVersion = coalesce($clusterVersion, r.clusterVersion),
+          r.role = coalesce($role, r.role),
+          r.docIntent = $docIntent,
+          r.embeddingVersion = coalesce($embeddingVersion, r.embeddingVersion),
+          r.policyType = coalesce($policyType, r.policyType),
+          r.effectiveFrom = coalesce($effectiveFrom, r.effectiveFrom),
+          r.expiresAt = CASE WHEN $expiresAt_is_set THEN $expiresAt ELSE r.expiresAt END,
+          r.relationshipType = coalesce($relationshipType, r.relationshipType),
+          r.docLocale = coalesce($docLocale, r.docLocale),
+          r.tags = CASE WHEN $tags IS NULL THEN r.tags ELSE $tags END,
+          r.stakeholders = CASE WHEN $stakeholders IS NULL THEN r.stakeholders ELSE $stakeholders END
     `;
         const mdAll = relationshipObj.metadata || {};
         // Persist structured refs for auditability
@@ -1645,7 +2186,7 @@ export class KnowledgeGraphService extends EventEmitter {
             if (topAllAny.toRef && mdAll.toRef == null)
                 mdAll.toRef = topAllAny.toRef;
         }
-        catch (_l) { }
+        catch (_o) { }
         const topAll = relationshipObj;
         const evidenceArr = Array.isArray(topAll.evidence)
             ? topAll.evidence
@@ -1661,6 +2202,85 @@ export class KnowledgeGraphService extends EventEmitter {
             : (locPathEff && (typeof locLineEff === 'number')
                 ? ('site_' + crypto.createHash('sha1').update(`${locPathEff}|${locLineEff}|${locColEff !== null && locColEff !== void 0 ? locColEff : ''}|${topAll.accessPath || mdAll.accessPath || ''}`).digest('hex').slice(0, 12))
                 : null);
+        const toISO = (value) => {
+            if (value === null)
+                return null;
+            if (value instanceof Date)
+                return value.toISOString();
+            if (typeof value === 'string') {
+                const dt = new Date(value);
+                return Number.isNaN(dt.getTime()) ? value : dt.toISOString();
+            }
+            return null;
+        };
+        const sectionAnchorEff = typeof topAll.sectionAnchor === 'string'
+            ? topAll.sectionAnchor
+            : (typeof mdAll.sectionAnchor === 'string' ? mdAll.sectionAnchor : null);
+        const sectionTitleEff = typeof topAll.sectionTitle === 'string'
+            ? topAll.sectionTitle
+            : (typeof mdAll.sectionTitle === 'string' ? mdAll.sectionTitle : null);
+        const summaryEff = typeof topAll.summary === 'string'
+            ? topAll.summary
+            : (typeof mdAll.summary === 'string' ? mdAll.summary : null);
+        const docVersionEff = typeof topAll.docVersion === 'string'
+            ? topAll.docVersion
+            : (typeof mdAll.docVersion === 'string' ? mdAll.docVersion : null);
+        const docHashEff = typeof topAll.docHash === 'string'
+            ? topAll.docHash
+            : (typeof mdAll.docHash === 'string' ? mdAll.docHash : null);
+        const documentationQualityEff = typeof topAll.documentationQuality === 'string'
+            ? topAll.documentationQuality
+            : (typeof mdAll.documentationQuality === 'string' ? mdAll.documentationQuality : null);
+        const coverageScopeEff = typeof topAll.coverageScope === 'string'
+            ? topAll.coverageScope
+            : (typeof mdAll.coverageScope === 'string' ? mdAll.coverageScope : null);
+        const domainPathEff = typeof topAll.domainPath === 'string'
+            ? topAll.domainPath
+            : (typeof mdAll.domainPath === 'string' ? mdAll.domainPath : null);
+        const taxonomyVersionEff = typeof topAll.taxonomyVersion === 'string'
+            ? topAll.taxonomyVersion
+            : (typeof mdAll.taxonomyVersion === 'string' ? mdAll.taxonomyVersion : null);
+        const updatedFromDocAtEff = toISO((_d = topAll.updatedFromDocAt) !== null && _d !== void 0 ? _d : mdAll.updatedFromDocAt);
+        const lastValidatedEff = toISO((_e = topAll.lastValidated) !== null && _e !== void 0 ? _e : mdAll.lastValidated);
+        const strengthEff = typeof topAll.strength === 'number'
+            ? topAll.strength
+            : (typeof mdAll.strength === 'number' ? mdAll.strength : null);
+        const similarityEff = typeof topAll.similarityScore === 'number'
+            ? topAll.similarityScore
+            : (typeof mdAll.similarityScore === 'number' ? mdAll.similarityScore : null);
+        const clusterVersionEff = typeof topAll.clusterVersion === 'string'
+            ? topAll.clusterVersion
+            : (typeof mdAll.clusterVersion === 'string' ? mdAll.clusterVersion : null);
+        const roleEff = typeof topAll.role === 'string'
+            ? topAll.role
+            : (typeof mdAll.role === 'string' ? mdAll.role : null);
+        const docIntentEff = typeof topAll.docIntent === 'string'
+            ? topAll.docIntent
+            : (typeof mdAll.docIntent === 'string' ? mdAll.docIntent : null);
+        const embeddingVersionEff = typeof topAll.embeddingVersion === 'string'
+            ? topAll.embeddingVersion
+            : (typeof mdAll.embeddingVersion === 'string' ? mdAll.embeddingVersion : null);
+        const policyTypeEff = typeof topAll.policyType === 'string'
+            ? topAll.policyType
+            : (typeof mdAll.policyType === 'string' ? mdAll.policyType : null);
+        const effectiveFromEff = toISO((_f = topAll.effectiveFrom) !== null && _f !== void 0 ? _f : mdAll.effectiveFrom);
+        const expiresAtCandidate = topAll.expiresAt !== undefined
+            ? topAll.expiresAt
+            : (Object.prototype.hasOwnProperty.call(mdAll, 'expiresAt') ? mdAll.expiresAt : undefined);
+        const expiresAtEff = expiresAtCandidate === null ? null : toISO(expiresAtCandidate);
+        const expiresAtIsSet = expiresAtCandidate !== undefined;
+        const relationshipTypeEff = typeof topAll.relationshipType === 'string'
+            ? topAll.relationshipType
+            : (typeof mdAll.relationshipType === 'string' ? mdAll.relationshipType : null);
+        const docLocaleEff = typeof topAll.docLocale === 'string'
+            ? topAll.docLocale
+            : (typeof mdAll.docLocale === 'string' ? mdAll.docLocale : null);
+        const tagsEff = Array.isArray(topAll.tags)
+            ? topAll.tags
+            : (Array.isArray(mdAll.tags) ? mdAll.tags : null);
+        const stakeholdersEff = Array.isArray(topAll.stakeholders)
+            ? topAll.stakeholders
+            : (Array.isArray(mdAll.stakeholders) ? mdAll.stakeholders : null);
         const result = await this.db.falkordbQuery(query, {
             fromId: relationshipObj.fromEntityId,
             toId: relationshipObj.toEntityId,
@@ -1669,12 +2289,11 @@ export class KnowledgeGraphService extends EventEmitter {
             lastModified: relationshipObj.lastModified.toISOString(),
             version: relationshipObj.version,
             metadata: JSON.stringify(relationshipObj.metadata || {}),
-            occurrencesScan: (typeof ((_d = topAll.occurrencesScan) !== null && _d !== void 0 ? _d : topAll.occurrences) === 'number' ? ((_e = topAll.occurrencesScan) !== null && _e !== void 0 ? _e : topAll.occurrences) : null),
+            occurrencesScan: (typeof topAll.occurrencesScan === 'number' ? topAll.occurrencesScan : null),
             confidence: typeof confidence === 'number' ? confidence : null,
             inferred: typeof inferred === 'boolean' ? inferred : null,
             resolved: typeof resolved === 'boolean' ? resolved : null,
             source: typeof source === 'string' ? source : null,
-            strength: typeof strength === 'number' ? strength : null,
             context: typeof context === 'string' ? context : null,
             kind: typeof topAll.kind === 'string' ? topAll.kind : (typeof mdAll.kind === 'string' ? mdAll.kind : null),
             resolution: typeof topAll.resolution === 'string' ? topAll.resolution : (typeof mdAll.resolution === 'string' ? mdAll.resolution : null),
@@ -1713,19 +2332,44 @@ export class KnowledgeGraphService extends EventEmitter {
             ambiguous: typeof topAll.ambiguous === 'boolean' ? topAll.ambiguous : (typeof mdAll.ambiguous === 'boolean' ? mdAll.ambiguous : null),
             candidateCount: typeof topAll.candidateCount === 'number' ? topAll.candidateCount : (typeof mdAll.candidateCount === 'number' ? mdAll.candidateCount : null),
             isMethod: typeof topAll.isMethod === 'boolean' ? topAll.isMethod : null,
-            firstSeenAt: (relationshipObj.firstSeenAt instanceof Date ? relationshipObj.firstSeenAt : new Date()).toISOString(),
-            lastSeenAt: (relationshipObj.lastSeenAt instanceof Date ? relationshipObj.lastSeenAt : new Date()).toISOString(),
+            firstSeenAt: toISO(relationshipObj.firstSeenAt) || new Date().toISOString(),
+            lastSeenAt: toISO(relationshipObj.lastSeenAt) || new Date().toISOString(),
+            sectionAnchor: sectionAnchorEff,
+            sectionTitle: sectionTitleEff,
+            summary: summaryEff,
+            docVersion: docVersionEff,
+            docHash: docHashEff,
+            documentationQuality: documentationQualityEff,
+            coverageScope: coverageScopeEff,
+            domainPath: domainPathEff,
+            taxonomyVersion: taxonomyVersionEff,
+            updatedFromDocAt: updatedFromDocAtEff,
+            lastValidated: lastValidatedEff,
+            strength: strengthEff,
+            similarityScore: similarityEff,
+            clusterVersion: clusterVersionEff,
+            role: roleEff,
+            docIntent: docIntentEff,
+            embeddingVersion: embeddingVersionEff,
+            policyType: policyTypeEff,
+            effectiveFrom: effectiveFromEff,
+            expiresAt: expiresAtEff,
+            expiresAt_is_set: expiresAtIsSet,
+            relationshipType: relationshipTypeEff,
+            docLocale: docLocaleEff,
+            tags: tagsEff,
+            stakeholders: stakeholdersEff,
         });
         // Phase 1: Unify resolved edge with any prior placeholders pointing to same symbol
         try {
             await this.unifyResolvedEdgePlaceholders(relationshipObj);
         }
-        catch (_m) { }
+        catch (_p) { }
         // Phase 2: Dual-write auxiliary evidence/site/candidate nodes (non-blocking)
         try {
             await this.dualWriteAuxiliaryForEdge(relationshipObj);
         }
-        catch (_o) { }
+        catch (_q) { }
         // Emit event for real-time updates
         this.emit("relationshipCreated", {
             id: relationshipObj.id,
@@ -1758,6 +2402,93 @@ export class KnowledgeGraphService extends EventEmitter {
     `;
         const rows = await this.db.falkordbQuery(query, { cutoff: cutoffISO, toRefFile: (opts === null || opts === void 0 ? void 0 : opts.toRefFile) || null });
         return ((_a = rows === null || rows === void 0 ? void 0 : rows[0]) === null || _a === void 0 ? void 0 : _a.updated) || 0;
+    }
+    async updateDocumentationFreshness(docId, opts) {
+        var _a, _b;
+        const lastValidatedISO = opts.lastValidated.toISOString();
+        const updatedFromDocAtISO = opts.updatedFromDocAt
+            ? opts.updatedFromDocAt.toISOString()
+            : null;
+        const docTypes = DOCUMENTATION_RELATIONSHIP_TYPES.map((t) => t);
+        const setDocQuality = typeof opts.documentationQuality === "string";
+        const query = `
+      MATCH (doc {id: $docId})
+      MATCH (doc)-[r]-()
+      WHERE type(r) IN $docTypes
+      SET r.lastValidated = $lastValidated,
+          r.updatedFromDocAt = CASE WHEN $updatedFromDocAt IS NULL THEN r.updatedFromDocAt ELSE $updatedFromDocAt END,
+          r.active = coalesce(r.active, true)
+          ${setDocQuality ? ", r.documentationQuality = $documentationQuality" : ""}
+      RETURN count(r) AS updated
+    `;
+        try {
+            const rows = await this.db.falkordbQuery(query, {
+                docId,
+                docTypes,
+                lastValidated: lastValidatedISO,
+                updatedFromDocAt: updatedFromDocAtISO,
+                documentationQuality: (_a = opts.documentationQuality) !== null && _a !== void 0 ? _a : null,
+            });
+            return ((_b = rows === null || rows === void 0 ? void 0 : rows[0]) === null || _b === void 0 ? void 0 : _b.updated) || 0;
+        }
+        catch (error) {
+            console.warn(`updateDocumentationFreshness failed for ${docId}:`, error instanceof Error ? error.message : error);
+            return 0;
+        }
+    }
+    async markDocumentationAsStale(cutoff, excludeDocIds = []) {
+        var _a;
+        const cutoffISO = cutoff.toISOString();
+        const docTypes = DOCUMENTATION_RELATIONSHIP_TYPES.map((t) => t);
+        const query = `
+      MATCH (doc {type: "documentation"})
+      WHERE (doc.docSource IS NULL OR doc.docSource <> 'manual')
+        AND NOT doc.id IN $exclude
+      MATCH (doc)-[r]-()
+      WHERE type(r) IN $docTypes AND (r.lastValidated IS NULL OR r.lastValidated < $cutoff)
+      SET r.documentationQuality = 'outdated',
+          r.lastValidated = coalesce(r.lastValidated, $cutoff),
+          r.active = coalesce(r.active, true)
+      RETURN count(r) AS updated
+    `;
+        try {
+            const rows = await this.db.falkordbQuery(query, {
+                cutoff: cutoffISO,
+                exclude: excludeDocIds,
+                docTypes,
+            });
+            return ((_a = rows === null || rows === void 0 ? void 0 : rows[0]) === null || _a === void 0 ? void 0 : _a.updated) || 0;
+        }
+        catch (error) {
+            console.warn("markDocumentationAsStale failed:", error instanceof Error ? error.message : error);
+            return 0;
+        }
+    }
+    async markEntityDocumentationOutdated(entityId, opts = {}) {
+        var _a;
+        const reason = opts.reason || null;
+        const staleSinceISO = (opts.staleSince || new Date()).toISOString();
+        const query = `
+      MATCH (entity {id: $entityId})-[r:DOCUMENTED_BY]->(doc {type: "documentation"})
+      WHERE coalesce(doc.docSource, 'parser') <> 'manual'
+      SET r.documentationQuality = 'outdated',
+          r.active = coalesce(r.active, true),
+          r.lastValidated = CASE WHEN r.lastValidated IS NULL THEN $staleSince ELSE r.lastValidated END,
+          r.docStaleReason = CASE WHEN $reason IS NULL THEN r.docStaleReason ELSE $reason END
+      RETURN count(r) AS updated
+    `;
+        try {
+            const rows = await this.db.falkordbQuery(query, {
+                entityId,
+                reason,
+                staleSince: staleSinceISO,
+            });
+            return ((_a = rows === null || rows === void 0 ? void 0 : rows[0]) === null || _a === void 0 ? void 0 : _a.updated) || 0;
+        }
+        catch (error) {
+            console.warn(`markEntityDocumentationOutdated failed for ${entityId}:`, error instanceof Error ? error.message : error);
+            return 0;
+        }
     }
     /**
      * Best-effort index creation to accelerate common queries.
@@ -1858,7 +2589,10 @@ export class KnowledgeGraphService extends EventEmitter {
         const nowISO = new Date().toISOString();
         for (const rIn of rels) {
             try {
-                const rid = rIn.id || canonicalRelationshipId(rIn.fromEntityId, rIn);
+                const normalized = this.normalizeRelationship(rIn);
+                const topIn = normalized;
+                const mdIn = topIn.metadata || {};
+                const rid = topIn.id || canonicalRelationshipId(topIn.fromEntityId, normalized);
                 // Fetch existing
                 let props = null;
                 try {
@@ -1880,10 +2614,10 @@ export class KnowledgeGraphService extends EventEmitter {
                     }
                 }
                 catch (_a) { }
-                const mdIn = rIn.metadata || {};
-                const topIn = rIn;
                 const incoming = {
-                    occurrencesScan: (typeof topIn.occurrencesScan === 'number' ? topIn.occurrencesScan : (typeof topIn.occurrences === 'number' ? topIn.occurrences : (typeof mdIn.occurrences === 'number' ? mdIn.occurrences : 1))),
+                    occurrencesScan: (typeof topIn.occurrencesScan === 'number'
+                        ? topIn.occurrencesScan
+                        : (typeof mdIn.occurrencesScan === 'number' ? mdIn.occurrencesScan : 1)),
                     confidence: typeof topIn.confidence === 'number' ? topIn.confidence : (typeof mdIn.confidence === 'number' ? mdIn.confidence : undefined),
                     inferred: typeof topIn.inferred === 'boolean' ? topIn.inferred : (typeof mdIn.inferred === 'boolean' ? mdIn.inferred : undefined),
                     resolved: typeof topIn.resolved === 'boolean' ? topIn.resolved : (typeof mdIn.resolved === 'boolean' ? mdIn.resolved : undefined),
@@ -1941,12 +2675,9 @@ export class KnowledgeGraphService extends EventEmitter {
                             }
                             return out;
                         };
-                        const evMergedRaw = [...evOld, ...evNew];
-                        const evMerged = dedupeBy(evMergedRaw, (e) => { var _a, _b, _c; return `${e.source || ''}|${((_a = e.location) === null || _a === void 0 ? void 0 : _a.path) || ''}|${((_b = e.location) === null || _b === void 0 ? void 0 : _b.line) || ''}|${((_c = e.location) === null || _c === void 0 ? void 0 : _c.column) || ''}`; });
-                        mergedEvidence = evMerged.slice(0, 20);
+                        mergedEvidence = mergeEdgeEvidence(evOld, evNew, 20);
                         const locMergedRaw = [...locOld, ...locNew];
-                        const locMergedDedupe = dedupeBy(locMergedRaw, (l) => `${l.path || ''}|${l.line || ''}|${l.column || ''}`);
-                        mergedLocations = locMergedDedupe.slice(0, 20);
+                        mergedLocations = mergeEdgeLocations(locMergedRaw, [], 20);
                     }
                     catch (_c) { }
                 }
@@ -1961,15 +2692,14 @@ export class KnowledgeGraphService extends EventEmitter {
               r.inferred = $inferred,
               r.resolved = $resolved,
               r.source = $source,
-              r.strength = CASE WHEN $confidence IS NULL THEN r.strength ELSE GREATEST(COALESCE(r.strength,0), $confidence) END,
               r.context = COALESCE(r.context, $context),
               r.evidence = $evidence,
               r.locations = $locations,
               r.firstSeenAt = COALESCE(r.firstSeenAt, $firstSeenAt),
               r.lastSeenAt = $lastSeenAt
         `;
-                const evidenceArr = Array.isArray(rIn.evidence) ? rIn.evidence : (Array.isArray(mdIn.evidence) ? mdIn.evidence : []);
-                const locationsArr = Array.isArray(rIn.locations) ? rIn.locations : (Array.isArray(mdIn.locations) ? mdIn.locations : []);
+                const evidenceArr = Array.isArray(topIn.evidence) ? topIn.evidence : (Array.isArray(mdIn.evidence) ? mdIn.evidence : []);
+                const locationsArr = Array.isArray(topIn.locations) ? topIn.locations : (Array.isArray(mdIn.locations) ? mdIn.locations : []);
                 await this.db.falkordbQuery(q, {
                     id: rid,
                     now: nowISO,
@@ -1986,7 +2716,7 @@ export class KnowledgeGraphService extends EventEmitter {
                 });
                 // Phase 2: dual-write evidence/sites for updated edge
                 try {
-                    await this.dualWriteAuxiliaryForEdge({ ...rIn, id: rid });
+                    await this.dualWriteAuxiliaryForEdge({ ...topIn, id: rid });
                 }
                 catch (_d) { }
             }
@@ -2027,14 +2757,58 @@ export class KnowledgeGraphService extends EventEmitter {
         }
         // Extended filters for code edges
         const qAny = query;
-        if (qAny.kind) {
-            whereClause.push("r.kind = $kind");
-            params.kind = qAny.kind;
-        }
-        if (qAny.source) {
-            whereClause.push("r.source = $source");
-            params.source = qAny.source;
-        }
+        const applyEnumFilter = (value, column, key) => {
+            if (Array.isArray(value)) {
+                const filtered = value.filter((v) => typeof v === 'string');
+                if (filtered.length === 1) {
+                    whereClause.push(`${column} = $${key}`);
+                    params[key] = filtered[0];
+                }
+                else if (filtered.length > 1) {
+                    const listKey = `${key}List`;
+                    whereClause.push(`${column} IN $${listKey}`);
+                    params[listKey] = filtered;
+                }
+            }
+            else if (typeof value === 'string') {
+                whereClause.push(`${column} = $${key}`);
+                params[key] = value;
+            }
+        };
+        const coerceStringList = (value) => {
+            if (Array.isArray(value)) {
+                return value
+                    .filter((v) => typeof v === 'string')
+                    .map((v) => v.trim())
+                    .filter((v) => v.length > 0);
+            }
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                return trimmed.length > 0 ? [trimmed] : [];
+            }
+            return [];
+        };
+        const applyArrayContainsFilter = (value, column, key) => {
+            const list = coerceStringList(value);
+            if (list.length === 1) {
+                whereClause.push(`ANY(x IN coalesce(${column}, []) WHERE x = $${key})`);
+                params[key] = list[0];
+            }
+            else if (list.length > 1) {
+                const listKey = `${key}List`;
+                whereClause.push(`ANY(x IN coalesce(${column}, []) WHERE x IN $${listKey})`);
+                params[listKey] = list;
+            }
+        };
+        applyEnumFilter(qAny.kind, 'r.kind', 'kind');
+        applyEnumFilter(qAny.source, 'r.source', 'source');
+        applyEnumFilter(qAny.resolution, 'r.resolution', 'resolution');
+        applyEnumFilter(qAny.scope, 'r.scope', 'scope');
+        applyEnumFilter(qAny.docIntent, 'r.docIntent', 'docIntent');
+        applyEnumFilter(qAny.coverageScope, 'r.coverageScope', 'coverageScope');
+        applyEnumFilter(qAny.embeddingVersion, 'r.embeddingVersion', 'embeddingVersion');
+        applyEnumFilter(qAny.clusterVersion, 'r.clusterVersion', 'clusterVersion');
+        applyEnumFilter(qAny.docLocale, 'r.docLocale', 'docLocale');
         if (typeof qAny.confidenceMin === 'number') {
             whereClause.push("r.confidence >= $cmin");
             params.cmin = qAny.confidenceMin;
@@ -2084,6 +2858,89 @@ export class KnowledgeGraphService extends EventEmitter {
             whereClause.push('r.isMethod = $isMethod');
             params.isMethod = qAny.isMethod;
         }
+        if (typeof qAny.operator === 'string') {
+            whereClause.push('r.operator = $operator');
+            params.operator = qAny.operator;
+        }
+        if (typeof qAny.callee === 'string') {
+            whereClause.push('r.callee = $callee');
+            params.callee = qAny.callee;
+        }
+        if (typeof qAny.importDepthMin === 'number') {
+            whereClause.push('r.importDepth >= $importDepthMin');
+            params.importDepthMin = qAny.importDepthMin;
+        }
+        if (typeof qAny.importDepthMax === 'number') {
+            whereClause.push('r.importDepth <= $importDepthMax');
+            params.importDepthMax = qAny.importDepthMax;
+        }
+        const domainPaths = coerceStringList(qAny.domainPath)
+            .map((value) => this.normalizeDomainPath(value))
+            .filter((value) => value !== undefined && value !== null);
+        if (domainPaths.length === 1) {
+            whereClause.push('r.domainPath = $domainPath');
+            params.domainPath = domainPaths[0];
+        }
+        else if (domainPaths.length > 1) {
+            whereClause.push('r.domainPath IN $domainPathList');
+            params.domainPathList = domainPaths;
+        }
+        const domainPrefixes = coerceStringList(qAny.domainPrefix)
+            .map((value) => this.normalizeDomainPath(value))
+            .filter((value) => value !== undefined && value !== null);
+        if (domainPrefixes.length === 1) {
+            whereClause.push('r.domainPath STARTS WITH $domainPrefix');
+            params.domainPrefix = domainPrefixes[0];
+        }
+        else if (domainPrefixes.length > 1) {
+            const clauses = [];
+            domainPrefixes.forEach((prefix, idx) => {
+                const key = `domainPrefix${idx}`;
+                clauses.push(`r.domainPath STARTS WITH $${key}`);
+                params[key] = prefix;
+            });
+            if (clauses.length > 0) {
+                whereClause.push(`(${clauses.join(' OR ')})`);
+            }
+        }
+        const clusterIds = coerceStringList(qAny.clusterId);
+        if (clusterIds.length === 1) {
+            whereClause.push('((a.type = "semanticCluster" AND a.id = $clusterId) OR (b.type = "semanticCluster" AND b.id = $clusterId))');
+            params.clusterId = clusterIds[0];
+        }
+        else if (clusterIds.length > 1) {
+            const key = 'clusterIdList';
+            whereClause.push('((a.type = "semanticCluster" AND a.id IN $clusterIdList) OR (b.type = "semanticCluster" AND b.id IN $clusterIdList))');
+            params[key] = clusterIds;
+        }
+        const docTypes = coerceStringList(qAny.docType);
+        if (docTypes.length === 1) {
+            whereClause.push('((a.type = "documentation" AND a.docType = $docType) OR (b.type = "documentation" AND b.docType = $docType))');
+            params.docType = docTypes[0];
+        }
+        else if (docTypes.length > 1) {
+            whereClause.push('((a.type = "documentation" AND a.docType IN $docTypeList) OR (b.type = "documentation" AND b.docType IN $docTypeList))');
+            params.docTypeList = docTypes;
+        }
+        const docStatuses = coerceStringList(qAny.docStatus);
+        if (docStatuses.length === 1) {
+            whereClause.push('((a.type = "documentation" AND a.status = $docStatus) OR (b.type = "documentation" AND b.status = $docStatus))');
+            params.docStatus = docStatuses[0];
+        }
+        else if (docStatuses.length > 1) {
+            whereClause.push('((a.type = "documentation" AND a.status IN $docStatusList) OR (b.type = "documentation" AND b.status IN $docStatusList))');
+            params.docStatusList = docStatuses;
+        }
+        if (qAny.lastValidatedAfter instanceof Date) {
+            whereClause.push('r.lastValidated >= $lastValidatedAfter');
+            params.lastValidatedAfter = qAny.lastValidatedAfter.toISOString();
+        }
+        if (qAny.lastValidatedBefore instanceof Date) {
+            whereClause.push('r.lastValidated <= $lastValidatedBefore');
+            params.lastValidatedBefore = qAny.lastValidatedBefore.toISOString();
+        }
+        applyArrayContainsFilter(qAny.stakeholder, 'r.stakeholders', 'stakeholder');
+        applyArrayContainsFilter(qAny.tag, 'r.tags', 'tag');
         // Filters on promoted to_ref_* scalars and siteHash
         if (typeof qAny.to_ref_kind === 'string') {
             whereClause.push("r.to_ref_kind = $to_ref_kind");
@@ -2215,13 +3072,38 @@ export class KnowledgeGraphService extends EventEmitter {
      * Validation is optional (defaults to false for performance in sync paths).
      */
     async createRelationshipsBulk(relationships, options) {
-        var _a, _b, _c, _d, _e;
+        var _a, _b, _c, _d;
         if (!relationships || relationships.length === 0)
             return;
         const validate = (options === null || options === void 0 ? void 0 : options.validate) === true;
+        const historyEnabled = this.isHistoryEnabled();
+        const normalizedRelationships = relationships.map((rel) => this.normalizeRelationship(rel));
+        const filteredRelationships = [];
+        for (const rel of normalizedRelationships) {
+            const top = rel;
+            if (top.inferred && typeof top.confidence === "number" && top.confidence < noiseConfig.MIN_INFERRED_CONFIDENCE) {
+                continue;
+            }
+            if (top.resolved && typeof top.confidence !== "number") {
+                top.confidence = 1.0;
+            }
+            if (top.firstSeenAt == null)
+                top.firstSeenAt = top.created || new Date();
+            if (top.lastSeenAt == null)
+                top.lastSeenAt = top.lastModified || new Date();
+            if (historyEnabled) {
+                if (top.validFrom == null)
+                    top.validFrom = top.firstSeenAt;
+                if (top.active == null)
+                    top.active = true;
+            }
+            filteredRelationships.push(rel);
+        }
+        if (filteredRelationships.length === 0)
+            return;
         // Group by relationship type since Cypher relationship type is not parameterizable
         const byType = new Map();
-        for (const r of relationships) {
+        for (const r of filteredRelationships) {
             if (!r.type || !r.fromEntityId || !r.toEntityId)
                 continue;
             const list = byType.get(r.type) || [];
@@ -2240,14 +3122,55 @@ export class KnowledgeGraphService extends EventEmitter {
                 if (listEff.length === 0)
                     continue;
             }
+            // Best-effort: backfill to_ref_* scalars for resolved targets using the entity's path/name (bulk)
+            try {
+                const candidates = [];
+                for (const r of listEff) {
+                    const anyR = r;
+                    if (!isCodeRelationship(r.type))
+                        continue;
+                    const missing = !(typeof anyR.to_ref_file === 'string' && typeof anyR.to_ref_symbol === 'string');
+                    if (missing && typeof r.toEntityId === 'string')
+                        candidates.push(r.toEntityId);
+                }
+                const uniq = Array.from(new Set(candidates));
+                if (uniq.length > 0) {
+                    const rows = await this.db.falkordbQuery(`UNWIND $ids AS id MATCH (n {id: id}) RETURN n.id as id, n.path as path, n.name as name`, { ids: uniq });
+                    const toMap = new Map();
+                    for (const row of rows || []) {
+                        const id = row.id;
+                        const p = row.path;
+                        const name = row.name;
+                        if (id && p && name) {
+                            const fileRel = p.includes(':') ? p.split(':')[0] : p;
+                            toMap.set(id, { fileRel, name });
+                        }
+                    }
+                    for (const r of listEff) {
+                        const anyR = r;
+                        if (!isCodeRelationship(r.type))
+                            continue;
+                        const missing = !(typeof anyR.to_ref_file === 'string' && typeof anyR.to_ref_symbol === 'string');
+                        if (!missing)
+                            continue;
+                        const hit = toMap.get(r.toEntityId);
+                        if (hit && hit.fileRel && hit.name) {
+                            anyR.to_ref_kind = 'fileSymbol';
+                            anyR.to_ref_file = hit.fileRel;
+                            anyR.to_ref_symbol = hit.name;
+                            anyR.to_ref_name = anyR.to_ref_name || hit.name;
+                            if (!anyR.toRef)
+                                anyR.toRef = { kind: 'fileSymbol', file: hit.fileRel, symbol: hit.name, name: hit.name };
+                        }
+                    }
+                }
+            }
+            catch (_e) { }
             // Map each relationship to a normalized row, then pre-dedupe by id merging counts/evidence
             const rowsRaw = listEff.map((r) => {
-                var _a, _b, _c;
+                var _a, _b, _c, _d, _e;
                 const top = r;
                 const mdIn = top.metadata || {};
-                // Normalize each edge before persistence
-                const norm = normalizeCodeEdge(r);
-                Object.assign(top, norm);
                 // Carry top-level evidence/locations into metadata for persistence
                 const evTop = Array.isArray(top.evidence) ? top.evidence : [];
                 const locTop = Array.isArray(top.locations) ? top.locations : [];
@@ -2284,8 +3207,12 @@ export class KnowledgeGraphService extends EventEmitter {
                 const resolved = typeof top.resolved === 'boolean' ? top.resolved : (typeof md.resolved === 'boolean' ? md.resolved : false);
                 if (resolved && typeof confidence !== 'number')
                     confidence = 1.0;
-                const strength = typeof confidence === 'number' ? Math.max(0, Math.min(1, confidence)) : ((_a = top.strength) !== null && _a !== void 0 ? _a : null);
-                const occurrencesScan = (typeof top.occurrencesScan === 'number' ? top.occurrencesScan : (typeof top.occurrences === 'number' ? top.occurrences : (typeof md.occurrences === 'number' ? md.occurrences : undefined)));
+                if (typeof confidence === 'number') {
+                    confidence = Math.max(0, Math.min(1, confidence));
+                }
+                const occurrencesScan = (typeof top.occurrencesScan === 'number'
+                    ? top.occurrencesScan
+                    : (typeof md.occurrencesScan === 'number' ? md.occurrencesScan : undefined));
                 const context = (typeof top.context === 'string' ? top.context : (typeof md.path === 'string' && typeof md.line === 'number' ? `${md.path}:${md.line}` : undefined));
                 // evidence/locations/site sampling
                 const evidence = JSON.stringify(Array.isArray(top.evidence) ? top.evidence : (Array.isArray(md.evidence) ? md.evidence : [])).slice(0, 200000);
@@ -2297,6 +3224,27 @@ export class KnowledgeGraphService extends EventEmitter {
                 const lastISO = (r.lastModified instanceof Date ? r.lastModified : new Date(r.lastModified)).toISOString();
                 // Canonical id by final from/to/type (fallback if not provided by upstream)
                 const id = top.id || canonicalRelationshipId(r.fromEntityId, { toEntityId: r.toEntityId, type });
+                const toISO = (value) => {
+                    if (value === null)
+                        return null;
+                    if (value === undefined)
+                        return null;
+                    if (value instanceof Date)
+                        return value.toISOString();
+                    if (typeof value === 'string') {
+                        const parsed = new Date(value);
+                        return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+                    }
+                    return null;
+                };
+                const updatedFromDocAtISO = toISO((_a = top.updatedFromDocAt) !== null && _a !== void 0 ? _a : md.updatedFromDocAt);
+                const lastValidatedISO = toISO((_b = top.lastValidated) !== null && _b !== void 0 ? _b : md.lastValidated);
+                const effectiveFromISO = toISO((_c = top.effectiveFrom) !== null && _c !== void 0 ? _c : md.effectiveFrom);
+                const expiresAtProvidedTop = Object.prototype.hasOwnProperty.call(top, 'expiresAt');
+                const expiresAtProvidedMeta = Object.prototype.hasOwnProperty.call(md, 'expiresAt');
+                const expiresAtRaw = expiresAtProvidedTop ? top.expiresAt : (expiresAtProvidedMeta ? md.expiresAt : undefined);
+                const expiresAtIsSet = expiresAtProvidedTop || expiresAtProvidedMeta;
+                const expiresAtISO = expiresAtRaw === null ? null : toISO(expiresAtRaw);
                 return {
                     fromId: r.fromEntityId,
                     toId: r.toEntityId,
@@ -2312,7 +3260,6 @@ export class KnowledgeGraphService extends EventEmitter {
                     inferred: (typeof top.inferred === 'boolean' ? top.inferred : (typeof md.inferred === 'boolean' ? md.inferred : null)),
                     resolved: (typeof top.resolved === 'boolean' ? top.resolved : (typeof md.resolved === 'boolean' ? md.resolved : null)),
                     source: source !== null && source !== void 0 ? source : null,
-                    strength,
                     context: context !== null && context !== void 0 ? context : null,
                     // Extra code-edge fields
                     kind: (typeof top.kind === 'string' ? top.kind : (typeof md.kind === 'string' ? md.kind : null)),
@@ -2333,6 +3280,9 @@ export class KnowledgeGraphService extends EventEmitter {
                     overloadIndex: (typeof top.overloadIndex === 'number' ? top.overloadIndex : (typeof md.overloadIndex === 'number' ? md.overloadIndex : null)),
                     genericArguments: JSON.stringify(Array.isArray(top.genericArguments) ? top.genericArguments : (Array.isArray(md.genericArguments) ? md.genericArguments : [])).slice(0, 200000),
                     siteHash: (typeof top.siteHash === 'string' ? top.siteHash : null),
+                    dataFlowId: (typeof top.dataFlowId === 'string'
+                        ? top.dataFlowId
+                        : (typeof md.dataFlowId === 'string' ? md.dataFlowId : null)),
                     to_ref_kind: (typeof top.to_ref_kind === 'string' ? top.to_ref_kind : null),
                     to_ref_file: (typeof top.to_ref_file === 'string' ? top.to_ref_file : null),
                     to_ref_symbol: (typeof top.to_ref_symbol === 'string' ? top.to_ref_symbol : null),
@@ -2346,7 +3296,7 @@ export class KnowledgeGraphService extends EventEmitter {
                     isMethod: (typeof top.isMethod === 'boolean' ? top.isMethod : null),
                     firstSeenAt: createdISO,
                     lastSeenAt: lastISO,
-                    loc_path: (_c = (_b = (top.location && top.location.path)) !== null && _b !== void 0 ? _b : md.path) !== null && _c !== void 0 ? _c : null,
+                    loc_path: (_e = (_d = (top.location && top.location.path)) !== null && _d !== void 0 ? _d : md.path) !== null && _e !== void 0 ? _e : null,
                     loc_line: (top.location && typeof top.location.line === 'number' ? top.location.line : (typeof md.line === 'number' ? md.line : null)),
                     loc_col: (top.location && typeof top.location.column === 'number' ? top.location.column : (typeof md.column === 'number' ? md.column : null)),
                     evidence,
@@ -2354,6 +3304,31 @@ export class KnowledgeGraphService extends EventEmitter {
                     siteId,
                     sites,
                     why,
+                    sectionAnchor: (typeof top.sectionAnchor === 'string' ? top.sectionAnchor : (typeof md.sectionAnchor === 'string' ? md.sectionAnchor : null)),
+                    sectionTitle: (typeof top.sectionTitle === 'string' ? top.sectionTitle : (typeof md.sectionTitle === 'string' ? md.sectionTitle : null)),
+                    summary: (typeof top.summary === 'string' ? top.summary : (typeof md.summary === 'string' ? md.summary : null)),
+                    docVersion: (typeof top.docVersion === 'string' ? top.docVersion : (typeof md.docVersion === 'string' ? md.docVersion : null)),
+                    docHash: (typeof top.docHash === 'string' ? top.docHash : (typeof md.docHash === 'string' ? md.docHash : null)),
+                    documentationQuality: (typeof top.documentationQuality === 'string' ? top.documentationQuality : (typeof md.documentationQuality === 'string' ? md.documentationQuality : null)),
+                    coverageScope: (typeof top.coverageScope === 'string' ? top.coverageScope : (typeof md.coverageScope === 'string' ? md.coverageScope : null)),
+                    domainPath: (typeof top.domainPath === 'string' ? top.domainPath : (typeof md.domainPath === 'string' ? md.domainPath : null)),
+                    taxonomyVersion: (typeof top.taxonomyVersion === 'string' ? top.taxonomyVersion : (typeof md.taxonomyVersion === 'string' ? md.taxonomyVersion : null)),
+                    updatedFromDocAt: updatedFromDocAtISO,
+                    lastValidated: lastValidatedISO,
+                    strength: (typeof top.strength === 'number' ? top.strength : (typeof md.strength === 'number' ? md.strength : null)),
+                    similarityScore: (typeof top.similarityScore === 'number' ? top.similarityScore : (typeof md.similarityScore === 'number' ? md.similarityScore : null)),
+                    clusterVersion: (typeof top.clusterVersion === 'string' ? top.clusterVersion : (typeof md.clusterVersion === 'string' ? md.clusterVersion : null)),
+                    role: (typeof top.role === 'string' ? top.role : (typeof md.role === 'string' ? md.role : null)),
+                    docIntent: (typeof top.docIntent === 'string' ? top.docIntent : (typeof md.docIntent === 'string' ? md.docIntent : null)),
+                    embeddingVersion: (typeof top.embeddingVersion === 'string' ? top.embeddingVersion : (typeof md.embeddingVersion === 'string' ? md.embeddingVersion : null)),
+                    policyType: (typeof top.policyType === 'string' ? top.policyType : (typeof md.policyType === 'string' ? md.policyType : null)),
+                    effectiveFrom: effectiveFromISO,
+                    expiresAt: expiresAtISO,
+                    expiresAt_is_set: expiresAtIsSet,
+                    relationshipType: (typeof top.relationshipType === 'string' ? top.relationshipType : (typeof md.relationshipType === 'string' ? md.relationshipType : null)),
+                    docLocale: (typeof top.docLocale === 'string' ? top.docLocale : (typeof md.docLocale === 'string' ? md.docLocale : null)),
+                    tags: (Array.isArray(top.tags) ? top.tags : (Array.isArray(md.tags) ? md.tags : null)),
+                    stakeholders: (Array.isArray(top.stakeholders) ? top.stakeholders : (Array.isArray(md.stakeholders) ? md.stakeholders : null)),
                 };
             });
             // Pre-dedupe rows by id: merge occurrencesScan (sum), and merge evidence/locations/sites/context conservatively
@@ -2410,17 +3385,80 @@ export class KnowledgeGraphService extends EventEmitter {
                 prev.evidence = mergeArrJson(prev.evidence, row.evidence, 20, (e) => { var _a, _b, _c; return `${e.source || ''}|${((_a = e.location) === null || _a === void 0 ? void 0 : _a.path) || ''}|${((_b = e.location) === null || _b === void 0 ? void 0 : _b.line) || ''}|${((_c = e.location) === null || _c === void 0 ? void 0 : _c.column) || ''}`; });
                 prev.locations = mergeArrJson(prev.locations, row.locations, 20, (l) => `${l.path || ''}|${l.line || ''}|${l.column || ''}`);
                 prev.sites = mergeArrJson(prev.sites, row.sites, 20, (s) => String(s));
-                // Preserve stronger confidence/strength
+                // Preserve stronger confidence
                 if (typeof row.confidence === 'number')
                     prev.confidence = Math.max((_b = prev.confidence) !== null && _b !== void 0 ? _b : 0, row.confidence);
-                if (typeof row.strength === 'number')
-                    prev.strength = Math.max((_c = prev.strength) !== null && _c !== void 0 ? _c : 0, row.strength);
+                if (!prev.dataFlowId && row.dataFlowId)
+                    prev.dataFlowId = row.dataFlowId;
                 // Combine candidate count
                 if (typeof row.candidateCount === 'number') {
-                    const a = (_d = prev.candidateCount) !== null && _d !== void 0 ? _d : 0;
-                    const b = (_e = row.candidateCount) !== null && _e !== void 0 ? _e : 0;
+                    const a = (_c = prev.candidateCount) !== null && _c !== void 0 ? _c : 0;
+                    const b = (_d = row.candidateCount) !== null && _d !== void 0 ? _d : 0;
                     prev.candidateCount = Math.max(a, b);
                 }
+                if (typeof row.strength === 'number') {
+                    if (typeof prev.strength === 'number') {
+                        prev.strength = Math.max(prev.strength, row.strength);
+                    }
+                    else {
+                        prev.strength = row.strength;
+                    }
+                }
+                if (typeof row.similarityScore === 'number') {
+                    if (typeof prev.similarityScore === 'number') {
+                        prev.similarityScore = Math.max(prev.similarityScore, row.similarityScore);
+                    }
+                    else {
+                        prev.similarityScore = row.similarityScore;
+                    }
+                }
+                const assignIfMissing = (field) => {
+                    if (prev[field] == null && row[field] != null) {
+                        prev[field] = row[field];
+                    }
+                };
+                assignIfMissing('sectionAnchor');
+                assignIfMissing('sectionTitle');
+                assignIfMissing('summary');
+                assignIfMissing('docVersion');
+                assignIfMissing('docHash');
+                assignIfMissing('documentationQuality');
+                assignIfMissing('coverageScope');
+                assignIfMissing('domainPath');
+                assignIfMissing('taxonomyVersion');
+                assignIfMissing('clusterVersion');
+                assignIfMissing('role');
+                assignIfMissing('docIntent');
+                assignIfMissing('embeddingVersion');
+                assignIfMissing('policyType');
+                assignIfMissing('relationshipType');
+                assignIfMissing('docLocale');
+                if (row.updatedFromDocAt && (!prev.updatedFromDocAt || row.updatedFromDocAt > prev.updatedFromDocAt)) {
+                    prev.updatedFromDocAt = row.updatedFromDocAt;
+                }
+                if (row.lastValidated && (!prev.lastValidated || row.lastValidated > prev.lastValidated)) {
+                    prev.lastValidated = row.lastValidated;
+                }
+                if (row.effectiveFrom && (!prev.effectiveFrom || row.effectiveFrom < prev.effectiveFrom)) {
+                    prev.effectiveFrom = row.effectiveFrom;
+                }
+                if (row.expiresAt_is_set) {
+                    prev.expiresAt_is_set = true;
+                    prev.expiresAt = row.expiresAt;
+                }
+                const mergeStringArray = (field) => {
+                    const prevArr = Array.isArray(prev[field]) ? prev[field] : [];
+                    const rowArr = Array.isArray(row[field]) ? row[field] : [];
+                    if (rowArr.length > 0) {
+                        const merged = new Set(prevArr);
+                        for (const item of rowArr) {
+                            merged.add(item);
+                        }
+                        prev[field] = Array.from(merged);
+                    }
+                };
+                mergeStringArray('tags');
+                mergeStringArray('stakeholders');
             }
             const rows = Array.from(dedup.values());
             const query = `
@@ -2436,7 +3474,6 @@ export class KnowledgeGraphService extends EventEmitter {
             r.inferred = row.inferred,
             r.resolved = row.resolved,
             r.source = row.source,
-            r.strength = row.strength,
             r.context = row.context,
             r.kind = row.kind,
             r.resolution = row.resolution,
@@ -2463,6 +3500,7 @@ export class KnowledgeGraphService extends EventEmitter {
             r.locations = row.locations,
             r.siteId = row.siteId,
             r.sites = row.sites,
+            r.dataFlowId = row.dataFlowId,
             r.why = row.why,
             r.to_ref_kind = row.to_ref_kind,
             r.to_ref_file = row.to_ref_file,
@@ -2478,7 +3516,31 @@ export class KnowledgeGraphService extends EventEmitter {
             r.active = true,
             r.firstSeenAt = coalesce(r.firstSeenAt, row.firstSeenAt),
             r.lastSeenAt = row.lastSeenAt,
-            r.validFrom = coalesce(r.validFrom, row.firstSeenAt)
+            r.validFrom = coalesce(r.validFrom, row.firstSeenAt),
+            r.sectionAnchor = row.sectionAnchor,
+            r.sectionTitle = row.sectionTitle,
+            r.summary = row.summary,
+            r.docVersion = row.docVersion,
+            r.docHash = row.docHash,
+            r.documentationQuality = row.documentationQuality,
+            r.coverageScope = row.coverageScope,
+            r.domainPath = row.domainPath,
+            r.taxonomyVersion = row.taxonomyVersion,
+            r.updatedFromDocAt = row.updatedFromDocAt,
+            r.lastValidated = row.lastValidated,
+            r.strength = coalesce(row.strength, r.strength),
+            r.similarityScore = coalesce(row.similarityScore, r.similarityScore),
+            r.clusterVersion = coalesce(row.clusterVersion, r.clusterVersion),
+            r.role = coalesce(row.role, r.role),
+            r.docIntent = row.docIntent,
+            r.embeddingVersion = coalesce(row.embeddingVersion, r.embeddingVersion),
+            r.policyType = coalesce(row.policyType, r.policyType),
+            r.effectiveFrom = coalesce(row.effectiveFrom, r.effectiveFrom),
+            r.expiresAt = CASE WHEN row.expiresAt_is_set THEN row.expiresAt ELSE r.expiresAt END,
+            r.relationshipType = coalesce(row.relationshipType, r.relationshipType),
+            r.docLocale = coalesce(row.docLocale, r.docLocale),
+            r.tags = CASE WHEN row.tags IS NULL THEN r.tags ELSE row.tags END,
+            r.stakeholders = CASE WHEN row.stakeholders IS NULL THEN r.stakeholders ELSE row.stakeholders END
       `;
             await this.db.falkordbQuery(query, { rows });
             // Batched unification: only one unifier call per unique (fromId,type,file,symbol)
@@ -2514,13 +3576,54 @@ export class KnowledgeGraphService extends EventEmitter {
                     relObj.to_ref_file = row.to_ref_file;
                     relObj.to_ref_symbol = row.to_ref_symbol;
                     relObj.to_ref_name = row.to_ref_name;
+                    if (row.siteId)
+                        relObj.siteId = row.siteId;
+                    if (row.siteHash)
+                        relObj.siteHash = row.siteHash;
+                    if (typeof row.dataFlowId === 'string' && row.dataFlowId)
+                        relObj.dataFlowId = row.dataFlowId;
+                    try {
+                        const mdParsed = row.metadata ? JSON.parse(row.metadata) : undefined;
+                        if (mdParsed)
+                            relObj.metadata = mdParsed;
+                    }
+                    catch (_j) { }
+                    try {
+                        const evidenceParsed = row.evidence ? JSON.parse(row.evidence) : [];
+                        if (Array.isArray(evidenceParsed) && evidenceParsed.length > 0)
+                            relObj.evidence = evidenceParsed;
+                    }
+                    catch (_k) { }
+                    try {
+                        const locationsParsed = row.locations ? JSON.parse(row.locations) : [];
+                        if (Array.isArray(locationsParsed) && locationsParsed.length > 0)
+                            relObj.locations = locationsParsed;
+                    }
+                    catch (_l) { }
+                    try {
+                        const sitesParsed = row.sites ? JSON.parse(row.sites) : [];
+                        if (Array.isArray(sitesParsed) && sitesParsed.length > 0)
+                            relObj.sites = sitesParsed;
+                    }
+                    catch (_m) { }
+                    const loc = {};
+                    if (row.loc_path)
+                        loc.path = row.loc_path;
+                    if (typeof row.loc_line === 'number')
+                        loc.line = row.loc_line;
+                    if (typeof row.loc_col === 'number')
+                        loc.column = row.loc_col;
+                    if (Object.keys(loc).length > 0) {
+                        const existing = Array.isArray(relObj.locations) ? relObj.locations : [];
+                        relObj.locations = [...existing, loc];
+                    }
                     try {
                         await this.dualWriteAuxiliaryForEdge(relObj);
                     }
-                    catch (_j) { }
+                    catch (_o) { }
                 }
             }
-            catch (_k) { }
+            catch (_p) { }
         }
     }
     // Phase 1+: grouped unifier to reduce duplicate scans per batch
@@ -3170,19 +4273,42 @@ export class KnowledgeGraphService extends EventEmitter {
                 RelationshipType.DEPENDS_ON,
             ],
         });
-        return {
-            entityId,
-            directDependencies: directDeps.map((rel) => ({
-                entity: null, // Would need to fetch entity
+        const [directEntities, reverseEntities] = await Promise.all([
+            Promise.all(directDeps.map((rel) => this.getEntity(rel.toEntityId).catch(() => null))),
+            Promise.all(reverseDeps.map((rel) => this.getEntity(rel.fromEntityId).catch(() => null))),
+        ]);
+        const directDependencies = [];
+        for (let i = 0; i < directDeps.length; i++) {
+            const entityRef = directEntities[i];
+            if (!entityRef)
+                continue;
+            const rel = directDeps[i];
+            const confidence = typeof rel.confidence === "number"
+                ? Math.max(0, Math.min(1, rel.confidence))
+                : 1;
+            directDependencies.push({
+                entity: entityRef,
                 relationship: rel.type,
-                strength: 1,
-            })),
-            indirectDependencies: [],
-            reverseDependencies: reverseDeps.map((rel) => ({
-                entity: null,
+                confidence,
+            });
+        }
+        const reverseDependencies = [];
+        for (let i = 0; i < reverseDeps.length; i++) {
+            const entityRef = reverseEntities[i];
+            if (!entityRef)
+                continue;
+            const rel = reverseDeps[i];
+            reverseDependencies.push({
+                entity: entityRef,
                 relationship: rel.type,
                 impact: "medium",
-            })),
+            });
+        }
+        return {
+            entityId,
+            directDependencies,
+            indirectDependencies: [],
+            reverseDependencies,
             circularDependencies: [],
         };
     }
@@ -3706,6 +4832,46 @@ export class KnowledgeGraphService extends EventEmitter {
         const countResult = await this.db.falkordbQuery(countQuery, params);
         const total = ((_a = countResult[0]) === null || _a === void 0 ? void 0 : _a.total) || 0;
         return { entities, total };
+    }
+    async getEntitiesByFile(filePath, options = {}) {
+        if (!filePath || typeof filePath !== "string") {
+            return [];
+        }
+        const relative = path.isAbsolute(filePath)
+            ? path.relative(process.cwd(), filePath)
+            : filePath;
+        const normalized = relative.replace(/\\/g, "/").replace(/^file:/, "");
+        const fileId = `file:${normalized}`;
+        const symbolPrefix = `${normalized}:`;
+        const query = `
+      MATCH (n)
+      WHERE n.path = $filePath
+         OR n.id = $fileId
+         OR n.path STARTS WITH $symbolPrefix
+         OR (exists(n.filePath) AND n.filePath = $filePath)
+      RETURN n
+    `;
+        const rows = await this.db.falkordbQuery(query, {
+            filePath: normalized,
+            fileId,
+            symbolPrefix,
+        });
+        const entities = [];
+        const seen = new Set();
+        for (const row of rows || []) {
+            const entity = this.parseEntityFromGraph(row);
+            if (!(entity === null || entity === void 0 ? void 0 : entity.id))
+                continue;
+            if (!options.includeSymbols && entity.type === "symbol") {
+                // Skip symbols when not requested explicitly.
+                continue;
+            }
+            if (!seen.has(entity.id)) {
+                seen.add(entity.id);
+                entities.push(entity);
+            }
+        }
+        return entities;
     }
     async listRelationships(options = {}) {
         var _a;

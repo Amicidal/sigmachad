@@ -1013,9 +1013,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                     case "delete":
                         // Handle file deletion
                         try {
-                            // Find all entities associated with this file
-                            // TODO: Implement getEntitiesByFile method in KnowledgeGraphService
-                            const fileEntities = []; // Placeholder - need to implement this method
+                            const fileEntities = await this.kgService.getEntitiesByFile(change.path, { includeSymbols: true });
                             for (const entity of fileEntities) {
                                 await this.kgService.deleteEntity(entity.id);
                                 operation.entitiesDeleted++;

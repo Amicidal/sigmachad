@@ -3,6 +3,13 @@
  * Based on the comprehensive knowledge graph design
  */
 
+import {
+  DocumentationIntent,
+  DocumentationNodeType,
+  DocumentationSource,
+  DocumentationStatus,
+} from "./relationships.js";
+
 export interface CodebaseEntity {
   id: string;
   path: string;
@@ -238,11 +245,17 @@ export interface DocumentationNode extends CodebaseEntity {
   type: "documentation";
   title: string;
   content: string;
-  docType: "readme" | "api-docs" | "design-doc" | "architecture" | "user-guide";
+  docType: DocumentationNodeType;
   businessDomains: string[];
   stakeholders: string[];
   technologies: string[];
-  status: "active" | "deprecated" | "draft";
+  status: DocumentationStatus;
+  docVersion: string;
+  docHash: string;
+  docIntent: DocumentationIntent;
+  docSource: DocumentationSource;
+  docLocale?: string;
+  lastIndexed?: Date;
 }
 
 export interface BusinessDomain {

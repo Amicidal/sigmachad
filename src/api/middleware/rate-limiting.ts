@@ -165,6 +165,11 @@ export function getRateLimitStats() {
   return stats;
 }
 
+// Test-only helper to introspect and mutate bucket state.
+export function __getRateLimitStoresForTests() {
+  return Array.from(bucketStores);
+}
+
 // Start cleanup interval (should be called when app starts)
 export function startCleanupInterval(intervalMs: number = 300000) {
   // 5 minutes

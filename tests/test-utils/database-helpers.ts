@@ -9,6 +9,42 @@ import {
 } from "../../src/services/DatabaseService";
 import { v4 as uuidv4 } from "uuid";
 
+export interface ClearTestDataOptions {
+  includePostgres?: boolean;
+  includeGraph?: boolean;
+  includeVector?: boolean;
+  includeCache?: boolean;
+  postgresTables?: string[];
+  silent?: boolean;
+}
+
+const DEFAULT_POSTGRES_TABLES = [
+  "test_coverage",
+  "test_performance",
+  "test_results",
+  "test_suites",
+  "flaky_test_analyses",
+  "changes",
+  "sessions",
+  "documents",
+  "performance_metrics",
+  "coverage_history",
+];
+
+export const TEST_FIXTURE_IDS = {
+  documents: {
+    code: "00000000-0000-4000-8000-000000000001",
+    documentation: "00000000-0000-4000-8000-000000000002",
+  },
+  falkorEntities: {
+    typescriptFile: "00000000-0000-4000-8000-000000000101",
+    javascriptFile: "00000000-0000-4000-8000-000000000102",
+    pythonFile: "00000000-0000-4000-8000-000000000103",
+    goFile: "00000000-0000-4000-8000-000000000104",
+    rustFile: "00000000-0000-4000-8000-000000000105",
+  },
+};
+
 // Test database configuration using test containers
 export const TEST_DATABASE_CONFIG: DatabaseConfig = {
   falkordb: {
@@ -39,27 +75,29 @@ export const TEST_DATABASE_CONFIG: DatabaseConfig = {
  * Setup database service for testing
  * Initializes and sets up the database schema
  */
-export async function setupTestDatabase(): Promise<DatabaseService> {
-  console.log("🔧 Setting up test database...");
+export async function setupTestDatabase(
+  options: { silent?: boolean } = {}
+): Promise<DatabaseService> {
+  const silent = options.silent === true || process.env.TEST_SILENT === "1";
+  const log = silent ? () => {} : console.log;
+  const warn = silent ? () => {} : console.warn;
+
+  log("🔧 Setting up test database...");
   const dbService = new DatabaseService(TEST_DATABASE_CONFIG);
 
   try {
     await dbService.initialize();
-    console.log("✅ Database service initialized");
+    log("✅ Database service initialized");
   } catch (error) {
-    console.warn(
-      "⚠️ Database initialization failed, but continuing for unit tests:",
-      error
-    );
-    // Return service even if initialization fails for unit tests that don't require live connections
-    return dbService;
+    warn("⚠️ Database initialization failed:", error);
+    throw (error instanceof Error ? error : new Error(String(error)));
   }
 
   // Only attempt schema setup if initialization succeeded and core services are healthy
   try {
     if (dbService.isInitialized()) {
       const health = await dbService.healthCheck();
-      console.log("📊 Database health check:", health);
+      log("📊 Database health check:", health);
 
       const allCoreHealthy =
         health.falkordb?.status === "healthy" &&
@@ -68,18 +106,16 @@ export async function setupTestDatabase(): Promise<DatabaseService> {
 
       if (allCoreHealthy) {
         await dbService.setupDatabase();
-        console.log("✅ Database schema setup complete");
+        log("✅ Database schema setup complete");
       } else {
-        console.warn(
-          "⚠️ Some database services are not healthy, schema setup skipped"
-        );
-        console.warn("Health status:", health);
+        warn("⚠️ Some database services are not healthy, schema setup skipped");
+        warn("Health status:", health);
       }
     } else {
-      console.warn("⚠️ Database service not initialized, schema setup skipped");
+      warn("⚠️ Database service not initialized, schema setup skipped");
     }
   } catch (error) {
-    console.warn("⚠️ Database schema setup failed, but continuing:", error);
+    warn("⚠️ Database schema setup failed, but continuing:", error);
   }
 
   return dbService;
@@ -100,130 +136,148 @@ export async function cleanupTestDatabase(
  * Clear all test data from databases
  * Useful for ensuring clean state between tests
  */
-export async function clearTestData(dbService: DatabaseService): Promise<void> {
+export async function clearTestData(
+  dbService: DatabaseService,
+  options: ClearTestDataOptions = {}
+): Promise<void> {
   if (!dbService || !dbService.isInitialized()) {
     console.warn("Database service not initialized for test data cleanup");
     return;
   }
 
-  console.log("🧹 Clearing test data...");
+  const silent = options.silent === true || process.env.TEST_SILENT === "1";
+  const log = silent ? () => {} : console.log;
+  const warn = silent ? () => {} : console.warn;
 
-  // Clear PostgreSQL test data with better error handling
-  const postgresTables = [
-    "test_coverage",
-    "test_performance",
-    "test_results",
-    "test_suites",
-    "flaky_test_analyses",
-    "changes",
-    "sessions",
-    "documents",
-    "performance_metrics",
-    "coverage_history",
-  ];
+  log("🧹 Clearing test data...");
 
-  for (const table of postgresTables) {
-    try {
-      await dbService.postgresQuery(`DELETE FROM ${table}`);
-      console.log(`✅ Cleared ${table}`);
-    } catch (error) {
-      console.warn(`⚠️ Could not clear ${table}:`, error);
-    }
-  }
+  const {
+    includePostgres = true,
+    includeGraph = true,
+    includeVector = true,
+    includeCache = true,
+    postgresTables = DEFAULT_POSTGRES_TABLES,
+  } = options;
 
-  // Clear FalkorDB graph data
-  try {
-    await dbService.falkordbCommand(
-      "GRAPH.QUERY",
-      "memento",
-      "MATCH (n) DETACH DELETE n"
+  const cleanupTasks: Promise<void>[] = [];
+
+  if (includePostgres && postgresTables.length) {
+    cleanupTasks.push(
+      (async () => {
+        try {
+          const truncateList = postgresTables
+            .map((table) => `"${table}"`)
+            .join(", ");
+          await dbService.postgresQuery(
+            `TRUNCATE TABLE IF EXISTS ${truncateList} RESTART IDENTITY CASCADE`
+          );
+          log("✅ Truncated PostgreSQL tables");
+        } catch (error) {
+          warn("⚠️ Could not truncate PostgreSQL tables:", error);
+        }
+      })()
     );
-    console.log("✅ Cleared FalkorDB graph data");
-  } catch (error) {
-    console.warn("⚠️ Could not clear FalkorDB graph data:", error);
   }
 
-  // Clear Qdrant collections but preserve required collections
-  try {
-    const collections = await dbService.qdrant.getCollections();
-    const requiredCollections = [
-      "code_embeddings",
-      "documentation_embeddings",
-      "integration_test",
-    ];
-
-    let clearedCollections = 0;
-    for (const collection of collections.collections || []) {
-      // Don't delete required collections, but clear their data
-      if (requiredCollections.includes(collection.name)) {
+  if (includeGraph) {
+    cleanupTasks.push(
+      (async () => {
         try {
-          // Clear the collection data by deleting all points
-          await dbService.qdrant.delete(collection.name, {
-            filter: {},
-            wait: true,
-          });
-          console.log(`✅ Cleared data from ${collection.name}`);
-        } catch (error) {
-          // Collection might be empty already
-        }
-      } else {
-        // Delete non-required collections
-        try {
-          await dbService.qdrant.deleteCollection(collection.name);
-          clearedCollections++;
-        } catch (error) {
-          console.warn(
-            `⚠️ Could not delete collection ${collection.name}:`,
-            error
+          await dbService.falkordbCommand(
+            "GRAPH.QUERY",
+            "memento",
+            "MATCH (n) DETACH DELETE n"
           );
-        }
-      }
-    }
-    console.log(`✅ Cleared ${clearedCollections} Qdrant collections`);
-
-    // Ensure required collections exist
-    const currentCollections = await dbService.qdrant.getCollections();
-    const existingNames =
-      currentCollections.collections?.map((c) => c.name) || [];
-
-    for (const collectionName of requiredCollections) {
-      if (!existingNames.includes(collectionName)) {
-        try {
-          // Create the missing collection with proper dimensions
-          const vectorSize = 1536; // OpenAI embedding dimensions
-          await dbService.qdrant.createCollection(collectionName, {
-            vectors: {
-              size: vectorSize,
-              distance: "Cosine",
-            },
-          });
-          console.log(`✅ Created required collection: ${collectionName}`);
+          log("✅ Cleared FalkorDB graph data");
         } catch (error) {
-          console.warn(
-            `⚠️ Could not create collection ${collectionName}:`,
-            error
-          );
+          warn("⚠️ Could not clear FalkorDB graph data:", error);
         }
-      }
-    }
-  } catch (error) {
-    console.warn("⚠️ Could not manage Qdrant collections:", error);
+      })()
+    );
   }
 
-  // Clear Redis keys
-  if (dbService.getConfig().redis) {
-    try {
-      const redisClient = dbService.getFalkorDBClient();
-      if (redisClient) {
-        await redisClient.sendCommand(["FLUSHDB"]);
-        console.log("✅ Cleared Redis keys");
+  if (includeVector) {
+    cleanupTasks.push(
+      (async () => {
+        try {
+          const qdrantClient = dbService.qdrant;
+          const requiredCollections = new Set([
+            "code_embeddings",
+            "documentation_embeddings",
+            "integration_test",
+          ]);
+
+          const collectionsResponse = await qdrantClient.getCollections();
+          const existingCollections = collectionsResponse.collections ?? [];
+
+      const maintenanceTasks = existingCollections.map(async (collection) => {
+        if (requiredCollections.has(collection.name)) {
+          try {
+            await qdrantClient.delete(collection.name, { filter: {}, wait: true });
+          } catch {
+            // Collection might already be empty or delete unsupported – ignore
+          }
+        } else {
+          try {
+            await qdrantClient.deleteCollection(collection.name);
+          } catch (err) {
+            warn(`⚠️ Could not delete collection ${collection.name}:`, err);
+          }
+        }
+      });
+
+      if (maintenanceTasks.length) {
+        await Promise.all(maintenanceTasks);
+      }
+
+      const existingNames = new Set(
+        (await qdrantClient.getCollections()).collections?.map((c) => c.name) ?? []
+      );
+
+      const ensureTasks = Array.from(requiredCollections)
+        .filter((collectionName) => !existingNames.has(collectionName))
+        .map(async (collectionName) => {
+          try {
+            await qdrantClient.createCollection(collectionName, {
+              vectors: {
+                size: 1536,
+                distance: "Cosine",
+              },
+            });
+            log(`✅ Created required collection: ${collectionName}`);
+          } catch (error) {
+            warn(`⚠️ Could not create collection ${collectionName}:`, error);
+          }
+        });
+
+      if (ensureTasks.length) {
+        await Promise.all(ensureTasks);
       }
     } catch (error) {
-      console.warn("⚠️ Could not clear Redis keys:", error);
+      warn("⚠️ Could not manage Qdrant collections:", error);
     }
+  })()
+    );
   }
 
-  console.log("✅ Test data cleanup complete");
+  if (includeCache && dbService.getConfig().redis) {
+    cleanupTasks.push(
+      (async () => {
+        try {
+          await dbService.redisFlushDb();
+          log("✅ Cleared Redis keys");
+        } catch (error) {
+          warn("⚠️ Could not clear Redis keys:", error);
+        }
+      })()
+    );
+  }
+
+  if (cleanupTasks.length) {
+    await Promise.all(cleanupTasks);
+  }
+
+  log("✅ Test data cleanup complete");
 }
 
 /**
@@ -266,11 +320,13 @@ export async function waitForDatabaseReady(
 export const TEST_FIXTURES = {
   documents: [
     {
+      id: TEST_FIXTURE_IDS.documents.code,
       type: "code",
       content: { language: "typescript", code: 'console.log("test");' },
       metadata: { file: "test.ts", author: "test" },
     },
     {
+      id: TEST_FIXTURE_IDS.documents.documentation,
       type: "documentation",
       content: { title: "Test Doc", content: "Test documentation content" },
       metadata: { version: "1.0", author: "test" },
@@ -392,7 +448,7 @@ export async function insertTestFixtures(
     await dbService.postgresQuery(
       "INSERT INTO documents (id, type, content, metadata) VALUES ($1, $2, $3, $4)",
       [
-        uuidv4(),
+        doc.id || uuidv4(),
         doc.type,
         JSON.stringify(doc.content),
         JSON.stringify(doc.metadata),
@@ -540,35 +596,35 @@ export async function insertTestFixtures(
   try {
     const falkorEntities = [
       {
-        id: uuidv4(),
+        id: TEST_FIXTURE_IDS.falkorEntities.typescriptFile,
         type: "file",
         path: "test.ts",
         language: "typescript",
         lastModified: new Date().toISOString(),
       },
       {
-        id: uuidv4(),
+        id: TEST_FIXTURE_IDS.falkorEntities.javascriptFile,
         type: "file",
         path: "utils.js",
         language: "javascript",
         lastModified: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
       },
       {
-        id: uuidv4(),
+        id: TEST_FIXTURE_IDS.falkorEntities.pythonFile,
         type: "file",
         path: "main.py",
         language: "python",
         lastModified: new Date(Date.now() - 7200000).toISOString(), // 2 hours ago
       },
       {
-        id: uuidv4(),
+        id: TEST_FIXTURE_IDS.falkorEntities.goFile,
         type: "file",
         path: "server.go",
         language: "go",
         lastModified: new Date(Date.now() - 10800000).toISOString(), // 3 hours ago
       },
       {
-        id: uuidv4(),
+        id: TEST_FIXTURE_IDS.falkorEntities.rustFile,
         type: "file",
         path: "app.rs",
         language: "rust",
@@ -588,6 +644,37 @@ export async function insertTestFixtures(
         })
       `,
         entity
+      );
+    }
+
+    const relationshipFixtures = [
+      {
+        fromId: TEST_FIXTURE_IDS.falkorEntities.javascriptFile,
+        toId: TEST_FIXTURE_IDS.falkorEntities.typescriptFile,
+        type: "CALLS",
+        props: { line: 12 },
+      },
+      {
+        fromId: TEST_FIXTURE_IDS.falkorEntities.typescriptFile,
+        toId: TEST_FIXTURE_IDS.falkorEntities.pythonFile,
+        type: "REFERENCES",
+        props: { confidence: 0.9 },
+      },
+    ];
+
+    for (const rel of relationshipFixtures) {
+      await dbService.falkordbQuery(
+        `
+        MATCH (from:Entity {id: $fromId}), (to:Entity {id: $toId})
+        MERGE (from)-[r:${rel.type}]->(to)
+        SET r += $props
+        RETURN r
+      `,
+        {
+          fromId: rel.fromId,
+          toId: rel.toId,
+          props: rel.props ?? {},
+        }
       );
     }
   } catch {

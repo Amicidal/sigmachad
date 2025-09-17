@@ -4,13 +4,18 @@
  */
 import * as fs from "fs/promises";
 import * as path from "path";
+const SYSTEM_CONFIG_DOCUMENT_ID = "00000000-0000-4000-8000-00000000c0f1";
+const SYSTEM_CONFIG_DOCUMENT_TYPE = "system_config";
 export class ConfigurationService {
     constructor(dbService, syncCoordinator, testWorkingDir) {
         this.dbService = dbService;
         this.syncCoordinator = syncCoordinator;
         this.testWorkingDir = testWorkingDir;
+        this.cachedConfig = {};
+        this.configLoaded = false;
     }
     async getSystemConfiguration() {
+        await this.ensureConfigLoaded();
         const config = {
             version: await this.getVersion(),
             environment: process.env.NODE_ENV || "development",
@@ -181,18 +186,48 @@ export class ConfigurationService {
         return features;
     }
     async getPerformanceConfig() {
-        return {
-            maxConcurrentSync: parseInt(process.env.MAX_CONCURRENT_SYNC || "") ||
+        var _a;
+        await this.ensureConfigLoaded();
+        const defaults = {
+            maxConcurrentSync: parseInt(process.env.MAX_CONCURRENT_SYNC || "", 10) ||
                 (this.syncCoordinator ? 5 : 1),
-            cacheSize: parseInt(process.env.CACHE_SIZE || "") || 1000,
-            requestTimeout: parseInt(process.env.REQUEST_TIMEOUT || "") || 30000,
+            cacheSize: parseInt(process.env.CACHE_SIZE || "", 10) || 1000,
+            requestTimeout: parseInt(process.env.REQUEST_TIMEOUT || "", 10) || 30000,
+        };
+        const overrides = ((_a = this.cachedConfig.performance) !== null && _a !== void 0 ? _a : {});
+        return {
+            maxConcurrentSync: typeof overrides.maxConcurrentSync === "number" &&
+                overrides.maxConcurrentSync >= 1
+                ? overrides.maxConcurrentSync
+                : defaults.maxConcurrentSync,
+            cacheSize: typeof overrides.cacheSize === "number" && overrides.cacheSize >= 0
+                ? overrides.cacheSize
+                : defaults.cacheSize,
+            requestTimeout: typeof overrides.requestTimeout === "number" &&
+                overrides.requestTimeout >= 1000
+                ? overrides.requestTimeout
+                : defaults.requestTimeout,
         };
     }
     async getSecurityConfig() {
-        return {
+        var _a;
+        await this.ensureConfigLoaded();
+        const defaults = {
             rateLimiting: process.env.ENABLE_RATE_LIMITING === "true",
             authentication: process.env.ENABLE_AUTHENTICATION === "true",
             auditLogging: process.env.ENABLE_AUDIT_LOGGING === "true",
+        };
+        const overrides = ((_a = this.cachedConfig.security) !== null && _a !== void 0 ? _a : {});
+        return {
+            rateLimiting: typeof overrides.rateLimiting === "boolean"
+                ? overrides.rateLimiting
+                : defaults.rateLimiting,
+            authentication: typeof overrides.authentication === "boolean"
+                ? overrides.authentication
+                : defaults.authentication,
+            auditLogging: typeof overrides.auditLogging === "boolean"
+                ? overrides.auditLogging
+                : defaults.auditLogging,
         };
     }
     async getSystemInfo() {
@@ -249,15 +284,106 @@ export class ConfigurationService {
                 throw new Error("requestTimeout must be at least 1000ms");
             }
         }
-        // For now, we'll just validate and log the updates
-        // In a production system, this would update environment variables or config files
         console.log("Configuration update requested:", JSON.stringify(updates, null, 2));
-        // TODO: Implement actual configuration persistence
-        // This could involve:
-        // 1. Writing to environment files
-        // 2. Updating database configuration
-        // 3. Sending signals to other services to reload config
-        throw new Error("Configuration updates not yet implemented - this is a placeholder");
+        await this.ensureConfigLoaded();
+        this.cachedConfig = this.deepMergeConfig(this.cachedConfig, updates);
+        this.configLoaded = true;
+        if (updates.performance) {
+            if (typeof updates.performance.maxConcurrentSync === "number") {
+                process.env.MAX_CONCURRENT_SYNC = String(updates.performance.maxConcurrentSync);
+            }
+            if (typeof updates.performance.cacheSize === "number") {
+                process.env.CACHE_SIZE = String(updates.performance.cacheSize);
+            }
+            if (typeof updates.performance.requestTimeout === "number") {
+                process.env.REQUEST_TIMEOUT = String(updates.performance.requestTimeout);
+            }
+        }
+        if (updates.security) {
+            if (typeof updates.security.rateLimiting === "boolean") {
+                process.env.ENABLE_RATE_LIMITING = String(updates.security.rateLimiting);
+            }
+            if (typeof updates.security.authentication === "boolean") {
+                process.env.ENABLE_AUTHENTICATION = String(updates.security.authentication);
+            }
+            if (typeof updates.security.auditLogging === "boolean") {
+                process.env.ENABLE_AUDIT_LOGGING = String(updates.security.auditLogging);
+            }
+        }
+        await this.persistConfiguration(this.cachedConfig).catch((error) => {
+            console.warn("Configuration persistence failed; continuing with in-memory overrides", error);
+        });
+    }
+    async ensureConfigLoaded() {
+        var _a;
+        if (this.configLoaded) {
+            return;
+        }
+        if (!this.dbService.isInitialized()) {
+            this.configLoaded = true;
+            return;
+        }
+        try {
+            const result = await this.dbService.postgresQuery(`SELECT content FROM documents WHERE id = $1::uuid AND type = $2 LIMIT 1`, [SYSTEM_CONFIG_DOCUMENT_ID, SYSTEM_CONFIG_DOCUMENT_TYPE]);
+            const rows = Array.isArray(result === null || result === void 0 ? void 0 : result.rows)
+                ? result.rows
+                : [];
+            if (rows.length > 0) {
+                const rawContent = (_a = rows[0]) === null || _a === void 0 ? void 0 : _a.content;
+                const parsed = typeof rawContent === "string"
+                    ? JSON.parse(rawContent)
+                    : rawContent;
+                if (parsed && typeof parsed === "object") {
+                    this.cachedConfig = this.deepMergeConfig(this.cachedConfig, parsed);
+                }
+            }
+        }
+        catch (error) {
+            console.warn("Configuration load failed; using defaults", error);
+        }
+        finally {
+            this.configLoaded = true;
+        }
+    }
+    deepMergeConfig(target, source) {
+        const result = { ...(target || {}) };
+        if (!source || typeof source !== "object") {
+            return result;
+        }
+        for (const [key, value] of Object.entries(source)) {
+            if (value === undefined) {
+                continue;
+            }
+            const current = result[key];
+            if (value &&
+                typeof value === "object" &&
+                !Array.isArray(value) &&
+                !(value instanceof Date)) {
+                const currentObject = current && typeof current === "object" && !Array.isArray(current)
+                    ? current
+                    : {};
+                result[key] = this.deepMergeConfig(currentObject, value);
+            }
+            else {
+                result[key] = value;
+            }
+        }
+        return result;
+    }
+    async persistConfiguration(config) {
+        if (!this.dbService.isInitialized()) {
+            return;
+        }
+        const now = new Date().toISOString();
+        const payload = JSON.stringify(config, (_key, value) => value instanceof Date ? value.toISOString() : value, 2);
+        await this.dbService.postgresQuery(`INSERT INTO documents (id, type, content, created_at, updated_at)
+       VALUES ($1::uuid, $2, $3::jsonb, $4, $4)
+       ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, updated_at = EXCLUDED.updated_at`, [
+            SYSTEM_CONFIG_DOCUMENT_ID,
+            SYSTEM_CONFIG_DOCUMENT_TYPE,
+            payload,
+            now,
+        ]);
     }
     async getDatabaseHealth() {
         var _a, _b;

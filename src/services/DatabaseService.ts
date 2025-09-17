@@ -11,12 +11,12 @@ import {
   IPostgreSQLService,
   IRedisService,
   IDatabaseHealthCheck,
-} from "./database";
+} from "./database/index.js";
 import { FalkorDBService } from "./database/FalkorDBService.js";
 import { QdrantService } from "./database/QdrantService.js";
 import { PostgreSQLService } from "./database/PostgreSQLService.js";
 import { RedisService } from "./database/RedisService.js";
-export type { DatabaseConfig } from "./database";
+export type { DatabaseConfig } from "./database/index.js";
 
 // Type definitions for better type safety
 export interface DatabaseQueryResult {
@@ -424,6 +424,13 @@ export class DatabaseService {
       throw new Error("Redis not configured");
     }
     return this.redisService.del(key);
+  }
+
+  async redisFlushDb(): Promise<void> {
+    if (!this.redisService) {
+      throw new Error("Redis not configured");
+    }
+    await this.redisService.flushDb();
   }
 
   // Health checks

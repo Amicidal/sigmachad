@@ -151,7 +151,13 @@ describe('Impact Routes', () => {
           }),
           documentationImpact: expect.objectContaining({
             staleDocs: [],
-            requiredUpdates: []
+            missingDocs: [],
+            requiredUpdates: [],
+            freshnessPenalty: 0
+          }),
+          deploymentGate: expect.objectContaining({
+            blocked: expect.any(Boolean),
+            reasons: expect.any(Array)
           }),
           recommendations: []
         })
@@ -181,7 +187,13 @@ describe('Impact Routes', () => {
           }),
           documentationImpact: expect.objectContaining({
             staleDocs: [],
-            requiredUpdates: []
+            missingDocs: [],
+            requiredUpdates: [],
+            freshnessPenalty: 0
+          }),
+          deploymentGate: expect.objectContaining({
+            blocked: expect.any(Boolean),
+            reasons: expect.any(Array)
           }),
           recommendations: []
         })

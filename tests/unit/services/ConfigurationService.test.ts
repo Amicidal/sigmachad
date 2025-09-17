@@ -722,7 +722,7 @@ describe("ConfigurationService", () => {
       );
     });
 
-    it("should throw not implemented error for valid updates", async () => {
+    it("should apply valid performance updates", async () => {
       const updates = {
         performance: {
           maxConcurrentSync: 10,
@@ -731,9 +731,12 @@ describe("ConfigurationService", () => {
         },
       };
 
-      await expect(configService.updateConfiguration(updates)).rejects.toThrow(
-        "Configuration updates not yet implemented"
-      );
+      await expect(configService.updateConfiguration(updates)).resolves.toBeUndefined();
+
+      const updatedConfig = await configService.getSystemConfiguration();
+      expect(updatedConfig.performance.maxConcurrentSync).toBe(10);
+      expect(updatedConfig.performance.cacheSize).toBe(2000);
+      expect(updatedConfig.performance.requestTimeout).toBe(60000);
     });
 
     it("should accept updates without performance section", async () => {
@@ -741,9 +744,7 @@ describe("ConfigurationService", () => {
         environment: "production",
       };
 
-      await expect(configService.updateConfiguration(updates)).rejects.toThrow(
-        "Configuration updates not yet implemented"
-      );
+      await expect(configService.updateConfiguration(updates)).resolves.toBeUndefined();
     });
 
     it("should accept empty performance updates", async () => {
@@ -751,21 +752,19 @@ describe("ConfigurationService", () => {
         performance: {},
       };
 
-      await expect(configService.updateConfiguration(updates)).rejects.toThrow(
-        "Configuration updates not yet implemented"
-      );
+      await expect(configService.updateConfiguration(updates)).resolves.toBeUndefined();
     });
 
-    it("should validate maxConcurrentSync greater than 1", async () => {
+    it("should apply maxConcurrentSync greater than 1", async () => {
       const updates = {
         performance: {
           maxConcurrentSync: 2,
         },
       };
 
-      await expect(configService.updateConfiguration(updates)).rejects.toThrow(
-        "Configuration updates not yet implemented"
-      );
+      await expect(configService.updateConfiguration(updates)).resolves.toBeUndefined();
+      const config = await configService.getSystemConfiguration();
+      expect(config.performance.maxConcurrentSync).toBe(2);
     });
 
     it("should validate cacheSize of zero", async () => {
@@ -775,9 +774,9 @@ describe("ConfigurationService", () => {
         },
       };
 
-      await expect(configService.updateConfiguration(updates)).rejects.toThrow(
-        "Configuration updates not yet implemented"
-      );
+      await expect(configService.updateConfiguration(updates)).resolves.toBeUndefined();
+      const config = await configService.getSystemConfiguration();
+      expect(config.performance.cacheSize).toBe(0);
     });
 
     it("should validate requestTimeout of exactly 1000ms", async () => {
@@ -787,9 +786,9 @@ describe("ConfigurationService", () => {
         },
       };
 
-      await expect(configService.updateConfiguration(updates)).rejects.toThrow(
-        "Configuration updates not yet implemented"
-      );
+      await expect(configService.updateConfiguration(updates)).resolves.toBeUndefined();
+      const config = await configService.getSystemConfiguration();
+      expect(config.performance.requestTimeout).toBe(1000);
     });
   });
 
@@ -1324,7 +1323,7 @@ describe("ConfigurationService", () => {
         if (edgeCase !== null && edgeCase !== undefined) {
           await expect(
             configService.updateConfiguration(edgeCase as any)
-          ).rejects.toThrow("Configuration updates not yet implemented");
+          ).resolves.toBeUndefined();
         }
       }
     });

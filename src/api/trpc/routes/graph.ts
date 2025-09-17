@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import { router, publicProcedure } from '../base.js';
-import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 
 // Entity and Relationship schemas
 const EntitySchema = z.object({
@@ -37,11 +37,14 @@ export const graphRouter = router({
       offset: z.number().min(0).default(0),
     }))
     .query(async ({ input, ctx }) => {
-      // TODO: Implement entity retrieval
-      const entities: any[] = [];
+      const { entities, total } = await ctx.kgService.listEntities({
+        type: input.type,
+        limit: input.limit,
+        offset: input.offset,
+      });
       return {
         items: entities,
-        total: 0,
+        total,
         limit: input.limit,
         offset: input.offset,
       };
@@ -53,8 +56,11 @@ export const graphRouter = router({
       id: z.string(),
     }))
     .query(async ({ input, ctx }) => {
-      // TODO: Implement single entity retrieval
-      return null;
+      const entity = await ctx.kgService.getEntity(input.id);
+      if (!entity) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `Entity ${input.id} not found` });
+      }
+      return entity;
     }),
 
   // Get relationships for entity
@@ -66,9 +72,41 @@ export const graphRouter = router({
       limit: z.number().min(1).max(1000).default(100),
     }))
     .query(async ({ input, ctx }) => {
-      // TODO: Implement relationship retrieval
-      const relationships: any[] = [];
-      return relationships;
+      const types = input.type ? [input.type] : undefined;
+      const collected: any[] = [];
+
+      if (input.direction === 'outgoing' || input.direction === 'both') {
+        const outgoing = await ctx.kgService.getRelationships({
+          fromEntityId: input.entityId,
+          type: types as any,
+          limit: input.limit,
+        });
+        collected.push(...outgoing);
+      }
+
+      if (input.direction === 'incoming' || input.direction === 'both') {
+        const incoming = await ctx.kgService.getRelationships({
+          toEntityId: input.entityId,
+          type: types as any,
+          limit: input.limit,
+        });
+        collected.push(...incoming);
+      }
+
+      const seen = new Set<string>();
+      const deduped = [] as any[];
+      for (const rel of collected) {
+        const key = (rel as any).id || `${rel.fromEntityId}->${rel.toEntityId}:${rel.type}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduped.push(rel);
+        }
+        if (deduped.length >= input.limit) {
+          break;
+        }
+      }
+
+      return deduped;
     }),
 
   // Search entities
@@ -106,13 +144,11 @@ export const graphRouter = router({
       depth: z.number().min(1).max(10).default(3),
     }))
     .query(async ({ input, ctx }) => {
-      // TODO: Implement dependency analysis
-      return {
-        entityId: input.entityId,
-        dependencies: [],
-        dependents: [],
-        depth: input.depth,
-      };
+      const analysis = await ctx.kgService.getEntityDependencies(input.entityId);
+      if (!analysis) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `Entity ${input.entityId} not found` });
+      }
+      return analysis;
     }),
 
   // Get semantic clusters
@@ -123,9 +159,24 @@ export const graphRouter = router({
       limit: z.number().min(1).max(100).default(20),
     }))
     .query(async ({ input, ctx }) => {
-      // TODO: Implement cluster analysis
-      const clusters: any[] = [];
-      return clusters;
+      const { entities } = await ctx.kgService.listEntities({
+        type: 'semanticCluster',
+        limit: input.limit,
+        offset: 0,
+      });
+
+      const filtered = entities.filter((cluster: any) => {
+        if (input.domain) {
+          const domain = (cluster?.domain || cluster?.metadata?.domain || '').toString();
+          if (!domain.toLowerCase().includes(input.domain.toLowerCase())) {
+            return false;
+          }
+        }
+        const members = Array.isArray((cluster as any).members) ? (cluster as any).members.length : 0;
+        return members >= input.minSize;
+      });
+
+      return filtered.slice(0, input.limit);
     }),
 
   // Analyze entity impact
@@ -135,14 +186,7 @@ export const graphRouter = router({
       changeType: z.enum(['modify', 'delete', 'refactor']),
     }))
     .query(async ({ input, ctx }) => {
-      // TODO: Implement impact analysis
-      return {
-        entityId: input.entityId,
-        changeType: input.changeType,
-        affectedEntities: [],
-        riskLevel: 'low' as const,
-        recommendations: [],
-      };
+      throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'Impact analysis is not yet available.' });
     }),
   // Time travel traversal
   timeTravel: publicProcedure

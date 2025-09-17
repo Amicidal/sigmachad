@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { ASTParser } from '@/services/ASTParser';
 import { RelationshipType } from '@/models/relationships';
+import { noiseConfig } from '@/config/noise';
 
 describe('ASTParser reference confidence metadata', () => {
   let parser: ASTParser;
@@ -39,5 +40,24 @@ describe('ASTParser reference confidence metadata', () => {
     const hasFileRef = refs.some(r => String(r.toEntityId).startsWith('file:') && (r as any).metadata?.confidence >= 0.6);
     expect(hasExternal || hasFileRef).toBe(true);
   });
-});
 
+  it('drops inferred placeholders when the confidence gate is raised', async () => {
+    const original = noiseConfig.MIN_INFERRED_CONFIDENCE;
+    noiseConfig.MIN_INFERRED_CONFIDENCE = 0.95;
+    try {
+      parser.clearCache();
+      const content = `
+        export function gated() {
+          return maybeGlobal + 2;
+        }
+      `;
+      await fs.writeFile(tmp, content, 'utf-8');
+
+      const result = await parser.parseFile(tmp);
+      const external = result.relationships.filter(r => r.type === RelationshipType.REFERENCES && String(r.toEntityId).startsWith('external:maybeGlobal'));
+      expect(external).toHaveLength(0);
+    } finally {
+      noiseConfig.MIN_INFERRED_CONFIDENCE = original;
+    }
+  });
+});

@@ -59,6 +59,12 @@ export class RedisService {
         }
         return this.redisClient.del(key);
     }
+    async flushDb() {
+        if (!this.initialized) {
+            throw new Error('Redis not configured');
+        }
+        await this.redisClient.flushDb();
+    }
     async healthCheck() {
         try {
             await this.redisClient.ping();

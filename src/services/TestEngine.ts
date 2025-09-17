@@ -553,17 +553,22 @@ export class TestEngine {
     });
 
     // Derive coverage from relationship metadata or fallback to test entity
-    const coverages: number[] = [];
+    const coverages: CoverageMetrics[] = [];
     for (const rel of testRels) {
       const meta = (rel as any).metadata || {};
       const relCov = meta.coverage?.lines ?? meta.coveragePercentage ?? meta.coverage;
       if (typeof relCov === 'number') {
-        coverages.push(relCov);
+        coverages.push({
+          lines: relCov,
+          branches: 0,
+          functions: 0,
+          statements: 0,
+        });
         continue;
       }
       const test = (await this.kgService.getEntity(rel.fromEntityId)) as Test | null;
-      if (test && test.coverage && typeof test.coverage.lines === 'number') {
-        coverages.push(test.coverage.lines);
+      if (test && test.coverage) {
+        coverages.push(test.coverage);
       }
     }
 
@@ -571,9 +576,9 @@ export class TestEngine {
       entityId,
       overallCoverage: this.aggregateCoverage(coverages),
       testBreakdown: {
-        unitTests: 0,
-        integrationTests: 0,
-        e2eTests: 0,
+        unitTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
+        integrationTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
+        e2eTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
       },
       uncoveredLines: [], // Would need source map integration
       uncoveredBranches: [],

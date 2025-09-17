@@ -7,6 +7,7 @@ import {
   EdgeEvidence,
   CodeRelationship,
   CODE_RELATIONSHIP_TYPES,
+  isDocumentationRelationshipType,
 } from '../models/relationships.js';
 
 const CODE_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(CODE_RELATIONSHIP_TYPES);
@@ -212,7 +213,7 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
     if (rel[key] == null && md[k] != null) rel[key] = md[k];
   };
   [
-    'kind','resolution','scope','arity','awaited','operator','importDepth','usedTypeChecker','isExported','accessPath',
+    'kind','resolution','scope','arity','awaited','operator','importDepth','usedTypeChecker','isExported','accessPath','dataFlowId',
     'confidence','inferred','resolved','source','callee','paramName','importAlias','receiverType','dynamicDispatch','overloadIndex','genericArguments',
     'ambiguous','candidateCount','isMethod','occurrencesScan','occurrencesTotal','occurrencesRecent'
   ].forEach((k) => hoist(k));
@@ -433,7 +434,114 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
 
 // Compute canonical relationship id for code edges using the canonical target key
 export function canonicalRelationshipId(fromId: string, rel: GraphRelationship): string {
-  const baseTarget = isCodeRelationship(rel.type) ? canonicalTargetKeyFor(rel) : String(rel.toEntityId || '');
+  const baseTarget = isCodeRelationship(rel.type)
+    ? canonicalTargetKeyFor(rel)
+    : (isDocumentationRelationshipType(rel.type)
+        ? canonicalDocumentationTargetKey(rel)
+        : String(rel.toEntityId || ''));
   const base = `${fromId}|${baseTarget}|${rel.type}`;
   return 'rel_' + crypto.createHash('sha1').update(base).digest('hex');
+}
+
+function canonicalDocumentationTargetKey(rel: GraphRelationship): string {
+  const anyRel: any = rel as any;
+  const md = (anyRel.metadata && typeof anyRel.metadata === 'object') ? anyRel.metadata : {};
+  const source = normalizeDocSourceForId(anyRel.source ?? md.source);
+  const docIntent = normalizeDocIntentForId(anyRel.docIntent ?? md.docIntent, rel.type);
+  const sectionAnchor = normalizeAnchorForId(anyRel.sectionAnchor ?? md.sectionAnchor ?? md.anchor);
+
+  switch (rel.type) {
+    case RelationshipType.DOCUMENTED_BY: {
+      const docVersion = normalizeStringForId(anyRel.docVersion ?? md.docVersion);
+      return `${rel.toEntityId}|${sectionAnchor}|${source}|${docIntent}|${docVersion}`;
+    }
+    case RelationshipType.DESCRIBES_DOMAIN: {
+      const domainPath = normalizeDomainPathForId(anyRel.domainPath ?? md.domainPath ?? md.taxonomyPath);
+      const taxonomyVersion = normalizeStringForId(anyRel.taxonomyVersion ?? md.taxonomyVersion);
+      return `${rel.toEntityId}|${domainPath}|${taxonomyVersion}|${sectionAnchor}|${docIntent}`;
+    }
+    case RelationshipType.BELONGS_TO_DOMAIN: {
+      const domainPath = normalizeDomainPathForId(anyRel.domainPath ?? md.domainPath);
+      return `${rel.toEntityId}|${domainPath}|${source}|${docIntent}`;
+    }
+    case RelationshipType.CLUSTER_MEMBER: {
+      const clusterVersion = normalizeStringForId(anyRel.clusterVersion ?? md.clusterVersion);
+      const docAnchor = normalizeAnchorForId(anyRel.docAnchor ?? md.docAnchor ?? sectionAnchor);
+      const embeddingVersion = normalizeStringForId(anyRel.embeddingVersion ?? md.embeddingVersion);
+      return `${rel.toEntityId}|${clusterVersion}|${docAnchor}|${embeddingVersion}|${docIntent}`;
+    }
+    case RelationshipType.DOMAIN_RELATED: {
+      const relationshipType = normalizeStringForId(anyRel.relationshipType ?? md.relationshipType);
+      return `${rel.toEntityId}|${relationshipType}|${source}`;
+    }
+    case RelationshipType.GOVERNED_BY: {
+      const policyType = normalizeStringForId(anyRel.policyType ?? md.policyType);
+      return `${rel.toEntityId}|${policyType}|${docIntent}`;
+    }
+    case RelationshipType.DOCUMENTS_SECTION: {
+      return `${rel.toEntityId}|${sectionAnchor}|${docIntent}`;
+    }
+    default:
+      return String(rel.toEntityId || '');
+  }
+}
+
+function normalizeAnchorForId(anchor: any): string {
+  if (!anchor) return '_root';
+  const normalized = String(anchor)
+    .trim()
+    .replace(/^#+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\-_/\s]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-/g, '')
+    .replace(/-$/g, '');
+  return normalized.length > 0 ? normalized.slice(0, 128) : '_root';
+}
+
+function normalizeDomainPathForId(value: any): string {
+  if (!value) return '';
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/>+/g, '/')
+    .replace(/\s+/g, '/')
+    .replace(/[^a-z0-9/_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/\/+/, '/')
+    .replace(/^\/+|\/+$/g, '');
+}
+
+function normalizeStringForId(value: any): string {
+  if (typeof value !== 'string') return '';
+  return value.trim();
+}
+
+function normalizeDocSourceForId(value: any): string {
+  if (!value) return '';
+  const normalized = String(value).toLowerCase();
+  switch (normalized) {
+    case 'parser':
+    case 'manual':
+    case 'llm':
+    case 'imported':
+    case 'sync':
+    case 'other':
+      return normalized;
+    default:
+      return 'other';
+  }
+}
+
+function normalizeDocIntentForId(value: any, type: RelationshipType): string {
+  if (value === null || value === undefined) {
+    if (type === RelationshipType.GOVERNED_BY) return 'governance';
+    return 'ai-context';
+  }
+  const normalized = String(value).toLowerCase();
+  if (normalized === 'ai-context' || normalized === 'governance' || normalized === 'mixed') {
+    return normalized;
+  }
+  return type === RelationshipType.GOVERNED_BY ? 'governance' : 'ai-context';
 }

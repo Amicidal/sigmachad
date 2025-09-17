@@ -96,7 +96,7 @@ export class MaintenanceService {
   }
 
   private async runCleanup(task: MaintenanceTask): Promise<MaintenanceResult> {
-    const changes = [];
+    const changes: Array<Record<string, unknown>> = [];
     const stats = { entitiesRemoved: 0, relationshipsRemoved: 0, orphanedRecords: 0 };
 
     try {
@@ -138,7 +138,7 @@ export class MaintenanceService {
   }
 
   private async runOptimization(task: MaintenanceTask): Promise<MaintenanceResult> {
-    const changes = [];
+    const changes: Array<Record<string, unknown>> = [];
     const stats = { optimizedCollections: 0, rebalancedIndexes: 0, vacuumedTables: 0 };
 
     try {
@@ -184,7 +184,7 @@ export class MaintenanceService {
   }
 
   private async runReindexing(task: MaintenanceTask): Promise<MaintenanceResult> {
-    const changes = [];
+    const changes: Array<Record<string, unknown>> = [];
     const stats = { indexesRebuilt: 0, collectionsReindexed: 0, tablesReindexed: 0 };
 
     try {
@@ -236,7 +236,7 @@ export class MaintenanceService {
   }
 
   private async runValidation(task: MaintenanceTask): Promise<MaintenanceResult> {
-    const changes = [];
+    const changes: Array<Record<string, unknown>> = [];
     const stats = { invalidEntities: 0, invalidRelationships: 0, integrityIssues: 0, validatedCollections: 0 };
 
     try {
@@ -364,7 +364,7 @@ export class MaintenanceService {
   }
 
   private getEntityIssues(entity: any): string[] {
-    const issues = [];
+    const issues: string[] = [];
     if (!entity.id) issues.push('missing id');
     if (!entity.type) issues.push('missing type');
     if (!entity.hash) issues.push('missing hash');

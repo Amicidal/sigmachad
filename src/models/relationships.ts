@@ -12,6 +12,11 @@ export interface Relationship {
   lastModified: Date;
   version: number;
   metadata?: Record<string, any>;
+  siteId?: string;
+  siteHash?: string;
+  evidence?: any[];
+  locations?: any[];
+  sites?: any[];
   // Optional temporal validity (history mode)
   validFrom?: Date;
   validTo?: Date | null;
@@ -62,6 +67,9 @@ export enum RelationshipType {
   BELONGS_TO_DOMAIN = 'BELONGS_TO_DOMAIN',
   DOCUMENTED_BY = 'DOCUMENTED_BY',
   CLUSTER_MEMBER = 'CLUSTER_MEMBER',
+  DOMAIN_RELATED = 'DOMAIN_RELATED',
+  GOVERNED_BY = 'GOVERNED_BY',
+  DOCUMENTS_SECTION = 'DOCUMENTS_SECTION',
 
   // Security relationships
   HAS_SECURITY_ISSUE = 'HAS_SECURITY_ISSUE',
@@ -112,6 +120,64 @@ export const CODE_RELATIONSHIP_TYPES = [
 ] as const;
 
 export type CodeRelationshipType = (typeof CODE_RELATIONSHIP_TYPES)[number];
+
+// Documentation relationship helpers
+export const DOCUMENTATION_RELATIONSHIP_TYPES = [
+  RelationshipType.DESCRIBES_DOMAIN,
+  RelationshipType.BELONGS_TO_DOMAIN,
+  RelationshipType.DOCUMENTED_BY,
+  RelationshipType.CLUSTER_MEMBER,
+  RelationshipType.DOMAIN_RELATED,
+  RelationshipType.GOVERNED_BY,
+  RelationshipType.DOCUMENTS_SECTION,
+] as const;
+
+export type DocumentationRelationshipType =
+  (typeof DOCUMENTATION_RELATIONSHIP_TYPES)[number];
+
+const DOCUMENTATION_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
+  DOCUMENTATION_RELATIONSHIP_TYPES,
+);
+
+export const isDocumentationRelationshipType = (
+  type: RelationshipType,
+): type is DocumentationRelationshipType =>
+  DOCUMENTATION_RELATIONSHIP_TYPE_SET.has(type);
+
+export type DocumentationSource =
+  | 'parser'
+  | 'manual'
+  | 'llm'
+  | 'imported'
+  | 'sync'
+  | 'other';
+
+export type DocumentationIntent = 'ai-context' | 'governance' | 'mixed';
+
+export type DocumentationNodeType =
+  | 'readme'
+  | 'api-docs'
+  | 'design-doc'
+  | 'architecture'
+  | 'user-guide';
+
+export type DocumentationStatus = 'active' | 'deprecated' | 'draft';
+
+export type DocumentationCoverageScope =
+  | 'api'
+  | 'behavior'
+  | 'operational'
+  | 'security'
+  | 'compliance';
+
+export type DocumentationQuality = 'complete' | 'partial' | 'outdated';
+
+export type DocumentationPolicyType =
+  | 'adr'
+  | 'runbook'
+  | 'compliance'
+  | 'manual'
+  | 'decision-log';
 
 // Structured evidence entries allowing multiple sources per edge
 export interface EdgeEvidence {
@@ -234,11 +300,37 @@ export interface TemporalRelationship extends Relationship {
 }
 
 export interface DocumentationRelationship extends Relationship {
-  type: RelationshipType.DESCRIBES_DOMAIN | RelationshipType.BELONGS_TO_DOMAIN |
-        RelationshipType.DOCUMENTED_BY | RelationshipType.CLUSTER_MEMBER;
+  type: DocumentationRelationshipType;
   confidence?: number; // 0-1, confidence in the relationship
   inferred?: boolean; // whether this was inferred vs explicitly stated
-  source?: string; // source of the relationship (file, line, etc.)
+  source?: DocumentationSource; // source of the relationship
+  docIntent?: DocumentationIntent;
+  sectionAnchor?: string;
+  sectionTitle?: string;
+  summary?: string;
+  docVersion?: string;
+  docHash?: string;
+  documentationQuality?: DocumentationQuality;
+  coverageScope?: DocumentationCoverageScope;
+  evidence?: Array<{ type: 'heading' | 'snippet' | 'link'; value: string }>;
+  tags?: string[];
+  stakeholders?: string[];
+  domainPath?: string;
+  taxonomyVersion?: string;
+  updatedFromDocAt?: Date;
+  lastValidated?: Date;
+  strength?: number;
+  similarityScore?: number;
+  clusterVersion?: string;
+  role?: 'core' | 'supporting' | 'entry-point' | 'integration';
+  docEvidenceId?: string;
+  docAnchor?: string;
+  embeddingVersion?: string;
+  policyType?: DocumentationPolicyType;
+  effectiveFrom?: Date;
+  expiresAt?: Date | null;
+  relationshipType?: 'depends_on' | 'overlaps' | 'shares_owner' | string;
+  docLocale?: string;
 }
 
 export interface SecurityRelationship extends Relationship {
@@ -321,6 +413,20 @@ export interface RelationshipQuery {
   until?: Date;
   limit?: number;
   offset?: number;
+  domainPath?: string | string[];
+  domainPrefix?: string | string[];
+  docIntent?: DocumentationIntent | DocumentationIntent[];
+  docType?: DocumentationNodeType | DocumentationNodeType[];
+  docStatus?: DocumentationStatus | DocumentationStatus[];
+  docLocale?: string | string[];
+  coverageScope?: DocumentationCoverageScope | DocumentationCoverageScope[];
+  embeddingVersion?: string | string[];
+  clusterId?: string | string[];
+  clusterVersion?: string | string[];
+  stakeholder?: string | string[];
+  tag?: string | string[];
+  lastValidatedAfter?: Date;
+  lastValidatedBefore?: Date;
   // Extended filters for code edges (optional)
   kind?: CodeEdgeKind | CodeEdgeKind[];
   source?: CodeEdgeSource | CodeEdgeSource[];

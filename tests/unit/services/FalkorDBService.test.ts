@@ -34,10 +34,10 @@ class MockRedisClient {
   private pingResponse = "PONG";
   private commandResponses = new Map<string, any>();
   private shouldFail = false;
-  private failureRate = 0;
+  private alwaysFail = false;
 
   constructor(config?: { failureRate?: number }) {
-    this.failureRate = config?.failureRate || 0;
+    this.alwaysFail = !!config?.failureRate && config.failureRate >= 100;
     // Default successful response format for GRAPH.QUERY
     this.setCommandResponse("GRAPH.QUERY", [
       ["id", "name", "type"], // headers
@@ -47,7 +47,7 @@ class MockRedisClient {
   }
 
   async connect(): Promise<void> {
-    if (this.shouldFail || Math.random() * 100 < this.failureRate) {
+    if (this.shouldFail || this.alwaysFail) {
       throw new Error("Connection failed");
     }
     this.connected = true;
@@ -61,7 +61,7 @@ class MockRedisClient {
     if (!this.connected) {
       throw new Error("Not connected");
     }
-    if (this.shouldFail) {
+    if (this.shouldFail || this.alwaysFail) {
       throw new Error("Ping failed");
     }
     return this.pingResponse;
@@ -72,7 +72,7 @@ class MockRedisClient {
       throw new Error("Not connected");
     }
 
-    if (this.shouldFail || Math.random() * 100 < this.failureRate) {
+    if (this.shouldFail || this.alwaysFail) {
       throw new Error("Command failed");
     }
 
@@ -110,7 +110,7 @@ class MockRedisClient {
   }
 
   setFailureRate(rate: number): void {
-    this.failureRate = rate;
+    this.alwaysFail = rate >= 100;
   }
 }
 
@@ -482,10 +482,14 @@ describe("FalkorDBService", () => {
       const args = ["GRAPH.QUERY", "memento", "MATCH (n) RETURN count(n)"];
       const result = await falkorService.command(...args);
 
-      expect(result).toEqual(expect.any(Array));
-      // Command returns the raw result from sendCommand, which is the mock response
-      expect(Array.isArray(result)).toBe(true);
-      expect(result).toHaveLength(3); // [headers, data, statistics]
+      expect(result).toEqual(
+        expect.objectContaining({
+          headers: expect.arrayContaining(["id", "name", "type"]),
+          data: expect.arrayContaining([
+            expect.objectContaining({ id: expect.any(String) }),
+          ]),
+        })
+      );
     });
 
     it("should handle command failures", async () => {
@@ -581,7 +585,7 @@ describe("FalkorDBService", () => {
         "memento",
         "MATCH (n) RETURN n"
       );
-      expect(result).toBe(null);
+      expect(result).toEqual({ data: [], headers: [] });
     });
 
     it("should handle partial result structures", async () => {

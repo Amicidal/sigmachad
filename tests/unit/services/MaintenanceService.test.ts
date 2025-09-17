@@ -32,10 +32,8 @@ import * as crypto from "crypto";
 
 // Import realistic mocks
 import {
-  RealisticFalkorDBMock,
-  RealisticQdrantMock,
-  RealisticPostgreSQLMock,
-  RealisticRedisMock,
+  createLightweightDatabaseMocks,
+  type LightweightDatabaseMocks,
 } from "../../test-utils/realistic-mocks";
 
 // Mock crypto
@@ -50,9 +48,7 @@ describe("MaintenanceService", () => {
   let maintenanceService: MaintenanceService;
   let mockDbService: DatabaseService;
   let mockKgService: KnowledgeGraphService;
-  let mockFalkorDB: RealisticFalkorDBMock;
-  let mockQdrant: RealisticQdrantMock;
-  let mockPostgres: RealisticPostgreSQLMock;
+  let dbMocks: LightweightDatabaseMocks;
   let testConfig: DatabaseConfig;
 
   beforeAll(() => {
@@ -96,34 +92,13 @@ describe("MaintenanceService", () => {
       },
     };
 
-    // Create mock services and DI-backed DatabaseService
-    mockFalkorDB = new RealisticFalkorDBMock({ failureRate: 0 });
-    mockQdrant = new RealisticQdrantMock({ failureRate: 0 });
-    mockPostgres = new RealisticPostgreSQLMock({ failureRate: 0 });
-
-    // Qdrant client stub with methods used by maintenance
-    let mockQdrantClient = {
-      getCollections: vi
-        .fn()
-        .mockResolvedValue({ collections: [{ name: "test-collection" }] }),
-      updateCollection: vi.fn().mockResolvedValue({}),
-      createSnapshot: vi.fn().mockResolvedValue({}),
-      getCollection: vi.fn().mockResolvedValue({ points_count: 100 }),
-      scroll: vi.fn().mockResolvedValue({ points: [] }),
-    };
+    dbMocks = createLightweightDatabaseMocks();
 
     mockDbService = new DatabaseService(testConfig, {
-      falkorFactory: () => mockFalkorDB,
-      qdrantFactory: () =>
-        ({
-          initialize: vi.fn().mockResolvedValue(undefined),
-          close: vi.fn().mockResolvedValue(undefined),
-          isInitialized: () => true,
-          getClient: () => mockQdrantClient,
-          healthCheck: vi.fn().mockResolvedValue(true),
-        } as any),
-      postgresFactory: () => mockPostgres,
-      redisFactory: () => new RealisticRedisMock({ failureRate: 0 }),
+      falkorFactory: () => dbMocks.falkor,
+      qdrantFactory: () => dbMocks.qdrant,
+      postgresFactory: () => dbMocks.postgres,
+      redisFactory: () => dbMocks.redis,
     });
     await mockDbService.initialize();
 

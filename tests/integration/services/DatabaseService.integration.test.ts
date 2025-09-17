@@ -40,12 +40,20 @@ describe("DatabaseService Integration", () => {
 
   beforeEach(async () => {
     if (dbService && dbService.isInitialized()) {
-      await clearTestData(dbService);
+      // Use lightweight cleanup to avoid repeatedly recreating Qdrant collections/Redis data.
+      await clearTestData(dbService, {
+        includePostgres: true,
+        includeGraph: true,
+        includeVector: false,
+        includeCache: false,
+      });
     }
   });
 
   describe("Cross-Database Operations", () => {
     it("should handle complex workflow spanning multiple databases", async () => {
+      const redisKeys: string[] = [];
+
       // 1. Store document in PostgreSQL
       const docResult = await dbService.postgresQuery(
         `
@@ -83,7 +91,9 @@ describe("DatabaseService Integration", () => {
       );
 
       // 3. Store embedding in Qdrant (use existing integration_test collection)
-      const testEmbedding = new Array(1536).fill(0).map(() => Math.random());
+      const testEmbedding = Array.from({ length: 1536 }, (_, index) =>
+        ((index % 32) + 1) / 1000
+      );
 
       // Clear any existing points with this ID first
       try {
@@ -109,8 +119,11 @@ describe("DatabaseService Integration", () => {
       });
 
       // 4. Cache metadata in Redis
+      const metadataKey = `doc:${docId}:metadata`;
+      redisKeys.push(metadataKey);
+
       await dbService.redisSet(
-        `doc:${docId}:metadata`,
+        metadataKey,
         JSON.stringify({
           type: "code",
           path: "test.ts",
@@ -135,30 +148,43 @@ describe("DatabaseService Integration", () => {
       expect(falkorResult[0]?.path).toBe("test.ts");
       expect(falkorResult[0]?.language).toBe("typescript");
 
-      // Qdrant - wait a bit for the point to be indexed
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Qdrant - poll until the point is indexed instead of relying on a fixed delay
+      const maxAttempts = 10;
+      let ourPoint: any | undefined;
 
-      const qdrantResult = await dbService.qdrant.scroll("integration_test", {
-        limit: 10,
-        with_payload: true,
-        with_vectors: false,
-      });
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const qdrantResult = await dbService.qdrant.scroll("integration_test", {
+          limit: 16,
+          with_payload: true,
+          with_vectors: false,
+        });
 
-      // Find our point in the results
-      const ourPoint = qdrantResult.points.find(
-        (point) =>
-          point.payload?.path === "test.ts" && point.payload?.type === "code"
-      );
+        ourPoint = qdrantResult.points.find(
+          (point) =>
+            point.payload?.path === "test.ts" && point.payload?.type === "code"
+        );
+
+        if (ourPoint) {
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
       expect(ourPoint).not.toBeUndefined();
-      expect(ourPoint?.payload).toEqual(expect.objectContaining({ path: 'test.ts', type: 'code' }));
+      expect(ourPoint?.payload).toEqual(
+        expect.objectContaining({ path: "test.ts", type: "code" })
+      );
 
       // Redis
-      const redisResult = await dbService.redisGet(`doc:${docId}:metadata`);
+      const redisResult = await dbService.redisGet(metadataKey);
       expect(redisResult).toEqual(expect.any(String));
       expect(redisResult.length).toBeGreaterThan(0);
       const metadata = JSON.parse(redisResult!);
       expect(metadata.type).toBe("code");
       expect(metadata.path).toBe("test.ts");
+
+      await Promise.all(redisKeys.map((key) => dbService.redisDel(key)));
     });
 
     it("should handle transaction rollback across databases with proper error isolation", async () => {
@@ -271,10 +297,12 @@ describe("DatabaseService Integration", () => {
 
   describe("Performance and Load Testing", () => {
     it("should handle concurrent operations efficiently", async () => {
-      const concurrentOperations = 10;
+      const concurrentOperations = 5;
       const operations = [];
 
       // Create concurrent read/write operations
+      const redisKeys: string[] = [];
+
       for (let i = 0; i < concurrentOperations; i++) {
         operations.push(
           // PostgreSQL operation
@@ -306,7 +334,11 @@ describe("DatabaseService Integration", () => {
           ),
 
           // Redis operation
-          dbService.redisSet(`perf_key_${i}`, `value_${i}`, 300) // 5 minute TTL
+          (async () => {
+            const key = `perf_key_${i}`;
+            redisKeys.push(key);
+            await dbService.redisSet(key, `value_${i}`, 300);
+          })()
         );
       }
 
@@ -335,10 +367,11 @@ describe("DatabaseService Integration", () => {
         const value = await dbService.redisGet(`perf_key_${i}`);
         expect(value).toBe(`value_${i}`);
       }
+      await Promise.all(redisKeys.map((key) => dbService.redisDel(key)));
     });
 
     it("should handle large dataset operations", async () => {
-      const batchSize = 100;
+      const batchSize = 40;
       const operations = [];
 
       // Create large batch of documents

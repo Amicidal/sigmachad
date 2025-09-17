@@ -17,6 +17,8 @@ import {
   cleanupTestDatabase,
   clearTestData,
   checkDatabaseHealth,
+  insertTestFixtures,
+  TEST_FIXTURE_IDS,
 } from "../../test-utils/database-helpers.js";
 
 describe("APIGateway Integration", () => {
@@ -28,7 +30,7 @@ describe("APIGateway Integration", () => {
 
   beforeAll(async () => {
     // Setup test database
-    dbService = await setupTestDatabase();
+    dbService = await setupTestDatabase({ silent: true });
     const isHealthy = await checkDatabaseHealth(dbService);
     if (!isHealthy) {
       throw new Error(
@@ -61,7 +63,11 @@ describe("APIGateway Integration", () => {
 
   beforeEach(async () => {
     if (dbService && dbService.isInitialized()) {
-      await clearTestData(dbService);
+      await clearTestData(dbService, {
+        includeVector: false,
+        includeCache: false,
+        silent: true,
+      });
     }
   });
 
@@ -95,6 +101,7 @@ describe("APIGateway Integration", () => {
     it("should respond on key API v1 routes via injection", async () => {
       // Validate nested routes by performing minimal requests
       // Graph search: expect 200 on valid payload (or 400 for validation in non-strict)
+      await insertTestFixtures(dbService);
       const graphSearch = await app.inject({
         method: "POST",
         url: "/api/v1/graph/search",
@@ -102,6 +109,14 @@ describe("APIGateway Integration", () => {
         payload: JSON.stringify({ query: "function", limit: 1 })
       });
       expect(graphSearch.statusCode).toBe(200);
+      const graphBody = JSON.parse(graphSearch.payload);
+      expect(graphBody).toEqual(
+        expect.objectContaining({
+          success: true,
+          data: expect.any(Object),
+        })
+      );
+      expect(Array.isArray(graphBody.data.entities)).toBe(true);
 
       // Tests: plan-and-generate
       const testPlan = await app.inject({
@@ -361,16 +376,16 @@ describe("APIGateway Integration", () => {
         url: "/api/v1/graph/examples/invalid-id",
       });
 
-      // Should handle gracefully even with invalid ID
-      if (response.statusCode === 404) {
-        throw new Error('APIGateway route must be implemented for this test');
-      }
-      if (response.statusCode === 200) {
-        try { JSON.parse(response.payload || '{}'); } catch {}
-      } else if (response.statusCode === 500) {
-        const body = JSON.parse(response.payload || '{}');
-        expect(body).toHaveProperty('error');
-      }
+      expect(response.statusCode).toBe(404);
+      const body = JSON.parse(response.payload);
+      expect(body).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.objectContaining({
+            code: "ENTITY_NOT_FOUND",
+          }),
+        })
+      );
     });
   });
 
@@ -428,26 +443,14 @@ describe("APIGateway Integration", () => {
         expect(cycleGateway.getConfig().port).toBeGreaterThan(0);
         expect(cycleApp.server.listening).toBe(true);
         const resp = await cycleApp.inject({ method: 'GET', url: '/health' });
-        // Be explicit about acceptable outcomes and validate payload shape
-        if (resp.statusCode === 200) {
-          const body = JSON.parse(resp.payload || '{}');
-          expect(body).toEqual(
-            expect.objectContaining({
-              status: 'healthy',
-              services: expect.any(Object),
-            })
-          );
-        } else if (resp.statusCode === 503) {
-          const body = JSON.parse(resp.payload || '{}');
-          expect(body).toEqual(
-            expect.objectContaining({
-              status: 'unhealthy',
-              services: expect.any(Object),
-            })
-          );
-        } else {
-          throw new Error(`Unexpected /health status: ${resp.statusCode}`);
-        }
+        expect(resp.statusCode).toBe(200);
+        const body = JSON.parse(resp.payload || '{}');
+        expect(body).toEqual(
+          expect.objectContaining({
+            status: 'healthy',
+            services: expect.any(Object),
+          })
+        );
 
         await cycleGateway.stop();
         expect(cycleApp.server.listening).toBe(false);

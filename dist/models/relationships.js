@@ -43,6 +43,9 @@ export var RelationshipType;
     RelationshipType["BELONGS_TO_DOMAIN"] = "BELONGS_TO_DOMAIN";
     RelationshipType["DOCUMENTED_BY"] = "DOCUMENTED_BY";
     RelationshipType["CLUSTER_MEMBER"] = "CLUSTER_MEMBER";
+    RelationshipType["DOMAIN_RELATED"] = "DOMAIN_RELATED";
+    RelationshipType["GOVERNED_BY"] = "GOVERNED_BY";
+    RelationshipType["DOCUMENTS_SECTION"] = "DOCUMENTS_SECTION";
     // Security relationships
     RelationshipType["HAS_SECURITY_ISSUE"] = "HAS_SECURITY_ISSUE";
     RelationshipType["DEPENDS_ON_VULNERABLE"] = "DEPENDS_ON_VULNERABLE";
@@ -60,4 +63,31 @@ export var RelationshipType;
     // Checkpoint relationships
     RelationshipType["CHECKPOINT_INCLUDES"] = "CHECKPOINT_INCLUDES";
 })(RelationshipType || (RelationshipType = {}));
+// Shared list of relationship types that describe code edges.
+export const CODE_RELATIONSHIP_TYPES = [
+    RelationshipType.CALLS,
+    RelationshipType.REFERENCES,
+    RelationshipType.IMPLEMENTS,
+    RelationshipType.EXTENDS,
+    RelationshipType.DEPENDS_ON,
+    RelationshipType.OVERRIDES,
+    RelationshipType.READS,
+    RelationshipType.WRITES,
+    RelationshipType.THROWS,
+    RelationshipType.TYPE_USES,
+    RelationshipType.RETURNS_TYPE,
+    RelationshipType.PARAM_TYPE,
+];
+// Documentation relationship helpers
+export const DOCUMENTATION_RELATIONSHIP_TYPES = [
+    RelationshipType.DESCRIBES_DOMAIN,
+    RelationshipType.BELONGS_TO_DOMAIN,
+    RelationshipType.DOCUMENTED_BY,
+    RelationshipType.CLUSTER_MEMBER,
+    RelationshipType.DOMAIN_RELATED,
+    RelationshipType.GOVERNED_BY,
+    RelationshipType.DOCUMENTS_SECTION,
+];
+const DOCUMENTATION_RELATIONSHIP_TYPE_SET = new Set(DOCUMENTATION_RELATIONSHIP_TYPES);
+export const isDocumentationRelationshipType = (type) => DOCUMENTATION_RELATIONSHIP_TYPE_SET.has(type);
 //# sourceMappingURL=relationships.js.map

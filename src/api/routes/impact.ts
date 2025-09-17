@@ -1,220 +1,226 @@
 /**
  * Impact Analysis Routes
- * Handles cascading impact analysis for code changes
+ * Provides cascading impact analysis for proposed changes.
  */
 
 import { FastifyInstance } from "fastify";
 import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
 import { DatabaseService } from "../../services/DatabaseService.js";
-import { RelationshipType } from "../../models/entities.js";
+import { RelationshipType } from "../../models/relationships.js";
 
-interface ImpactAnalysisRequest {
-  changes: {
-    entityId: string;
-    changeType: "modify" | "delete" | "rename";
-    newName?: string;
-    signatureChange?: boolean;
-  }[];
-  includeIndirect?: boolean;
-  maxDepth?: number;
+type ChangeType = "modify" | "delete" | "rename";
+
+interface ImpactChange {
+  entityId: string;
+  changeType: ChangeType;
+  newName?: string;
+  signatureChange?: boolean;
 }
 
-interface ImpactAnalysis {
-  directImpact: {
-    entities: any[];
-    severity: "high" | "medium" | "low";
-    reason: string;
-  }[];
-  cascadingImpact: {
-    level: number;
-    entities: any[];
-    relationship: string;
-    confidence: number;
-  }[];
-  testImpact: {
-    affectedTests: any[];
-    requiredUpdates: string[];
-    coverageImpact: number;
+interface ImpactEntityRef {
+  id: string;
+  name: string;
+  type: string;
+}
+
+interface DirectImpactEntry {
+  entities: ImpactEntityRef[];
+  severity: "low" | "medium" | "high";
+  reason: string;
+}
+
+interface CascadingImpactEntry {
+  level: number;
+  entities: ImpactEntityRef[];
+  relationship: string;
+  confidence: number;
+}
+
+interface TestImpactMetrics {
+  affectedTests: ImpactEntityRef[];
+  requiredUpdates: string[];
+  coverageImpact: number;
+}
+
+interface DocumentationImpactMetrics {
+  staleDocs: string[];
+  requiredUpdates: string[];
+}
+
+interface ImpactRecommendation {
+  priority: "immediate" | "high" | "medium" | "low";
+  description: string;
+  effort: "low" | "medium" | "high";
+  impact: string;
+  type: "warning" | "requirement" | "info" | string;
+}
+
+interface ImpactAnalysisResult {
+  directImpact: DirectImpactEntry[];
+  cascadingImpact: CascadingImpactEntry[];
+  testImpact: TestImpactMetrics;
+  documentationImpact: DocumentationImpactMetrics;
+  recommendations: ImpactRecommendation[];
+}
+
+function toEntityRef(id: string, fallbackName?: string, type: string = "entity"): ImpactEntityRef {
+  return {
+    id,
+    name: fallbackName || id,
+    type,
   };
-  documentationImpact: {
-    staleDocs: any[];
-    requiredUpdates: string[];
-  };
-  recommendations: {
-    priority: "immediate" | "planned" | "optional";
-    description: string;
-    effort: "low" | "medium" | "high";
-    impact: "breaking" | "functional" | "cosmetic";
-    type?: "warning" | "requirement" | "suggestion";
-  }[];
 }
 
 async function analyzeChangeImpact(
   kgService: KnowledgeGraphService,
-  changes: ImpactAnalysisRequest["changes"],
+  changes: ImpactChange[],
   includeIndirect: boolean,
   maxDepth: number
-): Promise<ImpactAnalysis> {
-  const directImpact: ImpactAnalysis["directImpact"] = [];
-  const cascadingImpact: ImpactAnalysis["cascadingImpact"] = [];
-  const testImpact: ImpactAnalysis["testImpact"] = {
+): Promise<ImpactAnalysisResult> {
+  const directImpact: DirectImpactEntry[] = [];
+  const cascadingImpact: CascadingImpactEntry[] = [];
+  const testImpact: TestImpactMetrics = {
     affectedTests: [],
     requiredUpdates: [],
     coverageImpact: 0,
   };
-  const documentationImpact: ImpactAnalysis["documentationImpact"] = {
+  const documentationImpact: DocumentationImpactMetrics = {
     staleDocs: [],
     requiredUpdates: [],
   };
-  const recommendations: ImpactAnalysis["recommendations"] = [];
+  const recommendations: ImpactRecommendation[] = [];
 
   for (const change of changes) {
     try {
-      // Get the entity being changed
       const entity = await kgService.getEntity(change.entityId);
-      if (!entity) continue;
+      if (!entity) {
+        continue;
+      }
 
-      // Analyze direct impact - entities that directly depend on this entity
       const directRelationships = await kgService.getRelationships({
         toEntityId: change.entityId,
         limit: 100,
       });
 
       if (directRelationships.length > 0) {
+        const entities = directRelationships.map((rel) =>
+          toEntityRef(rel.fromEntityId)
+        );
+
+        const severity: DirectImpactEntry["severity"] = change.changeType === "delete"
+          ? "high"
+          : change.signatureChange
+          ? "medium"
+          : "low";
+
         directImpact.push({
-          entities: directRelationships.map((rel) => ({
-            id: rel.fromEntityId,
-            name: rel.fromEntityId, // Could be enhanced to get entity name
-            type: "entity",
-          })),
-          severity:
-            change.changeType === "delete"
-              ? "high"
-              : change.signatureChange
-              ? "medium"
-              : "low",
+          entities,
+          severity,
           reason: `${change.changeType} of ${
-            (entity as any).name || entity.id
+            (entity as any).name || change.entityId
           } affects ${directRelationships.length} dependent entities`,
         });
       }
 
-      // Analyze cascading impact if requested
       if (includeIndirect) {
-        // Include inheritance relationships for interface changes
         const relationshipTypes: RelationshipType[] = [
           RelationshipType.CALLS,
           RelationshipType.DEPENDS_ON,
           RelationshipType.REFERENCES,
           RelationshipType.IMPLEMENTS,
-          RelationshipType.EXTENDS
+          RelationshipType.EXTENDS,
         ];
-        
-        // Check both directions for IMPLEMENTS and REFERENCES relationships
-        // This catches classes that implement interfaces and functions that reference them
+
         const forwardRelationships = await kgService.getRelationships({
           toEntityId: change.entityId,
           type: [RelationshipType.IMPLEMENTS, RelationshipType.REFERENCES],
           limit: 100,
         });
-        
-        // Add entities that implement or reference this entity
+
         if (forwardRelationships.length > 0) {
           const implementers = forwardRelationships.filter(
-            rel => rel.type === RelationshipType.IMPLEMENTS
+            (rel) => rel.type === RelationshipType.IMPLEMENTS
           );
           const references = forwardRelationships.filter(
-            rel => rel.type === RelationshipType.REFERENCES
+            (rel) => rel.type === RelationshipType.REFERENCES
           );
-          
+
           if (implementers.length > 0) {
             cascadingImpact.push({
               level: 1,
-              entities: implementers.map((rel) => ({
-                id: rel.fromEntityId,
-                name: rel.fromEntityId,
-                type: "entity",
-              })),
+              entities: implementers.map((rel) => toEntityRef(rel.fromEntityId)),
               relationship: "implements",
-              confidence: 0.95, // High confidence for direct implementation
+              confidence: 0.95,
             });
           }
-          
+
           if (references.length > 0) {
             cascadingImpact.push({
               level: 1,
-              entities: references.map((rel) => ({
-                id: rel.fromEntityId,
-                name: rel.fromEntityId,
-                type: "entity",
-              })),
+              entities: references.map((rel) => toEntityRef(rel.fromEntityId)),
               relationship: "references",
-              confidence: 0.9, // High confidence for direct references
+              confidence: 0.9,
             });
           }
         }
-        
+
         const paths = await kgService.findPaths({
           startEntityId: change.entityId,
-          maxDepth: maxDepth,
-          relationshipTypes: relationshipTypes,
+          maxDepth,
+          relationshipTypes,
         });
 
-        for (const path of paths) {
-          if (path.nodeIds && path.nodeIds.length > 2) {
-            // More than direct connection
-            const level = Math.ceil(path.nodeIds.length / 2); // Estimate level based on path length
+        for (const rawPath of paths) {
+          const nodeIds = Array.isArray(rawPath)
+            ? rawPath
+            : Array.isArray((rawPath as any)?.nodeIds)
+            ? (rawPath as any).nodeIds
+            : [];
+
+          if (nodeIds.length > 2) {
+            const level = Math.max(1, Math.ceil(nodeIds.length / 2));
+            const confidence = Math.max(0, 0.8 - level * 0.1);
+            const entities = nodeIds.slice(1).map((id) => toEntityRef(id));
+
             cascadingImpact.push({
-              level: level,
-              entities: path.nodeIds.slice(1).map((nodeId: string) => ({
-                id: nodeId,
-                name: nodeId,
-                type: "entity",
-              })),
+              level,
+              entities,
               relationship: "indirect_dependency",
-              confidence: 0.8 - level * 0.1, // Decreasing confidence with distance
+              confidence,
             });
           }
         }
       }
 
-      // Analyze test impact
       const testRelationships = await kgService.getRelationships({
         toEntityId: change.entityId,
         type: RelationshipType.TESTS,
       });
 
       if (testRelationships.length > 0) {
-        testImpact.affectedTests = testRelationships.map((rel) => ({
-          id: rel.fromEntityId,
-          name: rel.fromEntityId,
-          type: "unit",
-        }));
-
+        testImpact.affectedTests = testRelationships.map((rel) =>
+          toEntityRef(rel.fromEntityId, undefined, "unit")
+        );
         testImpact.requiredUpdates = testRelationships.map(
           (rel) =>
             `Update test ${rel.fromEntityId} to reflect changes to ${
               (entity as any).name || entity.id
             }`
         );
-
-        testImpact.coverageImpact = testRelationships.length * 15; // Estimate 15% coverage per test
+        testImpact.coverageImpact = testRelationships.length * 15;
       }
 
-      // Add recommendations based on change type
+      const entityName = (entity as any).name || entity.id;
+
       if (change.changeType === "delete") {
-        // Add specific warnings for file deletion
         recommendations.push({
           priority: "immediate",
-          description: `Consider migration path before deleting ${
-            (entity as any).name || entity.id
-          }`,
+          description: `Consider migration path before deleting ${entityName}`,
           effort: "high",
           impact: "breaking",
           type: "warning",
         });
-        
-        // Add warning type recommendation
+
         if (directRelationships.length > 0) {
           recommendations.push({
             priority: "immediate",
@@ -224,8 +230,7 @@ async function analyzeChangeImpact(
             type: "warning",
           });
         }
-        
-        // Add requirement type recommendation for tests
+
         if (testImpact.affectedTests.length > 0) {
           recommendations.push({
             priority: "immediate",
@@ -238,20 +243,14 @@ async function analyzeChangeImpact(
       } else if (change.signatureChange) {
         recommendations.push({
           priority: "immediate",
-          description: `Update dependent entities to match new signature of ${
-            (entity as any).name || entity.id
-          }`,
+          description: `Update dependent entities to match new signature of ${entityName}`,
           effort: "medium",
           impact: "breaking",
           type: "requirement",
         });
       }
     } catch (error) {
-      console.error(
-        `Error analyzing impact for change ${change.entityId}:`,
-        error
-      );
-      // Continue with other changes even if one fails
+      console.error(`Error analyzing impact for change ${change.entityId}:`, error);
     }
   }
 
@@ -269,7 +268,6 @@ export async function registerImpactRoutes(
   kgService: KnowledgeGraphService,
   _dbService: DatabaseService
 ): Promise<void> {
-  // POST /api/impact/analyze - Analyze change impact
   app.post(
     "/impact/analyze",
     {
@@ -302,11 +300,13 @@ export async function registerImpactRoutes(
     },
     async (request, reply) => {
       try {
-        const params: ImpactAnalysisRequest =
-          request.body as ImpactAnalysisRequest;
+        const params = request.body as {
+          changes: ImpactChange[];
+          includeIndirect?: boolean;
+          maxDepth?: number;
+        };
 
-        // Validate request parameters
-        if (!params.changes || !Array.isArray(params.changes)) {
+        if (!Array.isArray(params.changes) || params.changes.length === 0) {
           return reply.status(400).send({
             success: false,
             error: {
@@ -316,7 +316,6 @@ export async function registerImpactRoutes(
           });
         }
 
-        // Validate each change entry
         for (const change of params.changes) {
           if (!change.entityId) {
             return reply.status(400).send({
@@ -327,24 +326,26 @@ export async function registerImpactRoutes(
               },
             });
           }
-          
+
           if (!change.changeType || !["modify", "delete", "rename"].includes(change.changeType)) {
             return reply.status(400).send({
               success: false,
               error: {
                 code: "INVALID_REQUEST",
-                message: "Each change must have a valid changeType (modify, delete, or rename)",
+                message:
+                  "Each change must have a valid changeType (modify, delete, or rename)",
               },
             });
           }
         }
 
-        // Analyze impact of changes using the knowledge graph
-        const analysis: ImpactAnalysis = await analyzeChangeImpact(
+        const analysis = await analyzeChangeImpact(
           kgService,
           params.changes,
-          params.includeIndirect !== false, // Default to true
-          params.maxDepth || 5
+          params.includeIndirect !== false,
+          params.maxDepth && Number.isFinite(params.maxDepth)
+            ? Math.max(1, Math.min(10, Math.floor(params.maxDepth)))
+            : 5
         );
 
         reply.send({
@@ -363,12 +364,10 @@ export async function registerImpactRoutes(
     }
   );
 
-  // Basic changes listing for impact module
   app.get("/impact/changes", async (_request, reply) => {
     reply.send({ success: true, data: [] });
   });
 
-  // GET /api/impact/entity/{entityId} - Get impact assessment for entity
   app.get(
     "/impact/entity/:entityId",
     {
@@ -395,24 +394,17 @@ export async function registerImpactRoutes(
     async (request, reply) => {
       try {
         const { entityId } = request.params as { entityId: string };
-        const { changeType, includeReverse } = request.query as {
-          changeType?: string;
-          includeReverse?: boolean;
-        };
+        const { changeType } = request.query as { changeType?: ChangeType };
 
-        // TODO: Calculate impact for specific entity change
         const impact = {
           entityId,
           changeType: changeType || "modify",
-          affectedEntities: [],
-          riskLevel: "medium",
-          mitigationStrategies: [],
+          affectedEntities: [] as ImpactEntityRef[],
+          riskLevel: "medium" as const,
+          mitigationStrategies: [] as string[],
         };
 
-        reply.send({
-          success: true,
-          data: impact,
-        });
+        reply.send({ success: true, data: impact });
       } catch (error) {
         reply.status(500).send({
           success: false,
@@ -425,7 +417,6 @@ export async function registerImpactRoutes(
     }
   );
 
-  // POST /api/impact/simulate - Simulate impact of different change scenarios
   app.post(
     "/impact/simulate",
     {
@@ -464,25 +455,23 @@ export async function registerImpactRoutes(
     },
     async (request, reply) => {
       try {
-        const { scenarios } = request.body as { scenarios: any[] };
+        const { scenarios } = request.body as {
+          scenarios: Array<{ name: string; changes: ImpactChange[] }>;
+        };
 
-        // TODO: Compare impact of different change scenarios
         const comparison = {
           scenarios: scenarios.map((scenario) => ({
             name: scenario.name,
             impact: {
               entitiesAffected: 0,
-              riskLevel: "medium",
-              effort: "medium",
+              riskLevel: "medium" as const,
+              effort: "medium" as const,
             },
           })),
-          recommendations: [],
+          recommendations: [] as ImpactRecommendation[],
         };
 
-        reply.send({
-          success: true,
-          data: comparison,
-        });
+        reply.send({ success: true, data: comparison });
       } catch (error) {
         reply.status(500).send({
           success: false,
@@ -495,16 +484,13 @@ export async function registerImpactRoutes(
     }
   );
 
-  // GET /api/impact/history/{entityId} - Get impact history for entity
   app.get(
     "/history/:entityId",
     {
       schema: {
         params: {
           type: "object",
-          properties: {
-            entityId: { type: "string" },
-          },
+          properties: { entityId: { type: "string" } },
           required: ["entityId"],
         },
         querystring: {
@@ -519,26 +505,17 @@ export async function registerImpactRoutes(
     async (request, reply) => {
       try {
         const { entityId } = request.params as { entityId: string };
-        const { since, limit } = request.query as {
-          since?: string;
-          limit?: number;
-        };
-
-        // TODO: Retrieve impact history from database
         const history = {
           entityId,
-          impacts: [],
+          impacts: [] as any[],
           summary: {
             totalChanges: 0,
             averageImpact: "medium",
-            mostAffected: [],
+            mostAffected: [] as ImpactEntityRef[],
           },
         };
 
-        reply.send({
-          success: true,
-          data: history,
-        });
+        reply.send({ success: true, data: history });
       } catch (error) {
         reply.status(500).send({
           success: false,

@@ -920,11 +920,28 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 });
             }
             catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to update system configuration';
+                const validationPatterns = [
+                    'must be at least',
+                    'cannot be negative',
+                    'must be at least 1000ms',
+                ];
+                if (error instanceof Error &&
+                    validationPatterns.some((pattern) => message.includes(pattern))) {
+                    reply.status(400).send({
+                        success: false,
+                        error: {
+                            code: 'CONFIG_VALIDATION_FAILED',
+                            message,
+                        }
+                    });
+                    return;
+                }
                 reply.status(500).send({
                     success: false,
                     error: {
                         code: 'CONFIG_UPDATE_FAILED',
-                        message: error instanceof Error ? error.message : 'Failed to update system configuration'
+                        message,
                     }
                 });
             }

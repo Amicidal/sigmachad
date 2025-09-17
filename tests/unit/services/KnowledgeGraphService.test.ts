@@ -29,12 +29,13 @@ import {
   GraphRelationship,
   RelationshipType
 } from '../../../src/models/relationships';
+import { noiseConfig } from '../../../src/config/noise';
 import {
   GraphSearchRequest,
   GraphExamples,
   DependencyAnalysis
 } from '../../../src/models/types';
-import { canonicalRelationshipId } from '../../../src/utils/codeEdges';
+import { canonicalRelationshipId, normalizeCodeEdge } from '../../../src/utils/codeEdges';
 
 // Mock implementations
 import { makeNodeRow, makeRelationshipRow } from '../../test-utils/graph-fixtures';
@@ -492,6 +493,40 @@ describe('KnowledgeGraphService', () => {
         });
       });
 
+      it('promotes documentation metadata to query parameters', async () => {
+        mockDb.falkordbQuery.mockResolvedValue([]);
+
+        const now = new Date('2024-04-11T00:00:00Z');
+        const docRelationship = {
+          id: 'rel_doc_1',
+          fromEntityId: 'entity:service-A',
+          toEntityId: 'doc_serviceA_runbook',
+          type: RelationshipType.DOCUMENTED_BY,
+          created: now,
+          lastModified: now,
+          version: 1,
+          sectionAnchor: '## Intro Section',
+          summary: 'Service A runbook overview',
+          docIntent: 'governance',
+          tags: ['runbook', 'critical'],
+          stakeholders: ['owner@acme.test'],
+          metadata: {},
+        } as GraphRelationship;
+
+        await knowledgeGraphService.createRelationship(docRelationship);
+
+        const mergeCall = mockDb.falkordbQuery.mock.calls.find(
+          ([query]) => typeof query === 'string' && query.includes('MERGE (a)-[r:DOCUMENTED_BY')
+        );
+
+        expect(mergeCall).toBeDefined();
+        const params = mergeCall![1];
+        expect(params.sectionAnchor).toBe('intro-section');
+        expect(params.docIntent).toBe('governance');
+        expect(params.tags).toEqual(['runbook', 'critical']);
+        expect(params.stakeholders).toEqual(['owner@acme.test']);
+      });
+
       it('merges incoming code edges with existing evidence and preserves historical context', async () => {
         const existingRow = {
           r: [
@@ -554,6 +589,8 @@ describe('KnowledgeGraphService', () => {
         expect(params.id).toBe(canonicalRelationshipId(incoming.fromEntityId, incoming));
         expect(params.confidence).toBeCloseTo(0.8, 5);
         expect(params.context).toBe('src/foo.ts:5');
+        expect(params.firstSeenAt).toBe('2024-01-01T00:00:00.000Z');
+        expect(params.lastSeenAt).toBe('2024-01-10T00:00:00.000Z');
 
         const storedEvidence = JSON.parse(params.evidence);
         expect(storedEvidence).toEqual([
@@ -571,6 +608,54 @@ describe('KnowledgeGraphService', () => {
         expect(metadata.confidence).toBeUndefined();
 
         mockDb.falkordbQuery = originalQuery;
+      });
+
+      it('preserves earliest metadata line when prior evidence points earlier', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          if (query.includes('WHERE r.id = $id RETURN r LIMIT 1')) {
+            return [
+              {
+                r: [
+                  ['id', 'rel_line_merge'],
+                  ['type', RelationshipType.CALLS],
+                  ['metadata', JSON.stringify({ path: 'src/foo.ts', line: 5 })],
+                ],
+                fromId: 'sym:src/foo.ts#caller@hash',
+                toId: 'file:src/helper.ts:helper',
+              },
+            ];
+          }
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_line_merge',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'file:src/helper.ts:helper',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-01-10T00:00:00Z'),
+          lastModified: new Date('2024-01-10T00:00:00Z'),
+          version: 1,
+          metadata: {
+            path: 'src/foo.ts',
+            line: 12,
+            _existingEarliestLine: 5,
+          },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find((c) => c.query.includes('MERGE (a)-[r:CALLS'));
+        expect(mergeCall).toBeDefined();
+        const metadata = JSON.parse(mergeCall!.params.metadata);
+        expect(metadata.line).toBe(5);
       });
 
       it('backfills to_ref fields when target entity metadata is missing', async () => {
@@ -622,11 +707,97 @@ describe('KnowledgeGraphService', () => {
         mockDb.falkordbQuery = originalQuery;
       });
 
-      it('synthesizes why hints and defaults confidence for resolved edges', async () => {
+      it('skips low-confidence inferred code edges below the noise threshold', async () => {
+        const callCountBefore = mockDb.falkordbQuery.mock.calls.length;
+        const emitCountBefore = mockEventEmitter.emit.mock.calls.length;
+
+        const relationship: GraphRelationship = {
+          id: 'rel_low_conf',
+          fromEntityId: 'sym:src/low.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-01-06T00:00:00Z'),
+          lastModified: new Date('2024-01-06T00:00:00Z'),
+          version: 1,
+          inferred: true,
+          confidence: 0.2,
+          metadata: { path: 'src/low.ts', line: 7 },
+        } as GraphRelationship;
+
+        await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+
+        const newCalls = mockDb.falkordbQuery.mock.calls.slice(callCountBefore);
+        expect(newCalls.some(([query]) => typeof query === 'string' && query.includes('MERGE (a)-[r:'))).toBe(false);
+
+        const newEmits = mockEventEmitter.emit.mock.calls.slice(emitCountBefore);
+        expect(newEmits.some(([event]) => event === 'relationshipCreated')).toBe(false);
+      });
+
+      it('persists low-confidence non-inferred code edges', async () => {
+        const callsBefore = mockDb.falkordbQuery.mock.calls.length;
+
+        const relationship: GraphRelationship = {
+          id: 'rel_low_conf_non_inferred',
+          fromEntityId: 'sym:src/low.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-01-06T00:00:00Z'),
+          lastModified: new Date('2024-01-06T00:00:00Z'),
+          version: 1,
+          inferred: false,
+          confidence: 0.2,
+          metadata: { path: 'src/low.ts', line: 8 },
+        } as GraphRelationship;
+
+        await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+
+        const newCalls = mockDb.falkordbQuery.mock.calls.slice(callsBefore);
+        const mergeCalls = newCalls.filter(
+          ([query]) => typeof query === 'string' && query.includes('MERGE (a)-[r:CALLS')
+        );
+        expect(mergeCalls.length).toBeGreaterThan(0);
+      });
+
+      it('hoists occurrences metadata so counters persist correctly', async () => {
         const calls: Array<{ query: string; params: any }> = [];
         const originalQuery = mockDb.falkordbQuery;
         mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
           calls.push({ query, params });
+          if (query.includes('WHERE r.id = $id RETURN r LIMIT 1')) {
+            return [];
+          }
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_occ_scan_metadata',
+          fromEntityId: 'sym:src/scan.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-01-07T00:00:00Z'),
+          lastModified: new Date('2024-01-07T00:00:00Z'),
+          version: 1,
+          metadata: { path: 'src/scan.ts', line: 12, occurrencesScan: 4 },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find((c) => typeof c.query === 'string' && c.query.includes('MERGE (a)-[r:CALLS'));
+        expect(mergeCall).toBeDefined();
+        expect(mergeCall!.params.occurrencesScan).toBe(4);
+      });
+
+      it('synthesizes why hints and defaults confidence for resolved edges', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('UNWIND $rows AS row')) {
+            calls.push({ query, params });
+          }
           return [];
         });
 
@@ -657,11 +828,117 @@ describe('KnowledgeGraphService', () => {
         mockDb.falkordbQuery = originalQuery;
       });
 
+      it('includes via-import hint when resolution reflects deep import linking', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('UNWIND $rows AS row')) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_via_import',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'external:lodash',
+          type: RelationshipType.REFERENCES,
+          created: new Date('2024-01-02T00:00:00Z'),
+          lastModified: new Date('2024-01-02T00:00:00Z'),
+          version: 1,
+          resolution: 'via-import',
+          metadata: {},
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find((c) => c.query.includes('MERGE (a)-[r:REFERENCES'));
+        expect(mergeCall).toBeDefined();
+        expect(mergeCall!.params.why).toBe('via import deep resolution');
+      });
+
+      it('describes direct AST resolution when edges resolve directly', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const getEntitySpy = vi.spyOn(knowledgeGraphService, 'getEntity').mockResolvedValue(null);
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (
+            typeof query === 'string' &&
+            (query.includes('UNWIND $rows AS row') || query.includes('MERGE (a)-[r:REFERENCES'))
+          ) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_direct_resolution',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'file:src/bar.ts:Symbol',
+          type: RelationshipType.REFERENCES,
+          created: new Date('2024-01-04T00:00:00Z'),
+          lastModified: new Date('2024-01-04T00:00:00Z'),
+          version: 1,
+          resolution: 'direct',
+          metadata: {},
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          getEntitySpy.mockRestore();
+        }
+
+        const mergeCall = calls.find((c) => c.query.includes('MERGE (a)-[r:REFERENCES'));
+        expect(mergeCall).toBeDefined();
+        expect(mergeCall!.params.why).toBe('direct AST resolution');
+      });
+
+      it('describes heuristic matches in why output when only heuristics fire', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('UNWIND $rows AS row')) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_heuristic_why',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'file:src/bar.ts:callee',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-01-03T00:00:00Z'),
+          lastModified: new Date('2024-01-03T00:00:00Z'),
+          version: 1,
+          source: 'heuristic' as any,
+          metadata: {},
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find((c) => c.query.includes('MERGE (a)-[r:CALLS'));
+        expect(mergeCall).toBeDefined();
+        expect(mergeCall!.params.why).toBe('heuristic match');
+      });
+
       it('mirrors structured fromRef metadata into scalar fields', async () => {
         const calls: Array<{ query: string; params: any }> = [];
         const originalQuery = mockDb.falkordbQuery;
         mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
-          calls.push({ query, params });
+          if (typeof query === 'string' && query.includes('UNWIND $rows AS row')) {
+            calls.push({ query, params });
+          }
           return [];
         });
 
@@ -696,6 +973,99 @@ describe('KnowledgeGraphService', () => {
         });
 
         mockDb.falkordbQuery = originalQuery;
+      });
+
+      it('defaults validity metadata when history tracking is enabled', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const historySpy = vi.spyOn(knowledgeGraphService as any, 'isHistoryEnabled').mockReturnValue(true);
+        const dualWriteSpy = vi
+          .spyOn(knowledgeGraphService as any, 'dualWriteAuxiliaryForEdge')
+          .mockResolvedValue(undefined);
+        const unifySpy = vi
+          .spyOn(knowledgeGraphService as any, 'unifyResolvedEdgePlaceholders')
+          .mockResolvedValue(undefined);
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          if (query.includes('WHERE r.id = $id RETURN r LIMIT 1')) {
+            return [];
+          }
+          return [];
+        });
+
+        const created = new Date('2024-05-05T00:00:00Z');
+        const relationship: GraphRelationship = {
+          id: 'rel_history',
+          fromEntityId: 'sym:src/history.ts#caller@hash',
+          toEntityId: 'file:src/historyTarget.ts:callee',
+          type: RelationshipType.CALLS,
+          created,
+          lastModified: created,
+          version: 1,
+          metadata: { path: 'src/history.ts', line: 4 },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        expect(dualWriteSpy).toHaveBeenCalledTimes(1);
+        const [capturedRel] = dualWriteSpy.mock.calls[0];
+        expect((capturedRel as any).active).toBe(true);
+        expect((capturedRel as any).firstSeenAt).toBeInstanceOf(Date);
+        expect((capturedRel as any).validFrom).toBeInstanceOf(Date);
+        expect((capturedRel as any).validFrom?.toISOString()).toBe((capturedRel as any).firstSeenAt?.toISOString());
+
+        const mergeCall = calls.find((c) => c.query.includes('MERGE (a)-[r:CALLS'));
+        expect(mergeCall).toBeDefined();
+        expect(mergeCall!.params.firstSeenAt).toBe((capturedRel as any).firstSeenAt.toISOString());
+
+        historySpy.mockRestore();
+        dualWriteSpy.mockRestore();
+        unifySpy.mockRestore();
+      });
+
+      it('reconstructs structured refs when only scalar to_ref/from_ref fields are provided', () => {
+        const relationship: GraphRelationship = {
+          id: 'rel_scalar_refs',
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-02-10T00:00:00Z'),
+          lastModified: new Date('2024-02-10T00:00:00Z'),
+          version: 1,
+          metadata: {},
+        } as GraphRelationship;
+        (relationship as any).to_ref_kind = 'fileSymbol';
+        (relationship as any).to_ref_file = 'src/target.ts';
+        (relationship as any).to_ref_symbol = 'Target';
+        (relationship as any).to_ref_name = 'Target';
+        (relationship as any).from_ref_kind = 'fileSymbol';
+        (relationship as any).from_ref_file = 'src/source.ts';
+        (relationship as any).from_ref_symbol = 'caller';
+        (relationship as any).from_ref_name = 'caller';
+
+        const normalized = (knowledgeGraphService as any).normalizeRelationship(relationship);
+
+        expect(normalized.toRef).toEqual({
+          id: 'file:src/target.ts:Target',
+          kind: 'fileSymbol',
+          file: 'src/target.ts',
+          symbol: 'Target',
+          name: 'Target',
+        });
+        expect((normalized as any).fromRef).toEqual({
+          id: 'sym:src/source.ts#caller@hash',
+          kind: 'fileSymbol',
+          file: 'src/source.ts',
+          symbol: 'caller',
+          name: 'caller',
+        });
+        expect((normalized.metadata as any).toRef).toEqual(normalized.toRef);
+        expect((normalized.metadata as any).fromRef).toEqual((normalized as any).fromRef);
       });
 
       it('writes auxiliary evidence and site records when dual-write is enabled', async () => {
@@ -739,6 +1109,970 @@ describe('KnowledgeGraphService', () => {
 
         expect(calls.some((c) => c.query.includes('MERGE (n:edge_evidence'))).toBe(true);
         expect(calls.some((c) => c.query.includes('MERGE (s:edge_site'))).toBe(true);
+      });
+
+      it('dual-writes evidence sourced exclusively from metadata', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('UNWIND $rows AS row')) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const rel = {
+          id: 'rel_meta_only',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'file:src/bar.ts:callee',
+          type: RelationshipType.CALLS,
+          metadata: {
+            path: 'src/foo.ts',
+            line: 42,
+            evidence: [{ source: 'heuristic', location: { path: 'src/foo.ts', line: 42 } }],
+          },
+        } as unknown as GraphRelationship;
+
+        try {
+          await (knowledgeGraphService as any).dualWriteAuxiliaryForEdge(rel);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+        }
+
+        const evidenceCall = calls.find((c) => c.query.includes('MERGE (n:edge_evidence'));
+        expect(evidenceCall).toBeDefined();
+        expect(evidenceCall?.params.edgeId).toBe('rel_meta_only');
+        expect(evidenceCall?.params.source).toBe('heuristic');
+        expect(evidenceCall?.params.path).toBe('src/foo.ts');
+        expect(evidenceCall?.params.line).toBe(42);
+      });
+
+      it('caps auxiliary evidence and candidate writes to configured limits', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const evidence = Array.from({ length: 55 }, (_, idx) => ({
+          source: 'ast',
+          location: { path: 'src/foo.ts', line: idx + 1 },
+        }));
+        const candidates = Array.from({ length: 25 }, (_, idx) => ({
+          name: `candidate-${idx}`,
+          resolver: 'heuristic',
+        }));
+
+        const rel = {
+          id: 'rel_truncate_aux',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'file:src/bar.ts:callee',
+          type: RelationshipType.CALLS,
+          metadata: {
+            evidence,
+            candidates,
+          },
+          evidence,
+        } as unknown as GraphRelationship;
+
+        try {
+          await (knowledgeGraphService as any).dualWriteAuxiliaryForEdge(rel);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+        }
+
+        const evidenceCalls = calls.filter((c) => typeof c.query === 'string' && c.query.includes('edge_evidence'));
+        expect(evidenceCalls.length).toBe(50);
+
+        const candidateCalls = calls.filter((c) => typeof c.query === 'string' && c.query.includes('edge_candidate'));
+        expect(candidateCalls.length).toBe(20);
+      });
+
+      it('uses metadata location when writing site nodes without normalized location', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('UNWIND $rows AS row')) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const rel = {
+          id: 'rel_site_meta',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'file:src/bar.ts:callee',
+          type: RelationshipType.CALLS,
+          siteHash: 'sh_site_meta',
+          siteId: 'site_meta',
+          metadata: {
+            path: 'src/foo.ts',
+            line: 21,
+            column: 4,
+            accessPath: 'useBar',
+          },
+        } as unknown as GraphRelationship;
+
+        try {
+          await (knowledgeGraphService as any).dualWriteAuxiliaryForEdge(rel);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+        }
+
+        const siteCall = calls.find((c) => c.query.includes('MERGE (s:edge_site'));
+        expect(siteCall).toBeDefined();
+        expect(siteCall?.params.edgeId).toBe('rel_site_meta');
+        expect(siteCall?.params.path).toBe('src/foo.ts');
+        expect(siteCall?.params.line).toBe(21);
+        expect(siteCall?.params.column).toBe(4);
+        expect(siteCall?.params.accessPath).toBe('useBar');
+        expect(siteCall?.params.siteId).toBe('site_meta');
+      });
+
+      it('skips auxiliary writes when the feature flag is disabled', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        process.env.EDGE_AUX_DUAL_WRITE = 'false';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_disabled_aux',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'file:src/bar.ts:callee',
+          type: RelationshipType.CALLS,
+          metadata: {
+            path: 'src/foo.ts',
+            line: 21,
+            evidence: [{ source: 'ast', location: { path: 'src/foo.ts', line: 21 } }],
+          },
+          evidence: [{ source: 'type-checker', location: { path: 'src/foo.ts', line: 21 } }] as any,
+        } as GraphRelationship;
+
+        try {
+          await (knowledgeGraphService as any).dualWriteAuxiliaryForEdge(relationship);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+        }
+
+        expect(calls.some((c) => c.query.includes('edge_evidence'))).toBe(false);
+        expect(calls.some((c) => c.query.includes('edge_site'))).toBe(false);
+        expect(calls.some((c) => c.query.includes('edge_candidate'))).toBe(false);
+        expect(calls.some((c) => c.query.includes('dataflow'))).toBe(false);
+      });
+
+      it('persists resolution candidates as auxiliary nodes when provided', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_candidates',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'file:src/bar.ts:callee',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-03-02T00:00:00Z'),
+          lastModified: new Date('2024-03-02T00:00:00Z'),
+          version: 1,
+          metadata: {
+            path: 'src/foo.ts',
+            line: 20,
+            toRef: { kind: 'fileSymbol', file: 'src/bar.ts', symbol: 'callee', name: 'callee' },
+            candidates: [
+              { id: 'sym:src/bar.ts#callee@hash', name: 'callee', resolver: 'coordinator', score: 0.9 },
+              { name: 'fallback', resolver: 'heuristic' },
+            ],
+          },
+          evidence: [{ source: 'ast', location: { path: 'src/foo.ts', line: 20 } }] as any,
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+        }
+
+        expect(calls.some((c) => c.query.includes('MERGE (n:edge_candidate'))).toBe(true);
+        expect(calls.some((c) => c.query.includes('MERGE (cand)-[:CANDIDATE_ENTITY'))).toBe(true);
+      });
+
+      it('writes dataflow helper nodes for READS/WRITES code edges with identifiers', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        const originalDf = process.env.EDGE_DATAFLOW_NODES;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+        process.env.EDGE_DATAFLOW_NODES = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_dataflow',
+          fromEntityId: 'sym:src/foo.ts#reader@hash',
+          toEntityId: 'file:src/store.ts:value',
+          type: RelationshipType.READS,
+          created: new Date('2024-03-03T00:00:00Z'),
+          lastModified: new Date('2024-03-03T00:00:00Z'),
+          version: 1,
+          dataFlowId: 'df_abc123',
+          metadata: {
+            path: 'src/foo.ts',
+            line: 30,
+            toRef: { kind: 'fileSymbol', file: 'src/store.ts', symbol: 'value', name: 'value' },
+          },
+          evidence: [{ source: 'ast', location: { path: 'src/foo.ts', line: 30 } }] as any,
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+          if (originalDf === undefined) delete process.env.EDGE_DATAFLOW_NODES;
+          else process.env.EDGE_DATAFLOW_NODES = originalDf;
+        }
+
+        expect(calls.some((c) => c.query.includes('MERGE (df:dataflow'))).toBe(true);
+        expect(calls.some((c) => c.query.includes('MERGE (a)-[:HAS_DATAFLOW]->(df)'))).toBe(true);
+        expect(calls.some((c) => c.query.includes('MERGE (df)-[:DATAFLOW_TO]->(b)'))).toBe(true);
+      });
+
+      it('writes dataflow helper nodes for WRITES code edges when enabled', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        const originalDf = process.env.EDGE_DATAFLOW_NODES;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+        process.env.EDGE_DATAFLOW_NODES = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_dataflow_write',
+          fromEntityId: 'sym:src/foo.ts#writer@hash',
+          toEntityId: 'file:src/store.ts:value',
+          type: RelationshipType.WRITES,
+          created: new Date('2024-03-05T00:00:00Z'),
+          lastModified: new Date('2024-03-05T00:00:00Z'),
+          version: 1,
+          dataFlowId: 'df_write123',
+          metadata: {
+            path: 'src/foo.ts',
+            line: 34,
+            toRef: { kind: 'fileSymbol', file: 'src/store.ts', symbol: 'value', name: 'value' },
+          },
+          evidence: [{ source: 'ast', location: { path: 'src/foo.ts', line: 34 } }] as any,
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+          if (originalDf === undefined) delete process.env.EDGE_DATAFLOW_NODES;
+          else process.env.EDGE_DATAFLOW_NODES = originalDf;
+        }
+
+        expect(calls.some((c) => c.query.includes('MERGE (df:dataflow'))).toBe(true);
+        expect(calls.some((c) => c.query.includes('MERGE (a)-[:HAS_DATAFLOW]->(df)'))).toBe(true);
+        expect(calls.some((c) => c.query.includes('MERGE (df)-[:DATAFLOW_TO]->(b)'))).toBe(true);
+      });
+
+      it('hoists metadata dataFlowId to emit dataflow helper nodes', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        const originalDf = process.env.EDGE_DATAFLOW_NODES;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+        process.env.EDGE_DATAFLOW_NODES = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_dataflow_meta',
+          fromEntityId: 'sym:src/foo.ts#reader@hash',
+          toEntityId: 'file:src/store.ts:value',
+          type: RelationshipType.READS,
+          created: new Date('2024-03-07T00:00:00Z'),
+          lastModified: new Date('2024-03-07T00:00:00Z'),
+          version: 1,
+          metadata: {
+            path: 'src/foo.ts',
+            line: 36,
+            dataFlowId: 'df_meta_only',
+            toRef: { kind: 'fileSymbol', file: 'src/store.ts', symbol: 'value', name: 'value' },
+          },
+          evidence: [{ source: 'ast', location: { path: 'src/foo.ts', line: 36 } }] as any,
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+          if (originalDf === undefined) delete process.env.EDGE_DATAFLOW_NODES;
+          else process.env.EDGE_DATAFLOW_NODES = originalDf;
+        }
+
+        const dfCall = calls.find((c) => typeof c.query === 'string' && c.query.includes('MERGE (df:dataflow'));
+        expect(dfCall).toBeDefined();
+        expect(dfCall!.params.id).toBe('df_meta_only');
+      });
+
+      it('does not create dataflow nodes when the dataflow flag is disabled', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalAux = process.env.EDGE_AUX_DUAL_WRITE;
+        const originalDf = process.env.EDGE_DATAFLOW_NODES;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+        process.env.EDGE_DATAFLOW_NODES = 'false';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_no_dataflow',
+          fromEntityId: 'sym:src/foo.ts#reader@hash',
+          toEntityId: 'file:src/store.ts:value',
+          type: RelationshipType.READS,
+          created: new Date('2024-03-04T00:00:00Z'),
+          lastModified: new Date('2024-03-04T00:00:00Z'),
+          version: 1,
+          dataFlowId: 'df_skip123',
+          metadata: {
+            path: 'src/foo.ts',
+            line: 32,
+            toRef: { kind: 'fileSymbol', file: 'src/store.ts', symbol: 'value', name: 'value' },
+            evidence: [{ source: 'ast', location: { path: 'src/foo.ts', line: 32 } }],
+          },
+          evidence: [{ source: 'type-checker', location: { path: 'src/foo.ts', line: 32 } }] as any,
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalAux === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalAux;
+          if (originalDf === undefined) delete process.env.EDGE_DATAFLOW_NODES;
+          else process.env.EDGE_DATAFLOW_NODES = originalDf;
+        }
+
+        expect(calls.some((c) => c.query.includes('MERGE (df:dataflow'))).toBe(false);
+      });
+
+      it('skips dataflow node writes when identifiers are missing despite the dataflow flag', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalAux = process.env.EDGE_AUX_DUAL_WRITE;
+        const originalDf = process.env.EDGE_DATAFLOW_NODES;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+        process.env.EDGE_DATAFLOW_NODES = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'rel_missing_dataflow_id',
+          fromEntityId: 'sym:src/foo.ts#reader@hash',
+          toEntityId: 'file:src/store.ts:value',
+          type: RelationshipType.READS,
+          created: new Date('2024-03-06T00:00:00Z'),
+          lastModified: new Date('2024-03-06T00:00:00Z'),
+          version: 1,
+          metadata: {
+            path: 'src/foo.ts',
+            line: 36,
+            toRef: { kind: 'fileSymbol', file: 'src/store.ts', symbol: 'value', name: 'value' },
+          },
+          evidence: [{ source: 'ast', location: { path: 'src/foo.ts', line: 36 } }] as any,
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalAux === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalAux;
+          if (originalDf === undefined) delete process.env.EDGE_DATAFLOW_NODES;
+          else process.env.EDGE_DATAFLOW_NODES = originalDf;
+        }
+
+        expect(calls.some((c) => typeof c.query === 'string' && c.query.includes('MERGE (df:dataflow'))).toBe(false);
+      });
+    });
+
+    describe('createRelationshipsBulk', () => {
+      it('dedupes by canonical id and backfills missing toRef metadata', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const getEntitySpy = vi.spyOn(knowledgeGraphService, 'getEntity').mockResolvedValue(null);
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          if (query.includes('UNWIND $ids AS id MATCH (n {id: id}) RETURN n.id as id, n.path as path, n.name as name')) {
+            return [
+              { id: 'sym:src/target.ts#target@hash', path: 'src/target.ts', name: 'target' },
+            ];
+          }
+          return [];
+        });
+
+        const base = {
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'sym:src/target.ts#target@hash',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-04-02T00:00:00Z'),
+          lastModified: new Date('2024-04-02T00:00:00Z'),
+          version: 1,
+        } as GraphRelationship;
+
+        const relationships: GraphRelationship[] = [
+          {
+            ...base,
+            occurrencesScan: 1,
+            metadata: { path: 'src/source.ts', line: 10 },
+            evidence: [{ source: 'ast', location: { path: 'src/source.ts', line: 10 } }] as any,
+          },
+          {
+            ...base,
+            occurrencesScan: 2,
+            metadata: {
+              evidence: [{ source: 'heuristic', location: { path: 'src/source.ts', line: 15 } }],
+            },
+            evidence: [{ source: 'type-checker', location: { path: 'src/source.ts', line: 12 } }] as any,
+          },
+        ];
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk(relationships);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          getEntitySpy.mockRestore();
+        }
+
+        const bulkCall = calls.find((c) => c.query.includes('UNWIND $rows AS row'));
+        expect(bulkCall).toBeDefined();
+        const rows = bulkCall!.params.rows as Array<any>;
+        expect(rows).toHaveLength(1);
+
+        const row = rows[0];
+        expect(row.id).toBe(canonicalRelationshipId(base.fromEntityId, relationships[0]));
+        expect(row.occurrencesScan).toBe(3);
+        expect(row.to_ref_kind).toBe('fileSymbol');
+        expect(row.to_ref_file).toBe('src/target.ts');
+        expect(row.to_ref_symbol).toBe('target');
+
+        const evidence = JSON.parse(row.evidence as string);
+        expect(evidence).toEqual(
+          expect.arrayContaining([
+            { source: 'ast', location: { path: 'src/source.ts', line: 10 } },
+            { source: 'type-checker', location: { path: 'src/source.ts', line: 12 } },
+            { source: 'heuristic', location: { path: 'src/source.ts', line: 15 } },
+          ])
+        );
+      });
+
+      it('normalizes documentation relationships in bulk writes', async () => {
+        mockDb.falkordbQuery.mockResolvedValue([]);
+
+        const docRelationship = {
+          fromEntityId: 'service:checkout',
+          toEntityId: 'doc_checkout_runbook',
+          type: RelationshipType.DOCUMENTED_BY,
+          created: new Date('2024-04-06T00:00:00Z'),
+          lastModified: new Date('2024-04-06T00:00:00Z'),
+          version: 1,
+          sectionAnchor: '# Overview',
+          docIntent: 'ai-context',
+          coverageScope: 'operational',
+          tags: ['runbook'],
+          stakeholders: ['ops@acme.test'],
+          lastValidated: new Date('2024-04-06T01:00:00Z'),
+        } as GraphRelationship;
+
+        await knowledgeGraphService.createRelationshipsBulk([docRelationship]);
+
+        const bulkCall = mockDb.falkordbQuery.mock.calls.find(
+          ([query]) => typeof query === 'string' && query.includes('UNWIND $rows AS row')
+        );
+        expect(bulkCall).toBeDefined();
+        const rows = (bulkCall![1].rows as Array<any>) || [];
+        expect(rows).toHaveLength(1);
+        const row = rows[0];
+        expect(row.sectionAnchor).toBe('overview');
+        expect(row.docIntent).toBe('ai-context');
+        expect(row.coverageScope).toBe('operational');
+        expect(row.tags).toEqual(['runbook']);
+        expect(row.stakeholders).toEqual(['ops@acme.test']);
+      });
+
+      it('normalizes code edge rows before bulk merge', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const created = new Date('2024-04-05T00:00:00Z');
+        const relationship: GraphRelationship = {
+          id: 'bulk-normalize',
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created,
+          lastModified: created,
+          version: 1,
+          resolved: true,
+          metadata: {
+            path: 'src/source.ts',
+            line: 10,
+            column: 3,
+            scope: 'imported',
+            source: 'ts',
+            evidence: [
+              { source: 'ast', location: { path: 'src/source.ts', line: 10, column: 3 } },
+              { source: 'heuristic', location: { path: 'src/source.ts', line: 14 } },
+            ],
+            toRef: { kind: 'fileSymbol', file: 'src/target.ts', symbol: 'Target', name: 'Target' },
+          },
+          evidence: [
+            { source: 'type-checker', location: { path: 'src/source.ts', line: 5 } },
+            { source: 'ast', location: { path: 'src/source.ts', line: 10, column: 3 } },
+          ] as any,
+          locations: [
+            { path: 'src/source.ts', line: 5 },
+            { path: 'src/source.ts', line: 10 },
+          ],
+          accessPath: 'useTarget',
+        } as GraphRelationship;
+
+        const normalizedPreview = normalizeCodeEdge({
+          ...relationship,
+          metadata: { ...(relationship.metadata as any) },
+          evidence: (relationship.evidence as any)?.map((entry: any) => ({
+            ...entry,
+            location: entry.location ? { ...entry.location } : undefined,
+          })),
+          locations: relationship.locations?.map((loc) => ({ ...loc })),
+        } as GraphRelationship);
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([relationship]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const bulkCall = calls.find((c) => c.query.includes('UNWIND $rows AS row'));
+        expect(bulkCall).toBeDefined();
+
+        const [row] = bulkCall!.params.rows as Array<any>;
+        expect(row.source).toBe('type-checker');
+        expect(row.scope).toBe('imported');
+        expect(row.context).toBe('src/source.ts:10');
+        expect(row.confidence).toBe(1);
+        expect(row.resolved).toBe(true);
+        expect(row.to_ref_kind).toBe('fileSymbol');
+        expect(row.to_ref_file).toBe('src/target.ts');
+        expect(row.to_ref_symbol).toBe('Target');
+
+        expect(row.siteId).toBe(normalizedPreview.siteId);
+
+        const sites = JSON.parse(row.sites as string);
+        expect(sites).toContain(normalizedPreview.siteId);
+        expect(row.siteHash).toBe(normalizedPreview.siteHash);
+
+        expect(row.loc_path).toBe('src/source.ts');
+        expect(row.loc_line).toBe(10);
+        expect(row.loc_col).toBe(3);
+
+        const evidence = JSON.parse(row.evidence as string);
+        expect(evidence).toEqual(normalizedPreview.evidence);
+
+        const locations = JSON.parse(row.locations as string);
+        expect(locations).toEqual(normalizedPreview.locations ?? []);
+
+        expect(typeof row.why).toBe('string');
+        expect(row.why).toContain('resolved by type checker');
+        expect(row.why).toContain('scope=imported');
+      });
+
+      it('skips low-confidence inferred code edges below the noise threshold in bulk', async () => {
+        const rawCalls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          rawCalls.push({ query, params });
+          return [];
+        });
+
+        const relationship: GraphRelationship = {
+          id: 'bulk-low-conf',
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-04-06T00:00:00Z'),
+          lastModified: new Date('2024-04-06T00:00:00Z'),
+          version: 1,
+          inferred: true,
+          confidence: Math.max(0, noiseConfig.MIN_INFERRED_CONFIDENCE - 0.05),
+          metadata: { path: 'src/source.ts', line: 18 },
+        } as GraphRelationship;
+
+        const normalizedPreview = normalizeCodeEdge({
+          ...relationship,
+          metadata: { ...(relationship.metadata as any) },
+        } as GraphRelationship);
+        expect(normalizedPreview.inferred).toBe(true);
+        expect(normalizedPreview.confidence).toBeLessThan(noiseConfig.MIN_INFERRED_CONFIDENCE);
+
+        const normalizedServicePreview = (knowledgeGraphService as any).normalizeRelationship(relationship);
+        expect(normalizedServicePreview.inferred).toBe(true);
+        expect(normalizedServicePreview.confidence).toBeLessThan(noiseConfig.MIN_INFERRED_CONFIDENCE);
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([relationship]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCalls = rawCalls.filter(({ query }) => typeof query === 'string' && query.includes('UNWIND $rows AS row'));
+        expect(mergeCalls).toHaveLength(0);
+      });
+
+      it('caps deduped evidence and site arrays when merging bulk edges', async () => {
+        const rawCalls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          rawCalls.push({ query, params });
+          return [];
+        });
+
+        const base: GraphRelationship = {
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-04-09T00:00:00Z'),
+          lastModified: new Date('2024-04-09T00:00:00Z'),
+          version: 1,
+          metadata: { path: 'src/source.ts', line: 22 },
+        } as GraphRelationship;
+
+        const makeEvidence = (start: number) =>
+          Array.from({ length: 20 }, (_, idx) => ({
+            source: idx % 2 === 0 ? 'ast' : 'heuristic',
+            location: { path: 'src/source.ts', line: start + idx },
+          }));
+
+        const relationshipA: GraphRelationship = {
+          ...base,
+          evidence: makeEvidence(1) as any,
+          sites: Array.from({ length: 20 }, (_, idx) => `site_a_${idx}`),
+        } as GraphRelationship;
+
+        const relationshipB: GraphRelationship = {
+          ...base,
+          evidence: makeEvidence(40) as any,
+          sites: Array.from({ length: 20 }, (_, idx) => `site_b_${idx}`),
+          metadata: { path: 'src/source.ts', line: 23 },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([relationshipA, relationshipB]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const bulkCall = rawCalls.find((c) => typeof c.query === 'string' && c.query.includes('UNWIND $rows AS row'));
+        expect(bulkCall).toBeDefined();
+        const rows = bulkCall!.params.rows as Array<any>;
+        expect(rows).toHaveLength(1);
+
+        const row = rows[0];
+        const evidence = JSON.parse(row.evidence as string);
+        expect(evidence).toHaveLength(20);
+        expect(new Set(evidence.map((entry: any) => entry.location?.line)).size).toBe(20);
+
+        const sites = JSON.parse(row.sites as string);
+        expect(sites.length).toBeLessThanOrEqual(20);
+        expect(new Set(sites).size).toBe(sites.length);
+      });
+
+      it('invokes the placeholder unifier for resolved targets in bulk batches', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalAux = process.env.EDGE_AUX_DUAL_WRITE;
+        const originalDf = process.env.EDGE_DATAFLOW_NODES;
+        process.env.EDGE_AUX_DUAL_WRITE = 'false';
+        process.env.EDGE_DATAFLOW_NODES = 'false';
+
+        const unifyStub = vi
+          .spyOn(knowledgeGraphService as any, 'unifyResolvedEdgesBatch')
+          .mockResolvedValue(undefined);
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          if (query.includes('UNWIND $ids AS id MATCH (n {id: id}) RETURN n.id as id, n.path as path, n.name as name')) {
+            return [{ id: 'sym:src/target.ts#target@hash', path: 'src/target.ts', name: 'target' }];
+          }
+          return [];
+        });
+
+        const created = new Date('2024-05-01T00:00:00Z');
+        const relationship: GraphRelationship = {
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'sym:src/target.ts#target@hash',
+          type: RelationshipType.CALLS,
+          created,
+          lastModified: created,
+          version: 1,
+          metadata: { path: 'src/source.ts', line: 14 },
+          evidence: [{ source: 'ast', location: { path: 'src/source.ts', line: 14 } }] as any,
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([relationship]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalAux === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalAux;
+          if (originalDf === undefined) delete process.env.EDGE_DATAFLOW_NODES;
+          else process.env.EDGE_DATAFLOW_NODES = originalDf;
+        }
+
+        expect(unifyStub).toHaveBeenCalledTimes(1);
+        const [rowsArg] = unifyStub.mock.calls[0] as [Array<any>];
+        expect(Array.isArray(rowsArg)).toBe(true);
+        expect(rowsArg[0]).toMatchObject({
+          fromId: 'sym:src/source.ts#caller@hash',
+          toId: 'sym:src/target.ts#target@hash',
+          type: RelationshipType.CALLS,
+          to_ref_file: 'src/target.ts',
+          to_ref_symbol: 'target',
+        });
+
+        const bulkCall = calls.find((c) => c.query.includes('UNWIND $rows AS row'));
+        expect(bulkCall).toBeDefined();
+
+        unifyStub.mockRestore();
+      });
+
+      it('merges temporal metadata and candidate counts when deduping bulk edges', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const base: GraphRelationship = {
+          id: 'bulk-temporal',
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-04-01T00:00:00Z'),
+          lastModified: new Date('2024-04-01T12:00:00Z'),
+          version: 1,
+          occurrencesScan: 1,
+          metadata: {
+            path: 'src/source.ts',
+            line: 10,
+            candidateCount: 2,
+          },
+        } as GraphRelationship;
+
+        const newer: GraphRelationship = {
+          ...base,
+          created: new Date('2024-04-04T00:00:00Z'),
+          lastModified: new Date('2024-04-07T00:00:00Z'),
+          metadata: {
+            path: 'src/source.ts',
+            line: 12,
+            candidateCount: 5,
+          },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([base, newer]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const bulkCall = calls.find((c) => c.query.includes('UNWIND $rows AS row'));
+        expect(bulkCall).toBeDefined();
+        const [row] = bulkCall!.params.rows as Array<any>;
+
+        expect(row.firstSeenAt).toBe(base.created.toISOString());
+        expect(row.lastModified).toBe(newer.lastModified.toISOString());
+        expect(row.context).toBe('src/source.ts:10');
+        expect(row.candidateCount).toBe(5);
+      });
+
+      it('dual-writes auxiliary nodes during bulk ingestion when enabled', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalAux = process.env.EDGE_AUX_DUAL_WRITE;
+        const originalDf = process.env.EDGE_DATAFLOW_NODES;
+        process.env.EDGE_AUX_DUAL_WRITE = 'true';
+        process.env.EDGE_DATAFLOW_NODES = 'true';
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const created = new Date('2024-04-08T00:00:00Z');
+        const relationship: GraphRelationship = {
+          id: 'bulk-aux',
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.READS,
+          created,
+          lastModified: created,
+          version: 1,
+          dataFlowId: 'df_abcdef123456',
+          metadata: {
+            path: 'src/source.ts',
+            line: 25,
+            evidence: [{ source: 'ast', location: { path: 'src/source.ts', line: 25 } }],
+            candidates: [
+              { id: 'sym:src/target.ts#Target@hash', name: 'Target', resolver: 'coordinator', score: 0.9 },
+              { name: 'fallback', resolver: 'heuristic' },
+            ],
+            toRef: { kind: 'fileSymbol', file: 'src/target.ts', symbol: 'Target', name: 'Target' },
+          },
+          evidence: [{ source: 'type-checker', location: { path: 'src/source.ts', line: 20 } }] as any,
+          locations: [{ path: 'src/source.ts', line: 20 }] as any,
+          sites: ['existing_site'],
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([relationship]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalAux === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalAux;
+          if (originalDf === undefined) delete process.env.EDGE_DATAFLOW_NODES;
+          else process.env.EDGE_DATAFLOW_NODES = originalDf;
+        }
+
+        expect(calls.some((c) => c.query.includes('MERGE (n:edge_evidence'))).toBe(true);
+        expect(calls.some((c) => c.query.includes('MERGE (s:edge_site'))).toBe(true);
+        expect(calls.some((c) => c.query.includes('MERGE (n:edge_candidate'))).toBe(true);
+        expect(calls.some((c) => c.query.includes('MERGE (df:dataflow'))).toBe(true);
+      });
+
+      it('drops relationships with missing endpoints when validation is enabled', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+
+        const presentIds = new Set([
+          'sym:src/source.ts#caller@hash',
+          'sym:src/target.ts#target@hash',
+        ]);
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          if (query.includes('RETURN collect(n.id) as present')) {
+            return [{ present: Array.from(presentIds) }];
+          }
+          if (query.includes('UNWIND $rows AS row')) {
+            return [];
+          }
+          if (query.includes('MATCH ()-[r]->() WHERE r.id = $id RETURN r LIMIT 1')) {
+            return [];
+          }
+          if (query.includes('MERGE (n:edge_candidate')) {
+            return [];
+          }
+          return [];
+        });
+
+        const good = {
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'sym:src/target.ts#target@hash',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-04-10T00:00:00Z'),
+          lastModified: new Date('2024-04-10T00:00:00Z'),
+          version: 1,
+          metadata: { path: 'src/source.ts', line: 7 },
+          evidence: [{ source: 'ast', location: { path: 'src/source.ts', line: 7 } }] as any,
+        } as GraphRelationship;
+
+        const missing = {
+          ...good,
+          fromEntityId: 'sym:src/missing.ts#caller@hash',
+          toEntityId: 'sym:src/unknown.ts#target@hash',
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([good, missing], { validate: true });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const validationCall = calls.find((c) =>
+          c.query.includes('RETURN collect(n.id) as present')
+        );
+        expect(validationCall).toBeDefined();
+        expect(Array.isArray(validationCall!.params.ids)).toBe(true);
+
+        const bulkCall = calls.find((c) => c.query.includes('UNWIND $rows AS row'));
+        expect(bulkCall).toBeDefined();
+        const rows = bulkCall!.params.rows as Array<any>;
+        expect(rows).toHaveLength(1);
+        expect(rows[0].fromId).toBe(good.fromEntityId);
+        expect(rows[0].toId).toBe(good.toEntityId);
       });
     });
 
@@ -864,6 +2198,72 @@ describe('KnowledgeGraphService', () => {
         expect(params.from_ref_symbol).toBe('caller');
         expect(queryString).toContain('coalesce(r.active, true) = true');
       });
+
+      it('respects explicit active filters without adding the default clause', async () => {
+        mockDb.falkordbQuery.mockResolvedValue([]);
+
+        await knowledgeGraphService.getRelationships({
+          active: false,
+          kind: ['call'],
+        } as any);
+
+        const queryCall = mockDb.falkordbQuery.mock.calls.find(
+          ([query]) => typeof query === 'string' && query.includes('MATCH (a)-[r]->(b)')
+        );
+        expect(queryCall).toBeDefined();
+        const [queryString, params] = queryCall!;
+        expect(queryString).toContain('r.active = $active');
+        expect(queryString).not.toContain('coalesce(r.active, true) = true');
+        expect(params.active).toBe(false);
+      });
+
+      it('applies documentation-focused relationship filters', async () => {
+        mockDb.falkordbQuery.mockResolvedValue([]);
+
+        const lastValidatedAfter = new Date('2024-01-01T00:00:00Z');
+        const lastValidatedBefore = new Date('2024-02-01T00:00:00Z');
+
+        await knowledgeGraphService.getRelationships({
+          domainPath: 'Payments > Settlements',
+          domainPrefix: ['Payments', 'Payments > Refunds'],
+          docIntent: ['governance', 'mixed'],
+          coverageScope: 'compliance',
+          embeddingVersion: ['v1', 'v2'],
+          clusterVersion: '2024-Q1',
+          clusterId: ['cluster_payments', 'cluster_billing'],
+          docType: ['design-doc', 'user-guide'],
+          docStatus: 'active',
+          docLocale: ['en-US', 'fr-FR'],
+          stakeholder: ['owner@acme.test', 'lead@acme.test'],
+          tag: 'critical',
+          lastValidatedAfter,
+          lastValidatedBefore,
+        } as any);
+
+        const [queryString, params] = mockDb.falkordbQuery.mock.calls[0];
+        expect(queryString).toContain('r.domainPath = $domainPath');
+        expect(queryString).toContain('r.domainPath STARTS WITH $domainPrefix0');
+        expect(queryString).toContain('ANY(x IN coalesce(r.tags, []) WHERE x = $tag)');
+        expect(queryString).toContain('ANY(x IN coalesce(r.stakeholders, []) WHERE x IN $stakeholderList)');
+        expect(queryString).toContain('((a.type = "documentation" AND a.docType IN $docTypeList) OR (b.type = "documentation" AND b.docType IN $docTypeList))');
+        expect(queryString).toContain('((a.type = "semanticCluster" AND a.id IN $clusterIdList) OR (b.type = "semanticCluster" AND b.id IN $clusterIdList))');
+        expect(params.domainPath).toBe('payments/settlements');
+        expect(params.domainPrefix).toBeUndefined();
+        expect(params.domainPrefix0).toBe('payments');
+        expect(params.domainPrefix1).toBe('payments/refunds');
+        expect(params.docIntentList).toEqual(['governance', 'mixed']);
+        expect(params.coverageScope).toBe('compliance');
+        expect(params.embeddingVersionList).toEqual(['v1', 'v2']);
+        expect(params.clusterVersion).toBe('2024-Q1');
+        expect(params.clusterIdList).toEqual(['cluster_payments', 'cluster_billing']);
+        expect(params.docTypeList).toEqual(['design-doc', 'user-guide']);
+        expect(params.docStatus).toBe('active');
+        expect(params.docLocaleList).toEqual(['en-US', 'fr-FR']);
+        expect(params.stakeholderList).toEqual(['owner@acme.test', 'lead@acme.test']);
+        expect(params.tag).toBe('critical');
+        expect(params.lastValidatedAfter).toBe(lastValidatedAfter.toISOString());
+        expect(params.lastValidatedBefore).toBe(lastValidatedBefore.toISOString());
+      });
     });
 
     describe('upsertEdgeEvidenceBulk', () => {
@@ -931,28 +2331,89 @@ describe('KnowledgeGraphService', () => {
           },
         };
 
-        await knowledgeGraphService.upsertEdgeEvidenceBulk([incoming]);
+        const now = new Date('2024-01-15T00:00:00.000Z');
+        vi.useFakeTimers();
+        vi.setSystemTime(now);
 
-        expect(updateParams).not.toBeNull();
-        expect(updateParams.id).toBe('edge-1');
-        expect(updateParams.occurrencesScan).toBe(2);
-        expect(updateParams.confidence).toBeCloseTo(0.8, 5);
-        expect(updateParams.firstSeenAt).toBe(firstSeen);
+        try {
+          await knowledgeGraphService.upsertEdgeEvidenceBulk([incoming]);
 
-        const mergedEvidence = JSON.parse(updateParams.evidence);
-        expect(mergedEvidence).toEqual([
-          { source: 'type-checker', location: { path: 'src/foo.ts', line: 10 } },
-          { source: 'ast', location: { path: 'src/foo.ts', line: 5 } },
-          { source: 'heuristic', location: { path: 'src/foo.ts', line: 12 } },
-        ]);
+          expect(updateParams).not.toBeNull();
+          expect(updateParams.id).toBe('edge-1');
+          expect(updateParams.occurrencesScan).toBe(2);
+          expect(updateParams.confidence).toBeCloseTo(0.8, 5);
+          expect(updateParams.firstSeenAt).toBe(firstSeen);
+          expect(updateParams.lastSeenAt).toBe(now.toISOString());
 
-        const mergedLocations = JSON.parse(updateParams.locations);
-        expect(mergedLocations).toEqual([
-          { path: 'src/foo.ts', line: 5 },
-          { path: 'src/foo.ts', line: 10 },
-        ]);
+          const mergedEvidence = JSON.parse(updateParams.evidence);
+          expect(mergedEvidence).toEqual([
+            { source: 'type-checker', location: { path: 'src/foo.ts', line: 10 } },
+            { source: 'ast', location: { path: 'src/foo.ts', line: 5 } },
+            { source: 'heuristic', location: { path: 'src/foo.ts', line: 12 } },
+          ]);
 
-        mockDb.falkordbQuery = originalQuery;
+          const mergedLocations = JSON.parse(updateParams.locations);
+          expect(mergedLocations).toEqual([
+            { path: 'src/foo.ts', line: 5 },
+            { path: 'src/foo.ts', line: 10 },
+          ]);
+        } finally {
+          vi.useRealTimers();
+          mockDb.falkordbQuery = originalQuery;
+        }
+      });
+
+      it('generates canonical ids when incoming edges omit an id', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        const originalEnv = process.env.EDGE_AUX_DUAL_WRITE;
+        process.env.EDGE_AUX_DUAL_WRITE = 'false';
+
+        let updateParams: any | null = null;
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          if (query.includes('WHERE r.id = $id RETURN r LIMIT 1')) {
+            return [];
+          }
+          if (query.includes('SET r.lastModified = $now')) {
+            updateParams = params;
+          }
+          return [];
+        });
+
+        const created = new Date('2024-05-01T00:00:00.000Z');
+        const incoming = {
+          fromEntityId: 'sym:src/source.ts#caller@hash',
+          toEntityId: 'file:src/target.ts:Target',
+          type: RelationshipType.CALLS,
+          created,
+          lastModified: created,
+          version: 1,
+          metadata: {
+            path: 'src/source.ts',
+            line: 18,
+            toRef: { kind: 'fileSymbol', file: 'src/target.ts', symbol: 'Target', name: 'Target' },
+          },
+          evidence: [{ source: 'ast', location: { path: 'src/source.ts', line: 18 } }] as any,
+        } as unknown as GraphRelationship;
+
+        const normalizedPreview = normalizeCodeEdge({
+          ...incoming,
+        } as GraphRelationship);
+        const expectedId = canonicalRelationshipId(incoming.fromEntityId, normalizedPreview);
+
+        try {
+          await knowledgeGraphService.upsertEdgeEvidenceBulk([incoming]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          if (originalEnv === undefined) delete process.env.EDGE_AUX_DUAL_WRITE;
+          else process.env.EDGE_AUX_DUAL_WRITE = originalEnv;
+        }
+
+        const fetchCall = calls.find((c) => c.query.includes('WHERE r.id = $id RETURN r LIMIT 1'));
+        expect(fetchCall?.params.id).toBe(expectedId);
+        expect(updateParams?.id).toBe(expectedId);
       });
     });
 
@@ -1045,6 +2506,142 @@ describe('KnowledgeGraphService', () => {
 
         mockDb.falkordbQuery = originalQuery;
       });
+
+      it('merges external placeholders into the resolved edge via name-only matching', async () => {
+        const externalRow = {
+          r: [
+            ['id', 'placeholder-ext'],
+            ['type', RelationshipType.CALLS],
+            ['occurrencesTotal', 5],
+            ['occurrencesScan', 1],
+            ['confidence', 0.2],
+            ['firstSeenAt', '2024-02-01T00:00:00.000Z'],
+            ['lastSeenAt', '2024-02-04T00:00:00.000Z'],
+            ['evidence', JSON.stringify([
+              { source: 'heuristic', location: { path: 'src/foo.ts', line: 11 } },
+            ])],
+            ['locations', JSON.stringify([
+              { path: 'src/foo.ts', line: 11 },
+            ])],
+            ['sites', JSON.stringify(['site_ext'])],
+            ['to_ref_kind', 'external'],
+            ['to_ref_name', 'Symbol'],
+            ['siteId', 'site_ext'],
+          ],
+          fromId: 'sym:src/foo.ts#caller@hash',
+          toId: 'external:Symbol',
+        };
+
+        const calls: Array<{ query: string; params: any }> = [];
+        let updateParams: any | null = null;
+        let retireParams: any | null = null;
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          if (query.includes("r.to_ref_file = $file")) {
+            return [];
+          }
+          if (query.includes("r.to_ref_kind = 'external'")) {
+            return [externalRow];
+          }
+          if (query.includes('SET r.occurrencesTotal = coalesce')) {
+            updateParams = params;
+          }
+          if (query.includes('SET r.active = false')) {
+            retireParams = params;
+          }
+          return [];
+        });
+
+        const resolved: GraphRelationship = {
+          id: 'resolved-edge-ext',
+          fromEntityId: 'sym:src/foo.ts#caller@hash',
+          toEntityId: 'sym:src/foo.ts#resolved@456',
+          type: RelationshipType.CALLS,
+          created: new Date('2024-02-10T00:00:00Z'),
+          lastModified: new Date('2024-02-10T00:00:00Z'),
+          version: 1,
+          to_ref_kind: 'entity',
+          to_ref_file: 'src/foo.ts',
+          to_ref_symbol: 'Symbol',
+        } as any;
+
+        await (knowledgeGraphService as any).unifyResolvedEdgePlaceholders(resolved);
+
+        const externalFetch = calls.find((c) => c.query.includes("r.to_ref_kind = 'external'"));
+        expect(externalFetch?.params).toMatchObject({
+          fromId: 'sym:src/foo.ts#caller@hash',
+          symbol: 'Symbol',
+        });
+
+        expect(updateParams).not.toBeNull();
+        expect(updateParams!.occTotalAdd).toBe(5);
+        expect(updateParams!.occScanAdd).toBe(1);
+        expect(JSON.parse(updateParams!.evidence)).toEqual([
+          { source: 'heuristic', location: { path: 'src/foo.ts', line: 11 } },
+        ]);
+        if (updateParams!.sites) {
+          expect(JSON.parse(updateParams!.sites)).toContain('site_ext');
+        }
+
+        expect(retireParams?.ids).toEqual(['placeholder-ext']);
+
+        mockDb.falkordbQuery = originalQuery;
+      });
+    });
+
+    describe('unifyResolvedEdgesBatch', () => {
+      it('invokes the placeholder unifier once per resolved target grouping', async () => {
+        const original = (knowledgeGraphService as any).unifyResolvedEdgePlaceholders;
+        const stub = vi.fn().mockResolvedValue(undefined);
+        (knowledgeGraphService as any).unifyResolvedEdgePlaceholders = stub;
+
+        try {
+          await (knowledgeGraphService as any).unifyResolvedEdgesBatch([
+            {
+              id: 'rel-resolved-1',
+              fromId: 'sym:src/foo.ts#caller@hash',
+              toId: 'sym:src/foo.ts#resolved@hash',
+              type: RelationshipType.CALLS,
+              to_ref_kind: 'entity',
+              to_ref_file: 'src/foo.ts',
+              to_ref_symbol: 'resolved',
+              created: new Date('2024-03-01T00:00:00Z').toISOString(),
+              lastModified: new Date('2024-03-02T00:00:00Z').toISOString(),
+            },
+            {
+              id: 'rel-resolved-2',
+              fromId: 'sym:src/foo.ts#caller@hash',
+              toId: 'sym:src/foo.ts#resolved@hash',
+              type: RelationshipType.CALLS,
+              to_ref_kind: 'entity',
+              to_ref_file: 'src/foo.ts',
+              to_ref_symbol: 'resolved',
+            },
+            {
+              id: 'rel-unresolved',
+              fromId: 'sym:src/foo.ts#caller@hash',
+              toId: 'external:lodash',
+              type: RelationshipType.REFERENCES,
+              to_ref_kind: 'external',
+              to_ref_name: 'lodash',
+            },
+          ]);
+        } finally {
+          (knowledgeGraphService as any).unifyResolvedEdgePlaceholders = original;
+        }
+
+        expect(stub).toHaveBeenCalledTimes(1);
+        expect(stub).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: 'rel-resolved-1',
+            fromEntityId: 'sym:src/foo.ts#caller@hash',
+            toEntityId: 'sym:src/foo.ts#resolved@hash',
+            to_ref_file: 'src/foo.ts',
+            to_ref_symbol: 'resolved',
+          })
+        );
+      });
     });
 
     describe('finalizeScan', () => {
@@ -1076,6 +2673,35 @@ describe('KnowledgeGraphService', () => {
 
         mockDb.falkordbQuery = originalQuery;
       });
+
+      it('sets validTo when history mode is enabled', async () => {
+        const originalQuery = mockDb.falkordbQuery;
+        const calls: Array<{ query: string; params: any }> = [];
+        const historySpy = vi.spyOn(knowledgeGraphService as any, 'isHistoryEnabled').mockReturnValue(true);
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          if (query.includes('FOREACH (x IN rs | SET x.active = false)') && !query.includes("r.to_ref_kind = 'external'")) {
+            return [{ count: 1 }];
+          }
+          if (query.includes("r.to_ref_kind = 'external'")) {
+            return [{ count: 0 }];
+          }
+          return [];
+        });
+
+        const cutoff = new Date('2024-02-15T00:00:00.000Z');
+
+        try {
+          await knowledgeGraphService.finalizeScan(cutoff);
+          const historyCall = calls.find((c) => c.query.includes('SET r.validTo = $cutoff'));
+          expect(historyCall).toBeDefined();
+          expect(historyCall?.params.cutoff).toBe(cutoff.toISOString());
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+          historySpy.mockRestore();
+        }
+      });
     });
 
     describe('markInactiveEdgesNotSeenSince', () => {
@@ -1102,6 +2728,7 @@ describe('KnowledgeGraphService', () => {
             query.includes('MATCH ()-[r]->()') && query.includes('r.lastSeenAt < $cutoff')
           );
           expect(firstCall).toBeDefined();
+          expect(firstCall!.query).toContain('r.validTo = coalesce(r.validTo, $cutoff)');
           expect(firstCall!.query).not.toContain('r.to_ref_file = $toRefFile');
           expect(firstCall!.params.cutoff).toBe(cutoff.toISOString());
 
@@ -1111,6 +2738,68 @@ describe('KnowledgeGraphService', () => {
           const secondCall = calls.find(({ query }) => query.includes('r.to_ref_file = $toRefFile'));
           expect(secondCall).toBeDefined();
           expect(secondCall!.params.toRefFile).toBe('src/foo.ts');
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+      });
+    });
+
+    describe('edge auxiliary readers', () => {
+      it('returns evidence, sites, and candidates with graceful fallback on errors', async () => {
+        const originalQuery = mockDb.falkordbQuery;
+        const responses = new Map<string, any[]>([
+          ['edge_evidence', [
+            {
+              id: 'evid_1',
+              edgeId: 'rel-aux',
+              source: 'ast',
+              confidence: 0.8,
+              path: 'src/foo.ts',
+              line: 7,
+            },
+          ]],
+          ['edge_site', [
+            {
+              id: 'site_hash',
+              edgeId: 'rel-aux',
+              siteId: 'site_abc',
+              path: 'src/foo.ts',
+              line: 7,
+              column: 2,
+            },
+          ]],
+          ['edge_candidate', [
+            {
+              id: 'cand_hash',
+              edgeId: 'rel-aux',
+              candidateId: 'sym:src/foo.ts#target@hash',
+              name: 'target',
+              resolver: 'coordinator',
+              score: 0.9,
+              rank: 1,
+            },
+          ]],
+        ]);
+
+        mockDb.falkordbQuery = vi.fn(async (query: string) => {
+          if (query.includes('MATCH (n:edge_evidence)')) return responses.get('edge_evidence');
+          if (query.includes('MATCH (s:edge_site)')) return responses.get('edge_site');
+          if (query.includes('MATCH (c:edge_candidate)')) return responses.get('edge_candidate');
+          throw new Error('unexpected query');
+        });
+
+        try {
+          const evidence = await knowledgeGraphService.getEdgeEvidenceNodes('rel-aux', 5);
+          const sites = await knowledgeGraphService.getEdgeSites('rel-aux', 5);
+          const candidates = await knowledgeGraphService.getEdgeCandidates('rel-aux', 5);
+
+          expect(evidence).toEqual(responses.get('edge_evidence'));
+          expect(sites).toEqual(responses.get('edge_site'));
+          expect(candidates).toEqual(responses.get('edge_candidate'));
+
+          mockDb.falkordbQuery.mockRejectedValueOnce(new Error('boom'));
+          const fallback = await knowledgeGraphService.getEdgeEvidenceNodes('rel-aux', 5);
+          expect(fallback).toEqual([]);
         } finally {
           mockDb.falkordbQuery = originalQuery;
         }

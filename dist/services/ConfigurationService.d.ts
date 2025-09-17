@@ -44,6 +44,8 @@ export declare class ConfigurationService {
     private syncCoordinator?;
     private testWorkingDir?;
     constructor(dbService: DatabaseService, syncCoordinator?: SynchronizationCoordinator | undefined, testWorkingDir?: string | undefined);
+    private cachedConfig;
+    private configLoaded;
     getSystemConfiguration(): Promise<SystemConfiguration>;
     getHistoryConfig(): {
         enabled: boolean;
@@ -99,6 +101,9 @@ export declare class ConfigurationService {
     private getSecurityConfig;
     private getSystemInfo;
     updateConfiguration(updates: Partial<SystemConfiguration>): Promise<void>;
+    private ensureConfigLoaded;
+    private deepMergeConfig;
+    private persistConfiguration;
     getDatabaseHealth(): Promise<{
         falkordb: any;
         qdrant: any;

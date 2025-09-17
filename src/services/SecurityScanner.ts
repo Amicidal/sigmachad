@@ -20,6 +20,7 @@ import { EventEmitter } from "events";
 import { noiseConfig } from "../config/noise.js";
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 
 export interface SecurityRule {
   id: string;
@@ -520,7 +521,7 @@ export class SecurityScanner extends EventEmitter {
 
   private scanFileForIssues(
     content: string,
-    entity: CodebaseEntity,
+    file: File,
     options: SecurityScanOptions,
     rules?: SecurityRule[]
   ): SecurityIssue[] {
@@ -541,8 +542,8 @@ export class SecurityScanner extends EventEmitter {
         const codeSnippet = this.getCodeSnippet(lines, lineNumber);
 
         // Stable fingerprint: entity, rule, line, snippet hash
-        const fpInput = `${entity.id}|${rule.id}|${lineNumber}|${codeSnippet}`;
-        const uniqueId = `sec_${crypto.createHash('sha1').update(fpInput).digest('hex')}`;
+        const fpInput = `${file.id}|${rule.id}|${lineNumber}|${codeSnippet}`;
+        const uniqueId = `sec_${createHash("sha1").update(fpInput).digest("hex")}`;
 
         const issue: SecurityIssue = {
           id: uniqueId,
@@ -554,7 +555,7 @@ export class SecurityScanner extends EventEmitter {
           description: rule.description,
           cwe: rule.cwe,
           owasp: rule.owasp,
-          affectedEntityId: entity.id,
+          affectedEntityId: file.id,
           lineNumber,
           codeSnippet,
           remediation: rule.remediation,
@@ -565,7 +566,7 @@ export class SecurityScanner extends EventEmitter {
         };
 
         // Suppression for issues by ruleId/path
-        if (this.isIssueSuppressed(issue, fileEntity)) {
+        if (this.isIssueSuppressed(issue, file)) {
           continue;
         }
 
@@ -1660,7 +1661,7 @@ export class SecurityScanner extends EventEmitter {
   }
 
   private analyzeAuditFindings(issues: SecurityIssue[]): any[] {
-    const findings = [];
+    const findings: Array<Record<string, unknown>> = [];
 
     // Group issues by type
     const issuesByType = issues.reduce((acc, issue) => {
@@ -1706,7 +1707,7 @@ export class SecurityScanner extends EventEmitter {
   }
 
   private generateAuditRecommendations(issues: SecurityIssue[]): string[] {
-    const recommendations = [];
+    const recommendations: string[] = [];
 
     const criticalIssues = issues.filter((i) => i.severity === "critical");
     const highIssues = issues.filter((i) => i.severity === "high");

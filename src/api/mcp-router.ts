@@ -24,6 +24,7 @@ import { existsSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Project } from "ts-morph";
+import { RelationshipType } from "../models/relationships.js";
 
 // MCP Tool definitions
 interface MCPToolDefinition {
@@ -1591,7 +1592,7 @@ export class MCPRouter {
     entityIds: string[],
     severity: string[]
   ): Promise<any> {
-    const issues = [];
+    const issues: Array<Record<string, unknown>> = [];
 
     // Mock SAST scan - would integrate with actual SAST tools
     const mockPatterns = [
@@ -1632,7 +1633,7 @@ export class MCPRouter {
     entityIds: string[],
     severity: string[]
   ): Promise<any> {
-    const vulnerabilities = [];
+    const vulnerabilities: Array<Record<string, unknown>> = [];
 
     // Mock dependency scanning - would integrate with tools like OWASP Dependency Check
     const mockVulnerabilities = [
@@ -1685,7 +1686,7 @@ export class MCPRouter {
     entityIds: string[],
     severity: string[]
   ): Promise<any> {
-    const issues = [];
+    const issues: Array<Record<string, unknown>> = [];
 
     // Mock secrets scanning
     const secretPatterns = [
@@ -1725,7 +1726,7 @@ export class MCPRouter {
     entityIds: string[],
     severity: string[]
   ): Promise<any> {
-    const issues = [];
+    const issues: Array<Record<string, unknown>> = [];
 
     // Mock dependency analysis for circular dependencies, unused deps, etc.
     const dependencyIssues = [
@@ -1792,6 +1793,76 @@ export class MCPRouter {
     return scores[severity as keyof typeof scores] || 5.0;
   }
 
+  private getDocFreshnessWindowMs(): number {
+    const raw = process.env.DOC_FRESHNESS_MAX_AGE_DAYS;
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    const days = Number.isFinite(parsed) && parsed > 0 ? parsed : 14;
+    return days * 24 * 60 * 60 * 1000;
+  }
+
+  private shouldFlagDocumentationOutdated(change: any): boolean {
+    const changeType = String(change?.changeType || "").toLowerCase();
+    const impactfulTypes = new Set([
+      "modify",
+      "modified",
+      "update",
+      "updated",
+      "refactor",
+      "rename",
+      "renamed",
+      "delete",
+      "deleted",
+      "remove",
+      "removed",
+    ]);
+
+    if (impactfulTypes.has(changeType)) return true;
+    if (change?.signatureChange) return true;
+    return false;
+  }
+
+  private evaluateDeploymentGate(documentationImpact: {
+    staleDocs: any[];
+    missingDocs: any[];
+    freshnessPenalty: number;
+  }) {
+    const missingCount = documentationImpact.missingDocs?.length || 0;
+    const staleCount = documentationImpact.staleDocs?.length || 0;
+    const freshnessPenalty = documentationImpact.freshnessPenalty || 0;
+
+    const reasons: string[] = [];
+    let blocked = false;
+    let level: "none" | "advisory" | "required" = "none";
+
+    if (missingCount > 0) {
+      blocked = true;
+      level = "required";
+      reasons.push(
+        `${missingCount} impacted entities lack linked documentation`
+      );
+    }
+
+    if (staleCount > 3 || freshnessPenalty > 5) {
+      if (!blocked) {
+        level = "advisory";
+      }
+      reasons.push(
+        `${staleCount} documentation artefact${staleCount === 1 ? "" : "s"} marked stale`
+      );
+    }
+
+    return {
+      blocked,
+      level,
+      reasons,
+      stats: {
+        missingDocs: missingCount,
+        staleDocs: staleCount,
+        freshnessPenalty,
+      },
+    };
+  }
+
   private async handleImpactAnalysis(params: any): Promise<any> {
     console.log("MCP Tool called: impact.analyze", params);
 
@@ -1805,7 +1876,9 @@ export class MCPRouter {
       };
       const documentationImpact = {
         staleDocs: [] as any[],
+        missingDocs: [] as any[],
         requiredUpdates: [] as string[],
+        freshnessPenalty: 0,
       };
       const recommendations: any[] = [];
 
@@ -1854,8 +1927,33 @@ export class MCPRouter {
           entity
         );
         documentationImpact.staleDocs.push(...docResults.staleDocs);
+        documentationImpact.missingDocs.push(...docResults.missingDocs);
         documentationImpact.requiredUpdates.push(...docResults.requiredUpdates);
+        documentationImpact.freshnessPenalty += docResults.freshnessPenalty || 0;
       }
+
+      const dedupeById = <T extends { docId?: string; entityId?: string }>(
+        items: T[]
+      ): T[] => {
+        const seen = new Set<string>();
+        const out: T[] = [];
+        for (const item of items) {
+          const key = item.docId || item.entityId || JSON.stringify(item);
+          if (!seen.has(key)) {
+            seen.add(key);
+            out.push(item);
+          }
+        }
+        return out;
+      };
+
+      documentationImpact.staleDocs = dedupeById(documentationImpact.staleDocs);
+      documentationImpact.missingDocs = dedupeById(
+        documentationImpact.missingDocs
+      );
+      documentationImpact.requiredUpdates = Array.from(
+        new Set(documentationImpact.requiredUpdates)
+      );
 
       // Ensure we have at least some impact data for testing
       if (params.changes.length > 0 && directImpact.length === 0) {
@@ -1897,6 +1995,8 @@ export class MCPRouter {
         });
       }
 
+      const deploymentGate = this.evaluateDeploymentGate(documentationImpact);
+
       // Generate recommendations based on impact analysis
       recommendations.push(
         ...this.generateImpactRecommendations(
@@ -1911,17 +2011,24 @@ export class MCPRouter {
         directImpact,
         cascadingImpact,
         testImpact,
+        documentationImpact,
+        deploymentGate,
         recommendations,
         changes: params.changes,
         summary: {
           totalAffectedEntities: directImpact.length + cascadingImpact.length,
-          riskLevel: this.calculateRiskLevel(directImpact, cascadingImpact),
+          riskLevel: this.calculateRiskLevel(
+            directImpact,
+            cascadingImpact,
+            documentationImpact
+          ),
           estimatedEffort: this.estimateEffort(
             directImpact,
             cascadingImpact,
             testImpact,
             documentationImpact
           ),
+          deploymentGate,
         },
         message: `Impact analysis completed. ${
           directImpact.length + cascadingImpact.length
@@ -1938,12 +2045,30 @@ export class MCPRouter {
           requiredUpdates: [],
           coverageImpact: 0,
         },
+        documentationImpact: {
+          staleDocs: [],
+          missingDocs: [],
+          requiredUpdates: [],
+          freshnessPenalty: 0,
+        },
+        deploymentGate: {
+          blocked: false,
+          level: "none" as const,
+          reasons: [],
+          stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
+        },
         recommendations: [],
         changes: params.changes || [],
         summary: {
           totalAffectedEntities: 0,
           riskLevel: "low",
           estimatedEffort: "low",
+          deploymentGate: {
+            blocked: false,
+            level: "none" as const,
+            reasons: [],
+            stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
+          },
         },
         message: `Impact analysis failed: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -1953,7 +2078,7 @@ export class MCPRouter {
   }
 
   private async analyzeDirectImpact(change: any, entity: any): Promise<any[]> {
-    const impacts = [];
+    const impacts: Array<Record<string, unknown>> = [];
 
     try {
       // Get relationships for this entity
@@ -2001,7 +2126,7 @@ export class MCPRouter {
     entity: any,
     maxDepth: number
   ): Promise<any[]> {
-    const impacts = [];
+    const impacts: Array<Record<string, unknown>> = [];
     const visited = new Set([entity.id]);
 
     // BFS to find cascading impacts
@@ -2046,8 +2171,8 @@ export class MCPRouter {
   }
 
   private async analyzeTestImpact(change: any, entity: any): Promise<any> {
-    const affectedTests = [];
-    const requiredUpdates = [];
+    const affectedTests: Array<Record<string, unknown>> = [];
+    const requiredUpdates: string[] = [];
     let coverageImpact = 0;
 
     try {
@@ -2085,37 +2210,136 @@ export class MCPRouter {
     change: any,
     entity: any
   ): Promise<any> {
-    const staleDocs = [];
-    const requiredUpdates = [];
+    const staleDocs: Array<Record<string, unknown>> = [];
+    const missingDocs: Array<Record<string, unknown>> = [];
+    const requiredUpdates: string[] = [];
+    let freshnessPenalty = 0;
 
     try {
-      // Search for documentation entities that might reference this entity
-      const docEntities = await this.kgService.search({
-        query: (entity as any).name || entity.id,
-        limit: 10,
+      const docEdges = await this.kgService.getRelationships({
+        fromEntityId: entity.id,
+        type: RelationshipType.DOCUMENTED_BY,
+        limit: 100,
       });
 
-      for (const docEntity of docEntities) {
-        staleDocs.push({
-          docId: docEntity.id,
-          title:
-            (docEntity as any).title || (docEntity as any).name || docEntity.id,
-          reason: `Documentation references ${
-            (entity as any).name || entity.id
-          } which is being modified`,
+      const docIds = Array.from(
+        new Set(
+          docEdges
+            .map((rel) => rel.toEntityId)
+            .filter((id): id is string => typeof id === "string" && id.length > 0)
+        )
+      );
+
+      if (docIds.length === 0) {
+        missingDocs.push({
+          entityId: entity.id,
+          reason: "No DOCUMENTED_BY relationships present",
+        });
+        freshnessPenalty += 2;
+
+        const searchResults = await this.kgService.search({
+          query: (entity as any).name || entity.id,
+          limit: 5,
         });
 
-        requiredUpdates.push(
-          `Update ${
-            (docEntity as any).title || (docEntity as any).name || docEntity.id
-          } to reflect changes to ${(entity as any).name || entity.id}`
+        for (const docEntity of searchResults) {
+          requiredUpdates.push(
+            `Create documentation coverage linking ${
+              (entity as any).name || entity.id
+            } to ${
+              (docEntity as any).title || (docEntity as any).name || docEntity.id
+            }`
+          );
+        }
+      } else {
+        const docMap = new Map<string, any>();
+        await Promise.all(
+          docIds.map(async (docId) => {
+            try {
+              const docEntity = await this.kgService.getEntity(docId);
+              if (docEntity) {
+                docMap.set(docId, docEntity);
+              }
+            } catch {}
+          })
         );
+
+        const freshnessWindowMs = this.getDocFreshnessWindowMs();
+        const now = Date.now();
+        const shouldForceOutdated = this.shouldFlagDocumentationOutdated(change);
+        const needsFlag = shouldForceOutdated
+          ? docEdges.some((rel) =>
+              ((rel as any).documentationQuality || rel.metadata?.documentationQuality) !==
+              "outdated"
+            )
+          : false;
+
+        if (shouldForceOutdated && needsFlag) {
+          try {
+            await this.kgService.markEntityDocumentationOutdated(entity.id, {
+              reason: `Change ${change.changeType || "update"} pending review`,
+              staleSince: change.timestamp ? new Date(change.timestamp) : undefined,
+            });
+            docEdges.forEach((rel) => ((rel as any).documentationQuality = "outdated"));
+          } catch (error) {
+            console.warn(
+              "Failed to mark documentation outdated during impact analysis:",
+              error instanceof Error ? error.message : error
+            );
+          }
+        }
+
+        for (const rel of docEdges) {
+          const docId = rel.toEntityId as string;
+          const docEntity = docMap.get(docId);
+          const title =
+            docEntity?.title || (docEntity as any)?.name || docId || "Unknown doc";
+          const relAny: any = rel as any;
+          const md = relAny.metadata || {};
+          const quality: string | undefined =
+            relAny.documentationQuality || md.documentationQuality;
+          const lastValidatedRaw = relAny.lastValidated || md.lastValidated;
+          const lastValidated =
+            typeof lastValidatedRaw === "string"
+              ? new Date(lastValidatedRaw)
+              : lastValidatedRaw instanceof Date
+              ? lastValidatedRaw
+              : undefined;
+          const ageMs = lastValidated ? now - lastValidated.getTime() : Number.POSITIVE_INFINITY;
+          const isOutdated = quality === "outdated";
+          const isPartial = quality === "partial";
+          const isStaleByTime = ageMs > freshnessWindowMs;
+          const needsRefresh = isOutdated || isPartial || isStaleByTime;
+
+          if (needsRefresh) {
+            const reason = isOutdated
+              ? "outdated"
+              : isPartial
+              ? "partial-coverage"
+              : "stale-freshness";
+
+            staleDocs.push({
+              docId,
+              title,
+              documentationQuality: quality || "unknown",
+              lastValidated: lastValidated ? lastValidated.toISOString() : null,
+              coverageScope: relAny.coverageScope || md.coverageScope || null,
+              reason,
+            });
+
+            requiredUpdates.push(
+              `Refresh ${title} to reflect changes to ${(entity as any).name || entity.id}`
+            );
+
+            freshnessPenalty += 1;
+          }
+        }
       }
     } catch (error) {
       console.warn("Error analyzing documentation impact:", error);
     }
 
-    return { staleDocs, requiredUpdates };
+    return { staleDocs, missingDocs, requiredUpdates, freshnessPenalty };
   }
 
   private generateImpactRecommendations(
@@ -2124,7 +2348,7 @@ export class MCPRouter {
     testImpact: any,
     documentationImpact: any
   ): any[] {
-    const recommendations = [];
+    const recommendations: Array<Record<string, unknown>> = [];
 
     // Risk-based recommendations
     if (directImpact.some((i) => i.severity === "high")) {
@@ -2154,6 +2378,38 @@ export class MCPRouter {
           "Run full test suite before and after changes",
           "Consider test refactoring to reduce coupling",
           "Update test documentation",
+        ],
+      });
+    }
+
+    if (documentationImpact.missingDocs?.length) {
+      const missingCount = documentationImpact.missingDocs.length;
+      recommendations.push({
+        priority: missingCount > 2 ? "immediate" : "high",
+        description: `${missingCount} impacted entities have no linked documentation`,
+        effort: missingCount > 4 ? "high" : "medium",
+        impact: "knowledge-gap",
+        actions: [
+          "Author or link documentation for uncovered entities",
+          "Ensure architectural decisions are captured before merge",
+          "Update onboarding/runbooks to reflect new behaviour",
+        ],
+      });
+    }
+
+    if (documentationImpact.staleDocs.length > 0) {
+      const staleCount = documentationImpact.staleDocs.length;
+      recommendations.push({
+        priority: staleCount > 3 ? "immediate" : "high",
+        description: `Refresh ${staleCount} stale documentation artefact${
+          staleCount === 1 ? "" : "s"
+        }`,
+        effort: staleCount > 5 ? "high" : "medium",
+        impact: "governance",
+        actions: [
+          "Review documentation linked to the change set",
+          "Re-run documentation sync after updates",
+          "Notify stakeholders responsible for governance docs",
         ],
       });
     }
@@ -2193,16 +2449,61 @@ export class MCPRouter {
 
   private calculateRiskLevel(
     directImpact: any[],
-    cascadingImpact: any[]
+    cascadingImpact: any[],
+    documentationImpact?: {
+      staleDocs: any[];
+      missingDocs: any[];
+      freshnessPenalty: number;
+    }
   ): "low" | "medium" | "high" | "critical" {
     const highSeverityCount = directImpact.filter(
       (i) => i.severity === "high"
     ).length;
     const totalAffected = directImpact.length + cascadingImpact.length;
 
-    if (highSeverityCount > 5 || totalAffected > 50) return "critical";
-    if (highSeverityCount > 2 || totalAffected > 20) return "high";
-    if (highSeverityCount > 0 || totalAffected > 10) return "medium";
+    let base: "low" | "medium" | "high" | "critical" = "low";
+    if (highSeverityCount > 5 || totalAffected > 50) base = "critical";
+    else if (highSeverityCount > 2 || totalAffected > 20) base = "high";
+    else if (highSeverityCount > 0 || totalAffected > 10) base = "medium";
+
+    let score = this.riskLevelToScore(base);
+
+    if (documentationImpact) {
+      const missingCount = documentationImpact.missingDocs?.length || 0;
+      const staleCount = documentationImpact.staleDocs?.length || 0;
+      const freshnessPenalty = documentationImpact.freshnessPenalty || 0;
+
+      if (missingCount > 0) {
+        score = Math.max(score, 1);
+      }
+      if (missingCount > 1 || staleCount > 2) {
+        score = Math.max(score, 2);
+      }
+      if (missingCount > 3 || staleCount > 5 || freshnessPenalty > 5) {
+        score = Math.max(score, 3);
+      }
+    }
+
+    return this.riskScoreToLabel(score);
+  }
+
+  private riskLevelToScore(level: "low" | "medium" | "high" | "critical"): number {
+    switch (level) {
+      case "critical":
+        return 3;
+      case "high":
+        return 2;
+      case "medium":
+        return 1;
+      default:
+        return 0;
+    }
+  }
+
+  private riskScoreToLabel(score: number): "low" | "medium" | "high" | "critical" {
+    if (score >= 3) return "critical";
+    if (score >= 2) return "high";
+    if (score >= 1) return "medium";
     return "low";
   }
 
@@ -2216,7 +2517,8 @@ export class MCPRouter {
       directImpact.length +
       cascadingImpact.length +
       testImpact.affectedTests.length +
-      documentationImpact.staleDocs.length;
+      documentationImpact.staleDocs.length +
+      (documentationImpact.missingDocs?.length || 0);
 
     if (totalAffected > 30) return "high";
     if (totalAffected > 15) return "medium";
@@ -3164,7 +3466,7 @@ export class MCPRouter {
             if (fn.getName() === name && fn.getBody()) {
               results.push({
                 file: sf.getFilePath(),
-                range: { start: fn.getStartLinePos(), end: fn.getEndLinePos() },
+                range: { start: fn.getStartLineNumber(), end: fn.getEndLineNumber() },
                 metavariables: { NAME: { text: name } },
               });
               if (results.length >= limit) return results;
@@ -3177,7 +3479,7 @@ export class MCPRouter {
               if (m.getName() === name && m.getBody()) {
                 results.push({
                   file: sf.getFilePath(),
-                  range: { start: m.getStartLinePos(), end: m.getEndLinePos() },
+                  range: { start: m.getStartLineNumber(), end: m.getEndLineNumber() },
                   metavariables: { NAME: { text: name } },
                 });
                 if (results.length >= limit) return results;
@@ -3860,7 +4162,7 @@ export class MCPRouter {
 
       const coverage = await this.testEngine.getCoverageAnalysis(entityId);
 
-      let historicalData = null;
+      let historicalData: any = null;
       if (includeHistorical) {
         historicalData = await this.dbService.getCoverageHistory(entityId, 30);
       }

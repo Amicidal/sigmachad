@@ -1366,5 +1366,23 @@ describe('Admin Routes', () => {
         }
       });
     });
+
+    it('should return 400 for configuration validation errors', async () => {
+      mockRequest.body = { performance: { maxConcurrentSync: 0 } };
+      mockConfigurationService.updateConfiguration = vi.fn().mockRejectedValue(
+        new Error('maxConcurrentSync must be at least 1')
+      );
+
+      await updateConfigHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(400);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          code: 'CONFIG_VALIDATION_FAILED',
+          message: 'maxConcurrentSync must be at least 1'
+        }
+      });
+    });
   });
 });

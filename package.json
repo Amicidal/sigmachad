@@ -38,6 +38,7 @@
     "sync": "tsx scripts/sync-knowledge-graph.ts",
     "health": "tsx scripts/health-check.ts",
     "assets:webgl": "tsx scripts/fetch-webgl-assets.ts",
+    "smoke": "tsx scripts/smoke-test.ts",
     "web:dev": "pnpm --dir web/graph-viewer dev",
     "web:build": "pnpm --dir web/graph-viewer build"
   },

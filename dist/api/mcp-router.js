@@ -10,6 +10,7 @@ import { existsSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Project } from "ts-morph";
+import { RelationshipType } from "../models/relationships.js";
 export class MCPRouter {
     // Resolve absolute path to the project's src directory, regardless of CWD
     getSrcRoot() {
@@ -1547,6 +1548,63 @@ export class MCPRouter {
         const scores = { critical: 9.8, high: 7.5, medium: 5.5, low: 3.2 };
         return scores[severity] || 5.0;
     }
+    getDocFreshnessWindowMs() {
+        const raw = process.env.DOC_FRESHNESS_MAX_AGE_DAYS;
+        const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+        const days = Number.isFinite(parsed) && parsed > 0 ? parsed : 14;
+        return days * 24 * 60 * 60 * 1000;
+    }
+    shouldFlagDocumentationOutdated(change) {
+        const changeType = String((change === null || change === void 0 ? void 0 : change.changeType) || "").toLowerCase();
+        const impactfulTypes = new Set([
+            "modify",
+            "modified",
+            "update",
+            "updated",
+            "refactor",
+            "rename",
+            "renamed",
+            "delete",
+            "deleted",
+            "remove",
+            "removed",
+        ]);
+        if (impactfulTypes.has(changeType))
+            return true;
+        if (change === null || change === void 0 ? void 0 : change.signatureChange)
+            return true;
+        return false;
+    }
+    evaluateDeploymentGate(documentationImpact) {
+        var _a, _b;
+        const missingCount = ((_a = documentationImpact.missingDocs) === null || _a === void 0 ? void 0 : _a.length) || 0;
+        const staleCount = ((_b = documentationImpact.staleDocs) === null || _b === void 0 ? void 0 : _b.length) || 0;
+        const freshnessPenalty = documentationImpact.freshnessPenalty || 0;
+        const reasons = [];
+        let blocked = false;
+        let level = "none";
+        if (missingCount > 0) {
+            blocked = true;
+            level = "required";
+            reasons.push(`${missingCount} impacted entities lack linked documentation`);
+        }
+        if (staleCount > 3 || freshnessPenalty > 5) {
+            if (!blocked) {
+                level = "advisory";
+            }
+            reasons.push(`${staleCount} documentation artefact${staleCount === 1 ? "" : "s"} marked stale`);
+        }
+        return {
+            blocked,
+            level,
+            reasons,
+            stats: {
+                missingDocs: missingCount,
+                staleDocs: staleCount,
+                freshnessPenalty,
+            },
+        };
+    }
     async handleImpactAnalysis(params) {
         console.log("MCP Tool called: impact.analyze", params);
         try {
@@ -1559,7 +1617,9 @@ export class MCPRouter {
             };
             const documentationImpact = {
                 staleDocs: [],
+                missingDocs: [],
                 requiredUpdates: [],
+                freshnessPenalty: 0,
             };
             const recommendations = [];
             // Analyze each change for impact
@@ -1595,8 +1655,25 @@ export class MCPRouter {
                 // Analyze documentation impact
                 const docResults = await this.analyzeDocumentationImpact(change, entity);
                 documentationImpact.staleDocs.push(...docResults.staleDocs);
+                documentationImpact.missingDocs.push(...docResults.missingDocs);
                 documentationImpact.requiredUpdates.push(...docResults.requiredUpdates);
+                documentationImpact.freshnessPenalty += docResults.freshnessPenalty || 0;
             }
+            const dedupeById = (items) => {
+                const seen = new Set();
+                const out = [];
+                for (const item of items) {
+                    const key = item.docId || item.entityId || JSON.stringify(item);
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        out.push(item);
+                    }
+                }
+                return out;
+            };
+            documentationImpact.staleDocs = dedupeById(documentationImpact.staleDocs);
+            documentationImpact.missingDocs = dedupeById(documentationImpact.missingDocs);
+            documentationImpact.requiredUpdates = Array.from(new Set(documentationImpact.requiredUpdates));
             // Ensure we have at least some impact data for testing
             if (params.changes.length > 0 && directImpact.length === 0) {
                 // Add mock direct impact
@@ -1634,18 +1711,22 @@ export class MCPRouter {
                     ],
                 });
             }
+            const deploymentGate = this.evaluateDeploymentGate(documentationImpact);
             // Generate recommendations based on impact analysis
             recommendations.push(...this.generateImpactRecommendations(directImpact, cascadingImpact, testImpact, documentationImpact));
             return {
                 directImpact,
                 cascadingImpact,
                 testImpact,
+                documentationImpact,
+                deploymentGate,
                 recommendations,
                 changes: params.changes,
                 summary: {
                     totalAffectedEntities: directImpact.length + cascadingImpact.length,
-                    riskLevel: this.calculateRiskLevel(directImpact, cascadingImpact),
+                    riskLevel: this.calculateRiskLevel(directImpact, cascadingImpact, documentationImpact),
                     estimatedEffort: this.estimateEffort(directImpact, cascadingImpact, testImpact, documentationImpact),
+                    deploymentGate,
                 },
                 message: `Impact analysis completed. ${directImpact.length + cascadingImpact.length} entities affected`,
             };
@@ -1661,12 +1742,30 @@ export class MCPRouter {
                     requiredUpdates: [],
                     coverageImpact: 0,
                 },
+                documentationImpact: {
+                    staleDocs: [],
+                    missingDocs: [],
+                    requiredUpdates: [],
+                    freshnessPenalty: 0,
+                },
+                deploymentGate: {
+                    blocked: false,
+                    level: "none",
+                    reasons: [],
+                    stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
+                },
                 recommendations: [],
                 changes: params.changes || [],
                 summary: {
                     totalAffectedEntities: 0,
                     riskLevel: "low",
                     estimatedEffort: "low",
+                    deploymentGate: {
+                        blocked: false,
+                        level: "none",
+                        reasons: [],
+                        stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
+                    },
                 },
                 message: `Impact analysis failed: ${error instanceof Error ? error.message : "Unknown error"}`,
             };
@@ -1776,28 +1875,110 @@ export class MCPRouter {
     }
     async analyzeDocumentationImpact(change, entity) {
         const staleDocs = [];
+        const missingDocs = [];
         const requiredUpdates = [];
+        let freshnessPenalty = 0;
         try {
-            // Search for documentation entities that might reference this entity
-            const docEntities = await this.kgService.search({
-                query: entity.name || entity.id,
-                limit: 10,
+            const docEdges = await this.kgService.getRelationships({
+                fromEntityId: entity.id,
+                type: RelationshipType.DOCUMENTED_BY,
+                limit: 100,
             });
-            for (const docEntity of docEntities) {
-                staleDocs.push({
-                    docId: docEntity.id,
-                    title: docEntity.title || docEntity.name || docEntity.id,
-                    reason: `Documentation references ${entity.name || entity.id} which is being modified`,
+            const docIds = Array.from(new Set(docEdges
+                .map((rel) => rel.toEntityId)
+                .filter((id) => typeof id === "string" && id.length > 0)));
+            if (docIds.length === 0) {
+                missingDocs.push({
+                    entityId: entity.id,
+                    reason: "No DOCUMENTED_BY relationships present",
                 });
-                requiredUpdates.push(`Update ${docEntity.title || docEntity.name || docEntity.id} to reflect changes to ${entity.name || entity.id}`);
+                freshnessPenalty += 2;
+                const searchResults = await this.kgService.search({
+                    query: entity.name || entity.id,
+                    limit: 5,
+                });
+                for (const docEntity of searchResults) {
+                    requiredUpdates.push(`Create documentation coverage linking ${entity.name || entity.id} to ${docEntity.title || docEntity.name || docEntity.id}`);
+                }
+            }
+            else {
+                const docMap = new Map();
+                await Promise.all(docIds.map(async (docId) => {
+                    try {
+                        const docEntity = await this.kgService.getEntity(docId);
+                        if (docEntity) {
+                            docMap.set(docId, docEntity);
+                        }
+                    }
+                    catch (_a) { }
+                }));
+                const freshnessWindowMs = this.getDocFreshnessWindowMs();
+                const now = Date.now();
+                const shouldForceOutdated = this.shouldFlagDocumentationOutdated(change);
+                const needsFlag = shouldForceOutdated
+                    ? docEdges.some((rel) => {
+                        var _a;
+                        return (rel.documentationQuality || ((_a = rel.metadata) === null || _a === void 0 ? void 0 : _a.documentationQuality)) !==
+                            "outdated";
+                    })
+                    : false;
+                if (shouldForceOutdated && needsFlag) {
+                    try {
+                        await this.kgService.markEntityDocumentationOutdated(entity.id, {
+                            reason: `Change ${change.changeType || "update"} pending review`,
+                            staleSince: change.timestamp ? new Date(change.timestamp) : undefined,
+                        });
+                        docEdges.forEach((rel) => (rel.documentationQuality = "outdated"));
+                    }
+                    catch (error) {
+                        console.warn("Failed to mark documentation outdated during impact analysis:", error instanceof Error ? error.message : error);
+                    }
+                }
+                for (const rel of docEdges) {
+                    const docId = rel.toEntityId;
+                    const docEntity = docMap.get(docId);
+                    const title = (docEntity === null || docEntity === void 0 ? void 0 : docEntity.title) || (docEntity === null || docEntity === void 0 ? void 0 : docEntity.name) || docId || "Unknown doc";
+                    const relAny = rel;
+                    const md = relAny.metadata || {};
+                    const quality = relAny.documentationQuality || md.documentationQuality;
+                    const lastValidatedRaw = relAny.lastValidated || md.lastValidated;
+                    const lastValidated = typeof lastValidatedRaw === "string"
+                        ? new Date(lastValidatedRaw)
+                        : lastValidatedRaw instanceof Date
+                            ? lastValidatedRaw
+                            : undefined;
+                    const ageMs = lastValidated ? now - lastValidated.getTime() : Number.POSITIVE_INFINITY;
+                    const isOutdated = quality === "outdated";
+                    const isPartial = quality === "partial";
+                    const isStaleByTime = ageMs > freshnessWindowMs;
+                    const needsRefresh = isOutdated || isPartial || isStaleByTime;
+                    if (needsRefresh) {
+                        const reason = isOutdated
+                            ? "outdated"
+                            : isPartial
+                                ? "partial-coverage"
+                                : "stale-freshness";
+                        staleDocs.push({
+                            docId,
+                            title,
+                            documentationQuality: quality || "unknown",
+                            lastValidated: lastValidated ? lastValidated.toISOString() : null,
+                            coverageScope: relAny.coverageScope || md.coverageScope || null,
+                            reason,
+                        });
+                        requiredUpdates.push(`Refresh ${title} to reflect changes to ${entity.name || entity.id}`);
+                        freshnessPenalty += 1;
+                    }
+                }
             }
         }
         catch (error) {
             console.warn("Error analyzing documentation impact:", error);
         }
-        return { staleDocs, requiredUpdates };
+        return { staleDocs, missingDocs, requiredUpdates, freshnessPenalty };
     }
     generateImpactRecommendations(directImpact, cascadingImpact, testImpact, documentationImpact) {
+        var _a;
         const recommendations = [];
         // Risk-based recommendations
         if (directImpact.some((i) => i.severity === "high")) {
@@ -1824,6 +2005,34 @@ export class MCPRouter {
                     "Run full test suite before and after changes",
                     "Consider test refactoring to reduce coupling",
                     "Update test documentation",
+                ],
+            });
+        }
+        if ((_a = documentationImpact.missingDocs) === null || _a === void 0 ? void 0 : _a.length) {
+            const missingCount = documentationImpact.missingDocs.length;
+            recommendations.push({
+                priority: missingCount > 2 ? "immediate" : "high",
+                description: `${missingCount} impacted entities have no linked documentation`,
+                effort: missingCount > 4 ? "high" : "medium",
+                impact: "knowledge-gap",
+                actions: [
+                    "Author or link documentation for uncovered entities",
+                    "Ensure architectural decisions are captured before merge",
+                    "Update onboarding/runbooks to reflect new behaviour",
+                ],
+            });
+        }
+        if (documentationImpact.staleDocs.length > 0) {
+            const staleCount = documentationImpact.staleDocs.length;
+            recommendations.push({
+                priority: staleCount > 3 ? "immediate" : "high",
+                description: `Refresh ${staleCount} stale documentation artefact${staleCount === 1 ? "" : "s"}`,
+                effort: staleCount > 5 ? "high" : "medium",
+                impact: "governance",
+                actions: [
+                    "Review documentation linked to the change set",
+                    "Re-run documentation sync after updates",
+                    "Notify stakeholders responsible for governance docs",
                 ],
             });
         }
@@ -1857,22 +2066,62 @@ export class MCPRouter {
         }
         return recommendations;
     }
-    calculateRiskLevel(directImpact, cascadingImpact) {
+    calculateRiskLevel(directImpact, cascadingImpact, documentationImpact) {
+        var _a, _b;
         const highSeverityCount = directImpact.filter((i) => i.severity === "high").length;
         const totalAffected = directImpact.length + cascadingImpact.length;
+        let base = "low";
         if (highSeverityCount > 5 || totalAffected > 50)
+            base = "critical";
+        else if (highSeverityCount > 2 || totalAffected > 20)
+            base = "high";
+        else if (highSeverityCount > 0 || totalAffected > 10)
+            base = "medium";
+        let score = this.riskLevelToScore(base);
+        if (documentationImpact) {
+            const missingCount = ((_a = documentationImpact.missingDocs) === null || _a === void 0 ? void 0 : _a.length) || 0;
+            const staleCount = ((_b = documentationImpact.staleDocs) === null || _b === void 0 ? void 0 : _b.length) || 0;
+            const freshnessPenalty = documentationImpact.freshnessPenalty || 0;
+            if (missingCount > 0) {
+                score = Math.max(score, 1);
+            }
+            if (missingCount > 1 || staleCount > 2) {
+                score = Math.max(score, 2);
+            }
+            if (missingCount > 3 || staleCount > 5 || freshnessPenalty > 5) {
+                score = Math.max(score, 3);
+            }
+        }
+        return this.riskScoreToLabel(score);
+    }
+    riskLevelToScore(level) {
+        switch (level) {
+            case "critical":
+                return 3;
+            case "high":
+                return 2;
+            case "medium":
+                return 1;
+            default:
+                return 0;
+        }
+    }
+    riskScoreToLabel(score) {
+        if (score >= 3)
             return "critical";
-        if (highSeverityCount > 2 || totalAffected > 20)
+        if (score >= 2)
             return "high";
-        if (highSeverityCount > 0 || totalAffected > 10)
+        if (score >= 1)
             return "medium";
         return "low";
     }
     estimateEffort(directImpact, cascadingImpact, testImpact, documentationImpact) {
+        var _a;
         const totalAffected = directImpact.length +
             cascadingImpact.length +
             testImpact.affectedTests.length +
-            documentationImpact.staleDocs.length;
+            documentationImpact.staleDocs.length +
+            (((_a = documentationImpact.missingDocs) === null || _a === void 0 ? void 0 : _a.length) || 0);
         if (totalAffected > 30)
             return "high";
         if (totalAffected > 15)
@@ -2710,7 +2959,7 @@ export class MCPRouter {
                         if (fn.getName() === name && fn.getBody()) {
                             results.push({
                                 file: sf.getFilePath(),
-                                range: { start: fn.getStartLinePos(), end: fn.getEndLinePos() },
+                                range: { start: fn.getStartLineNumber(), end: fn.getEndLineNumber() },
                                 metavariables: { NAME: { text: name } },
                             });
                             if (results.length >= limit)
@@ -2724,7 +2973,7 @@ export class MCPRouter {
                             if (m.getName() === name && m.getBody()) {
                                 results.push({
                                     file: sf.getFilePath(),
-                                    range: { start: m.getStartLinePos(), end: m.getEndLinePos() },
+                                    range: { start: m.getStartLineNumber(), end: m.getEndLineNumber() },
                                     metavariables: { NAME: { text: name } },
                                 });
                                 if (results.length >= limit)

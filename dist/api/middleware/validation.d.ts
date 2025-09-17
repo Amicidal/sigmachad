@@ -58,7 +58,7 @@ export declare const searchQuerySchema: z.ZodObject<{
     query: string;
     limit?: number | undefined;
     entityTypes?: ("function" | "class" | "file" | "module" | "interface")[] | undefined;
-    searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
+    searchType?: "dependency" | "semantic" | "structural" | "usage" | undefined;
     filters?: {
         tags?: string[] | undefined;
         path?: string | undefined;
@@ -73,7 +73,7 @@ export declare const searchQuerySchema: z.ZodObject<{
     query: string;
     limit?: number | undefined;
     entityTypes?: ("function" | "class" | "file" | "module" | "interface")[] | undefined;
-    searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
+    searchType?: "dependency" | "semantic" | "structural" | "usage" | undefined;
     filters?: {
         tags?: string[] | undefined;
         path?: string | undefined;

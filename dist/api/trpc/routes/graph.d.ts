@@ -30,7 +30,7 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        items: any[];
+        items: import("../../../models/entities.js").Entity[];
         total: number;
         limit: number;
         offset: number;
@@ -52,7 +52,7 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, null>;
+    }, import("../../../models/entities.js").Entity>;
     getRelationships: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -90,7 +90,7 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
             query: string;
             limit?: number | undefined;
             entityTypes?: ("function" | "test" | "class" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
-            searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
+            searchType?: "dependency" | "semantic" | "structural" | "usage" | undefined;
             filters?: {
                 tags?: string[] | undefined;
                 path?: string | undefined;
@@ -107,7 +107,7 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
             query: string;
             limit: number;
             entityTypes?: ("function" | "test" | "class" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
-            searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
+            searchType?: "dependency" | "semantic" | "structural" | "usage" | undefined;
             filters?: {
                 tags?: string[] | undefined;
                 path?: string | undefined;
@@ -145,12 +145,7 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        entityId: string;
-        dependencies: never[];
-        dependents: never[];
-        depth: number;
-    }>;
+    }, import("../../../models/types.js").DependencyAnalysis>;
     getClusters: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -172,7 +167,7 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, any[]>;
+    }, import("../../../models/entities.js").Entity[]>;
     analyzeImpact: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -192,13 +187,7 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        entityId: string;
-        changeType: "delete" | "modify" | "refactor";
-        affectedEntities: never[];
-        riskLevel: "low";
-        recommendations: never[];
-    }>;
+    }, never>;
     timeTravel: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;

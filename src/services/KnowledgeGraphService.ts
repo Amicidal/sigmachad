@@ -21,6 +21,12 @@ import {
   RelationshipQuery,
   PathQuery,
   TraversalQuery,
+  isDocumentationRelationshipType,
+  DocumentationCoverageScope,
+  DocumentationIntent,
+  DocumentationPolicyType,
+  DocumentationQuality,
+  DOCUMENTATION_RELATIONSHIP_TYPES,
 } from "../models/relationships.js";
 import { noiseConfig } from "../config/noise.js";
 import {
@@ -33,6 +39,7 @@ import { embeddingService } from "../utils/embedding.js";
 import { normalizeCodeEdge, canonicalRelationshipId, isCodeRelationship, mergeEdgeEvidence, mergeEdgeLocations } from "../utils/codeEdges.js";
 import { EventEmitter } from "events";
 import crypto from "crypto";
+import path from "path";
 
 // Simple cache interface for search results
 interface CacheEntry<T> {
@@ -77,7 +84,9 @@ class SimpleCache<T> {
     // If cache is at max size, remove oldest entry
     if (this.cache.size >= this.maxSize) {
       const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
+      if (typeof oldestKey !== "undefined") {
+        this.cache.delete(oldestKey);
+      }
     }
 
     this.cache.set(cacheKey, {
@@ -439,6 +448,10 @@ export class KnowledgeGraphService extends EventEmitter {
       this.harmonizeRefFields(rel);
     }
 
+    if (isDocumentationRelationshipType(rel.type)) {
+      Object.assign(rel, this.normalizeDocumentationEdge(rel));
+    }
+
     // Generate a human-readable why if missing
     if (!rel.why) {
       const src = rel.source as string | undefined;
@@ -454,6 +467,440 @@ export class KnowledgeGraphService extends EventEmitter {
     }
 
     return rel as GraphRelationship;
+  }
+
+  private normalizeDocumentationEdge(relIn: any): any {
+    const rel = relIn;
+    const md: Record<string, any> = { ...(rel.metadata || {}) };
+    rel.metadata = md;
+
+    const source = this.normalizeDocSource(rel.source || md.source);
+    if (source) {
+      rel.source = source;
+      md.source = source;
+    }
+
+    const docIntent = this.normalizeDocIntent(
+      rel.docIntent ?? md.docIntent,
+      source,
+      rel.type
+    );
+    if (docIntent) {
+      rel.docIntent = docIntent;
+      md.docIntent = docIntent;
+    }
+
+    const sectionAnchor = this.normalizeSectionAnchor(
+      rel.sectionAnchor ?? md.sectionAnchor ?? md.anchor,
+      rel.type === RelationshipType.DOCUMENTED_BY ||
+        rel.type === RelationshipType.DOCUMENTS_SECTION
+    );
+    if (sectionAnchor) {
+      rel.sectionAnchor = sectionAnchor;
+      md.sectionAnchor = sectionAnchor;
+    }
+
+    const summary = this.normalizeSummary(rel.summary ?? md.summary);
+    if (summary !== undefined) {
+      if (summary) {
+        rel.summary = summary;
+        md.summary = summary;
+      } else {
+        delete rel.summary;
+        delete md.summary;
+      }
+    }
+
+    const docVersion = this.normalizeString(rel.docVersion ?? md.docVersion);
+    if (docVersion) {
+      rel.docVersion = docVersion;
+      md.docVersion = docVersion;
+    }
+
+    const docHash = this.normalizeString(rel.docHash ?? md.docHash);
+    if (docHash) {
+      rel.docHash = docHash;
+      md.docHash = docHash;
+    }
+
+    const coverageScope = this.normalizeCoverageScope(
+      rel.coverageScope ?? md.coverageScope
+    );
+    if (coverageScope) {
+      rel.coverageScope = coverageScope;
+      md.coverageScope = coverageScope;
+    } else {
+      delete rel.coverageScope;
+      delete md.coverageScope;
+    }
+
+    const documentationQuality = this.normalizeDocumentationQuality(
+      rel.documentationQuality ?? md.documentationQuality
+    );
+    if (documentationQuality) {
+      rel.documentationQuality = documentationQuality;
+      md.documentationQuality = documentationQuality;
+    } else {
+      delete rel.documentationQuality;
+      delete md.documentationQuality;
+    }
+
+    const docLocale = this.normalizeLocale(rel.docLocale ?? md.docLocale);
+    if (docLocale) {
+      rel.docLocale = docLocale;
+      md.docLocale = docLocale;
+    }
+
+    const tags = this.normalizeStringArray(rel.tags ?? md.tags);
+    if (tags) {
+      rel.tags = tags;
+      md.tags = tags;
+    }
+
+    const stakeholders = this.normalizeStringArray(
+      rel.stakeholders ?? md.stakeholders
+    );
+    if (stakeholders) {
+      rel.stakeholders = stakeholders;
+      md.stakeholders = stakeholders;
+    }
+
+    const confidence = this.clamp01(rel.confidence ?? md.confidence);
+    if (confidence !== undefined) {
+      rel.confidence = confidence;
+      md.confidence = confidence;
+    }
+
+    if (
+      rel.type === RelationshipType.BELONGS_TO_DOMAIN &&
+      rel.strength === undefined
+    ) {
+      rel.strength = this.clamp01(md.strength) ?? 0.5;
+    } else if (rel.strength !== undefined) {
+      rel.strength = this.clamp01(rel.strength) ?? undefined;
+    }
+    if (rel.strength !== undefined) {
+      md.strength = rel.strength;
+    }
+
+    if (rel.type === RelationshipType.CLUSTER_MEMBER) {
+      const similarity = this.clampRange(
+        rel.similarityScore ?? md.similarityScore,
+        -1,
+        1
+      );
+      if (similarity !== undefined) {
+        rel.similarityScore = similarity;
+        md.similarityScore = similarity;
+      }
+
+      const clusterVersion =
+        this.normalizeString(rel.clusterVersion ?? md.clusterVersion) || "v1";
+      rel.clusterVersion = clusterVersion;
+      md.clusterVersion = clusterVersion;
+
+      const docAnchor =
+        this.normalizeSectionAnchor(rel.docAnchor ?? md.docAnchor) || sectionAnchor;
+      if (docAnchor) {
+        rel.docAnchor = docAnchor;
+        md.docAnchor = docAnchor;
+      }
+    }
+
+    if (
+      rel.type === RelationshipType.DESCRIBES_DOMAIN ||
+      rel.type === RelationshipType.BELONGS_TO_DOMAIN
+    ) {
+      const domainPath = this.normalizeDomainPath(
+        rel.domainPath ?? md.domainPath ?? md.taxonomyPath
+      );
+      if (domainPath) {
+        rel.domainPath = domainPath;
+        md.domainPath = domainPath;
+      }
+    }
+
+    if (rel.type === RelationshipType.DESCRIBES_DOMAIN) {
+      const taxonomyVersion =
+        this.normalizeString(rel.taxonomyVersion ?? md.taxonomyVersion) || "v1";
+      rel.taxonomyVersion = taxonomyVersion;
+      md.taxonomyVersion = taxonomyVersion;
+    }
+
+    if (rel.type === RelationshipType.DOMAIN_RELATED) {
+      const relationshipType = this.normalizeDomainRelationship(
+        rel.relationshipType ?? md.relationshipType
+      );
+      if (relationshipType) {
+        rel.relationshipType = relationshipType;
+        md.relationshipType = relationshipType;
+      }
+    }
+
+    if (rel.type === RelationshipType.GOVERNED_BY) {
+      const policyType = this.normalizePolicyType(
+        rel.policyType ?? md.policyType
+      );
+      if (policyType) {
+        rel.policyType = policyType;
+        md.policyType = policyType;
+      }
+    }
+
+    const lastValidated = this.toDate(rel.lastValidated ?? md.lastValidated);
+    if (lastValidated) {
+      rel.lastValidated = lastValidated;
+      md.lastValidated = lastValidated.toISOString();
+    }
+
+    const updatedFromDocAt = this.toDate(
+      rel.updatedFromDocAt ?? md.updatedFromDocAt
+    );
+    if (updatedFromDocAt) {
+      rel.updatedFromDocAt = updatedFromDocAt;
+      md.updatedFromDocAt = updatedFromDocAt.toISOString();
+    }
+
+    const lastComputed = this.toDate(rel.lastComputed ?? md.lastComputed);
+    if (lastComputed) {
+      rel.lastComputed = lastComputed;
+      md.lastComputed = lastComputed.toISOString();
+    }
+
+    const effectiveFrom = this.toDate(rel.effectiveFrom ?? md.effectiveFrom);
+    if (effectiveFrom) {
+      rel.effectiveFrom = effectiveFrom;
+      md.effectiveFrom = effectiveFrom.toISOString();
+    }
+
+    const expiresAtRaw = rel.expiresAt ?? md.expiresAt;
+    if (expiresAtRaw === null) {
+      rel.expiresAt = null;
+      md.expiresAt = null;
+    } else {
+      const expiresAt = this.toDate(expiresAtRaw);
+      if (expiresAt) {
+        rel.expiresAt = expiresAt;
+        md.expiresAt = expiresAt.toISOString();
+      }
+    }
+
+    if (Array.isArray(rel.evidence)) {
+      rel.evidence = rel.evidence.slice(0, 5);
+    }
+    if (Array.isArray(md.evidence)) {
+      md.evidence = md.evidence.slice(0, 5);
+    }
+
+    const embeddingVersion = this.normalizeString(
+      rel.embeddingVersion ?? md.embeddingVersion
+    );
+    if (embeddingVersion) {
+      rel.embeddingVersion = embeddingVersion;
+      md.embeddingVersion = embeddingVersion;
+    } else if (docIntent === "ai-context") {
+      const defaultEmbeddingVersion =
+        process.env.EMBEDDING_MODEL_VERSION ||
+        process.env.DEFAULT_EMBEDDING_VERSION;
+      if (defaultEmbeddingVersion) {
+        rel.embeddingVersion = defaultEmbeddingVersion;
+        md.embeddingVersion = defaultEmbeddingVersion;
+      }
+    }
+
+    return rel;
+  }
+
+  private normalizeDocSource(source: any): string | undefined {
+    if (!source) return undefined;
+    const normalized = String(source).toLowerCase();
+    switch (normalized) {
+      case "parser":
+      case "manual":
+      case "llm":
+      case "imported":
+      case "sync":
+      case "other":
+        return normalized;
+      default:
+        return "other";
+    }
+  }
+
+  private normalizeDocIntent(
+    intent: any,
+    source: string | undefined,
+    type: RelationshipType
+  ): DocumentationIntent {
+    const normalized = typeof intent === "string" ? intent.toLowerCase() : undefined;
+    if (normalized === "ai-context" || normalized === "governance" || normalized === "mixed") {
+      return normalized as DocumentationIntent;
+    }
+
+    if (type === RelationshipType.GOVERNED_BY) {
+      return "governance";
+    }
+
+    if (source === "manual") {
+      return "governance";
+    }
+
+    return source === "llm" ? "ai-context" : "ai-context";
+  }
+
+  private normalizeCoverageScope(
+    scope: any
+  ): DocumentationCoverageScope | undefined {
+    if (!scope) return undefined;
+    const normalized = String(scope).toLowerCase();
+    switch (normalized) {
+      case "api":
+      case "behavior":
+      case "operational":
+      case "security":
+      case "compliance":
+        return normalized as DocumentationCoverageScope;
+      default:
+        return undefined;
+    }
+  }
+
+  private normalizeDocumentationQuality(
+    quality: any
+  ): DocumentationQuality | undefined {
+    if (!quality) return undefined;
+    const normalized = String(quality).toLowerCase();
+    switch (normalized) {
+      case "complete":
+      case "partial":
+      case "outdated":
+        return normalized as DocumentationQuality;
+      default:
+        return undefined;
+    }
+  }
+
+  private normalizePolicyType(
+    policyType: any
+  ): DocumentationPolicyType | undefined {
+    if (!policyType) return undefined;
+    const normalized = String(policyType).toLowerCase();
+    switch (normalized) {
+      case "adr":
+      case "runbook":
+      case "compliance":
+      case "manual":
+      case "decision-log":
+        return normalized as DocumentationPolicyType;
+      default:
+        return undefined;
+    }
+  }
+
+  private normalizeDomainRelationship(value: any): string | undefined {
+    if (!value) return undefined;
+    const normalized = String(value).toLowerCase();
+    switch (normalized) {
+      case "depends_on":
+      case "overlaps":
+      case "shares_owner":
+        return normalized;
+      default:
+        return normalized;
+    }
+  }
+
+  private normalizeSectionAnchor(
+    anchor: any,
+    enforceRoot = false
+  ): string | undefined {
+    if (!anchor && enforceRoot) {
+      return "_root";
+    }
+    if (!anchor) return undefined;
+    const normalized = String(anchor)
+      .trim()
+      .replace(/^#+/, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\-_/\s]+/g, "-")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-/g, "")
+      .replace(/-$/g, "");
+
+    return normalized.length > 0 ? normalized.slice(0, 128) : enforceRoot ? "_root" : undefined;
+  }
+
+  private normalizeDomainPath(value: any): string | undefined {
+    if (!value) return undefined;
+    const normalized = String(value)
+      .trim()
+      .toLowerCase()
+      .replace(/>+/g, "/")
+      .replace(/\s+/g, "/")
+      .replace(/[^a-z0-9/_-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/\/+/, "/")
+      .replace(/^\/+|\/+$/g, "");
+    return normalized;
+  }
+
+  private normalizeSummary(value: any): string | undefined {
+    if (!value) return undefined;
+    const text = String(value).trim();
+    if (text.length === 0) return undefined;
+    return text.length > 500 ? `${text.slice(0, 497)}...` : text;
+  }
+
+  private normalizeStringArray(value: any): string[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const normalized = value
+      .map((v) => String(v).trim())
+      .filter((v) => v.length > 0);
+    if (normalized.length === 0) return undefined;
+    return Array.from(new Set(normalized)).slice(0, 20);
+  }
+
+  private normalizeString(value: any): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  private normalizeLocale(value: any): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    return trimmed.slice(0, 16);
+  }
+
+  private clamp01(value: any): number | undefined {
+    if (typeof value !== "number") return undefined;
+    if (Number.isNaN(value)) return undefined;
+    if (!Number.isFinite(value)) return undefined;
+    return Math.min(1, Math.max(0, value));
+  }
+
+  private clampRange(
+    value: any,
+    min: number,
+    max: number
+  ): number | undefined {
+    if (typeof value !== "number") return undefined;
+    if (Number.isNaN(value)) return undefined;
+    if (!Number.isFinite(value)) return undefined;
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+  }
+
+  private toDate(value: any): Date | undefined {
+    if (!value) return undefined;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value;
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
   }
 
   private harmonizeRefFields(rel: any): void {
@@ -2070,7 +2517,31 @@ export class KnowledgeGraphService extends EventEmitter {
           r.active = true,
           r.firstSeenAt = coalesce(r.firstSeenAt, $firstSeenAt),
           r.lastSeenAt = $lastSeenAt,
-          r.validFrom = coalesce(r.validFrom, $firstSeenAt)
+          r.validFrom = coalesce(r.validFrom, $firstSeenAt),
+          r.sectionAnchor = $sectionAnchor,
+          r.sectionTitle = $sectionTitle,
+          r.summary = $summary,
+          r.docVersion = $docVersion,
+          r.docHash = $docHash,
+          r.documentationQuality = $documentationQuality,
+          r.coverageScope = $coverageScope,
+          r.domainPath = $domainPath,
+          r.taxonomyVersion = $taxonomyVersion,
+          r.updatedFromDocAt = $updatedFromDocAt,
+          r.lastValidated = $lastValidated,
+          r.strength = coalesce($strength, r.strength),
+          r.similarityScore = coalesce($similarityScore, r.similarityScore),
+          r.clusterVersion = coalesce($clusterVersion, r.clusterVersion),
+          r.role = coalesce($role, r.role),
+          r.docIntent = $docIntent,
+          r.embeddingVersion = coalesce($embeddingVersion, r.embeddingVersion),
+          r.policyType = coalesce($policyType, r.policyType),
+          r.effectiveFrom = coalesce($effectiveFrom, r.effectiveFrom),
+          r.expiresAt = CASE WHEN $expiresAt_is_set THEN $expiresAt ELSE r.expiresAt END,
+          r.relationshipType = coalesce($relationshipType, r.relationshipType),
+          r.docLocale = coalesce($docLocale, r.docLocale),
+          r.tags = CASE WHEN $tags IS NULL THEN r.tags ELSE $tags END,
+          r.stakeholders = CASE WHEN $stakeholders IS NULL THEN r.stakeholders ELSE $stakeholders END
     `;
 
     const mdAll: any = (relationshipObj as any).metadata || {};
@@ -2095,6 +2566,83 @@ export class KnowledgeGraphService extends EventEmitter {
       : (locPathEff && (typeof locLineEff === 'number')
           ? ('site_' + crypto.createHash('sha1').update(`${locPathEff}|${locLineEff}|${locColEff ?? ''}|${topAll.accessPath || mdAll.accessPath || ''}`).digest('hex').slice(0, 12))
           : null);
+    const toISO = (value: any) => {
+      if (value === null) return null;
+      if (value instanceof Date) return value.toISOString();
+      if (typeof value === 'string') {
+        const dt = new Date(value);
+        return Number.isNaN(dt.getTime()) ? value : dt.toISOString();
+      }
+      return null;
+    };
+    const sectionAnchorEff = typeof topAll.sectionAnchor === 'string'
+      ? topAll.sectionAnchor
+      : (typeof mdAll.sectionAnchor === 'string' ? mdAll.sectionAnchor : null);
+    const sectionTitleEff = typeof topAll.sectionTitle === 'string'
+      ? topAll.sectionTitle
+      : (typeof mdAll.sectionTitle === 'string' ? mdAll.sectionTitle : null);
+    const summaryEff = typeof topAll.summary === 'string'
+      ? topAll.summary
+      : (typeof mdAll.summary === 'string' ? mdAll.summary : null);
+    const docVersionEff = typeof topAll.docVersion === 'string'
+      ? topAll.docVersion
+      : (typeof mdAll.docVersion === 'string' ? mdAll.docVersion : null);
+    const docHashEff = typeof topAll.docHash === 'string'
+      ? topAll.docHash
+      : (typeof mdAll.docHash === 'string' ? mdAll.docHash : null);
+    const documentationQualityEff = typeof topAll.documentationQuality === 'string'
+      ? topAll.documentationQuality
+      : (typeof mdAll.documentationQuality === 'string' ? mdAll.documentationQuality : null);
+    const coverageScopeEff = typeof topAll.coverageScope === 'string'
+      ? topAll.coverageScope
+      : (typeof mdAll.coverageScope === 'string' ? mdAll.coverageScope : null);
+    const domainPathEff = typeof topAll.domainPath === 'string'
+      ? topAll.domainPath
+      : (typeof mdAll.domainPath === 'string' ? mdAll.domainPath : null);
+    const taxonomyVersionEff = typeof topAll.taxonomyVersion === 'string'
+      ? topAll.taxonomyVersion
+      : (typeof mdAll.taxonomyVersion === 'string' ? mdAll.taxonomyVersion : null);
+    const updatedFromDocAtEff = toISO(topAll.updatedFromDocAt ?? mdAll.updatedFromDocAt);
+    const lastValidatedEff = toISO(topAll.lastValidated ?? mdAll.lastValidated);
+    const strengthEff = typeof topAll.strength === 'number'
+      ? topAll.strength
+      : (typeof mdAll.strength === 'number' ? mdAll.strength : null);
+    const similarityEff = typeof topAll.similarityScore === 'number'
+      ? topAll.similarityScore
+      : (typeof mdAll.similarityScore === 'number' ? mdAll.similarityScore : null);
+    const clusterVersionEff = typeof topAll.clusterVersion === 'string'
+      ? topAll.clusterVersion
+      : (typeof mdAll.clusterVersion === 'string' ? mdAll.clusterVersion : null);
+    const roleEff = typeof topAll.role === 'string'
+      ? topAll.role
+      : (typeof mdAll.role === 'string' ? mdAll.role : null);
+    const docIntentEff = typeof topAll.docIntent === 'string'
+      ? topAll.docIntent
+      : (typeof mdAll.docIntent === 'string' ? mdAll.docIntent : null);
+    const embeddingVersionEff = typeof topAll.embeddingVersion === 'string'
+      ? topAll.embeddingVersion
+      : (typeof mdAll.embeddingVersion === 'string' ? mdAll.embeddingVersion : null);
+    const policyTypeEff = typeof topAll.policyType === 'string'
+      ? topAll.policyType
+      : (typeof mdAll.policyType === 'string' ? mdAll.policyType : null);
+    const effectiveFromEff = toISO(topAll.effectiveFrom ?? mdAll.effectiveFrom);
+    const expiresAtCandidate = topAll.expiresAt !== undefined
+      ? topAll.expiresAt
+      : (Object.prototype.hasOwnProperty.call(mdAll, 'expiresAt') ? mdAll.expiresAt : undefined);
+    const expiresAtEff = expiresAtCandidate === null ? null : toISO(expiresAtCandidate);
+    const expiresAtIsSet = expiresAtCandidate !== undefined;
+    const relationshipTypeEff = typeof topAll.relationshipType === 'string'
+      ? topAll.relationshipType
+      : (typeof mdAll.relationshipType === 'string' ? mdAll.relationshipType : null);
+    const docLocaleEff = typeof topAll.docLocale === 'string'
+      ? topAll.docLocale
+      : (typeof mdAll.docLocale === 'string' ? mdAll.docLocale : null);
+    const tagsEff = Array.isArray(topAll.tags)
+      ? topAll.tags
+      : (Array.isArray(mdAll.tags) ? mdAll.tags : null);
+    const stakeholdersEff = Array.isArray(topAll.stakeholders)
+      ? topAll.stakeholders
+      : (Array.isArray(mdAll.stakeholders) ? mdAll.stakeholders : null);
     const result = await this.db.falkordbQuery(query, {
       fromId: relationshipObj.fromEntityId,
       toId: relationshipObj.toEntityId,
@@ -2146,8 +2694,33 @@ export class KnowledgeGraphService extends EventEmitter {
       ambiguous: typeof topAll.ambiguous === 'boolean' ? topAll.ambiguous : (typeof mdAll.ambiguous === 'boolean' ? mdAll.ambiguous : null),
       candidateCount: typeof topAll.candidateCount === 'number' ? topAll.candidateCount : (typeof mdAll.candidateCount === 'number' ? mdAll.candidateCount : null),
       isMethod: typeof topAll.isMethod === 'boolean' ? topAll.isMethod : null,
-      firstSeenAt: ((relationshipObj as any).firstSeenAt instanceof Date ? (relationshipObj as any).firstSeenAt : new Date()).toISOString(),
-      lastSeenAt: ((relationshipObj as any).lastSeenAt instanceof Date ? (relationshipObj as any).lastSeenAt : new Date()).toISOString(),
+      firstSeenAt: toISO((relationshipObj as any).firstSeenAt) || new Date().toISOString(),
+      lastSeenAt: toISO((relationshipObj as any).lastSeenAt) || new Date().toISOString(),
+      sectionAnchor: sectionAnchorEff,
+      sectionTitle: sectionTitleEff,
+      summary: summaryEff,
+      docVersion: docVersionEff,
+      docHash: docHashEff,
+      documentationQuality: documentationQualityEff,
+      coverageScope: coverageScopeEff,
+      domainPath: domainPathEff,
+      taxonomyVersion: taxonomyVersionEff,
+      updatedFromDocAt: updatedFromDocAtEff,
+      lastValidated: lastValidatedEff,
+      strength: strengthEff,
+      similarityScore: similarityEff,
+      clusterVersion: clusterVersionEff,
+      role: roleEff,
+      docIntent: docIntentEff,
+      embeddingVersion: embeddingVersionEff,
+      policyType: policyTypeEff,
+      effectiveFrom: effectiveFromEff,
+      expiresAt: expiresAtEff,
+      expiresAt_is_set: expiresAtIsSet,
+      relationshipType: relationshipTypeEff,
+      docLocale: docLocaleEff,
+      tags: tagsEff,
+      stakeholders: stakeholdersEff,
     });
 
     // Phase 1: Unify resolved edge with any prior placeholders pointing to same symbol
@@ -2187,6 +2760,117 @@ export class KnowledgeGraphService extends EventEmitter {
     `;
     const rows = await this.db.falkordbQuery(query, { cutoff: cutoffISO, toRefFile: opts?.toRefFile || null });
     return rows?.[0]?.updated || 0;
+  }
+
+  async updateDocumentationFreshness(
+    docId: string,
+    opts: {
+      lastValidated: Date;
+      documentationQuality?: DocumentationQuality;
+      updatedFromDocAt?: Date;
+    }
+  ): Promise<number> {
+    const lastValidatedISO = opts.lastValidated.toISOString();
+    const updatedFromDocAtISO = opts.updatedFromDocAt
+      ? opts.updatedFromDocAt.toISOString()
+      : null;
+    const docTypes = DOCUMENTATION_RELATIONSHIP_TYPES.map(
+      (t) => t as unknown as string
+    );
+    const setDocQuality = typeof opts.documentationQuality === "string";
+    const query = `
+      MATCH (doc {id: $docId})
+      MATCH (doc)-[r]-()
+      WHERE type(r) IN $docTypes
+      SET r.lastValidated = $lastValidated,
+          r.updatedFromDocAt = CASE WHEN $updatedFromDocAt IS NULL THEN r.updatedFromDocAt ELSE $updatedFromDocAt END,
+          r.active = coalesce(r.active, true)
+          ${setDocQuality ? ", r.documentationQuality = $documentationQuality" : ""}
+      RETURN count(r) AS updated
+    `;
+    try {
+      const rows = await this.db.falkordbQuery(query, {
+        docId,
+        docTypes,
+        lastValidated: lastValidatedISO,
+        updatedFromDocAt: updatedFromDocAtISO,
+        documentationQuality: opts.documentationQuality ?? null,
+      });
+      return rows?.[0]?.updated || 0;
+    } catch (error) {
+      console.warn(
+        `updateDocumentationFreshness failed for ${docId}:`,
+        error instanceof Error ? error.message : error
+      );
+      return 0;
+    }
+  }
+
+  async markDocumentationAsStale(
+    cutoff: Date,
+    excludeDocIds: string[] = []
+  ): Promise<number> {
+    const cutoffISO = cutoff.toISOString();
+    const docTypes = DOCUMENTATION_RELATIONSHIP_TYPES.map(
+      (t) => t as unknown as string
+    );
+    const query = `
+      MATCH (doc {type: "documentation"})
+      WHERE (doc.docSource IS NULL OR doc.docSource <> 'manual')
+        AND NOT doc.id IN $exclude
+      MATCH (doc)-[r]-()
+      WHERE type(r) IN $docTypes AND (r.lastValidated IS NULL OR r.lastValidated < $cutoff)
+      SET r.documentationQuality = 'outdated',
+          r.lastValidated = coalesce(r.lastValidated, $cutoff),
+          r.active = coalesce(r.active, true)
+      RETURN count(r) AS updated
+    `;
+    try {
+      const rows = await this.db.falkordbQuery(query, {
+        cutoff: cutoffISO,
+        exclude: excludeDocIds,
+        docTypes,
+      });
+      return rows?.[0]?.updated || 0;
+    } catch (error) {
+      console.warn(
+        "markDocumentationAsStale failed:",
+        error instanceof Error ? error.message : error
+      );
+      return 0;
+    }
+  }
+
+  async markEntityDocumentationOutdated(
+    entityId: string,
+    opts: { reason?: string; staleSince?: Date } = {}
+  ): Promise<number> {
+    const reason = opts.reason || null;
+    const staleSinceISO = (opts.staleSince || new Date()).toISOString();
+    const query = `
+      MATCH (entity {id: $entityId})-[r:DOCUMENTED_BY]->(doc {type: "documentation"})
+      WHERE coalesce(doc.docSource, 'parser') <> 'manual'
+      SET r.documentationQuality = 'outdated',
+          r.active = coalesce(r.active, true),
+          r.lastValidated = CASE WHEN r.lastValidated IS NULL THEN $staleSince ELSE r.lastValidated END,
+          r.docStaleReason = CASE WHEN $reason IS NULL THEN r.docStaleReason ELSE $reason END
+      RETURN count(r) AS updated
+    `;
+
+    try {
+      const rows = await this.db.falkordbQuery(query, {
+        entityId,
+        reason,
+        staleSince: staleSinceISO,
+      });
+      return rows?.[0]?.updated || 0;
+    } catch (error) {
+      console.warn(
+        `markEntityDocumentationOutdated failed for ${entityId}:`,
+        error instanceof Error ? error.message : error
+      );
+      return 0;
+    }
   }
 
   /**
@@ -2416,10 +3100,39 @@ export class KnowledgeGraphService extends EventEmitter {
         params[key] = value;
       }
     };
+    const coerceStringList = (value: any): string[] => {
+      if (Array.isArray(value)) {
+        return value
+          .filter((v) => typeof v === 'string')
+          .map((v: string) => v.trim())
+          .filter((v: string) => v.length > 0);
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? [trimmed] : [];
+      }
+      return [];
+    };
+    const applyArrayContainsFilter = (value: any, column: string, key: string) => {
+      const list = coerceStringList(value);
+      if (list.length === 1) {
+        whereClause.push(`ANY(x IN coalesce(${column}, []) WHERE x = $${key})`);
+        params[key] = list[0];
+      } else if (list.length > 1) {
+        const listKey = `${key}List`;
+        whereClause.push(`ANY(x IN coalesce(${column}, []) WHERE x IN $${listKey})`);
+        params[listKey] = list;
+      }
+    };
     applyEnumFilter(qAny.kind, 'r.kind', 'kind');
     applyEnumFilter(qAny.source, 'r.source', 'source');
     applyEnumFilter(qAny.resolution, 'r.resolution', 'resolution');
     applyEnumFilter(qAny.scope, 'r.scope', 'scope');
+    applyEnumFilter(qAny.docIntent, 'r.docIntent', 'docIntent');
+    applyEnumFilter(qAny.coverageScope, 'r.coverageScope', 'coverageScope');
+    applyEnumFilter(qAny.embeddingVersion, 'r.embeddingVersion', 'embeddingVersion');
+    applyEnumFilter(qAny.clusterVersion, 'r.clusterVersion', 'clusterVersion');
+    applyEnumFilter(qAny.docLocale, 'r.docLocale', 'docLocale');
     if (typeof qAny.confidenceMin === 'number') {
       whereClause.push("r.confidence >= $cmin");
       params.cmin = qAny.confidenceMin;
@@ -2485,6 +3198,74 @@ export class KnowledgeGraphService extends EventEmitter {
       whereClause.push('r.importDepth <= $importDepthMax');
       params.importDepthMax = qAny.importDepthMax;
     }
+    const domainPaths = coerceStringList(qAny.domainPath)
+      .map((value) => this.normalizeDomainPath(value))
+      .filter((value): value is string => value !== undefined && value !== null);
+    if (domainPaths.length === 1) {
+      whereClause.push('r.domainPath = $domainPath');
+      params.domainPath = domainPaths[0];
+    } else if (domainPaths.length > 1) {
+      whereClause.push('r.domainPath IN $domainPathList');
+      params.domainPathList = domainPaths;
+    }
+
+    const domainPrefixes = coerceStringList(qAny.domainPrefix)
+      .map((value) => this.normalizeDomainPath(value))
+      .filter((value): value is string => value !== undefined && value !== null);
+    if (domainPrefixes.length === 1) {
+      whereClause.push('r.domainPath STARTS WITH $domainPrefix');
+      params.domainPrefix = domainPrefixes[0];
+    } else if (domainPrefixes.length > 1) {
+      const clauses: string[] = [];
+      domainPrefixes.forEach((prefix, idx) => {
+        const key = `domainPrefix${idx}`;
+        clauses.push(`r.domainPath STARTS WITH $${key}`);
+        params[key] = prefix;
+      });
+      if (clauses.length > 0) {
+        whereClause.push(`(${clauses.join(' OR ')})`);
+      }
+    }
+
+    const clusterIds = coerceStringList(qAny.clusterId);
+    if (clusterIds.length === 1) {
+      whereClause.push('((a.type = "semanticCluster" AND a.id = $clusterId) OR (b.type = "semanticCluster" AND b.id = $clusterId))');
+      params.clusterId = clusterIds[0];
+    } else if (clusterIds.length > 1) {
+      const key = 'clusterIdList';
+      whereClause.push('((a.type = "semanticCluster" AND a.id IN $clusterIdList) OR (b.type = "semanticCluster" AND b.id IN $clusterIdList))');
+      params[key] = clusterIds;
+    }
+
+    const docTypes = coerceStringList(qAny.docType);
+    if (docTypes.length === 1) {
+      whereClause.push('((a.type = "documentation" AND a.docType = $docType) OR (b.type = "documentation" AND b.docType = $docType))');
+      params.docType = docTypes[0];
+    } else if (docTypes.length > 1) {
+      whereClause.push('((a.type = "documentation" AND a.docType IN $docTypeList) OR (b.type = "documentation" AND b.docType IN $docTypeList))');
+      params.docTypeList = docTypes;
+    }
+
+    const docStatuses = coerceStringList(qAny.docStatus);
+    if (docStatuses.length === 1) {
+      whereClause.push('((a.type = "documentation" AND a.status = $docStatus) OR (b.type = "documentation" AND b.status = $docStatus))');
+      params.docStatus = docStatuses[0];
+    } else if (docStatuses.length > 1) {
+      whereClause.push('((a.type = "documentation" AND a.status IN $docStatusList) OR (b.type = "documentation" AND b.status IN $docStatusList))');
+      params.docStatusList = docStatuses;
+    }
+
+    if (qAny.lastValidatedAfter instanceof Date) {
+      whereClause.push('r.lastValidated >= $lastValidatedAfter');
+      params.lastValidatedAfter = qAny.lastValidatedAfter.toISOString();
+    }
+    if (qAny.lastValidatedBefore instanceof Date) {
+      whereClause.push('r.lastValidated <= $lastValidatedBefore');
+      params.lastValidatedBefore = qAny.lastValidatedBefore.toISOString();
+    }
+
+    applyArrayContainsFilter(qAny.stakeholder, 'r.stakeholders', 'stakeholder');
+    applyArrayContainsFilter(qAny.tag, 'r.tags', 'tag');
     // Filters on promoted to_ref_* scalars and siteHash
     if (typeof qAny.to_ref_kind === 'string') {
       whereClause.push("r.to_ref_kind = $to_ref_kind");
@@ -2641,11 +3422,31 @@ export class KnowledgeGraphService extends EventEmitter {
 
     const validate = options?.validate === true;
 
+    const historyEnabled = this.isHistoryEnabled();
     const normalizedRelationships = relationships.map((rel) => this.normalizeRelationship(rel));
+    const filteredRelationships: GraphRelationship[] = [];
+    for (const rel of normalizedRelationships) {
+      const top: any = rel as any;
+      if (top.inferred && typeof top.confidence === "number" && top.confidence < noiseConfig.MIN_INFERRED_CONFIDENCE) {
+        continue;
+      }
+      if (top.resolved && typeof top.confidence !== "number") {
+        top.confidence = 1.0;
+      }
+      if (top.firstSeenAt == null) top.firstSeenAt = top.created || new Date();
+      if (top.lastSeenAt == null) top.lastSeenAt = top.lastModified || new Date();
+      if (historyEnabled) {
+        if (top.validFrom == null) top.validFrom = top.firstSeenAt;
+        if (top.active == null) top.active = true;
+      }
+      filteredRelationships.push(rel);
+    }
+
+    if (filteredRelationships.length === 0) return;
 
     // Group by relationship type since Cypher relationship type is not parameterizable
     const byType = new Map<string, GraphRelationship[]>();
-    for (const r of normalizedRelationships) {
+    for (const r of filteredRelationships) {
       if (!r.type || !r.fromEntityId || !r.toEntityId) continue;
       const list = byType.get(r.type) || [];
       list.push(r);
@@ -2758,6 +3559,24 @@ export class KnowledgeGraphService extends EventEmitter {
         const lastISO = (r.lastModified instanceof Date ? r.lastModified : new Date(r.lastModified as any)).toISOString();
         // Canonical id by final from/to/type (fallback if not provided by upstream)
         const id = top.id || canonicalRelationshipId(r.fromEntityId, { toEntityId: r.toEntityId, type } as any);
+        const toISO = (value: any): string | null => {
+          if (value === null) return null;
+          if (value === undefined) return null;
+          if (value instanceof Date) return value.toISOString();
+          if (typeof value === 'string') {
+            const parsed = new Date(value);
+            return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+          }
+          return null;
+        };
+        const updatedFromDocAtISO = toISO(top.updatedFromDocAt ?? md.updatedFromDocAt);
+        const lastValidatedISO = toISO(top.lastValidated ?? md.lastValidated);
+        const effectiveFromISO = toISO(top.effectiveFrom ?? md.effectiveFrom);
+        const expiresAtProvidedTop = Object.prototype.hasOwnProperty.call(top, 'expiresAt');
+        const expiresAtProvidedMeta = Object.prototype.hasOwnProperty.call(md, 'expiresAt');
+        const expiresAtRaw = expiresAtProvidedTop ? top.expiresAt : (expiresAtProvidedMeta ? md.expiresAt : undefined);
+        const expiresAtIsSet = expiresAtProvidedTop || expiresAtProvidedMeta;
+        const expiresAtISO = expiresAtRaw === null ? null : toISO(expiresAtRaw);
         return {
           fromId: r.fromEntityId,
           toId: r.toEntityId,
@@ -2793,6 +3612,9 @@ export class KnowledgeGraphService extends EventEmitter {
           overloadIndex: (typeof top.overloadIndex === 'number' ? top.overloadIndex : (typeof md.overloadIndex === 'number' ? md.overloadIndex : null)),
           genericArguments: JSON.stringify(Array.isArray(top.genericArguments) ? top.genericArguments : (Array.isArray(md.genericArguments) ? md.genericArguments : [])).slice(0, 200000),
           siteHash: (typeof top.siteHash === 'string' ? top.siteHash : null),
+          dataFlowId: (typeof (top as any).dataFlowId === 'string'
+            ? (top as any).dataFlowId
+            : (typeof md.dataFlowId === 'string' ? md.dataFlowId : null)),
           to_ref_kind: (typeof top.to_ref_kind === 'string' ? top.to_ref_kind : null),
           to_ref_file: (typeof top.to_ref_file === 'string' ? top.to_ref_file : null),
           to_ref_symbol: (typeof top.to_ref_symbol === 'string' ? top.to_ref_symbol : null),
@@ -2814,6 +3636,31 @@ export class KnowledgeGraphService extends EventEmitter {
           siteId,
           sites,
           why,
+          sectionAnchor: (typeof top.sectionAnchor === 'string' ? top.sectionAnchor : (typeof md.sectionAnchor === 'string' ? md.sectionAnchor : null)),
+          sectionTitle: (typeof top.sectionTitle === 'string' ? top.sectionTitle : (typeof md.sectionTitle === 'string' ? md.sectionTitle : null)),
+          summary: (typeof top.summary === 'string' ? top.summary : (typeof md.summary === 'string' ? md.summary : null)),
+          docVersion: (typeof top.docVersion === 'string' ? top.docVersion : (typeof md.docVersion === 'string' ? md.docVersion : null)),
+          docHash: (typeof top.docHash === 'string' ? top.docHash : (typeof md.docHash === 'string' ? md.docHash : null)),
+          documentationQuality: (typeof top.documentationQuality === 'string' ? top.documentationQuality : (typeof md.documentationQuality === 'string' ? md.documentationQuality : null)),
+          coverageScope: (typeof top.coverageScope === 'string' ? top.coverageScope : (typeof md.coverageScope === 'string' ? md.coverageScope : null)),
+          domainPath: (typeof top.domainPath === 'string' ? top.domainPath : (typeof md.domainPath === 'string' ? md.domainPath : null)),
+          taxonomyVersion: (typeof top.taxonomyVersion === 'string' ? top.taxonomyVersion : (typeof md.taxonomyVersion === 'string' ? md.taxonomyVersion : null)),
+          updatedFromDocAt: updatedFromDocAtISO,
+          lastValidated: lastValidatedISO,
+          strength: (typeof top.strength === 'number' ? top.strength : (typeof md.strength === 'number' ? md.strength : null)),
+          similarityScore: (typeof top.similarityScore === 'number' ? top.similarityScore : (typeof md.similarityScore === 'number' ? md.similarityScore : null)),
+          clusterVersion: (typeof top.clusterVersion === 'string' ? top.clusterVersion : (typeof md.clusterVersion === 'string' ? md.clusterVersion : null)),
+          role: (typeof top.role === 'string' ? top.role : (typeof md.role === 'string' ? md.role : null)),
+          docIntent: (typeof top.docIntent === 'string' ? top.docIntent : (typeof md.docIntent === 'string' ? md.docIntent : null)),
+          embeddingVersion: (typeof top.embeddingVersion === 'string' ? top.embeddingVersion : (typeof md.embeddingVersion === 'string' ? md.embeddingVersion : null)),
+          policyType: (typeof top.policyType === 'string' ? top.policyType : (typeof md.policyType === 'string' ? md.policyType : null)),
+          effectiveFrom: effectiveFromISO,
+          expiresAt: expiresAtISO,
+          expiresAt_is_set: expiresAtIsSet,
+          relationshipType: (typeof top.relationshipType === 'string' ? top.relationshipType : (typeof md.relationshipType === 'string' ? md.relationshipType : null)),
+          docLocale: (typeof top.docLocale === 'string' ? top.docLocale : (typeof md.docLocale === 'string' ? md.docLocale : null)),
+          tags: (Array.isArray(top.tags) ? top.tags : (Array.isArray(md.tags) ? md.tags : null)),
+          stakeholders: (Array.isArray(top.stakeholders) ? top.stakeholders : (Array.isArray(md.stakeholders) ? md.stakeholders : null)),
         };
       });
 
@@ -2857,11 +3704,73 @@ export class KnowledgeGraphService extends EventEmitter {
         prev.sites = mergeArrJson(prev.sites, row.sites, 20, (s) => String(s));
         // Preserve stronger confidence
         if (typeof row.confidence === 'number') prev.confidence = Math.max(prev.confidence ?? 0, row.confidence);
+        if (!prev.dataFlowId && row.dataFlowId) prev.dataFlowId = row.dataFlowId;
         // Combine candidate count
         if (typeof row.candidateCount === 'number') {
           const a = prev.candidateCount ?? 0; const b = row.candidateCount ?? 0;
           prev.candidateCount = Math.max(a, b);
         }
+        if (typeof row.strength === 'number') {
+          if (typeof prev.strength === 'number') {
+            prev.strength = Math.max(prev.strength, row.strength);
+          } else {
+            prev.strength = row.strength;
+          }
+        }
+        if (typeof row.similarityScore === 'number') {
+          if (typeof prev.similarityScore === 'number') {
+            prev.similarityScore = Math.max(prev.similarityScore, row.similarityScore);
+          } else {
+            prev.similarityScore = row.similarityScore;
+          }
+        }
+        const assignIfMissing = (field: string) => {
+          if ((prev as any)[field] == null && (row as any)[field] != null) {
+            (prev as any)[field] = (row as any)[field];
+          }
+        };
+        assignIfMissing('sectionAnchor');
+        assignIfMissing('sectionTitle');
+        assignIfMissing('summary');
+        assignIfMissing('docVersion');
+        assignIfMissing('docHash');
+        assignIfMissing('documentationQuality');
+        assignIfMissing('coverageScope');
+        assignIfMissing('domainPath');
+        assignIfMissing('taxonomyVersion');
+        assignIfMissing('clusterVersion');
+        assignIfMissing('role');
+        assignIfMissing('docIntent');
+        assignIfMissing('embeddingVersion');
+        assignIfMissing('policyType');
+        assignIfMissing('relationshipType');
+        assignIfMissing('docLocale');
+        if (row.updatedFromDocAt && (!prev.updatedFromDocAt || row.updatedFromDocAt > prev.updatedFromDocAt)) {
+          prev.updatedFromDocAt = row.updatedFromDocAt;
+        }
+        if (row.lastValidated && (!prev.lastValidated || row.lastValidated > prev.lastValidated)) {
+          prev.lastValidated = row.lastValidated;
+        }
+        if (row.effectiveFrom && (!prev.effectiveFrom || row.effectiveFrom < prev.effectiveFrom)) {
+          prev.effectiveFrom = row.effectiveFrom;
+        }
+        if (row.expiresAt_is_set) {
+          prev.expiresAt_is_set = true;
+          prev.expiresAt = row.expiresAt;
+        }
+        const mergeStringArray = (field: 'tags' | 'stakeholders') => {
+          const prevArr = Array.isArray((prev as any)[field]) ? ((prev as any)[field] as string[]) : [];
+          const rowArr = Array.isArray((row as any)[field]) ? ((row as any)[field] as string[]) : [];
+          if (rowArr.length > 0) {
+            const merged = new Set<string>(prevArr);
+            for (const item of rowArr) {
+              merged.add(item);
+            }
+            (prev as any)[field] = Array.from(merged);
+          }
+        };
+        mergeStringArray('tags');
+        mergeStringArray('stakeholders');
       }
       const rows = Array.from(dedup.values());
 
@@ -2904,6 +3813,7 @@ export class KnowledgeGraphService extends EventEmitter {
             r.locations = row.locations,
             r.siteId = row.siteId,
             r.sites = row.sites,
+            r.dataFlowId = row.dataFlowId,
             r.why = row.why,
             r.to_ref_kind = row.to_ref_kind,
             r.to_ref_file = row.to_ref_file,
@@ -2919,7 +3829,31 @@ export class KnowledgeGraphService extends EventEmitter {
             r.active = true,
             r.firstSeenAt = coalesce(r.firstSeenAt, row.firstSeenAt),
             r.lastSeenAt = row.lastSeenAt,
-            r.validFrom = coalesce(r.validFrom, row.firstSeenAt)
+            r.validFrom = coalesce(r.validFrom, row.firstSeenAt),
+            r.sectionAnchor = row.sectionAnchor,
+            r.sectionTitle = row.sectionTitle,
+            r.summary = row.summary,
+            r.docVersion = row.docVersion,
+            r.docHash = row.docHash,
+            r.documentationQuality = row.documentationQuality,
+            r.coverageScope = row.coverageScope,
+            r.domainPath = row.domainPath,
+            r.taxonomyVersion = row.taxonomyVersion,
+            r.updatedFromDocAt = row.updatedFromDocAt,
+            r.lastValidated = row.lastValidated,
+            r.strength = coalesce(row.strength, r.strength),
+            r.similarityScore = coalesce(row.similarityScore, r.similarityScore),
+            r.clusterVersion = coalesce(row.clusterVersion, r.clusterVersion),
+            r.role = coalesce(row.role, r.role),
+            r.docIntent = row.docIntent,
+            r.embeddingVersion = coalesce(row.embeddingVersion, r.embeddingVersion),
+            r.policyType = coalesce(row.policyType, r.policyType),
+            r.effectiveFrom = coalesce(row.effectiveFrom, r.effectiveFrom),
+            r.expiresAt = CASE WHEN row.expiresAt_is_set THEN row.expiresAt ELSE r.expiresAt END,
+            r.relationshipType = coalesce(row.relationshipType, r.relationshipType),
+            r.docLocale = coalesce(row.docLocale, r.docLocale),
+            r.tags = CASE WHEN row.tags IS NULL THEN r.tags ELSE row.tags END,
+            r.stakeholders = CASE WHEN row.stakeholders IS NULL THEN r.stakeholders ELSE row.stakeholders END
       `;
       await this.db.falkordbQuery(query, { rows });
 
@@ -2956,6 +3890,33 @@ export class KnowledgeGraphService extends EventEmitter {
           (relObj as any).to_ref_file = row.to_ref_file;
           (relObj as any).to_ref_symbol = row.to_ref_symbol;
           (relObj as any).to_ref_name = row.to_ref_name;
+          if (row.siteId) relObj.siteId = row.siteId;
+          if (row.siteHash) relObj.siteHash = row.siteHash;
+          if (typeof row.dataFlowId === 'string' && row.dataFlowId) (relObj as any).dataFlowId = row.dataFlowId;
+          try {
+            const mdParsed = row.metadata ? JSON.parse(row.metadata) : undefined;
+            if (mdParsed) relObj.metadata = mdParsed;
+          } catch {}
+          try {
+            const evidenceParsed = row.evidence ? JSON.parse(row.evidence) : [];
+            if (Array.isArray(evidenceParsed) && evidenceParsed.length > 0) relObj.evidence = evidenceParsed;
+          } catch {}
+          try {
+            const locationsParsed = row.locations ? JSON.parse(row.locations) : [];
+            if (Array.isArray(locationsParsed) && locationsParsed.length > 0) relObj.locations = locationsParsed;
+          } catch {}
+          try {
+            const sitesParsed = row.sites ? JSON.parse(row.sites) : [];
+            if (Array.isArray(sitesParsed) && sitesParsed.length > 0) relObj.sites = sitesParsed;
+          } catch {}
+          const loc: any = {};
+          if (row.loc_path) loc.path = row.loc_path;
+          if (typeof row.loc_line === 'number') loc.line = row.loc_line;
+          if (typeof row.loc_col === 'number') loc.column = row.loc_col;
+          if (Object.keys(loc).length > 0) {
+            const existing = Array.isArray(relObj.locations) ? relObj.locations : [];
+            relObj.locations = [...existing, loc];
+          }
           try { await this.dualWriteAuxiliaryForEdge(relObj); } catch {}
         }
       } catch {}
@@ -3711,19 +4672,48 @@ export class KnowledgeGraphService extends EventEmitter {
       ],
     });
 
+    const [directEntities, reverseEntities] = await Promise.all([
+      Promise.all(
+        directDeps.map((rel) => this.getEntity(rel.toEntityId).catch(() => null))
+      ),
+      Promise.all(
+        reverseDeps.map((rel) => this.getEntity(rel.fromEntityId).catch(() => null))
+      ),
+    ]);
+
+    const directDependencies: DependencyAnalysis["directDependencies"] = [];
+    for (let i = 0; i < directDeps.length; i++) {
+      const entityRef = directEntities[i];
+      if (!entityRef) continue;
+      const rel = directDeps[i];
+      const confidence =
+        typeof (rel as any).confidence === "number"
+          ? Math.max(0, Math.min(1, (rel as any).confidence))
+          : 1;
+      directDependencies.push({
+        entity: entityRef,
+        relationship: rel.type,
+        confidence,
+      });
+    }
+
+    const reverseDependencies: DependencyAnalysis["reverseDependencies"] = [];
+    for (let i = 0; i < reverseDeps.length; i++) {
+      const entityRef = reverseEntities[i];
+      if (!entityRef) continue;
+      const rel = reverseDeps[i];
+      reverseDependencies.push({
+        entity: entityRef,
+        relationship: rel.type,
+        impact: "medium",
+      });
+    }
+
     return {
       entityId,
-      directDependencies: directDeps.map((rel) => ({
-        entity: null as any, // Would need to fetch entity
-        relationship: rel.type,
-        confidence: typeof (rel as any).confidence === 'number' ? Math.max(0, Math.min(1, (rel as any).confidence)) : 1,
-      })),
+      directDependencies,
       indirectDependencies: [],
-      reverseDependencies: reverseDeps.map((rel) => ({
-        entity: null as any,
-        relationship: rel.type,
-        impact: "medium" as const,
-      })),
+      reverseDependencies,
       circularDependencies: [],
     };
   }
@@ -4320,6 +5310,57 @@ export class KnowledgeGraphService extends EventEmitter {
     const total = countResult[0]?.total || 0;
 
     return { entities, total };
+  }
+
+  async getEntitiesByFile(
+    filePath: string,
+    options: { includeSymbols?: boolean } = {}
+  ): Promise<Entity[]> {
+    if (!filePath || typeof filePath !== "string") {
+      return [];
+    }
+
+    const relative = path.isAbsolute(filePath)
+      ? path.relative(process.cwd(), filePath)
+      : filePath;
+    const normalized = relative.replace(/\\/g, "/").replace(/^file:/, "");
+    const fileId = `file:${normalized}`;
+    const symbolPrefix = `${normalized}:`;
+
+    const query = `
+      MATCH (n)
+      WHERE n.path = $filePath
+         OR n.id = $fileId
+         OR n.path STARTS WITH $symbolPrefix
+         OR (exists(n.filePath) AND n.filePath = $filePath)
+      RETURN n
+    `;
+
+    const rows = await this.db.falkordbQuery(query, {
+      filePath: normalized,
+      fileId,
+      symbolPrefix,
+    });
+
+    const entities: Entity[] = [];
+    const seen = new Set<string>();
+
+    for (const row of rows || []) {
+      const entity = this.parseEntityFromGraph(row);
+      if (!entity?.id) continue;
+
+      if (!options.includeSymbols && entity.type === "symbol") {
+        // Skip symbols when not requested explicitly.
+        continue;
+      }
+
+      if (!seen.has(entity.id)) {
+        seen.add(entity.id);
+        entities.push(entity);
+      }
+    }
+
+    return entities;
   }
 
   async listRelationships(

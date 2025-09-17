@@ -23,19 +23,19 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 class MockQdrantClient {
   private connected = false;
   private shouldFail = false;
-  private failureRate = 0;
+  private alwaysFail = false;
   private collections: string[] = [];
   private collectionConfigs: Map<string, any> = new Map();
 
   constructor(config?: { failureRate?: number }) {
-    this.failureRate = config?.failureRate || 0;
+    this.alwaysFail = !!config?.failureRate && config.failureRate >= 100;
   }
 
   async getCollections(): Promise<{ collections: Array<{ name: string }> }> {
     if (!this.connected) {
       throw new Error('Not connected');
     }
-    if (this.shouldFail || Math.random() * 100 < this.failureRate) {
+    if (this.shouldFail || this.alwaysFail) {
       throw new Error('Failed to get collections');
     }
 
@@ -48,7 +48,7 @@ class MockQdrantClient {
     if (!this.connected) {
       throw new Error('Not connected');
     }
-    if (this.shouldFail || Math.random() * 100 < this.failureRate) {
+    if (this.shouldFail || this.alwaysFail) {
       const error: any = new Error('Failed to create collection');
       if (name === 'documentation_embeddings') {
         error.status = 409;
@@ -78,7 +78,7 @@ class MockQdrantClient {
   }
 
   setFailureRate(rate: number): void {
-    this.failureRate = rate;
+    this.alwaysFail = rate >= 100;
   }
 
   getCollectionsList(): string[] {
@@ -94,7 +94,7 @@ class MockQdrantClient {
     this.collectionConfigs.clear();
     this.connected = false;
     this.shouldFail = false;
-    this.failureRate = 0;
+    this.alwaysFail = false;
   }
 }
 
@@ -131,8 +131,7 @@ describe('QdrantService', () => {
   });
 
   describe('Constructor and Configuration', () => {
-    it('should create service instance with valid configuration', () => {
-      expect(qdrantService).not.toBeNull();
+    it('exposes the expected public surface', () => {
       expect(qdrantService).toBeInstanceOf(QdrantService);
       expect(typeof qdrantService.initialize).toBe('function');
       expect(typeof qdrantService.close).toBe('function');
@@ -142,44 +141,23 @@ describe('QdrantService', () => {
       expect(typeof qdrantService.healthCheck).toBe('function');
     });
 
-    it('should handle configuration with API key', () => {
-      const configWithKey = { url: 'http://localhost:6333', apiKey: 'test-key' };
-      const service = new QdrantService(configWithKey);
-      expect(service).toBeInstanceOf(QdrantService);
-    });
-
-    it('should handle configuration without API key', () => {
-      const configWithoutKey = { url: 'http://localhost:6333' };
-      const service = new QdrantService(configWithoutKey);
-      expect(service).toBeInstanceOf(QdrantService);
-    });
-
-    it('should accept different Qdrant URLs', () => {
-      const urls = [
-        'http://localhost:6333',
-        'https://qdrant.example.com:6333',
-        'http://qdrant-server:6333',
-        'https://qdrant.cloud.com',
-      ];
-
-      urls.forEach(url => {
-        const service = new QdrantService({ url });
-        expect(service).toBeInstanceOf(QdrantService);
-      });
-    });
-
-    it('should accept various API key formats', () => {
-      const apiKeys = [
-        'simple-key',
-        'complex-api-key-123456',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-        'xoxp-1234567890-abcdefghijklmnopqrstuv',
-      ];
-
-      apiKeys.forEach(apiKey => {
-        const service = new QdrantService({ url: testConfig.url, apiKey });
-        expect(service).toBeDefined();
-      });
+    it.each([
+      { label: 'with explicit API key', config: { apiKey: 'test-key' } },
+      { label: 'without API key', config: {} },
+      {
+        label: 'custom hostname',
+        config: { url: 'https://qdrant.example.com:6333' },
+      },
+      {
+        label: 'cloud URL',
+        config: { url: 'https://qdrant.cloud.com', apiKey: 'cloud-key' },
+      },
+    ])('constructs safely $label', ({ config }) => {
+      const finalConfig = {
+        url: config.url || testConfig.url,
+        apiKey: config.apiKey,
+      };
+      expect(() => new QdrantService(finalConfig)).not.toThrow();
     });
   });
 

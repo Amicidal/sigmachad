@@ -1,5 +1,5 @@
 import { createClient as createRedisClient, RedisClientType } from 'redis';
-import { IRedisService } from './interfaces';
+import { IRedisService } from './interfaces.js';
 
 export class RedisService implements IRedisService {
   private redisClient!: RedisClientType;
@@ -71,6 +71,13 @@ export class RedisService implements IRedisService {
       throw new Error('Redis not configured');
     }
     return this.redisClient.del(key);
+  }
+
+  async flushDb(): Promise<void> {
+    if (!this.initialized) {
+      throw new Error('Redis not configured');
+    }
+    await this.redisClient.flushDb();
   }
 
   async healthCheck(): Promise<boolean> {

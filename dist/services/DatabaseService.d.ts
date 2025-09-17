@@ -3,8 +3,8 @@
  * Orchestrates specialized database services for FalkorDB, Qdrant, PostgreSQL, and Redis
  */
 import { QdrantClient } from "@qdrant/js-client-rest";
-import { DatabaseConfig, IFalkorDBService, IQdrantService, IPostgreSQLService, IRedisService, IDatabaseHealthCheck } from "./database";
-export type { DatabaseConfig } from "./database";
+import { DatabaseConfig, IFalkorDBService, IQdrantService, IPostgreSQLService, IRedisService, IDatabaseHealthCheck } from "./database/index.js";
+export type { DatabaseConfig } from "./database/index.js";
 export interface DatabaseQueryResult {
     rows?: any[];
     rowCount?: number;
@@ -82,6 +82,7 @@ export declare class DatabaseService {
     redisGet(key: string): Promise<string | null>;
     redisSet(key: string, value: string, ttl?: number): Promise<void>;
     redisDel(key: string): Promise<number>;
+    redisFlushDb(): Promise<void>;
     healthCheck(): Promise<IDatabaseHealthCheck>;
     setupDatabase(): Promise<void>;
     isInitialized(): boolean;

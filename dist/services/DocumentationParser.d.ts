@@ -12,6 +12,12 @@ export interface ParsedDocument {
     stakeholders: string[];
     technologies: string[];
     docType: DocumentationNode["docType"];
+    docIntent: DocumentationNode["docIntent"];
+    docVersion: string;
+    docHash: string;
+    docSource: DocumentationNode["docSource"];
+    docLocale?: string;
+    lastIndexed: Date;
     metadata: Record<string, any>;
 }
 export interface DomainExtraction {
@@ -27,6 +33,9 @@ export interface SyncResult {
     newDomains: number;
     updatedClusters: number;
     errors: string[];
+    refreshedRelationships?: number;
+    staleRelationships?: number;
+    sectionsLinked?: number;
 }
 export interface SearchResult {
     document: DocumentationNode;
@@ -38,6 +47,9 @@ export declare class DocumentationParser {
     private dbService;
     private supportedExtensions;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService);
+    private inferDocIntent;
+    private inferDocLocale;
+    private normalizeDomainPath;
     /**
      * Parse a documentation file and extract structured information
      */
@@ -151,5 +163,11 @@ export declare class DocumentationParser {
      * Find matched sections in content
      */
     private findMatchedSections;
+    private getFreshnessWindowDays;
+    private linkDocumentSections;
+    private extractSectionDescriptors;
+    private slugifySectionTitle;
+    private extractSectionSummary;
+    private applyFreshnessUpdates;
 }
 //# sourceMappingURL=DocumentationParser.d.ts.map

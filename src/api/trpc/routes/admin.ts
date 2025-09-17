@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { router, adminProcedure } from '../base.js';
+import { TRPCError } from '@trpc/server';
 
 export const adminRouter = router({
   // Get system logs
@@ -16,13 +17,7 @@ export const adminRouter = router({
       limit: z.number().min(1).max(1000).default(100),
     }))
     .query(async ({ input, ctx }) => {
-      // TODO: Implement log retrieval
-      const logs: any[] = [];
-      return {
-        items: logs,
-        total: logs.length,
-        limit: input.limit,
-      };
+      throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'Log retrieval is not available in this build.' });
     }),
 
   // Get consolidated metrics (graph/history/sync subset)
@@ -53,12 +48,7 @@ export const adminRouter = router({
       force: z.boolean().default(false),
     }))
     .mutation(async ({ input, ctx }) => {
-      // TODO: Implement filesystem sync
-      return {
-        success: true,
-        syncedPaths: input.paths || [],
-        timestamp: new Date().toISOString(),
-      };
+      throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'Filesystem synchronization is not available in this build.' });
     }),
 
   // Clear cache
@@ -67,20 +57,19 @@ export const adminRouter = router({
       type: z.enum(['entities', 'relationships', 'search', 'all']).default('all'),
     }))
     .mutation(async ({ input, ctx }) => {
-      // TODO: Implement cache clearing
-      return {
-        success: true,
-        clearedType: input.type,
-        timestamp: new Date().toISOString(),
-      };
+      throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'Cache clearing is not available in this build.' });
     }),
 
   // Get system configuration
   getConfig: adminProcedure
     .query(async ({ ctx }) => {
       const cfg = ctx.dbService.getConfig?.();
+      const cfgAny = cfg
+        ? ((cfg as unknown) as Record<string, unknown>)
+        : undefined;
+      const version = typeof cfgAny?.version === 'string' ? (cfgAny.version as string) : 'unknown';
       return {
-        version: cfg?.version || 'unknown',
+        version,
         environment: process.env.NODE_ENV || 'development',
         features: {
           websocket: true,
@@ -97,12 +86,7 @@ export const adminRouter = router({
       value: z.any(),
     }))
     .mutation(async ({ input, ctx }) => {
-      // TODO: Implement configuration update
-      return {
-        success: true,
-        key: input.key,
-        updated: new Date().toISOString(),
-      };
+      throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'Configuration updates are not available in this build.' });
     }),
 
   // Index health

@@ -1,6 +1,11 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
+import os from 'node:os';
+
+const cpuCount = os.cpus()?.length ?? 1;
+const defaultMaxThreads = cpuCount > 1 ? Math.min(cpuCount, 4) : 1;
+const defaultMinThreads = cpuCount > 1 ? Math.min(2, defaultMaxThreads) : 1;
 
 export default defineConfig({
   test: {
@@ -10,8 +15,12 @@ export default defineConfig({
     poolOptions: {
       threads: {
         // Allow tuning via env to reduce worker management if needed in CI/sandboxes.
-        minThreads: Number(process.env.VITEST_MIN_THREADS || 1),
-        maxThreads: Number(process.env.VITEST_MAX_THREADS || 1),
+        minThreads: Number(
+          process.env.VITEST_MIN_THREADS || defaultMinThreads
+        ),
+        maxThreads: Number(
+          process.env.VITEST_MAX_THREADS || defaultMaxThreads
+        ),
       },
     },
     environment: 'node',

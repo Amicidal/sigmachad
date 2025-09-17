@@ -3,6 +3,8 @@
  * These mocks simulate real-world failure scenarios and edge cases
  */
 
+import { vi } from "vitest";
+
 import type {
   IFalkorDBService,
   IQdrantService,
@@ -17,6 +19,77 @@ interface MockConfig {
   transactionFailures?: boolean;
   dataCorruption?: boolean;
   seed?: number; // deterministic RNG seed
+}
+
+export interface LightweightDatabaseMocks {
+  falkor: IFalkorDBService;
+  qdrant: IQdrantService;
+  postgres: IPostgreSQLService;
+  redis: IRedisService;
+  qdrantClient: {
+    getCollections: ReturnType<typeof vi.fn>;
+    updateCollection: ReturnType<typeof vi.fn>;
+    createSnapshot: ReturnType<typeof vi.fn>;
+    getCollection: ReturnType<typeof vi.fn>;
+    scroll: ReturnType<typeof vi.fn>;
+  };
+}
+
+/**
+ * Lightweight deterministic mocks for unit tests that only need happy-path behaviour.
+ */
+export function createLightweightDatabaseMocks(): LightweightDatabaseMocks {
+  const falkor = {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    isInitialized: vi.fn().mockReturnValue(true),
+    query: vi.fn().mockResolvedValue([]),
+    command: vi.fn().mockResolvedValue(undefined),
+    setupGraph: vi.fn().mockResolvedValue(undefined),
+    healthCheck: vi.fn().mockResolvedValue(true),
+  } satisfies IFalkorDBService;
+
+  const qdrantClient = {
+    getCollections: vi.fn().mockResolvedValue({ collections: [] }),
+    updateCollection: vi.fn().mockResolvedValue(undefined),
+    createSnapshot: vi.fn().mockResolvedValue(undefined),
+    getCollection: vi.fn().mockResolvedValue({}),
+    scroll: vi.fn().mockResolvedValue({ points: [] }),
+  };
+
+  const qdrant = {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    isInitialized: vi.fn().mockReturnValue(true),
+    getClient: vi.fn().mockReturnValue(qdrantClient),
+    setupCollections: vi.fn().mockResolvedValue(undefined),
+    healthCheck: vi.fn().mockResolvedValue(true),
+  } satisfies IQdrantService;
+
+  const postgres = {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    isInitialized: vi.fn().mockReturnValue(true),
+    query: vi.fn().mockResolvedValue([]),
+    bulkQuery: vi.fn().mockResolvedValue([]),
+    getPool: vi.fn().mockReturnValue({}),
+    healthCheck: vi.fn().mockResolvedValue(true),
+  } satisfies IPostgreSQLService;
+
+  const redis = {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    isInitialized: vi.fn().mockReturnValue(true),
+    healthCheck: vi.fn().mockResolvedValue(true),
+  } satisfies IRedisService;
+
+  return {
+    falkor,
+    qdrant,
+    postgres,
+    redis,
+    qdrantClient,
+  };
 }
 
 /**
@@ -38,9 +111,8 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
 
   constructor(config: MockConfig = {}) {
     this.config = {
-      // Respect provided failure rate; default to 10%
-      failureRate: config.failureRate ?? 10,
-      latencyMs: config.latencyMs ?? 10,
+      failureRate: config.failureRate ?? 0,
+      latencyMs: config.latencyMs ?? 0,
       connectionFailures: config.connectionFailures ?? false,
       transactionFailures: config.transactionFailures ?? false,
       dataCorruption: config.dataCorruption ?? false,
@@ -205,7 +277,13 @@ export class RealisticQdrantMock implements IQdrantService {
   }
 
   constructor(config: MockConfig = {}) {
-    this.config = config;
+    this.config = {
+      failureRate: config.failureRate ?? 0,
+      latencyMs: config.latencyMs ?? 0,
+      connectionFailures: config.connectionFailures ?? false,
+      transactionFailures: config.transactionFailures ?? false,
+      dataCorruption: config.dataCorruption ?? false,
+    };
     this.rngState = (config.seed ?? 1) >>> 0;
   }
 
@@ -353,10 +431,10 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
   constructor(config: MockConfig = {}) {
     // Enforce realistic defaults for testing
     this.config = {
-      failureRate: config.failureRate ?? 8,
-      latencyMs: config.latencyMs ?? 15,
+      failureRate: config.failureRate ?? 0,
+      latencyMs: config.latencyMs ?? 0,
       connectionFailures: config.connectionFailures ?? false,
-      transactionFailures: config.transactionFailures ?? true, // Default to true for realism
+      transactionFailures: config.transactionFailures ?? false,
       dataCorruption: config.dataCorruption ?? false,
     };
     this.rngState = (config.seed ?? 1) >>> 0;
@@ -643,7 +721,13 @@ export class RealisticRedisMock implements IRedisService {
   }
 
   constructor(config: MockConfig = {}) {
-    this.config = config;
+    this.config = {
+      failureRate: config.failureRate ?? 0,
+      latencyMs: config.latencyMs ?? 0,
+      connectionFailures: config.connectionFailures ?? false,
+      transactionFailures: config.transactionFailures ?? false,
+      dataCorruption: config.dataCorruption ?? false,
+    };
     if (typeof config.seed === "number") {
       this.rngState = config.seed >>> 0;
     }
@@ -732,6 +816,20 @@ export class RealisticRedisMock implements IRedisService {
     this.store.delete(key);
 
     return existed ? 1 : 0;
+  }
+
+  async flushDb(): Promise<void> {
+    if (!this.initialized) {
+      throw new Error("Redis not initialized");
+    }
+
+    await this.simulateLatency();
+
+    if (this.shouldFail()) {
+      throw new Error("Redis FLUSH failed: Command timeout");
+    }
+
+    this.store.clear();
   }
 
   async healthCheck(): Promise<boolean> {

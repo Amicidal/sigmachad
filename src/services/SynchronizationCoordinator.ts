@@ -8,7 +8,7 @@ import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
 import { ASTParser } from "./ASTParser.js";
 import { DatabaseService } from "./DatabaseService.js";
 import { FileChange } from "./FileWatcher.js";
-import { RelationshipType } from "../models/relationships.js";
+import { GraphRelationship, RelationshipType } from "../models/relationships.js";
 import { GitService } from "./GitService.js";
 
 export interface SyncOperation {
@@ -1126,9 +1126,10 @@ export class SynchronizationCoordinator extends EventEmitter {
           case "delete":
             // Handle file deletion
             try {
-              // Find all entities associated with this file
-              // TODO: Implement getEntitiesByFile method in KnowledgeGraphService
-              const fileEntities: any[] = []; // Placeholder - need to implement this method
+              const fileEntities = await this.kgService.getEntitiesByFile(
+                change.path,
+                { includeSymbols: true }
+              );
 
               for (const entity of fileEntities) {
                 await this.kgService.deleteEntity(entity.id);
@@ -1651,12 +1652,9 @@ export interface PartialUpdate {
   newValue?: any;
 }
 
-// --- Resolution helpers ---
-import { GraphRelationship } from "../models/relationships.js";
-
 export interface FileLikeEntity { path?: string }
 
-declare module "./SynchronizationCoordinator" {
+declare module "./SynchronizationCoordinator.js" {
   interface SynchronizationCoordinator {
     resolveAndCreateRelationship(
       relationship: GraphRelationship,

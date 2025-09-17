@@ -74,6 +74,7 @@ export interface IRedisService {
     get(key: string): Promise<string | null>;
     set(key: string, value: string, ttl?: number): Promise<void>;
     del(key: string): Promise<number>;
+    flushDb(): Promise<void>;
     healthCheck(): Promise<boolean>;
 }
 export interface IDatabaseHealthCheck {

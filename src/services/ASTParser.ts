@@ -82,7 +82,7 @@ export class ASTParser {
   private tsProject: Project;
   private jsParser: any | null = null;
   private fileCache: Map<string, CachedFileInfo> = new Map();
-  private exportMapCache: Map<string, Map<string, { fileRel: string; name: string }>> = new Map();
+  private exportMapCache: Map<string, Map<string, { fileRel: string; name: string; depth: number }>> = new Map();
   private tsPathOptions: Partial<ts.CompilerOptions> | null = null;
   // Global symbol indexes for cross-file resolution at extraction time
   private globalSymbolIndex: Map<string, SymbolEntity> = new Map(); // key: `${fileRel}:${name}`
@@ -249,71 +249,6 @@ export class ASTParser {
           this.globalSymbolIndex.delete(key);
         }
       }
-      // ++/-- update expressions: treat as READ and WRITES of the operand
-      try {
-        const pre = sourceFile.getDescendantsOfKind(SyntaxKind.PrefixUnaryExpression);
-        const post = sourceFile.getDescendantsOfKind(SyntaxKind.PostfixUnaryExpression);
-        const all = ([] as any[]).concat(pre as any, post as any);
-        for (const ux of all) {
-          try {
-            const opTok = (ux as any).getOperatorToken?.()?.getText?.() || '';
-            if (opTok !== '++' && opTok !== '--') continue;
-            const operand: any = (ux as any).getOperand?.();
-            const fromId = enclosingSymbolId(ux);
-            if (operand && typeof operand.getText === 'function') {
-              const t = operand.getText();
-              const key = `${fileEntity.path}:${t}`;
-              const local = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(t) ? localSymbols.find(ls => (ls.entity as any).path === key) : null;
-              const to = local ? local.entity.id : `external:${t.split('.').pop() || t}`;
-              addRel(fromId, to, RelationshipType.READS, operand, { kindHint: 'read', accessPath: t });
-              addRel(fromId, to, RelationshipType.WRITES, operand, { kindHint: 'write', operator: opTok, accessPath: t });
-            }
-          } catch {}
-        }
-      } catch {}
-
-      // Destructuring writes in variable declarations: const {a} = rhs; const [x] = rhs;
-      try {
-        const vardecls = sourceFile.getDescendantsOfKind(SyntaxKind.VariableDeclaration);
-        for (const vd of vardecls) {
-          try {
-            const name: any = (vd as any).getNameNode?.();
-            const init: any = (vd as any).getInitializer?.();
-            if (!name || !init) continue;
-            const fromId = enclosingSymbolId(vd);
-            // Reads from RHS identifiers
-            const ids = init.getDescendantsOfKind?.(SyntaxKind.Identifier) || [];
-            for (const idn of ids) {
-              const t = idn.getText();
-              if (!t || isDeclarationName(idn)) continue;
-              const key = `${fileEntity.path}:${t}`;
-              const local = localSymbols.find(ls => (ls.entity as any).path === key);
-              if (local) addRel(fromId, local.entity.id, RelationshipType.READS, idn, { kindHint: 'read', scope: 'local', resolution: 'direct' });
-              else addRel(fromId, `external:${t}`, RelationshipType.READS, idn, { kindHint: 'read', scope: 'external', resolution: 'heuristic' });
-            }
-            // Writes for bound names in the pattern
-            const emitWrite = (bound: any) => {
-              try {
-                const txt = bound?.getText?.();
-                if (!txt) return;
-                if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(txt)) {
-                  const key = `${fileEntity.path}:${txt}`;
-                  const local = localSymbols.find(ls => (ls.entity as any).path === key);
-                  const to = local ? local.entity.id : `external:${txt}`;
-                  addRel(fromId, to, RelationshipType.WRITES, bound, { kindHint: 'write', operator: '=' });
-                }
-              } catch {}
-            };
-            if (name.getKind && name.getKind() === SyntaxKind.ObjectBindingPattern) {
-              const elems = name.getElements?.() || [];
-              for (const e of elems) emitWrite(e.getNameNode?.());
-            } else if (name.getKind && name.getKind() === SyntaxKind.ArrayBindingPattern) {
-              const elems = name.getElements?.() || [];
-              for (const e of elems) emitWrite(e.getNameNode?.());
-            }
-          } catch {}
-        }
-      } catch {}
     } catch {}
   }
 
@@ -389,7 +324,9 @@ export class ASTParser {
           }
         }
         // export * from './x' -> recurse
-        if (ed.isExportAll()) {
+        const hasNamespace = typeof ed.getNamespaceExport === 'function' ? !!ed.getNamespaceExport() : false;
+        const isStarExport = !hasNamespace && (!named || named.length === 0);
+        if (isStarExport) {
           const specSf = spec;
           const res = this.resolveReexportTarget(symbolName, specSf, depth + 1, seen);
           if (res) return res;
@@ -456,34 +393,36 @@ export class ASTParser {
         if (!specSf) {
           const modText = ed.getModuleSpecifierValue?.();
           if (modText) {
-            specSf = this.resolveModuleSpecifierToSourceFile(modText, moduleSf) || undefined as any;
+            specSf = this.resolveModuleSpecifierToSourceFile(modText, moduleSf) || (undefined as any);
           }
         }
-        if (ed.isExportAll()) {
-          // export * from '...'
+
+        const namespaceExport = typeof ed.getNamespaceExport === 'function' ? ed.getNamespaceExport() : undefined;
+        const named = ed.getNamedExports();
+        const isStarExport = !namespaceExport && named.length === 0;
+
+        if (isStarExport) {
           const child = this.getModuleExportMap(specSf, depth + 1, seen);
           for (const [k, v] of child.entries()) {
             if (!out.has(k)) out.set(k, { fileRel: v.fileRel, name: v.name, depth: v.depth });
           }
-        } else {
-          const named = ed.getNamedExports();
-          for (const ne of named) {
-            const name = ne.getNameNode().getText();
-            const alias = ne.getAliasNode()?.getText();
-            if (specSf) {
-              const child = this.getModuleExportMap(specSf, depth + 1, seen);
-              const chosen = child.get(name) || child.get(alias || '');
-              if (chosen) {
-                addExport(alias || name, chosen.name, chosen.fileRel, chosen.depth);
-              } else {
-                // No child mapping; point to that module file with provided name
-                const childRel = path.relative(process.cwd(), specSf.getFilePath());
-                addExport(alias || name, name, childRel, depth + 1);
-              }
+          continue;
+        }
+
+        for (const ne of named) {
+          const name = ne.getNameNode().getText();
+          const alias = ne.getAliasNode()?.getText();
+          if (specSf) {
+            const child = this.getModuleExportMap(specSf, depth + 1, seen);
+            const chosen = child.get(name) || child.get(alias || '');
+            if (chosen) {
+              addExport(alias || name, chosen.name, chosen.fileRel, chosen.depth);
             } else {
-              // Re-export local symbol
-              addExport(alias || name, name, undefined, depth);
+              const childRel = path.relative(process.cwd(), specSf.getFilePath());
+              addExport(alias || name, name, childRel, depth + 1);
             }
+          } else {
+            addExport(alias || name, name, undefined, depth);
           }
         }
       }
@@ -1543,6 +1482,7 @@ export class ASTParser {
           // Track resolution/scope hints for richer evidence
           let resHint: string | undefined;
           let scopeHint: string | undefined;
+          const baseMeta: Record<string, any> = {};
 
           // Property access calls: try to resolve base object type to declaration and method symbol name
           try {
@@ -1664,7 +1604,7 @@ export class ASTParser {
             else scopeHint = 'unknown';
           }
 
-          const baseMeta: Record<string, any> = {
+          Object.assign(baseMeta, {
             path: path.relative(process.cwd(), sourceFile.getFilePath()),
             ...(typeof line === 'number' ? { line } : {}),
             ...(typeof column === 'number' ? { column } : {}),
@@ -1675,7 +1615,7 @@ export class ASTParser {
             awaited,
             ...(resHint ? { resolution: resHint } : {}),
             ...(scopeHint ? { scope: scopeHint } : {}),
-          };
+          });
           if (!('isMethod' in baseMeta) && targetName.includes('.')) (baseMeta as any).isMethod = true;
 
           // Aggregate CALLS instead of emitting duplicates directly
@@ -1722,7 +1662,7 @@ export class ASTParser {
             });
             if (confidence >= noiseConfig.MIN_INFERRED_CONFIDENCE) {
               const keyAgg = `${symbolEntity.id}|${toId}`;
-              const meta = { ...baseMeta, inferred: true, source: 'call-typecheck', confidence, resolution: 'type-checker', scope: 'imported' };
+            const meta: Record<string, any> = { ...baseMeta, inferred: true, source: 'call-typecheck', confidence, resolution: 'type-checker', scope: 'imported' };
               const prev = callAgg.get(keyAgg);
               if (!prev) callAgg.set(keyAgg, { count: 1, meta });
               else {
@@ -1750,7 +1690,7 @@ export class ASTParser {
               const sfPath = path.relative(process.cwd(), sourceFile.getFilePath());
               const simple = type.getText();
               const key = `${sfPath}:${simple}`;
-              const toId = localIndex.get(key);
+              let toId = localIndex.get(key);
               if (toId) {
                 // Concretize file placeholder to symbol id when available
                 try {
@@ -1803,7 +1743,7 @@ export class ASTParser {
               const sfPath = path.relative(process.cwd(), sourceFile.getFilePath());
               const simple = type.getText();
               const key = `${sfPath}:${simple}`;
-              const toId = localIndex.get(key);
+              let toId = localIndex.get(key);
               if (toId) {
                 try {
                   if (toId.startsWith('file:')) {
@@ -2276,7 +2216,7 @@ export class ASTParser {
       // Enrich metadata with lightweight dataflow grouping for READS/WRITES
       if (type === RelationshipType.READS || type === RelationshipType.WRITES) {
         try {
-          const owner = enclosingSymbolId(node);
+          const owner = locNode ? enclosingSymbolId(locNode) : fileEntity.id;
           let varName = '';
           if (toId.startsWith('file:')) {
             const parts = toId.split(':');

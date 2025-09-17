@@ -7,6 +7,7 @@ import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
 import { ASTParser } from "./ASTParser.js";
 import { DatabaseService } from "./DatabaseService.js";
 import { FileChange } from "./FileWatcher.js";
+import { GraphRelationship } from "../models/relationships.js";
 export interface SyncOperation {
     id: string;
     type: "full" | "incremental" | "partial";
@@ -116,11 +117,10 @@ export interface PartialUpdate {
     type: "update" | "delete" | "create";
     newValue?: any;
 }
-import { GraphRelationship } from "../models/relationships.js";
 export interface FileLikeEntity {
     path?: string;
 }
-declare module "./SynchronizationCoordinator" {
+declare module "./SynchronizationCoordinator.js" {
     interface SynchronizationCoordinator {
         resolveAndCreateRelationship(relationship: GraphRelationship, sourceFilePath?: string): Promise<boolean>;
         resolveRelationshipTarget(relationship: GraphRelationship, sourceFilePath?: string): Promise<string | null>;

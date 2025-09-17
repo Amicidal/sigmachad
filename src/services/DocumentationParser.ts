@@ -27,6 +27,12 @@ export interface ParsedDocument {
   stakeholders: string[];
   technologies: string[];
   docType: DocumentationNode["docType"];
+  docIntent: DocumentationNode["docIntent"];
+  docVersion: string;
+  docHash: string;
+  docSource: DocumentationNode["docSource"];
+  docLocale?: string;
+  lastIndexed: Date;
   metadata: Record<string, any>;
 }
 
@@ -44,6 +50,9 @@ export interface SyncResult {
   newDomains: number;
   updatedClusters: number;
   errors: string[];
+  refreshedRelationships?: number;
+  staleRelationships?: number;
+  sectionsLinked?: number;
 }
 
 export interface SearchResult {
@@ -60,6 +69,60 @@ export class DocumentationParser {
   constructor(kgService: KnowledgeGraphService, dbService: DatabaseService) {
     this.kgService = kgService;
     this.dbService = dbService;
+  }
+
+  private inferDocIntent(
+    filePath: string,
+    docType: DocumentationNode["docType"]
+  ): DocumentationNode["docIntent"] {
+    const normalizedPath = filePath.toLowerCase();
+
+    if (
+      normalizedPath.includes("/adr") ||
+      normalizedPath.includes("adr-") ||
+      normalizedPath.includes("/architecture") ||
+      normalizedPath.includes("/decisions") ||
+      docType === "architecture"
+    ) {
+      return "governance";
+    }
+
+    if (docType === "design-doc" || docType === "user-guide") {
+      return "mixed";
+    }
+
+    return "ai-context";
+  }
+
+  private inferDocLocale(
+    filePath: string,
+    metadata: Record<string, any>
+  ): string | undefined {
+    const localeMatch = filePath
+      .toLowerCase()
+      .match(/\.([a-z]{2}(?:-[a-z0-9]+)?)\.(md|txt|rst|adoc)$/);
+    if (localeMatch) {
+      return localeMatch[1];
+    }
+
+    if (typeof metadata?.language === "string" && metadata.language.length > 0) {
+      return metadata.language;
+    }
+
+    return "en";
+  }
+
+  private normalizeDomainPath(domainName: string): string {
+    const cleaned = domainName
+      .trim()
+      .toLowerCase()
+      .replace(/>+/g, "/")
+      .replace(/\s+/g, "/")
+      .replace(/[^a-z0-9/_-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/\/+/, "/")
+      .replace(/\/+/, "/");
+    return cleaned.replace(/^\/+|\/+$/g, "");
   }
 
   /**
@@ -89,13 +152,28 @@ export class DocumentationParser {
           parsedContent = this.parsePlaintext(content);
       }
 
+      const checksum = this.calculateChecksum(content);
+      const inferredIntent = this.inferDocIntent(filePath, parsedContent.docType);
+      const locale = this.inferDocLocale(filePath, parsedContent.metadata);
+      const now = new Date();
+
+      parsedContent.docIntent = inferredIntent;
+      parsedContent.docVersion = checksum;
+      parsedContent.docHash = checksum;
+      parsedContent.docSource = "parser";
+      parsedContent.docLocale = locale;
+      parsedContent.lastIndexed = now;
+
       // Extract additional metadata
       parsedContent.metadata = {
         ...parsedContent.metadata,
         filePath,
         fileSize: content.length,
-        lastModified: new Date(),
-        checksum: this.calculateChecksum(content),
+        lastModified: now,
+        checksum,
+        docIntent: inferredIntent,
+        docVersion: checksum,
+        docLocale: locale,
       };
 
       return parsedContent;
@@ -145,6 +223,12 @@ export class DocumentationParser {
       stakeholders,
       technologies,
       docType,
+      docIntent: "ai-context",
+      docVersion: "",
+      docHash: "",
+      docSource: "parser",
+      docLocale: "en",
+      lastIndexed: new Date(),
       metadata: {
         headings,
         links: this.extractLinksFromContent(content, tokens),
@@ -171,6 +255,12 @@ export class DocumentationParser {
       stakeholders,
       technologies,
       docType,
+      docIntent: "ai-context",
+      docVersion: "",
+      docHash: "",
+      docSource: "parser",
+      docLocale: "en",
+      lastIndexed: new Date(),
       metadata: {
         lineCount: lines.length,
         wordCount: content.split(/\s+/).length,
@@ -197,6 +287,12 @@ export class DocumentationParser {
       stakeholders,
       technologies,
       docType,
+      docIntent: "ai-context",
+      docVersion: "",
+      docHash: "",
+      docSource: "parser",
+      docLocale: "en",
+      lastIndexed: new Date(),
       metadata: {
         sections: this.extractRstSections(lines),
       },
@@ -222,6 +318,12 @@ export class DocumentationParser {
       stakeholders,
       technologies,
       docType,
+      docIntent: "ai-context",
+      docVersion: "",
+      docHash: "",
+      docSource: "parser",
+      docLocale: "en",
+      lastIndexed: new Date(),
       metadata: {},
     };
   }
@@ -745,7 +847,11 @@ export class DocumentationParser {
       newDomains: 0,
       updatedClusters: 0,
       errors: [],
+      sectionsLinked: 0,
     };
+
+    const processedDocs: Array<{ id: string; lastIndexed: Date }> = [];
+    let linkedSectionsTotal = 0;
 
     try {
       // Find all documentation files
@@ -766,6 +872,13 @@ export class DocumentationParser {
           // Update semantic clusters
           await this.updateSemanticClusters(parsedDoc, docId);
 
+          linkedSectionsTotal += await this.linkDocumentSections(
+            docId,
+            parsedDoc
+          );
+
+          processedDocs.push({ id: docId, lastIndexed: parsedDoc.lastIndexed });
+
           result.processedFiles++;
         } catch (error) {
           result.errors.push(
@@ -776,7 +889,22 @@ export class DocumentationParser {
         }
       }
 
+      try {
+        const freshness = await this.applyFreshnessUpdates(processedDocs);
+        result.refreshedRelationships = freshness.refreshed;
+        result.staleRelationships = freshness.stale;
+      } catch (freshnessError) {
+        result.errors.push(
+          `Freshness update failed: ${
+            freshnessError instanceof Error
+              ? freshnessError.message
+              : "Unknown error"
+          }`
+        );
+      }
+
       result.updatedClusters = await this.refreshClusters();
+      result.sectionsLinked = linkedSectionsTotal;
     } catch (error) {
       result.errors.push(
         `Sync failed: ${
@@ -868,6 +996,12 @@ export class DocumentationParser {
       stakeholders: parsedDoc.stakeholders,
       technologies: parsedDoc.technologies,
       status: "active",
+      docVersion: parsedDoc.docVersion,
+      docHash: parsedDoc.docHash,
+      docIntent: parsedDoc.docIntent,
+      docSource: parsedDoc.docSource,
+      docLocale: parsedDoc.docLocale,
+      lastIndexed: parsedDoc.lastIndexed,
     };
 
     await this.kgService.createEntity(docNode);
@@ -906,6 +1040,17 @@ export class DocumentationParser {
         newDomainsCount++;
       }
 
+      const domainPath = this.normalizeDomainPath(domainName);
+      const taxonomyVersion =
+        typeof parsedDoc.metadata?.taxonomyVersion === "string"
+          ? parsedDoc.metadata.taxonomyVersion
+          : "v1";
+      const updatedFromDocAt =
+        parsedDoc.metadata?.lastModified instanceof Date
+          ? parsedDoc.metadata.lastModified
+          : parsedDoc.lastIndexed;
+      const sectionAnchor = "_root";
+
       // Create/ensure relationship from documentation -> domain
       try {
         await this.kgService.createRelationship({
@@ -916,7 +1061,25 @@ export class DocumentationParser {
           created: new Date(),
           lastModified: new Date(),
           version: 1,
-          metadata: { inferred: true, confidence: 0.6, source: 'doc-domain-extract' }
+          confidence: 0.6,
+          source: "parser",
+          docIntent: parsedDoc.docIntent,
+          domainPath,
+          taxonomyVersion,
+          sectionAnchor,
+          lastValidated: parsedDoc.lastIndexed,
+          updatedFromDocAt,
+          metadata: {
+            inferred: true,
+            confidence: 0.6,
+            source: "doc-domain-extract",
+            domainName,
+            domainPath,
+            taxonomyVersion,
+            sectionAnchor,
+            docIntent: parsedDoc.docIntent,
+            updatedFromDocAt,
+          },
         } as DocumentationRelationship as any);
       } catch {
         // Non-fatal
@@ -988,7 +1151,26 @@ export class DocumentationParser {
           created: new Date(),
           lastModified: new Date(),
           version: 1,
-          metadata: { inferred: true, confidence: 0.6, source: 'doc-cluster-link' }
+          confidence: 0.6,
+          source: "parser",
+          docIntent: parsedDoc.docIntent,
+          sectionAnchor: "_root",
+          documentationQuality: "partial",
+          coverageScope: "behavior",
+          docVersion: parsedDoc.docVersion,
+          docHash: parsedDoc.docHash,
+          lastValidated: parsedDoc.lastIndexed,
+          metadata: {
+            inferred: true,
+            confidence: 0.6,
+            source: "doc-cluster-link",
+            sectionAnchor: "_root",
+            documentationQuality: "partial",
+            coverageScope: "behavior",
+            docVersion: parsedDoc.docVersion,
+            docHash: parsedDoc.docHash,
+            docIntent: parsedDoc.docIntent,
+          },
         } as DocumentationRelationship as any);
       } catch {}
 
@@ -1003,7 +1185,20 @@ export class DocumentationParser {
           created: new Date(),
           lastModified: new Date(),
           version: 1,
-          metadata: { inferred: true, confidence: 0.6, source: 'cluster-domain' }
+          confidence: 0.6,
+          strength: 0.5,
+          source: "parser",
+          docIntent: parsedDoc.docIntent,
+          domainPath: this.normalizeDomainPath(domain),
+          lastValidated: parsedDoc.lastIndexed,
+          metadata: {
+            inferred: true,
+            confidence: 0.6,
+            strength: 0.5,
+            source: "cluster-domain",
+            domainPath: this.normalizeDomainPath(domain),
+            docIntent: parsedDoc.docIntent,
+          },
         } as DocumentationRelationship as any);
       } catch {}
     }
@@ -1139,5 +1334,208 @@ export class DocumentationParser {
     }
 
     return sections.slice(0, 5); // Limit to top 5 matches
+  }
+
+  private getFreshnessWindowDays(): number {
+    const raw = process.env.DOC_FRESHNESS_MAX_AGE_DAYS;
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+    return 14;
+  }
+
+  private async linkDocumentSections(
+    docId: string,
+    parsedDoc: ParsedDocument
+  ): Promise<number> {
+    const sections = this.extractSectionDescriptors(parsedDoc);
+    if (sections.length === 0) return 0;
+
+    let linked = 0;
+    for (const section of sections.slice(0, 30)) {
+      try {
+        await this.kgService.createRelationship(
+          {
+            id: `rel_${docId}_${section.anchor}_DOCUMENTS_SECTION`,
+            fromEntityId: docId,
+            toEntityId: docId,
+            type: RelationshipType.DOCUMENTS_SECTION,
+            created: new Date(),
+            lastModified: new Date(),
+            version: 1,
+            source: "parser",
+            docIntent: parsedDoc.docIntent,
+            docVersion: parsedDoc.docVersion,
+            docHash: parsedDoc.docHash,
+            docLocale: parsedDoc.docLocale,
+            lastValidated: parsedDoc.lastIndexed,
+            sectionAnchor: section.anchor,
+            sectionTitle: section.title,
+            summary: section.summary,
+            metadata: {
+              level: section.level,
+              inferred: true,
+              source: "doc-section-extract",
+              sectionAnchor: section.anchor,
+              sectionTitle: section.title,
+              summary: section.summary,
+              levelOrdinal: section.level,
+            },
+          } as DocumentationRelationship as any,
+        );
+        linked++;
+      } catch (error) {
+        console.warn(
+          `Failed to link documentation section ${section.anchor} for ${docId}:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+
+    return linked;
+  }
+
+  private extractSectionDescriptors(
+    parsedDoc: ParsedDocument
+  ): Array<{ title: string; anchor: string; level: number; summary?: string }> {
+    const sections: Array<{ title: string; level: number }> = [];
+    const metadata = parsedDoc.metadata || {};
+    const mdHeadings = Array.isArray(metadata.headings)
+      ? (metadata.headings as Array<{ text: string; level: number }>)
+      : [];
+    if (mdHeadings.length > 0) {
+      for (const heading of mdHeadings) {
+        const text = typeof heading.text === "string" ? heading.text.trim() : "";
+        const level = Number.isFinite(heading.level) ? heading.level : 2;
+        if (text.length === 0) continue;
+        if (text === parsedDoc.title) continue;
+        sections.push({ title: text, level });
+      }
+    }
+
+    const rstSections = Array.isArray(metadata.sections)
+      ? (metadata.sections as Array<{ title: string; level: number }>)
+      : [];
+    if (rstSections.length > 0 && sections.length === 0) {
+      for (const section of rstSections) {
+        const text = typeof section.title === "string" ? section.title.trim() : "";
+        if (text.length === 0) continue;
+        sections.push({ title: text, level: section.level || 2 });
+      }
+    }
+
+    const descriptors: Array<{ title: string; anchor: string; level: number; summary?: string }> = [];
+    if (sections.length === 0) {
+      return descriptors;
+    }
+
+    const content = parsedDoc.content || "";
+    const lines = content.split(/\r?\n/);
+
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i];
+      const anchor = this.slugifySectionTitle(section.title) || `_section_${i + 1}`;
+      const summary = this.extractSectionSummary(section.title, section.level, lines);
+      descriptors.push({
+        title: section.title,
+        anchor,
+        level: section.level || 2,
+        summary,
+      });
+    }
+
+    return descriptors;
+  }
+
+  private slugifySectionTitle(title: string): string {
+    return title
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\-_/\s]+/g, "-")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-/g, "")
+      .replace(/-$/g, "")
+      .slice(0, 128);
+  }
+
+  private extractSectionSummary(
+    title: string,
+    level: number,
+    lines: string[]
+  ): string | undefined {
+    const escapeRegExp = (value: string) =>
+      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const headingPatterns = [
+      new RegExp(`^#{1,${Math.max(level, 1)}}\\s*${escapeRegExp(title)}\\s*$`, "i"),
+      new RegExp(`^${escapeRegExp(title)}\s*$`, "i"),
+    ];
+
+    let startIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (headingPatterns.some((pattern) => pattern.test(line.trim()))) {
+        startIndex = i + 1;
+        break;
+      }
+    }
+
+    if (startIndex === -1 || startIndex >= lines.length) {
+      return undefined;
+    }
+
+    const snippet: string[] = [];
+    for (let i = startIndex; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^#{1,6}\s+/.test(line)) break; // next markdown heading
+      if (/^\s*$/.test(line)) {
+        if (snippet.length > 0) break;
+        continue;
+      }
+      snippet.push(line.trim());
+      if (snippet.join(" ").length > 220) break;
+    }
+
+    const summary = snippet.join(" ");
+    if (!summary) return undefined;
+    return summary.length > 240 ? `${summary.slice(0, 237)}...` : summary;
+  }
+
+  private async applyFreshnessUpdates(
+    processedDocs: Array<{ id: string; lastIndexed: Date }>
+  ): Promise<{ refreshed: number; stale: number }> {
+    let refreshed = 0;
+    const docIds: string[] = [];
+    for (const doc of processedDocs) {
+      docIds.push(doc.id);
+      try {
+        refreshed += await this.kgService.updateDocumentationFreshness(doc.id, {
+          lastValidated: doc.lastIndexed,
+          documentationQuality: "complete",
+          updatedFromDocAt: doc.lastIndexed,
+        });
+      } catch (error) {
+        console.warn(
+          `Failed to refresh documentation freshness for ${doc.id}:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+
+    const cutoffMs = this.getFreshnessWindowDays() * 24 * 60 * 60 * 1000;
+    const cutoffDate = new Date(Date.now() - cutoffMs);
+    let stale = 0;
+    try {
+      stale = await this.kgService.markDocumentationAsStale(cutoffDate, docIds);
+    } catch (error) {
+      console.warn(
+        "Failed to mark stale documentation relationships:",
+        error instanceof Error ? error.message : error
+      );
+    }
+
+    return { refreshed, stale };
   }
 }

@@ -51,6 +51,9 @@ export declare class MCPRouter {
     private updateSeverityCounts;
     private getCWEMapping;
     private getMockCVSSScore;
+    private getDocFreshnessWindowMs;
+    private shouldFlagDocumentationOutdated;
+    private evaluateDeploymentGate;
     private handleImpactAnalysis;
     private analyzeDirectImpact;
     private analyzeCascadingImpact;
@@ -58,6 +61,8 @@ export declare class MCPRouter {
     private analyzeDocumentationImpact;
     private generateImpactRecommendations;
     private calculateRiskLevel;
+    private riskLevelToScore;
+    private riskScoreToLabel;
     private estimateEffort;
     private handleSyncDocs;
     private extractBusinessDomains;

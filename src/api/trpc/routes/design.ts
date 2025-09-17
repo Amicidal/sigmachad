@@ -1,20 +1,23 @@
 /**
  * Design System tRPC Routes
- * Type-safe procedures for design system operations
+ * Type-safe procedures for design specification workflows
  */
 
 import { z } from 'zod';
-import { router, publicProcedure } from '../base.js';
+import { router, publicProcedure, type TRPCContext } from '../base.js';
+import { SpecService } from '../../../services/SpecService.js';
+import type { Spec } from '../../../models/entities.js';
+import type { ListSpecsParams } from '../../../models/types.js';
 
-// Validation schemas
 const ValidationIssueSchema = z.object({
-  field: z.string(),
   message: z.string(),
-  severity: z.enum(['error', 'warning']),
+  severity: z.enum(['error', 'warning', 'info']).default('warning'),
+  rule: z.string().optional(),
   file: z.string().optional(),
   line: z.number().optional(),
   column: z.number().optional(),
-  rule: z.string().optional(),
+  suggestion: z.string().optional(),
+  field: z.string().optional(),
 });
 
 const ValidationResultSchema = z.object({
@@ -23,153 +26,209 @@ const ValidationResultSchema = z.object({
   suggestions: z.array(z.string()),
 });
 
+const CoverageMetricsSchema = z.object({
+  lines: z.number(),
+  branches: z.number(),
+  functions: z.number(),
+  statements: z.number(),
+});
+
 const TestCoverageSchema = z.object({
   entityId: z.string(),
-  overallCoverage: z.object({
-    lines: z.number(),
-    branches: z.number(),
-    functions: z.number(),
-    statements: z.number(),
-  }),
+  overallCoverage: CoverageMetricsSchema,
   testBreakdown: z.object({
-    unitTests: z.object({
-      lines: z.number(),
-      branches: z.number(),
-      functions: z.number(),
-      statements: z.number(),
-    }),
-    integrationTests: z.object({
-      lines: z.number(),
-      branches: z.number(),
-      functions: z.number(),
-      statements: z.number(),
-    }),
-    e2eTests: z.object({
-      lines: z.number(),
-      branches: z.number(),
-      functions: z.number(),
-      statements: z.number(),
-    }),
+    unitTests: CoverageMetricsSchema,
+    integrationTests: CoverageMetricsSchema,
+    e2eTests: CoverageMetricsSchema,
   }),
   uncoveredLines: z.array(z.number()),
   uncoveredBranches: z.array(z.number()),
-  testCases: z.array(z.object({
-    testId: z.string(),
-    testName: z.string(),
-    testCode: z.string(),
-    assertions: z.array(z.string()),
-  })),
+  testCases: z.array(
+    z.object({
+      testId: z.string(),
+      testName: z.string(),
+      covers: z.array(z.string()),
+    })
+  ),
 });
 
-const SpecSchema = z.object({
+const SpecOutputSchema = z.object({
   id: z.string(),
-  name: z.string(),
-  type: z.enum(['component', 'page', 'feature', 'system']),
-  description: z.string(),
-  requirements: z.array(z.string()),
-  dependencies: z.array(z.string()),
-  status: z.enum(['draft', 'review', 'approved', 'implemented', 'deprecated']),
+  type: z.literal('spec'),
+  path: z.string(),
+  hash: z.string(),
+  language: z.string(),
   created: z.date(),
   updated: z.date(),
-  author: z.string(),
-  reviewers: z.array(z.string()),
-  tags: z.array(z.string()),
+  lastModified: z.date(),
+  title: z.string(),
+  description: z.string(),
+  acceptanceCriteria: z.array(z.string()),
+  status: z.enum(['draft', 'approved', 'implemented', 'deprecated']),
+  priority: z.enum(['low', 'medium', 'high', 'critical']),
+  assignee: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  metadata: z.record(z.any()).optional(),
 });
 
+const SpecInputSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  acceptanceCriteria: z.array(z.string()),
+  status: z.enum(['draft', 'approved', 'implemented', 'deprecated']).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+  assignee: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  path: z.string().optional(),
+  hash: z.string().optional(),
+  language: z.string().optional(),
+  metadata: z.record(z.any()).optional(),
+  created: z.union([z.date(), z.string()]).optional(),
+  updated: z.union([z.date(), z.string()]).optional(),
+  lastModified: z.union([z.date(), z.string()]).optional(),
+});
+
+const ListSpecsInputSchema = z.object({
+  status: z.array(z.enum(['draft', 'approved', 'implemented', 'deprecated'])).optional(),
+  priority: z.array(z.enum(['low', 'medium', 'high', 'critical'])).optional(),
+  assignee: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  search: z.string().optional(),
+  limit: z.number().min(1).max(100).optional(),
+  offset: z.number().min(0).optional(),
+  sortBy: z.enum(['created', 'updated', 'priority', 'status', 'title']).optional(),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
+});
+
+const SpecListResponseSchema = z.object({
+  items: z.array(SpecOutputSchema),
+  pagination: z.object({
+    page: z.number(),
+    pageSize: z.number(),
+    total: z.number(),
+    hasMore: z.boolean(),
+  }),
+});
+
+const SpecDetailSchema = z.object({
+  spec: SpecOutputSchema,
+  relatedSpecs: z.array(SpecOutputSchema.partial()),
+  affectedEntities: z.array(z.any()),
+  testCoverage: TestCoverageSchema,
+});
+
+const ensureSpecService = (ctx: TRPCContext): SpecService => {
+  const contextWithCache = ctx as TRPCContext & { __specService?: SpecService };
+  if (!contextWithCache.__specService) {
+    contextWithCache.__specService = new SpecService(ctx.kgService, ctx.dbService);
+  }
+  return contextWithCache.__specService;
+};
+
+const coerceDate = (value?: Date | string): Date | undefined => {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const buildSpecEntity = (input: z.infer<typeof SpecInputSchema>): Spec => {
+  const now = new Date();
+  return {
+    id: input.id,
+    type: 'spec',
+    path: input.path ?? `specs/${input.id}`,
+    hash: input.hash ?? '',
+    language: input.language ?? 'text',
+    created: coerceDate(input.created) ?? now,
+    updated: coerceDate(input.updated) ?? now,
+    lastModified: coerceDate(input.lastModified) ?? now,
+    title: input.title,
+    description: input.description,
+    acceptanceCriteria: input.acceptanceCriteria,
+    status: input.status ?? 'draft',
+    priority: input.priority ?? 'medium',
+    assignee: input.assignee ?? undefined,
+    tags: input.tags ?? [],
+    metadata: input.metadata ?? {},
+  };
+};
+
 export const designRouter = router({
-  // Validate design specification
   validateSpec: publicProcedure
     .input(z.object({
       spec: z.record(z.any()),
       rules: z.array(z.string()).optional(),
     }))
+    .output(ValidationResultSchema)
     .query(async ({ input, ctx }) => {
-      // TODO: Implement specification validation
+      const specService = ensureSpecService(ctx);
+      const result = specService.validateDraft(input.spec);
       return {
-        isValid: true,
-        issues: [],
-        suggestions: ['Consider adding more detailed requirements'],
-      } as z.infer<typeof ValidationResultSchema>;
+        isValid: result.isValid,
+        issues: result.issues.map((issue) => ({
+          ...issue,
+          field: issue.rule,
+        })),
+        suggestions: result.suggestions,
+      };
     }),
 
-  // Get test coverage for design
   getTestCoverage: publicProcedure
     .input(z.object({
       entityId: z.string(),
       includeTestCases: z.boolean().optional(),
     }))
+    .output(TestCoverageSchema)
     .query(async ({ input, ctx }) => {
-      // TODO: Implement test coverage analysis
-      return {
-        entityId: input.entityId,
-        overallCoverage: {
-          lines: 85,
-          branches: 80,
-          functions: 90,
-          statements: 85,
-        },
-        testBreakdown: {
-          unitTests: {
-            lines: 90,
-            branches: 85,
-            functions: 95,
-            statements: 90,
-          },
-          integrationTests: {
-            lines: 80,
-            branches: 75,
-            functions: 85,
-            statements: 80,
-          },
-          e2eTests: {
-            lines: 70,
-            branches: 65,
-            functions: 75,
-            statements: 70,
-          },
-        },
-        uncoveredLines: [],
-        uncoveredBranches: [],
-        testCases: [],
-      } as z.infer<typeof TestCoverageSchema>;
+      const specService = ensureSpecService(ctx);
+      const { testCoverage } = await specService.getSpec(input.entityId);
+      if (input.includeTestCases !== true) {
+        return { ...testCoverage, testCases: [] };
+      }
+      return testCoverage;
     }),
 
-  // Create or update specification
   upsertSpec: publicProcedure
-    .input(SpecSchema)
+    .input(SpecInputSchema)
+    .output(z.object({
+      success: z.literal(true),
+      created: z.boolean(),
+      spec: SpecOutputSchema,
+    }))
     .mutation(async ({ input, ctx }) => {
-      // TODO: Implement spec storage
+      const specService = ensureSpecService(ctx);
+      const entity = buildSpecEntity(input);
+      const { spec, created } = await specService.upsertSpec(entity);
       return {
         success: true,
-        data: input,
+        created,
+        spec,
       };
     }),
 
-  // Get specification by ID
   getSpec: publicProcedure
-    .input(z.object({
-      id: z.string(),
-    }))
+    .input(z.object({ id: z.string() }))
+    .output(SpecDetailSchema)
     .query(async ({ input, ctx }) => {
-      // TODO: Implement spec retrieval
-      return null;
+      const specService = ensureSpecService(ctx);
+      return specService.getSpec(input.id);
     }),
 
-  // List specifications with pagination
   listSpecs: publicProcedure
-    .input(z.object({
-      type: z.enum(['component', 'page', 'feature', 'system']).optional(),
-      status: z.enum(['draft', 'review', 'approved', 'implemented', 'deprecated']).optional(),
-      limit: z.number().min(1).max(100).default(20),
-      offset: z.number().min(0).default(0),
-    }))
+    .input(ListSpecsInputSchema.optional())
+    .output(SpecListResponseSchema)
     .query(async ({ input, ctx }) => {
-      // TODO: Implement spec listing
+      const specService = ensureSpecService(ctx);
+      const params: ListSpecsParams = {
+        ...(input ?? {}),
+      } as ListSpecsParams;
+      const result = await specService.listSpecs(params);
       return {
-        items: [],
-        total: 0,
-        limit: input.limit,
-        offset: input.offset,
+        items: result.specs,
+        pagination: result.pagination,
       };
     }),
 });
+

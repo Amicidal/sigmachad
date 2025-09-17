@@ -4,7 +4,7 @@
  */
 import { DatabaseService } from "./DatabaseService.js";
 import { Entity } from "../models/entities.js";
-import { GraphRelationship, RelationshipType, RelationshipQuery, PathQuery, TraversalQuery } from "../models/relationships.js";
+import { GraphRelationship, RelationshipType, RelationshipQuery, PathQuery, TraversalQuery, DocumentationQuality } from "../models/relationships.js";
 import { GraphSearchRequest, GraphExamples, DependencyAnalysis, TimeRangeParams } from "../models/types.js";
 import { EventEmitter } from "events";
 export declare class KnowledgeGraphService extends EventEmitter {
@@ -23,6 +23,25 @@ export declare class KnowledgeGraphService extends EventEmitter {
     private mergeLocationsArrays;
     private unifyResolvedEdgePlaceholders;
     private normalizeRelationship;
+    private normalizeDocumentationEdge;
+    private normalizeDocSource;
+    private normalizeDocIntent;
+    private normalizeCoverageScope;
+    private normalizeDocumentationQuality;
+    private normalizePolicyType;
+    private normalizeDomainRelationship;
+    private normalizeSectionAnchor;
+    private normalizeDomainPath;
+    private normalizeSummary;
+    private normalizeStringArray;
+    private normalizeString;
+    private normalizeLocale;
+    private clamp01;
+    private clampRange;
+    private toDate;
+    private harmonizeRefFields;
+    private inferRefKindFromId;
+    private parseFileSymbolFromId;
     private canonicalRelationshipId;
     private directoryDistance;
     private isHistoryEnabled;
@@ -224,6 +243,16 @@ export declare class KnowledgeGraphService extends EventEmitter {
     markInactiveEdgesNotSeenSince(cutoff: Date, opts?: {
         toRefFile?: string;
     }): Promise<number>;
+    updateDocumentationFreshness(docId: string, opts: {
+        lastValidated: Date;
+        documentationQuality?: DocumentationQuality;
+        updatedFromDocAt?: Date;
+    }): Promise<number>;
+    markDocumentationAsStale(cutoff: Date, excludeDocIds?: string[]): Promise<number>;
+    markEntityDocumentationOutdated(entityId: string, opts?: {
+        reason?: string;
+        staleSince?: Date;
+    }): Promise<number>;
     /**
      * Best-effort index creation to accelerate common queries.
      * Guarded to avoid failures on engines that do not support these syntaxes.
@@ -355,6 +384,9 @@ export declare class KnowledgeGraphService extends EventEmitter {
         entities: Entity[];
         total: number;
     }>;
+    getEntitiesByFile(filePath: string, options?: {
+        includeSymbols?: boolean;
+    }): Promise<Entity[]>;
     listRelationships(options?: {
         fromEntity?: string;
         toEntity?: string;

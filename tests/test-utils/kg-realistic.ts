@@ -22,6 +22,7 @@ export function makeRealisticKgService(overrides: Partial<any> = {}) {
     getRelationships: vi.fn().mockResolvedValue(relationships),
     search: vi.fn().mockResolvedValue(entities),
     getEntityExamples: vi.fn().mockResolvedValue({ usageExamples: [], testExamples: [] }),
+    findSymbolsByName: vi.fn().mockResolvedValue(entities.filter(e => e.type === 'symbol')),
   };
 
   return { ...base, ...overrides } as any;

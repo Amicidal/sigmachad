@@ -54,6 +54,7 @@ export declare class ASTParser {
     private globalSymbolIndex;
     private nameIndex;
     private tcBudgetRemaining;
+    private tcBudgetSpent;
     private takeTcBudget;
     private shouldUseTypeChecker;
     constructor();

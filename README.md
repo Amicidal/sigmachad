@@ -52,6 +52,29 @@ pnpm build && pnpm start
 curl http://localhost:3000/health
 ```
 
+### Smoke Test
+
+Once the API and backing services are running, execute the curated smoke script to verify the stack:
+
+```bash
+pnpm smoke            # defaults to http://localhost:3000
+pnpm smoke http://127.0.0.1:3001  # override base URL
+```
+
+The script probes the health endpoint and core graph APIs, exiting non-zero on failure so it can be wired into CI pipelines.
+
+### Integration Stack
+
+Bring the ephemeral databases online, run the integration suite, and tear everything down with the provided helpers:
+
+```bash
+pnpm docker:test-up
+pnpm test:integration
+pnpm docker:test-down
+```
+
+The integration tests expect the services defined in `docker-compose.test.yml` to be healthy before execution.
+
 ## Architecture
 
 ```
@@ -321,4 +344,3 @@ MIT License - see LICENSE file for details.
 ---
 
 For more detailed documentation, see the [docs](./docs/) directory.
-

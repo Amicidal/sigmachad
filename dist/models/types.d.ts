@@ -222,7 +222,7 @@ export interface DependencyAnalysis {
     directDependencies: {
         entity: Entity;
         relationship: RelationshipType;
-        strength: number;
+        confidence: number;
     }[];
     indirectDependencies: {
         entity: Entity;
@@ -349,13 +349,27 @@ export interface ImpactAnalysis {
     };
     documentationImpact: {
         staleDocs: any[];
+        missingDocs: any[];
         requiredUpdates: string[];
+        freshnessPenalty: number;
+    };
+    deploymentGate: {
+        blocked: boolean;
+        level: "none" | "advisory" | "required";
+        reasons: string[];
+        stats: {
+            missingDocs: number;
+            staleDocs: number;
+            freshnessPenalty: number;
+        };
     };
     recommendations: {
         priority: "immediate" | "planned" | "optional";
         description: string;
         effort: "low" | "medium" | "high";
         impact: "breaking" | "functional" | "cosmetic";
+        type?: "warning" | "requirement" | "suggestion";
+        actions?: string[];
     }[];
 }
 export interface VectorSearchRequest {

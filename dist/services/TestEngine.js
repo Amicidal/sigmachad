@@ -403,21 +403,26 @@ export class TestEngine {
             const meta = rel.metadata || {};
             const relCov = (_c = (_b = (_a = meta.coverage) === null || _a === void 0 ? void 0 : _a.lines) !== null && _b !== void 0 ? _b : meta.coveragePercentage) !== null && _c !== void 0 ? _c : meta.coverage;
             if (typeof relCov === 'number') {
-                coverages.push(relCov);
+                coverages.push({
+                    lines: relCov,
+                    branches: 0,
+                    functions: 0,
+                    statements: 0,
+                });
                 continue;
             }
             const test = (await this.kgService.getEntity(rel.fromEntityId));
-            if (test && test.coverage && typeof test.coverage.lines === 'number') {
-                coverages.push(test.coverage.lines);
+            if (test && test.coverage) {
+                coverages.push(test.coverage);
             }
         }
         return {
             entityId,
             overallCoverage: this.aggregateCoverage(coverages),
             testBreakdown: {
-                unitTests: 0,
-                integrationTests: 0,
-                e2eTests: 0,
+                unitTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
+                integrationTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
+                e2eTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
             },
             uncoveredLines: [], // Would need source map integration
             uncoveredBranches: [],
