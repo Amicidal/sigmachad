@@ -6,268 +6,140 @@
 import { FastifyInstance } from "fastify";
 import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
 import { DatabaseService } from "../../services/DatabaseService.js";
-import { RelationshipType } from "../../models/relationships.js";
+import { ImpactAnalysis, ImpactAnalysisRequest } from "../../models/types.js";
 
-type ChangeType = "modify" | "delete" | "rename";
-
-interface ImpactChange {
-  entityId: string;
-  changeType: ChangeType;
-  newName?: string;
-  signatureChange?: boolean;
-}
-
-interface ImpactEntityRef {
-  id: string;
-  name: string;
-  type: string;
-}
-
-interface DirectImpactEntry {
-  entities: ImpactEntityRef[];
-  severity: "low" | "medium" | "high";
-  reason: string;
-}
-
-interface CascadingImpactEntry {
-  level: number;
-  entities: ImpactEntityRef[];
-  relationship: string;
-  confidence: number;
-}
-
-interface TestImpactMetrics {
-  affectedTests: ImpactEntityRef[];
-  requiredUpdates: string[];
-  coverageImpact: number;
-}
-
-interface DocumentationImpactMetrics {
-  staleDocs: string[];
-  requiredUpdates: string[];
-}
-
-interface ImpactRecommendation {
-  priority: "immediate" | "high" | "medium" | "low";
-  description: string;
-  effort: "low" | "medium" | "high";
-  impact: string;
-  type: "warning" | "requirement" | "info" | string;
-}
-
-interface ImpactAnalysisResult {
-  directImpact: DirectImpactEntry[];
-  cascadingImpact: CascadingImpactEntry[];
-  testImpact: TestImpactMetrics;
-  documentationImpact: DocumentationImpactMetrics;
-  recommendations: ImpactRecommendation[];
-}
-
-function toEntityRef(id: string, fallbackName?: string, type: string = "entity"): ImpactEntityRef {
-  return {
-    id,
-    name: fallbackName || id,
-    type,
-  };
-}
-
-async function analyzeChangeImpact(
-  kgService: KnowledgeGraphService,
-  changes: ImpactChange[],
-  includeIndirect: boolean,
-  maxDepth: number
-): Promise<ImpactAnalysisResult> {
-  const directImpact: DirectImpactEntry[] = [];
-  const cascadingImpact: CascadingImpactEntry[] = [];
-  const testImpact: TestImpactMetrics = {
-    affectedTests: [],
-    requiredUpdates: [],
-    coverageImpact: 0,
-  };
-  const documentationImpact: DocumentationImpactMetrics = {
-    staleDocs: [],
-    requiredUpdates: [],
-  };
-  const recommendations: ImpactRecommendation[] = [];
-
-  for (const change of changes) {
-    try {
-      const entity = await kgService.getEntity(change.entityId);
-      if (!entity) {
-        continue;
-      }
-
-      const directRelationships = await kgService.getRelationships({
-        toEntityId: change.entityId,
-        limit: 100,
-      });
-
-      if (directRelationships.length > 0) {
-        const entities = directRelationships.map((rel) =>
-          toEntityRef(rel.fromEntityId)
-        );
-
-        const severity: DirectImpactEntry["severity"] = change.changeType === "delete"
-          ? "high"
-          : change.signatureChange
-          ? "medium"
-          : "low";
-
-        directImpact.push({
-          entities,
-          severity,
-          reason: `${change.changeType} of ${
-            (entity as any).name || change.entityId
-          } affects ${directRelationships.length} dependent entities`,
-        });
-      }
-
-      if (includeIndirect) {
-        const relationshipTypes: RelationshipType[] = [
-          RelationshipType.CALLS,
-          RelationshipType.DEPENDS_ON,
-          RelationshipType.REFERENCES,
-          RelationshipType.IMPLEMENTS,
-          RelationshipType.EXTENDS,
-        ];
-
-        const forwardRelationships = await kgService.getRelationships({
-          toEntityId: change.entityId,
-          type: [RelationshipType.IMPLEMENTS, RelationshipType.REFERENCES],
-          limit: 100,
-        });
-
-        if (forwardRelationships.length > 0) {
-          const implementers = forwardRelationships.filter(
-            (rel) => rel.type === RelationshipType.IMPLEMENTS
-          );
-          const references = forwardRelationships.filter(
-            (rel) => rel.type === RelationshipType.REFERENCES
-          );
-
-          if (implementers.length > 0) {
-            cascadingImpact.push({
-              level: 1,
-              entities: implementers.map((rel) => toEntityRef(rel.fromEntityId)),
-              relationship: "implements",
-              confidence: 0.95,
-            });
-          }
-
-          if (references.length > 0) {
-            cascadingImpact.push({
-              level: 1,
-              entities: references.map((rel) => toEntityRef(rel.fromEntityId)),
-              relationship: "references",
-              confidence: 0.9,
-            });
-          }
-        }
-
-        const paths = await kgService.findPaths({
-          startEntityId: change.entityId,
-          maxDepth,
-          relationshipTypes,
-        });
-
-        for (const rawPath of paths) {
-          const nodeIds = Array.isArray(rawPath)
-            ? rawPath
-            : Array.isArray((rawPath as any)?.nodeIds)
-            ? (rawPath as any).nodeIds
-            : [];
-
-          if (nodeIds.length > 2) {
-            const level = Math.max(1, Math.ceil(nodeIds.length / 2));
-            const confidence = Math.max(0, 0.8 - level * 0.1);
-            const entities = nodeIds.slice(1).map((id) => toEntityRef(id));
-
-            cascadingImpact.push({
-              level,
-              entities,
-              relationship: "indirect_dependency",
-              confidence,
-            });
-          }
-        }
-      }
-
-      const testRelationships = await kgService.getRelationships({
-        toEntityId: change.entityId,
-        type: RelationshipType.TESTS,
-      });
-
-      if (testRelationships.length > 0) {
-        testImpact.affectedTests = testRelationships.map((rel) =>
-          toEntityRef(rel.fromEntityId, undefined, "unit")
-        );
-        testImpact.requiredUpdates = testRelationships.map(
-          (rel) =>
-            `Update test ${rel.fromEntityId} to reflect changes to ${
-              (entity as any).name || entity.id
-            }`
-        );
-        testImpact.coverageImpact = testRelationships.length * 15;
-      }
-
-      const entityName = (entity as any).name || entity.id;
-
-      if (change.changeType === "delete") {
-        recommendations.push({
-          priority: "immediate",
-          description: `Consider migration path before deleting ${entityName}`,
-          effort: "high",
-          impact: "breaking",
-          type: "warning",
-        });
-
-        if (directRelationships.length > 0) {
-          recommendations.push({
-            priority: "immediate",
-            description: `${directRelationships.length} entities depend on this file/entity`,
-            effort: "high",
-            impact: "breaking",
-            type: "warning",
-          });
-        }
-
-        if (testImpact.affectedTests.length > 0) {
-          recommendations.push({
-            priority: "immediate",
-            description: `Update or remove ${testImpact.affectedTests.length} tests that depend on this entity`,
-            effort: "medium",
-            impact: "functional",
-            type: "requirement",
-          });
-        }
-      } else if (change.signatureChange) {
-        recommendations.push({
-          priority: "immediate",
-          description: `Update dependent entities to match new signature of ${entityName}`,
-          effort: "medium",
-          impact: "breaking",
-          type: "requirement",
-        });
-      }
-    } catch (error) {
-      console.error(`Error analyzing impact for change ${change.entityId}:`, error);
-    }
-  }
-
-  return {
-    directImpact,
-    cascadingImpact,
-    testImpact,
-    documentationImpact,
-    recommendations,
-  };
-}
+type ChangeType = ImpactAnalysisRequest["changes"][number]["changeType"];
+type ImpactChange = ImpactAnalysisRequest["changes"][number];
 
 export async function registerImpactRoutes(
   app: FastifyInstance,
   kgService: KnowledgeGraphService,
-  _dbService: DatabaseService
+  dbService: DatabaseService
 ): Promise<void> {
+  const sanitizeDepth = (value: unknown): number | undefined => {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return undefined;
+    }
+    const clamped = Math.max(1, Math.min(8, Math.floor(value)));
+    return clamped;
+  };
+
+  const deriveRiskLevel = (
+    analysis: ImpactAnalysis
+  ): "critical" | "high" | "medium" | "low" => {
+    const directImpactEntries = Array.isArray(analysis.directImpact)
+      ? analysis.directImpact
+      : [];
+    const cascadingImpactEntries = Array.isArray(analysis.cascadingImpact)
+      ? analysis.cascadingImpact
+      : [];
+    const specSummary = analysis.specImpact?.summary;
+
+    if (analysis.deploymentGate?.blocked) {
+      return "critical";
+    }
+
+    if (specSummary) {
+      if (specSummary.byPriority?.critical > 0) {
+        if (
+          (specSummary.pendingSpecs ?? 0) > 0 ||
+          (specSummary.acceptanceCriteriaReferences ?? 0) > 0
+        ) {
+          return "critical";
+        }
+        return "high";
+      }
+
+      if (
+        (specSummary.byPriority?.high ?? 0) > 0 ||
+        (specSummary.byImpactLevel?.critical ?? 0) > 0
+      ) {
+        return "high";
+      }
+    }
+
+    const hasHighDirect = directImpactEntries.some(
+      (entry) => entry.severity === "high"
+    );
+    if (hasHighDirect) {
+      return "high";
+    }
+
+    const hasMediumSignals =
+      directImpactEntries.some((entry) => entry.severity === "medium") ||
+      cascadingImpactEntries.length > 0 ||
+      (analysis.testImpact?.affectedTests?.length ?? 0) > 0 ||
+      (analysis.documentationImpact?.staleDocs?.length ?? 0) > 0 ||
+      (analysis.documentationImpact?.missingDocs?.length ?? 0) > 0 ||
+      (specSummary?.byPriority?.medium ?? 0) > 0 ||
+      (specSummary?.byImpactLevel?.high ?? 0) > 0 ||
+      (specSummary?.pendingSpecs ?? 0) > 0 ||
+      (specSummary?.acceptanceCriteriaReferences ?? 0) > 0;
+
+    return hasMediumSignals ? "medium" : "low";
+  };
+
+  const summarizeAnalysis = (analysis: ImpactAnalysis) => {
+    const directImpactEntries = Array.isArray(analysis.directImpact)
+      ? analysis.directImpact
+      : [];
+    const cascadingImpactEntries = Array.isArray(analysis.cascadingImpact)
+      ? analysis.cascadingImpact
+      : [];
+
+    const directDependents = directImpactEntries.reduce(
+      (total, entry) => total + (Array.isArray(entry.entities) ? entry.entities.length : 0),
+      0
+    );
+    const cascadingDependents = cascadingImpactEntries.reduce(
+      (total, entry) => total + (Array.isArray(entry.entities) ? entry.entities.length : 0),
+      0
+    );
+    const highestCascadeLevel = cascadingImpactEntries.reduce(
+      (level, entry) => Math.max(level, entry.level || 0),
+      0
+    );
+
+    const impactedTests = analysis.testImpact?.affectedTests?.length ?? 0;
+    const coverageImpact = analysis.testImpact?.coverageImpact ?? 0;
+    const missingDocs = analysis.documentationImpact?.missingDocs?.length ?? 0;
+    const staleDocs = analysis.documentationImpact?.staleDocs?.length ?? 0;
+
+    const deploymentGate =
+      analysis.deploymentGate ?? {
+        blocked: false,
+        level: "none" as const,
+        reasons: [],
+        stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
+      };
+
+    const specSummary = analysis.specImpact?.summary ?? {
+      byPriority: { critical: 0, high: 0, medium: 0, low: 0 },
+      byImpactLevel: { critical: 0, high: 0, medium: 0, low: 0 },
+      statuses: {
+        draft: 0,
+        approved: 0,
+        implemented: 0,
+        deprecated: 0,
+        unknown: 0,
+      },
+      acceptanceCriteriaReferences: 0,
+      pendingSpecs: 0,
+    };
+
+    return {
+      directDependents,
+      cascadingDependents,
+      highestCascadeLevel,
+      impactedTests,
+      coverageImpact,
+      missingDocs,
+      staleDocs,
+      deploymentGate,
+      specSummary,
+    };
+  };
+
   app.post(
     "/impact/analyze",
     {
@@ -300,11 +172,7 @@ export async function registerImpactRoutes(
     },
     async (request, reply) => {
       try {
-        const params = request.body as {
-          changes: ImpactChange[];
-          includeIndirect?: boolean;
-          maxDepth?: number;
-        };
+        const params = request.body as ImpactAnalysisRequest;
 
         if (!Array.isArray(params.changes) || params.changes.length === 0) {
           return reply.status(400).send({
@@ -339,14 +207,12 @@ export async function registerImpactRoutes(
           }
         }
 
-        const analysis = await analyzeChangeImpact(
-          kgService,
-          params.changes,
-          params.includeIndirect !== false,
-          params.maxDepth && Number.isFinite(params.maxDepth)
-            ? Math.max(1, Math.min(10, Math.floor(params.maxDepth)))
-            : 5
-        );
+        const sanitizedDepth = sanitizeDepth(params.maxDepth);
+
+        const analysis = await kgService.analyzeImpact(params.changes, {
+          includeIndirect: params.includeIndirect !== false,
+          maxDepth: sanitizedDepth,
+        });
 
         reply.send({
           success: true,
@@ -364,9 +230,178 @@ export async function registerImpactRoutes(
     }
   );
 
-  app.get("/impact/changes", async (_request, reply) => {
-    reply.send({ success: true, data: [] });
-  });
+  app.get(
+    "/impact/changes",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            since: { type: "string", format: "date-time" },
+            limit: { type: "number", default: 10 },
+            includeIndirect: { type: "boolean", default: true },
+            maxDepth: { type: "number" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const { since, limit, includeIndirect, maxDepth } = request.query as {
+          since?: string;
+          limit?: number;
+          includeIndirect?: boolean;
+          maxDepth?: number;
+        };
+
+        const parsedSince = since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+        if (Number.isNaN(parsedSince.getTime())) {
+          return reply.status(400).send({
+            success: false,
+            error: {
+              code: "INVALID_REQUEST",
+              message: "Query parameter 'since' must be a valid date-time",
+            },
+          });
+        }
+
+        const sanitizedLimit = Math.max(1, Math.min(limit ?? 10, 25));
+        const sanitizedDepth = sanitizeDepth(maxDepth);
+
+        const recentEntityIds = await kgService.findRecentEntityIds(
+          parsedSince,
+          sanitizedLimit
+        );
+
+        const records = [] as Array<{
+          entity: Record<string, any>;
+          changeType: ChangeType;
+          analysis: ImpactAnalysis;
+          metrics: ReturnType<typeof summarizeAnalysis>;
+          riskLevel: "critical" | "high" | "medium" | "low";
+          recommendations: ImpactAnalysis["recommendations"];
+        }>;
+
+        for (const entityId of recentEntityIds) {
+          const analysis = await kgService.analyzeImpact(
+            [
+              {
+                entityId,
+                changeType: "modify",
+              },
+            ],
+            {
+              includeIndirect: includeIndirect !== false,
+              maxDepth: sanitizedDepth,
+            }
+          );
+
+          const entity = await kgService.getEntity(entityId).catch(() => null);
+          const entitySummary = entity
+            ? {
+                id: entity.id,
+                type: (entity as any)?.type ?? "unknown",
+                name: (entity as any)?.name ?? (entity as any)?.title ?? entity.id,
+                path: (entity as any)?.path,
+              }
+            : { id: entityId };
+
+          const metrics = summarizeAnalysis(analysis);
+          const riskLevel = deriveRiskLevel(analysis);
+
+          records.push({
+            entity: entitySummary,
+            changeType: "modify",
+            analysis,
+            metrics,
+            riskLevel,
+            recommendations: analysis.recommendations,
+          });
+        }
+
+        const riskSummary = records.reduce(
+          (acc, record) => {
+            acc[record.riskLevel] += 1;
+            return acc;
+          },
+          { critical: 0, high: 0, medium: 0, low: 0 }
+        );
+
+        const aggregateMetrics = records.reduce(
+          (acc, record) => {
+            acc.directDependents += record.metrics.directDependents;
+            acc.cascadingDependents += record.metrics.cascadingDependents;
+            acc.impactedTests += record.metrics.impactedTests;
+            acc.missingDocs += record.metrics.missingDocs;
+            acc.staleDocs += record.metrics.staleDocs;
+            acc.coverageImpact += record.metrics.coverageImpact;
+            for (const key of ["critical", "high", "medium", "low"] as const) {
+              acc.specSummary.byPriority[key] +=
+                record.metrics.specSummary.byPriority[key];
+              acc.specSummary.byImpactLevel[key] +=
+                record.metrics.specSummary.byImpactLevel[key];
+            }
+            for (const key of [
+              "draft",
+              "approved",
+              "implemented",
+              "deprecated",
+              "unknown",
+            ] as const) {
+              acc.specSummary.statuses[key] +=
+                record.metrics.specSummary.statuses[key];
+            }
+            acc.specSummary.acceptanceCriteriaReferences +=
+              record.metrics.specSummary.acceptanceCriteriaReferences;
+            acc.specSummary.pendingSpecs +=
+              record.metrics.specSummary.pendingSpecs;
+            return acc;
+          },
+          {
+            directDependents: 0,
+            cascadingDependents: 0,
+            impactedTests: 0,
+            missingDocs: 0,
+            staleDocs: 0,
+            coverageImpact: 0,
+            specSummary: {
+              byPriority: { critical: 0, high: 0, medium: 0, low: 0 },
+              byImpactLevel: { critical: 0, high: 0, medium: 0, low: 0 },
+              statuses: {
+                draft: 0,
+                approved: 0,
+                implemented: 0,
+                deprecated: 0,
+                unknown: 0,
+              },
+              acceptanceCriteriaReferences: 0,
+              pendingSpecs: 0,
+            },
+          }
+        );
+
+        reply.send({
+          success: true,
+          data: {
+            since: parsedSince.toISOString(),
+            limit: sanitizedLimit,
+            analyzedEntities: records.length,
+            riskSummary,
+            aggregateMetrics,
+            records,
+          },
+        });
+      } catch (error) {
+        reply.status(500).send({
+          success: false,
+          error: {
+            code: "IMPACT_CHANGES_FAILED",
+            message: "Failed to assemble recent impact changes",
+          },
+        });
+      }
+    }
+  );
 
   app.get(
     "/impact/entity/:entityId",
@@ -386,7 +421,9 @@ export async function registerImpactRoutes(
               type: "string",
               enum: ["modify", "delete", "rename"],
             },
-            includeReverse: { type: "boolean", default: false },
+            includeIndirect: { type: "boolean", default: true },
+            maxDepth: { type: "number" },
+            signatureChange: { type: "boolean" },
           },
         },
       },
@@ -394,17 +431,58 @@ export async function registerImpactRoutes(
     async (request, reply) => {
       try {
         const { entityId } = request.params as { entityId: string };
-        const { changeType } = request.query as { changeType?: ChangeType };
+        const { changeType, includeIndirect, maxDepth, signatureChange } =
+          request.query as {
+            changeType?: ChangeType;
+            includeIndirect?: boolean;
+            maxDepth?: number;
+            signatureChange?: boolean;
+          };
 
-        const impact = {
-          entityId,
-          changeType: changeType || "modify",
-          affectedEntities: [] as ImpactEntityRef[],
-          riskLevel: "medium" as const,
-          mitigationStrategies: [] as string[],
-        };
+        const sanitizedDepth = sanitizeDepth(maxDepth);
 
-        reply.send({ success: true, data: impact });
+        const analysis = await kgService.analyzeImpact(
+          [
+            {
+              entityId,
+              changeType: changeType || "modify",
+              signatureChange: signatureChange === true,
+            },
+          ],
+          {
+            includeIndirect: includeIndirect !== false,
+            maxDepth: sanitizedDepth,
+          }
+        );
+
+        const entity = await kgService.getEntity(entityId).catch(() => null);
+        const entitySummary = entity
+          ? {
+              id: entity.id,
+              type: (entity as any)?.type ?? "unknown",
+              name: (entity as any)?.name ?? (entity as any)?.title ?? entity.id,
+              path: (entity as any)?.path,
+            }
+          : { id: entityId };
+
+        const metrics = summarizeAnalysis(analysis);
+        const riskLevel = deriveRiskLevel(analysis);
+
+        reply.send({
+          success: true,
+          data: {
+            entity: entitySummary,
+            change: {
+              changeType: changeType || "modify",
+              signatureChange: signatureChange === true,
+            },
+            analysis,
+            metrics,
+            riskLevel,
+            deploymentGate: analysis.deploymentGate,
+            recommendations: analysis.recommendations,
+          },
+        });
       } catch (error) {
         reply.status(500).send({
           success: false,
@@ -440,10 +518,13 @@ export async function registerImpactRoutes(
                           type: "string",
                           enum: ["modify", "delete", "rename"],
                         },
+                        signatureChange: { type: "boolean" },
                       },
                       required: ["entityId", "changeType"],
                     },
                   },
+                  includeIndirect: { type: "boolean", default: true },
+                  maxDepth: { type: "number" },
                 },
                 required: ["name", "changes"],
               },
@@ -456,22 +537,117 @@ export async function registerImpactRoutes(
     async (request, reply) => {
       try {
         const { scenarios } = request.body as {
-          scenarios: Array<{ name: string; changes: ImpactChange[] }>;
+          scenarios: Array<
+            {
+              name: string;
+              changes: ImpactChange[];
+              includeIndirect?: boolean;
+              maxDepth?: number;
+            }
+          >;
         };
 
-        const comparison = {
-          scenarios: scenarios.map((scenario) => ({
-            name: scenario.name,
-            impact: {
-              entitiesAffected: 0,
-              riskLevel: "medium" as const,
-              effort: "medium" as const,
+        if (!Array.isArray(scenarios) || scenarios.length === 0) {
+          return reply.status(400).send({
+            success: false,
+            error: {
+              code: "INVALID_REQUEST",
+              message: "At least one scenario must be provided",
             },
-          })),
-          recommendations: [] as ImpactRecommendation[],
+          });
+        }
+
+        const scenarioResponses = [] as Array<{
+          name: string;
+          request: {
+            includeIndirect: boolean;
+            maxDepth?: number;
+          };
+          analysis: ImpactAnalysis;
+          metrics: ReturnType<typeof summarizeAnalysis>;
+          riskLevel: "critical" | "high" | "medium" | "low";
+          recommendations: ImpactAnalysis["recommendations"];
+        }>;
+
+        for (const scenario of scenarios) {
+          if (!Array.isArray(scenario.changes) || scenario.changes.length === 0) {
+            continue;
+          }
+
+          const sanitizedChanges = scenario.changes.map((change) => ({
+            entityId: change.entityId,
+            changeType: change.changeType,
+            signatureChange: change.signatureChange === true,
+          }));
+
+          const sanitizedDepth = sanitizeDepth(scenario.maxDepth);
+
+          const analysis = await kgService.analyzeImpact(sanitizedChanges, {
+            includeIndirect: scenario.includeIndirect !== false,
+            maxDepth: sanitizedDepth,
+          });
+
+          const metrics = summarizeAnalysis(analysis);
+          const riskLevel = deriveRiskLevel(analysis);
+
+          scenarioResponses.push({
+            name: scenario.name,
+            request: {
+              includeIndirect: scenario.includeIndirect !== false,
+              maxDepth: sanitizedDepth,
+            },
+            analysis,
+            metrics,
+            riskLevel,
+            recommendations: analysis.recommendations,
+          });
+        }
+
+        if (scenarioResponses.length === 0) {
+          return reply.status(400).send({
+            success: false,
+            error: {
+              code: "INVALID_REQUEST",
+              message: "Scenarios must include at least one valid change",
+            },
+          });
+        }
+
+        const riskOrder: Record<"critical" | "high" | "medium" | "low", number> = {
+          critical: 3,
+          high: 2,
+          medium: 1,
+          low: 0,
         };
 
-        reply.send({ success: true, data: comparison });
+        const highestRisk = scenarioResponses.reduce((current, scenario) => {
+          if (!current) return scenario;
+          return riskOrder[scenario.riskLevel] > riskOrder[current.riskLevel]
+            ? scenario
+            : current;
+        }, scenarioResponses[0]);
+
+        const riskDistribution = scenarioResponses.reduce(
+          (acc, scenario) => {
+            acc[scenario.riskLevel] += 1;
+            return acc;
+          },
+          { critical: 0, high: 0, medium: 0, low: 0 }
+        );
+
+        reply.send({
+          success: true,
+          data: {
+            scenarios: scenarioResponses,
+            summary: {
+              highestRiskScenario: {
+                name: highestRisk.name,
+                riskLevel: highestRisk.riskLevel,
+              },
+              riskDistribution,
+            },
+          },
+        });
       } catch (error) {
         reply.status(500).send({
           success: false,
@@ -485,7 +661,7 @@ export async function registerImpactRoutes(
   );
 
   app.get(
-    "/history/:entityId",
+    "/impact/history/:entityId",
     {
       schema: {
         params: {
@@ -505,17 +681,79 @@ export async function registerImpactRoutes(
     async (request, reply) => {
       try {
         const { entityId } = request.params as { entityId: string };
-        const history = {
-          entityId,
-          impacts: [] as any[],
-          summary: {
-            totalChanges: 0,
-            averageImpact: "medium",
-            mostAffected: [] as ImpactEntityRef[],
-          },
+        const { since, limit } = request.query as {
+          since?: string;
+          limit?: number;
         };
 
-        reply.send({ success: true, data: history });
+        const parsedSince = since ? new Date(since) : undefined;
+        if (parsedSince && Number.isNaN(parsedSince.getTime())) {
+          return reply.status(400).send({
+            success: false,
+            error: {
+              code: "INVALID_REQUEST",
+              message: "Query parameter 'since' must be a valid date-time",
+            },
+          });
+        }
+
+        const sanitizedLimit = Math.max(1, Math.min(limit ?? 20, 100));
+
+        const values: any[] = [entityId];
+        let whereClause = "type = 'impact_analysis' AND metadata->>'entityId' = $1";
+
+        if (parsedSince) {
+          values.push(parsedSince.toISOString());
+          whereClause += " AND COALESCE((metadata->>'timestamp')::timestamptz, created_at) >= $2";
+        }
+
+        const limitParam = values.length + 1;
+
+        const rows = await dbService.postgresQuery(
+          `SELECT id, content, metadata, created_at, updated_at
+           FROM documents
+           WHERE ${whereClause}
+           ORDER BY COALESCE((metadata->>'timestamp')::timestamptz, created_at) DESC
+           LIMIT $${limitParam}`,
+          [...values, sanitizedLimit]
+        );
+
+        const records = (rows.rows ?? []).map((row: any) => {
+          const rawContent = row.content;
+          const rawMetadata = row.metadata;
+
+          const analysis: ImpactAnalysis =
+            typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
+          const metadata =
+            typeof rawMetadata === "string" ? JSON.parse(rawMetadata) : rawMetadata;
+
+          const metrics = summarizeAnalysis(analysis);
+          const riskLevel = deriveRiskLevel(analysis);
+
+          return {
+            id: row.id,
+            timestamp:
+              metadata?.timestamp || (row.created_at ? new Date(row.created_at).toISOString() : undefined),
+            changeType: metadata?.changeType || "modify",
+            directImpactCount:
+              metadata?.directImpactCount ?? metrics.directDependents,
+            cascadingImpactCount:
+              metadata?.cascadingImpactCount ?? metrics.cascadingDependents,
+            analysis,
+            metrics,
+            riskLevel,
+            metadata,
+          };
+        });
+
+        reply.send({
+          success: true,
+          data: {
+            entityId,
+            totalRecords: records.length,
+            records,
+          },
+        });
       } catch (error) {
         reply.status(500).send({
           success: false,

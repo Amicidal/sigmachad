@@ -299,6 +299,7 @@ describe("API Performance Integration", () => {
   });
 
   const describeLoad = runBenchmarks ? describe : describe.skip;
+  const describeBenchOnly = runBenchmarks ? describe : describe.skip;
 
   describeLoad("Concurrent Load Performance", () => {
     it("should handle moderate concurrent requests", async () => {
@@ -506,7 +507,6 @@ describe("API Performance Integration", () => {
   });
 
   const describeDatabase = runBenchmarks ? describe : describe.skip;
-  const describeBenchOnly = runBenchmarks ? describe : describe.skip;
 
   describeDatabase("Database Performance", () => {
     beforeEach(async () => {

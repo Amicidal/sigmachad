@@ -247,8 +247,7 @@ describe('TestResultParser', () => {
       expect(result.totalTests).toBeGreaterThanOrEqual(0);
     });
 
-    // TODO: When JUnit failure tags are parsed, convert this back to a normal test
-    it.fails('should detect failed status for <failure> testcases', async () => {
+    it('should detect failed status for <failure> testcases', async () => {
       const failureXml = `<?xml version="1.0"?>
         <testsuite name="TestSuite" tests="1" time="0.150">
           <testcase name="failing test" time="0.150">
@@ -265,8 +264,7 @@ describe('TestResultParser', () => {
       expect(result.results[0].errorMessage).toContain('Detailed failure information');
     });
 
-    // TODO: When JUnit error tags are parsed, convert this back to a normal test
-    it.fails('should detect error status for <error> testcases', async () => {
+    it('should detect error status for <error> testcases', async () => {
       const errorXml = `<?xml version="1.0"?>
         <testsuite name="TestSuite" tests="1" time="0.100">
           <testcase name="error test" time="0.100">
@@ -283,8 +281,7 @@ describe('TestResultParser', () => {
       expect(result.results[0].errorMessage).toContain('Exception details');
     });
 
-    // TODO: When JUnit skipped tags are parsed, convert this back to a normal test
-    it.fails('should detect skipped status for <skipped> testcases', async () => {
+    it('should detect skipped status for <skipped> testcases', async () => {
       const skippedXml = `<?xml version="1.0"?>
         <testsuite name="TestSuite" tests="1" time="0.000">
           <testcase name="skipped test" time="0.000">

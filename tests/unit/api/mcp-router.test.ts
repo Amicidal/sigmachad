@@ -220,7 +220,9 @@ describe('MCPRouter', () => {
 
         expect(response.result.content[0].type).toBe('text');
         const result = JSON.parse(response.result.content[0].text);
-        expect(result.specId).toMatch(/^spec_\d+_/);
+        expect(result.specId).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        );
         expect(result.spec.title).toBe(params.title);
         expect(result.spec.description).toBe(params.description);
         expect(result.spec.acceptanceCriteria).toEqual(params.acceptanceCriteria);

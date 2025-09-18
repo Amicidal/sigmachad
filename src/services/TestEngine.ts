@@ -109,13 +109,13 @@ export class TestEngine {
    */
   async recordTestResults(suiteResult: TestSuiteResult): Promise<void> {
     try {
-      // Validate input
-      if (!suiteResult.results || suiteResult.results.length === 0) {
-        throw new Error("Test suite must contain at least one test result");
-      }
+      const results = suiteResult.results ?? [];
 
-      // Validate test results
-      for (const result of suiteResult.results) {
+      // Validate test results when present
+      for (const result of results) {
+        if (!result) {
+          throw new Error("Test suite contains invalid test result entries");
+        }
         if (!result.testId || result.testId.trim().length === 0) {
           throw new Error("Test result must have a valid testId");
         }
@@ -130,29 +130,24 @@ export class TestEngine {
         }
       }
 
-      // Store the test suite result
-      // Map to DatabaseService storage shape
-      const overallStatus: "passed" | "failed" | "skipped" =
-        suiteResult.failedTests > 0
-          ? "failed"
-          : suiteResult.passedTests > 0
-          ? "passed"
-          : "skipped";
-      await this.dbService.storeTestSuiteResult({
-        name: suiteResult.suiteName,
-        status: overallStatus,
-        duration: suiteResult.duration,
-        timestamp: suiteResult.timestamp,
-        testResults: suiteResult.results.map((r) => ({
-          name: r.testName,
-          status: r.status === "error" ? "failed" : r.status,
-          duration: r.duration,
-          error: r.errorMessage,
-        })),
-      });
+      if (!suiteResult.coverage) {
+        suiteResult.coverage = this.aggregateCoverage(
+          results
+            .map((r) => r?.coverage)
+            .filter((c): c is CoverageMetrics => Boolean(c))
+        );
+      }
+
+      // Persist the raw suite result so downstream consumers receive the exact payload
+      await this.dbService.storeTestSuiteResult(suiteResult as any);
+
+      // Nothing else to do when there are no individual results
+      if (results.length === 0) {
+        return;
+      }
 
       // Process individual test results
-      for (const result of suiteResult.results) {
+      for (const result of results) {
         await this.processTestResult(result, suiteResult.timestamp);
       }
 
@@ -160,12 +155,12 @@ export class TestEngine {
       await this.updateTestEntities(suiteResult);
 
       // Perform flaky test analysis
-      await this.analyzeFlakyTests(suiteResult.results);
+      await this.analyzeFlakyTests(results);
 
       // Auto-create an incident checkpoint when failures occur (config-gated)
       const hasFailures =
         suiteResult.failedTests > 0 ||
-        suiteResult.results.some((r) => r.status === "failed" || r.status === "error");
+        results.some((r) => r.status === "failed" || r.status === "error");
       if (hasFailures) {
         await this.createIncidentCheckpoint(suiteResult).catch((e) => {
           console.warn("Incident checkpoint creation failed:", e);
@@ -173,12 +168,15 @@ export class TestEngine {
       }
 
       // Flush any batched performance relationships
-      if (this.perfRelBuffer.length > 0) {
+      if (this.perfRelBuffer.length > 0 &&
+        typeof this.kgService.createRelationshipsBulk === "function") {
         try {
           await this.kgService.createRelationshipsBulk(this.perfRelBuffer, { validate: false });
         } finally {
           this.perfRelBuffer = [];
         }
+      } else {
+        this.perfRelBuffer = [];
       }
     } catch (error) {
       console.error("Failed to record test results:", error);
@@ -238,6 +236,11 @@ export class TestEngine {
 
     const seeds = Array.from(seedIds);
     if (seeds.length === 0) return;
+
+    if (typeof this.kgService.createCheckpoint !== "function") {
+      console.warn("KnowledgeGraphService#createCheckpoint not available; skipping incident checkpoint.");
+      return;
+    }
 
     const { checkpointId } = await this.kgService.createCheckpoint(
       seeds,
@@ -425,7 +428,10 @@ export class TestEngine {
   /**
    * Analyze test results for flaky behavior
    */
-  async analyzeFlakyTests(results: TestResult[]): Promise<FlakyTestAnalysis[]> {
+  async analyzeFlakyTests(
+    results: TestResult[],
+    options: { persist?: boolean } = {}
+  ): Promise<FlakyTestAnalysis[]> {
     // Validate input
     if (!results || results.length === 0) {
       return []; // Return empty array for empty input
@@ -450,16 +456,88 @@ export class TestEngine {
         testId,
         testResults
       );
-      if (analysis.flakyScore > 0.3) {
-        // Only include potentially flaky tests
+      const qualifies =
+        analysis.flakyScore >= 0.2 ||
+        analysis.failureRate >= 0.2 ||
+        analysis.recentFailures > 0;
+
+      if (qualifies) {
         analyses.push(analysis);
       }
     }
 
     // Store flaky test analyses
-    await this.storeFlakyTestAnalyses(analyses);
+    if (options.persist !== false && analyses.length > 0) {
+      await this.storeFlakyTestAnalyses(analyses);
+    }
 
     return analyses;
+  }
+
+  /**
+   * Retrieve flaky analysis for a specific test entity using stored execution history
+   */
+  async getFlakyTestAnalysis(
+    entityId: string,
+    options: { limit?: number } = {}
+  ): Promise<FlakyTestAnalysis[]> {
+    if (!entityId || entityId.trim().length === 0) {
+      throw new Error("entityId is required to retrieve flaky analysis");
+    }
+
+    const history = await this.dbService.getTestExecutionHistory(
+      entityId,
+      options.limit ?? 200
+    );
+
+    if (!history || history.length === 0) {
+      return [];
+    }
+
+    const sortedHistory = [...history].sort((a, b) => {
+      const aTime = new Date(
+        a.suite_timestamp || a.timestamp || a.created_at || a.updated_at || 0
+      ).getTime();
+      const bTime = new Date(
+        b.suite_timestamp || b.timestamp || b.created_at || b.updated_at || 0
+      ).getTime();
+      return aTime - bTime;
+    });
+
+    const normalizedResults: TestResult[] = sortedHistory.map((row) => {
+      const numericDuration = Number(row.duration);
+
+      return {
+        testId: row.test_id || row.testId || entityId,
+        testSuite: row.suite_name || row.test_suite || "unknown-suite",
+        testName: row.test_name || row.testName || entityId,
+        status: this.normalizeTestStatus(row.status),
+        duration: Number.isFinite(numericDuration) ? numericDuration : 0,
+        errorMessage: row.error_message || row.errorMessage || undefined,
+        stackTrace: row.stack_trace || row.stackTrace || undefined,
+      };
+    });
+
+    return this.analyzeFlakyTests(normalizedResults, { persist: false });
+  }
+
+  private normalizeTestStatus(status: any): TestResult["status"] {
+    switch (String(status).toLowerCase()) {
+      case "passed":
+      case "pass":
+        return "passed";
+      case "failed":
+      case "fail":
+        return "failed";
+      case "skipped":
+      case "skip":
+        return "skipped";
+      case "error":
+      case "errored":
+        return "error";
+      default:
+        return "failed";
+    }
   }
 
   /**
@@ -546,47 +624,66 @@ export class TestEngine {
       throw new Error(`Test entity ${entityId} not found`);
     }
 
-    // Get all test relationships to this entity
-    const testRels = await this.kgService.queryRelationships({
+    // Get all tests that explicitly provide coverage for the entity
+    const coverageRels = await this.kgService.queryRelationships({
       toEntityId: entityId,
-      type: RelationshipType.TESTS,
+      type: RelationshipType.COVERAGE_PROVIDES,
     });
 
-    // Derive coverage from relationship metadata or fallback to test entity
     const coverages: CoverageMetrics[] = [];
-    for (const rel of testRels) {
-      const meta = (rel as any).metadata || {};
-      const relCov = meta.coverage?.lines ?? meta.coveragePercentage ?? meta.coverage;
-      if (typeof relCov === 'number') {
-        coverages.push({
-          lines: relCov,
-          branches: 0,
-          functions: 0,
-          statements: 0,
-        });
+    const breakdownBuckets: Record<'unit' | 'integration' | 'e2e', CoverageMetrics[]> = {
+      unit: [],
+      integration: [],
+      e2e: [],
+    };
+    const testCases: TestCoverageAnalysis['testCases'] = [];
+
+    for (const rel of coverageRels) {
+      if (!rel?.fromEntityId) {
         continue;
       }
+
+      const relCoverage = (rel as any)?.metadata?.coverage as CoverageMetrics | undefined;
       const test = (await this.kgService.getEntity(rel.fromEntityId)) as Test | null;
-      if (test && test.coverage) {
-        coverages.push(test.coverage);
+
+      if (!test && !relCoverage) {
+        continue;
       }
+
+      const coverage = test?.coverage ?? relCoverage ?? {
+        lines: 0,
+        branches: 0,
+        functions: 0,
+        statements: 0,
+      };
+
+      coverages.push(coverage);
+
+      if (test) {
+        breakdownBuckets[test.testType].push(coverage);
+      }
+
+      testCases.push({
+        testId: rel.fromEntityId,
+        testName: test?.targetSymbol ?? test?.id ?? rel.fromEntityId,
+        covers: [entityId],
+      });
     }
+
+    const overallCoverage = this.aggregateCoverage(coverages);
+    const testBreakdown = {
+      unitTests: this.aggregateCoverage(breakdownBuckets.unit),
+      integrationTests: this.aggregateCoverage(breakdownBuckets.integration),
+      e2eTests: this.aggregateCoverage(breakdownBuckets.e2e),
+    };
 
     return {
       entityId,
-      overallCoverage: this.aggregateCoverage(coverages),
-      testBreakdown: {
-        unitTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
-        integrationTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
-        e2eTests: { lines: 0, branches: 0, functions: 0, statements: 0 },
-      },
+      overallCoverage,
+      testBreakdown,
       uncoveredLines: [], // Would need source map integration
       uncoveredBranches: [],
-      testCases: testRels.map((rel) => ({
-        testId: rel.fromEntityId,
-        testName: rel.fromEntityId,
-        covers: [entityId],
-      })),
+      testCases,
     };
   }
 
@@ -635,43 +732,58 @@ export class TestEngine {
       throw new Error("JUnit XML content is empty");
     }
 
-    if (!content.includes("<testsuite") && !content.includes("<testcase")) {
-      throw new Error(
-        "Invalid JUnit XML format: missing testsuite or testcase elements"
-      );
+    if (!content.includes("<testcase")) {
+      throw new Error("Invalid JUnit XML format: no testcase elements found");
     }
 
-    const results: TestResult[] = [];
+    const suiteNameMatch = content.match(/<testsuite[^>]*name="([^"]+)"/i);
+    const suiteName = suiteNameMatch?.[1] ?? "JUnit Test Suite";
 
-    // Extract test cases from XML-like structure
-    const testCaseRegex =
-      /<testcase[^>]*classname="([^"]*)"[^>]*name="([^"]*)"[^>]*time="([^"]*)"[^>]*>/g;
-    let match;
-    let foundTests = false;
+    const results: TestResult[] = [];
+    const testCaseRegex = /<testcase\b([^>]*)>([\s\S]*?<\/testcase>)?|<testcase\b([^>]*)\/>/gi;
+    let match: RegExpExecArray | null;
+
+    const parseAttributes = (segment: string): Record<string, string> => {
+      const attrs: Record<string, string> = {};
+      const attrRegex = /(\S+)="([^"]*)"/g;
+      let attrMatch: RegExpExecArray | null;
+      while ((attrMatch = attrRegex.exec(segment)) !== null) {
+        const [, key, value] = attrMatch;
+        attrs[key.toLowerCase()] = value;
+      }
+      return attrs;
+    };
 
     while ((match = testCaseRegex.exec(content)) !== null) {
-      foundTests = true;
-      const [, className, testName, timeStr] = match;
+      const attrSegment = match[1] ?? match[3] ?? "";
+      const inner = match[2] ?? "";
+      const attrs = parseAttributes(attrSegment);
 
-      if (!className || !testName) {
-        throw new Error(
-          "Invalid JUnit XML format: testcase missing classname or name attribute"
-        );
-      }
+      const className = attrs.classname ?? attrs.class ?? suiteName;
+      const testName = attrs.name ?? attrs.id ?? `test-${results.length + 1}`;
+      const timeStr = attrs.time ?? attrs.duration ?? "0";
+      const durationSeconds = parseFloat(timeStr);
 
-      const time = parseFloat(timeStr || "0");
-      if (isNaN(time)) {
+      if (Number.isNaN(durationSeconds)) {
         throw new Error(
           `Invalid JUnit XML format: invalid time value '${timeStr}'`
         );
       }
 
+      const status = inner.includes("<failure")
+        ? "failed"
+        : inner.includes("<error")
+        ? "error"
+        : inner.includes("<skipped")
+        ? "skipped"
+        : "passed";
+
       results.push({
-        testId: `${className}.${testName}`,
+        testId: className ? `${className}.${testName}` : testName,
         testSuite: className,
-        testName: testName,
-        status: "passed",
-        duration: time * 1000, // Convert to milliseconds
+        testName,
+        status,
+        duration: durationSeconds * 1000,
         coverage: {
           statements: 0,
           branches: 0,
@@ -681,12 +793,12 @@ export class TestEngine {
       });
     }
 
-    if (!foundTests) {
+    if (results.length === 0) {
       throw new Error("Invalid JUnit XML format: no testcase elements found");
     }
 
     return {
-      suiteName: "JUnit Test Suite",
+      suiteName,
       timestamp: new Date(),
       results: results,
       framework: "junit",
@@ -1097,16 +1209,6 @@ export class TestEngine {
         return;
       }
 
-      const targetEntity = await this.kgService.getEntity(
-        testEntity.targetSymbol
-      );
-      if (!targetEntity) {
-        console.log(
-          `⚠️ Target entity ${testEntity.targetSymbol} not found for test ${testEntity.id}`
-        );
-        return;
-      }
-
       console.log(
         `✅ Creating coverage relationship: ${testEntity.id} -> ${testEntity.targetSymbol}`
       );
@@ -1324,18 +1426,7 @@ export class TestEngine {
   private async storeFlakyTestAnalyses(
     analyses: FlakyTestAnalysis[]
   ): Promise<void> {
-    // Map to DatabaseService FlakyTestAnalysis shape
-    const mapped = analyses.map((a) => ({
-      testId: a.testId,
-      testName: a.testName,
-      failureCount: Math.round(a.failureRate * a.totalRuns),
-      totalRuns: a.totalRuns,
-      lastFailure: new Date(),
-      failurePatterns: Object.entries(a.patterns)
-        .filter(([, v]) => !!v)
-        .map(([k, v]) => `${k}:${v}`),
-    }));
-    await this.dbService.storeFlakyTestAnalyses(mapped as any);
+    await this.dbService.storeFlakyTestAnalyses(analyses as any);
   }
 
   private calculateTrend(

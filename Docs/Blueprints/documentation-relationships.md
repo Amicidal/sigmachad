@@ -20,14 +20,20 @@ This blueprint captures the behaviour that currently ships so downstream tooling
   `KnowledgeGraphService.createRelationship` centralizes normalization (canonical IDs, intent, locale, coverage scope, strength, etc.) and drops low-confidence inferred edges below `noiseConfig.MIN_INFERRED_CONFIDENCE`.
 - **Freshness lifecycle**: After syncing files, `applyFreshnessUpdates` updates `DOCUMENTATION_RELATIONSHIP_TYPES` edges with the current `lastValidated`, upgrades quality to `complete`, and marks untouched relationships as `outdated` when older than `DOC_FRESHNESS_MAX_AGE_DAYS` (default 14). Manual docs (`docSource = manual`) are excluded from stale flagging.
 - **Cluster scaffolding**: Domains inferred from content are promoted to `BusinessDomain` nodes (auto-assigning `criticality` and `stakeholders`) and seed `SemanticCluster` nodes per domain, keeping `clusterType = "capability"` and `cohesionScore = 0.8`.
+- **Domain heuristics**: `extractBusinessDomains` no longer relies on hard-coded domain names. Instead it harvests phrases from headings, "Business Domains" sections, and noun phrases that end with domain-like keywords (management, processing, services, security, etc.), trimming narrative tails and splitting connective lists so docs such as "Payment Processing" or "User authentication" map to canonical domain strings.
+- **Signal extraction adapter**: `DocumentationIntelligenceProvider` (`src/services/DocumentationIntelligenceProvider.ts`) supplies business domains, stakeholders, technologies, and optional doc intent. The default implementation (`HeuristicDocumentationIntelligenceProvider`) preserves existing regex heuristics, while the `LLM_EXTRACTION_PROMPT` constant sketches the JSON contract for future Codex/Claude headless calls.
 - **API surface**: `/docs/sync` drives the pipeline and then invokes heuristics to build `IMPLEMENTS_SPEC` edges from exported symbols into spec-like documents (design, architecture, API docs). Additional routes (`/docs/search`, `/docs/parse`, `/docs/validate`, `/docs/domains`, `/docs/clusters`, `/docs/business/impact/:domain`) serve read/search/governance functions against the normalized graph data.
-- **Spec linkage heuristics**: Post-sync symbol linking enforces configurable thresholds from `src/config/noise.ts`, requiring either at least `DOC_LINK_MIN_OCCURRENCES` case-insensitive matches or a "strong" symbol name length, boosting confidence when the match occurs in headings and pruning prior edges that fall outside the allowed symbol set.
+- **Spec linkage heuristics**: Post-sync symbol linking enforces configurable thresholds from `src/config/noise.ts`, requiring either at least `DOC_LINK_MIN_OCCURRENCES` case-insensitive matches or a "strong" symbol name length, restricting matches to exported symbols and doc-type-specific symbol kinds (functions for API docs, classes/interfaces for design/architecture docs), boosting confidence when the match occurs in headings, and pruning prior edges that fall outside the allowed symbol set.
+
+## Known Issues (integration coverage)
+- Integration suites require FalkorDB, Qdrant, and PostgreSQL test services. When those containers are unavailable the documentation sync scenarios skip after setup, so ensure `docker-compose.test.yml` (or equivalent infrastructure) is running before depending on their assertions.
+- Section self-edge emission (`DOCUMENTS_SECTION`) and freshness lifecycle updates currently rely on manual testing; expanding automated coverage would harden those behaviours against regressions.
 
 ## 3. Node & Relationship Types
 **DocumentationNode** (`type = "documentation"`, `src/models/entities.ts:244`)
 - Required fields: `id`, `path`, `hash`, `title`, `content`, `docType`, `businessDomains`, `stakeholders`, `technologies`, `status`, `docVersion`, `docHash`, `docIntent`, `docSource`.
 - Optional metadata: `docLocale` (defaults to `en`), `lastIndexed`, language (currently hard-coded `markdown`).
-- IDs derived from filesize checksum; both `docVersion` and `docHash` reuse the same 32-bit checksum string.
+- IDs derived from a content-based rolling checksum; both `docVersion` and `docHash` reuse the same 32-bit hexadecimal string.
 
 **BusinessDomain**
 - Auto-created for each extracted domain (`domain_<slug>`). Carries derived `criticality` (`core` for auth/payment/security terms, `supporting` for user/reporting/communication, otherwise `utility`), stakeholder rollups, and provenance via `extractedFrom`.

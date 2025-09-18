@@ -8,6 +8,9 @@ Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFI
 - Version nodes are partially generated but lack transactional guarantees (race conditions, missing `PREVIOUS_VERSION` chains).
 - No standardized way to record change provenance (`MODIFIED_BY`, `MODIFIED_IN`); synchronization pipelines omit them.
 - Query APIs lack timeline retrieval features, forcing consumers to approximate history from `lastModified` fields.
+- Synchronization coordination tests reveal lifecycle operations remain stuck in `pending` when inputs are invalid, and the coordinator still depends on real database connectivity during failure modes. We need deterministic error handling/cleanup so temporal edges can transition to terminal states (`completed`/`failed`).
+- Rollback integration still lacks failure-path coverage: `RollbackCapabilities Integration > Error Handling and Edge Cases > should handle database connection failures during rollback point creation` registers zero assertions because the service swallows simulated connection failures. Temporal safety depends on surfacing these errors so rollback checkpoints can be invalidated.
+- The coordinator hooks time out while waiting for `clearTestData`, indicating the temporal pipelines need lightweight fixtures or mockable storage to avoid blocking integration suites.
 
 ## 3. Desired Capabilities
 1. Implement transactional versioning and temporal edge lifecycle to accurately reflect when entities/relationships change.

@@ -18,18 +18,25 @@ import {
   RealisticPostgreSQLMock
 } from '../../test-utils/realistic-mocks';
 
-// Mock the pg module
-const mockPool = {
-  connect: vi.fn(),
-  query: vi.fn(),
-  end: vi.fn(),
-  totalCount: 10,
-  idleCount: 5,
-  waitingCount: 0,
-};
+// Mock the pg module; use vi.hoisted so values are available during module mock evaluation.
+const { mockPool, mockTypes } = vi.hoisted(() => ({
+  mockPool: {
+    connect: vi.fn(),
+    query: vi.fn(),
+    end: vi.fn(),
+    totalCount: 10,
+    idleCount: 5,
+    waitingCount: 0,
+  },
+  mockTypes: {
+    setTypeParser: vi.fn(),
+    getTypeParser: vi.fn(),
+  },
+}));
 
 vi.mock('pg', () => ({
   Pool: vi.fn().mockImplementation(() => mockPool),
+  types: mockTypes,
 }));
 
   describe('PostgreSQLService', () => {

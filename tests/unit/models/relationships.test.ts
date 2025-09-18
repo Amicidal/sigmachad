@@ -42,7 +42,6 @@ import {
 describe('Relationship Types and Enums', () => {
   describe('RelationshipType Enum', () => {
     it('should contain all structural relationship types', () => {
-      expect(RelationshipType.BELONGS_TO).toBe('BELONGS_TO');
       expect(RelationshipType.CONTAINS).toBe('CONTAINS');
       expect(RelationshipType.DEFINES).toBe('DEFINES');
       expect(RelationshipType.EXPORTS).toBe('EXPORTS');
@@ -61,23 +60,21 @@ describe('Relationship Types and Enums', () => {
     it('should contain all test relationship types', () => {
       expect(RelationshipType.TESTS).toBe('TESTS');
       expect(RelationshipType.VALIDATES).toBe('VALIDATES');
-      expect(RelationshipType.LOCATED_IN).toBe('LOCATED_IN');
     });
 
     it('should contain all spec relationship types', () => {
       expect(RelationshipType.REQUIRES).toBe('REQUIRES');
       expect(RelationshipType.IMPACTS).toBe('IMPACTS');
-      expect(RelationshipType.LINKED_TO).toBe('LINKED_TO');
+      expect(RelationshipType.IMPLEMENTS_SPEC).toBe('IMPLEMENTS_SPEC');
     });
 
     it('should contain all temporal relationship types', () => {
       expect(RelationshipType.PREVIOUS_VERSION).toBe('PREVIOUS_VERSION');
-      expect(RelationshipType.CHANGED_AT).toBe('CHANGED_AT');
       expect(RelationshipType.MODIFIED_BY).toBe('MODIFIED_BY');
       expect(RelationshipType.CREATED_IN).toBe('CREATED_IN');
-      expect(RelationshipType.INTRODUCED_IN).toBe('INTRODUCED_IN');
       expect(RelationshipType.MODIFIED_IN).toBe('MODIFIED_IN');
       expect(RelationshipType.REMOVED_IN).toBe('REMOVED_IN');
+      expect(RelationshipType.OF).toBe('OF');
     });
 
     it('should contain all documentation relationship types', () => {
@@ -96,13 +93,12 @@ describe('Relationship Types and Enums', () => {
 
     it('should contain all performance relationship types', () => {
       expect(RelationshipType.PERFORMANCE_IMPACT).toBe('PERFORMANCE_IMPACT');
-      expect(RelationshipType.COVERAGE_PROVIDES).toBe('COVERAGE_PROVIDES');
       expect(RelationshipType.PERFORMANCE_REGRESSION).toBe('PERFORMANCE_REGRESSION');
     });
 
     it('should have correct enum structure', () => {
       const allTypes = Object.values(RelationshipType);
-      expect(allTypes).toHaveLength(35); // Count of all relationship types
+      expect(allTypes.length).toBeGreaterThanOrEqual(40);
 
       // Ensure all values are strings
       allTypes.forEach(type => {

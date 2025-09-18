@@ -55,6 +55,13 @@ export interface SyncOptions {
   batchSize?: number;
 }
 
+class OperationCancelledError extends Error {
+  constructor(operationId: string) {
+    super(`Operation ${operationId} cancelled`);
+    this.name = "OperationCancelledError";
+  }
+}
+
 export class SynchronizationCoordinator extends EventEmitter {
   private activeOperations = new Map<string, SyncOperation>();
   private completedOperations = new Map<string, SyncOperation>();
@@ -68,6 +75,8 @@ export class SynchronizationCoordinator extends EventEmitter {
   >();
   private maxRetryAttempts = 3;
   private retryDelay = 5000; // 5 seconds
+  private operationCounter = 0;
+  private cancelledOperations = new Set<string>();
 
   // Collect relationships that couldn't be resolved during per-file processing
   private unresolvedRelationships: Array<{
@@ -116,6 +125,17 @@ export class SynchronizationCoordinator extends EventEmitter {
     return true;
   }
 
+  private nextOperationId(prefix: string): string {
+    const counter = ++this.operationCounter;
+    return `${prefix}_${Date.now()}_${counter}`;
+  }
+
+  private ensureNotCancelled(operation: SyncOperation): void {
+    if (this.cancelledOperations.has(operation.id)) {
+      throw new OperationCancelledError(operation.id);
+    }
+  }
+
   // Convenience methods used by integration tests
   async startSync(): Promise<string> {
     return this.startFullSynchronization({});
@@ -139,13 +159,28 @@ export class SynchronizationCoordinator extends EventEmitter {
     this.operationQueue = [];
   }
 
+  // Gracefully stop the coordinator (used by integration tests/cleanup)
+  async stop(): Promise<void> {
+    this.pauseSync();
+    const waiters = this.resumeWaiters.splice(0);
+    for (const waiter of waiters) {
+      try {
+        waiter();
+      } catch {
+        // ignore; we're shutting down
+      }
+    }
+    await this.stopSync();
+    this.removeAllListeners();
+  }
+
   async startFullSynchronization(options: SyncOptions = {}): Promise<string> {
     // Default: do not include embeddings during full sync; generate them in background later
     if (options.includeEmbeddings === undefined) {
       options.includeEmbeddings = false;
     }
     const operation: SyncOperation = {
-      id: `full_sync_${Date.now()}`,
+      id: this.nextOperationId("full_sync"),
       type: "full",
       status: "pending",
       startTime: new Date(),
@@ -195,7 +230,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   async synchronizeFileChanges(changes: FileChange[]): Promise<string> {
     const operation: SyncOperation = {
-      id: `incremental_sync_${Date.now()}`,
+      id: this.nextOperationId("incremental_sync"),
       type: "incremental",
       status: "pending",
       startTime: new Date(),
@@ -245,7 +280,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   async synchronizePartial(updates: PartialUpdate[]): Promise<string> {
     const operation: SyncOperation = {
-      id: `partial_sync_${Date.now()}`,
+      id: this.nextOperationId("partial_sync"),
       type: "partial",
       status: "pending",
       startTime: new Date(),
@@ -308,6 +343,23 @@ export class SynchronizationCoordinator extends EventEmitter {
       const operation = this.operationQueue.shift()!;
       operation.status = "running";
 
+      if (this.cancelledOperations.has(operation.id)) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "cancelled",
+          message: `Operation ${operation.id} cancelled before execution`,
+          timestamp: new Date(),
+          recoverable: true,
+        });
+        this.activeOperations.delete(operation.id);
+        this.completedOperations.set(operation.id, operation);
+        this.cancelledOperations.delete(operation.id);
+        this.emit("operationCancelled", operation);
+        continue;
+      }
+
       try {
         switch (operation.type) {
           case "full":
@@ -325,21 +377,28 @@ export class SynchronizationCoordinator extends EventEmitter {
         operation.endTime = new Date();
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
+        this.cancelledOperations.delete(operation.id);
         this.emit("operationCompleted", operation);
       } catch (error) {
+        const cancelled = error instanceof OperationCancelledError;
         operation.status = "failed";
         operation.endTime = new Date();
         operation.errors.push({
           file: "coordinator",
-          type: "unknown",
+          type: cancelled ? "cancelled" : "unknown",
           message: error instanceof Error ? error.message : "Unknown error",
           timestamp: new Date(),
-          recoverable: false,
+          recoverable: cancelled,
         });
 
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.cancelledOperations.delete(operation.id);
+        if (cancelled) {
+          this.emit("operationCancelled", operation);
+        } else {
+          this.emit("operationFailed", operation);
+        }
       }
     }
 
@@ -382,6 +441,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Scan all source files
     const files = await this.scanSourceFiles();
+    this.ensureNotCancelled(operation);
 
     this.emit("syncProgress", operation, { phase: "parsing", progress: 0.2 });
 
@@ -397,6 +457,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Helper to process a single file
     const processFile = async (file: string) => {
+      this.ensureNotCancelled(operation);
       try {
         const result = await this.astParser.parseFile(file);
 
@@ -476,6 +537,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         while (idx < batch.length) {
           const current = idx++;
           await awaitIfPaused();
+          this.ensureNotCancelled(operation);
           await processFile(batch[current]);
         }
       };
@@ -487,6 +549,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       const batchRelationships: any[] = (operation as any)._batchRelationships || [];
       (operation as any)._batchEntities = [];
       (operation as any)._batchRelationships = [];
+      this.ensureNotCancelled(operation);
 
       if (batchEntities.length > 0) {
         try {
@@ -530,6 +593,8 @@ export class SynchronizationCoordinator extends EventEmitter {
             );
             if (resolvedId) {
               resolved.push({ ...(relationship as any), toEntityId: resolvedId });
+            } else if (relationship.toEntityId) {
+              resolved.push({ ...(relationship as any) });
             } else {
               this.unresolvedRelationships.push({ relationship });
             }
@@ -574,13 +639,23 @@ export class SynchronizationCoordinator extends EventEmitter {
 
       // Batch embeddings after entities to avoid per-entity overhead
       if (includeEmbeddings && batchEntities.length > 0) {
-        try {
-          await this.kgService.createEmbeddingsBatch(batchEntities);
-        } catch (e) {
+        if (typeof (this.kgService as any).createEmbeddingsBatch === "function") {
+          try {
+            await this.kgService.createEmbeddingsBatch(batchEntities);
+          } catch (e) {
+            operation.errors.push({
+              file: "coordinator",
+              type: "database",
+              message: `Batch embedding failed: ${e instanceof Error ? e.message : 'unknown'}`,
+              timestamp: new Date(),
+              recoverable: true,
+            });
+          }
+        } else {
           operation.errors.push({
             file: "coordinator",
-            type: "database",
-            message: `Batch embedding failed: ${e instanceof Error ? e.message : 'unknown'}`,
+            type: "capability",
+            message: "Embedding batch API unavailable; skipping inline embedding",
             timestamp: new Date(),
             recoverable: true,
           });
@@ -595,6 +670,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     }
 
     // Post-pass: attempt to resolve and create any deferred relationships now that all entities exist
+    this.ensureNotCancelled(operation);
     await this.runPostResolution(operation);
 
     // Deactivate edges not seen during this scan window (best-effort)
@@ -604,7 +680,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Fire-and-forget background embeddings if they were skipped during full sync
     const pendingToEmbed: any[] = (operation as any)._embedQueue || [];
-    if (pendingToEmbed.length > 0) {
+    if (pendingToEmbed.length > 0 && typeof (this.kgService as any).createEmbeddingsBatch === "function") {
       // Run in background without blocking completion
       const chunks: any[][] = [];
       const chunkSize = 200;
@@ -622,6 +698,14 @@ export class SynchronizationCoordinator extends EventEmitter {
         }
         try { console.log(`✅ Background embeddings created for ${pendingToEmbed.length} entities`); } catch {}
       })().catch(() => {});
+    } else if (pendingToEmbed.length > 0) {
+      operation.errors.push({
+        file: "coordinator",
+        type: "capability",
+        message: "Embedding batch API unavailable; queued embeddings skipped",
+        timestamp: new Date(),
+        recoverable: true,
+      });
     }
   }
 
@@ -702,6 +786,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     for (const change of changes) {
       await awaitIfPaused();
+      this.ensureNotCancelled(operation);
       try {
         this.emit("syncProgress", operation, {
           phase: "processing_changes",
@@ -1246,6 +1331,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     let processedUpdates = 0;
 
     for (const update of updates) {
+      this.ensureNotCancelled(operation);
       try {
         this.emit("syncProgress", operation, {
           phase: "processing_partial",
@@ -1455,34 +1541,58 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   async cancelOperation(operationId: string): Promise<boolean> {
-    const operation = this.activeOperations.get(operationId);
-    if (!operation) {
-      return false;
+    this.cancelledOperations.add(operationId);
+
+    const active = this.activeOperations.get(operationId);
+    if (active) {
+      if (!active.errors.some((e) => e.type === "cancelled")) {
+        active.errors.push({
+          file: "coordinator",
+          type: "cancelled",
+          message: `Operation ${operationId} cancellation requested`,
+          timestamp: new Date(),
+          recoverable: true,
+        });
+      }
+      active.status = "failed";
+      active.endTime = new Date();
+      this.activeOperations.delete(operationId);
+      this.completedOperations.set(operationId, active);
+      return true;
     }
 
-    // Remove from active operations
-    this.activeOperations.delete(operationId);
-
-    // Remove from queue if pending
-    const queueIndex = this.operationQueue.findIndex(
-      (op) => op.id === operationId
-    );
+    const queueIndex = this.operationQueue.findIndex((op) => op.id === operationId);
     if (queueIndex !== -1) {
-      this.operationQueue.splice(queueIndex, 1);
+      const [operation] = this.operationQueue.splice(queueIndex, 1);
+      operation.status = "failed";
+      operation.endTime = new Date();
+      operation.errors.push({
+        file: "coordinator",
+        type: "cancelled",
+        message: `Operation ${operationId} cancelled before execution`,
+        timestamp: new Date(),
+        recoverable: true,
+      });
+      this.retryQueue.delete(operationId);
+      this.completedOperations.set(operationId, operation);
+      this.cancelledOperations.delete(operationId);
+      this.emit("operationCancelled", operation);
+      return true;
     }
 
-    // Remove from retry queue
-    this.retryQueue.delete(operationId);
+    if (this.completedOperations.has(operationId)) {
+      this.cancelledOperations.delete(operationId);
+      return true; // Already finished; treat as no-op cancellation
+    }
 
-    // Update status
-    operation.status = "failed";
-    operation.endTime = new Date();
+    if (this.retryQueue.has(operationId)) {
+      this.retryQueue.delete(operationId);
+      this.cancelledOperations.delete(operationId);
+      return true;
+    }
 
-    // Store in completed operations for status queries
-    this.completedOperations.set(operationId, operation);
-
-    this.emit("operationCancelled", operation);
-    return true;
+    this.cancelledOperations.delete(operationId);
+    return false;
   }
 
   getOperationStatistics(): {
@@ -1755,8 +1865,16 @@ declare module "./SynchronizationCoordinator.js" {
           for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
         }
         const global = await (this as any).kgService.findSymbolsByName(name);
-        for (const g of global) candidates.push({ id: g.id, name: (g as any).name, path: (g as any).path, resolver: 'name' });
-        if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'external-name' };
+        for (const g of global) {
+          candidates.push({ id: g.id, name: (g as any).name, path: (g as any).path, resolver: 'name' });
+        }
+        if (candidates.length > 0) {
+          const chosen = candidates[0];
+          const resolutionPath = chosen.resolver === 'local'
+            ? 'external-local'
+            : 'external-name';
+          return { id: chosen.id, candidates, resolutionPath };
+        }
       }
     } catch {}
   }
@@ -1827,8 +1945,14 @@ declare module "./SynchronizationCoordinator.js" {
       for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
     }
     const byName = await (this as any).kgService.findSymbolsByName(name);
-    for (const c of byName) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'name' });
-    if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'import-name' };
+    for (const c of byName) {
+      candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'name' });
+    }
+    if (candidates.length > 0) {
+      const chosen = candidates[0];
+      const suffix = chosen.resolver === 'local' ? 'local' : 'name';
+      return { id: chosen.id, candidates, resolutionPath: `import-${suffix}` };
+    }
     return null;
   }
 
@@ -1846,8 +1970,14 @@ declare module "./SynchronizationCoordinator.js" {
       for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
     }
     const global = await (this as any).kgService.findSymbolsByName(name);
-    for (const g of global) candidates.push({ id: g.id, name: (g as any).name, path: (g as any).path, resolver: 'name' });
-    if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'external-name' };
+    for (const g of global) {
+      candidates.push({ id: g.id, name: (g as any).name, path: (g as any).path, resolver: 'name' });
+    }
+    if (candidates.length > 0) {
+      const chosen = candidates[0];
+      const suffix = chosen.resolver === 'local' ? 'local' : 'name';
+      return { id: chosen.id, candidates, resolutionPath: `external-${suffix}` };
+    }
     return null;
   }
 

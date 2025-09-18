@@ -249,7 +249,7 @@ export class SynchronizationMonitoring extends EventEmitter {
     })();
 
     // Include the error message in the log message to aid debugging/tests
-    this.log('error', operationId, `Sync error: ${normalized.message}`, {
+    this.log('error', operationId, `Sync error occurred: ${normalized.message}`, {
       file: normalized.file,
       type: normalized.type,
       message: normalized.message,
@@ -567,8 +567,8 @@ export class SynchronizationMonitoring extends EventEmitter {
       }
     }
 
-    // Remove old alerts (regardless of resolved status)
-    this.alerts = this.alerts.filter(alert => alert.timestamp.getTime() > cutoffTime);
+    // Remove old alerts but preserve unresolved ones regardless of age
+    this.alerts = this.alerts.filter(alert => !alert.resolved || alert.timestamp.getTime() > cutoffTime);
 
     // Remove old logs
     this.logs = this.logs.filter(log => log.timestamp.getTime() > cutoffTime);

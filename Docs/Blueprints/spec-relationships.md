@@ -8,6 +8,11 @@ Specification edges (`REQUIRES`, `IMPACTS`, `IMPLEMENTS_SPEC`) connect product r
 - All spec relationships share the same canonical ID (`specId|entityId|type`), so heuristic reruns overwrite human-verified metadata, and multiple acceptance-criteria mappings collide.
 - Query APIs lack filters for spec attributes, limiting dashboards and planning tools.
 - Temporal history is unavailable: no trace of when a requirement was satisfied, re-opened, or modified.
+- Impact analysis endpoints (`src/api/routes/impact.ts`) now lift spec relationship metadata into risk scoring and recommendations, but the broader query surface still lacks filters/aggregations by `impactLevel`, `priority`, and acceptance-criteria status for dashboards and automation.
+- Graph search (`POST /api/v1/graph/search`) does not index freshly recorded specs; even immediately after a successful design ingest, the search response returns an empty `entities` array. The end-to-end integration suite relies on this lookup to confirm that specs round-trip through the graph, so we need to plug spec ingestion into the search index (or provide a fallback query) before the workflow can pass.
+- The design authoring endpoint (`POST /api/v1/design/generate`) is still a stub that ends up returning HTTP 500. REST integration tests expect a generated spec identifier and persisted spec relationships, so the blueprint should track the remaining work to wire templating, storage, and graph publication.
+- Spec identifiers have transitioned to UUIDs (to satisfy the `documents.id` UUID column); clients and tests assuming legacy `spec_<timestamp>` keys must be updated.
+- MCP-driven spec creation does not currently populate `KnowledgeGraphService.getEntity` with the new spec. Test planning now falls back to database hydration, but the graph ingestion path needs to be restored so planning and search operate on graph data instead of heuristic fallbacks.
 
 ## 3. Desired Capabilities
 1. Persist structured metadata for requirement linkage: acceptance criteria IDs, rationale, priority, impact level, owning team, verification status.

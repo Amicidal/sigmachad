@@ -25,6 +25,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { Project } from "ts-morph";
 import { RelationshipType } from "../models/relationships.js";
+import {
+  SpecNotFoundError,
+  TestPlanningService,
+  TestPlanningValidationError,
+} from "../services/TestPlanningService.js";
+import type { TestPlanRequest } from "../models/types.js";
+import { SpecService } from "../services/SpecService.js";
 
 // MCP Tool definitions
 interface MCPToolDefinition {
@@ -63,6 +70,8 @@ export class MCPRouter {
     errorMessage?: string;
     params?: any;
   }> = [];
+  private testPlanningService: TestPlanningService;
+  private specService: SpecService;
 
   // Resolve absolute path to the project's src directory, regardless of CWD
   private getSrcRoot(): string {
@@ -96,6 +105,8 @@ export class MCPRouter {
     private testEngine: TestEngine,
     private securityScanner: SecurityScanner
   ) {
+    this.testPlanningService = new TestPlanningService(this.kgService);
+    this.specService = new SpecService(this.kgService, this.dbService);
     this.server = new Server(
       {
         name: "memento-mcp-server",
@@ -954,49 +965,35 @@ export class MCPRouter {
     console.log("MCP Tool called: design.create_spec", params);
 
     try {
-      // Generate a proper UUID for the spec
-      const { randomUUID } = await import("crypto");
-      const specId = randomUUID();
-
-      const spec = {
-        id: specId,
-        type: "spec",
-        path: `specs/${specId}`,
-        hash: "",
-        language: "text",
-        lastModified: new Date(),
-        created: new Date(),
-        title: params.title,
-        description: params.description,
-        acceptanceCriteria: params.acceptanceCriteria,
-        status: "draft",
-        priority: params.priority || "medium",
-        assignee: params.assignee,
-        tags: params.tags || [],
-        updated: new Date(),
+      const payload = {
+        title: params?.title ?? "",
+        description: params?.description ?? "",
+        acceptanceCriteria: Array.isArray(params?.acceptanceCriteria)
+          ? params.acceptanceCriteria
+          : [],
+        priority:
+          typeof params?.priority === "string" ? params.priority : undefined,
+        assignee: params?.assignee,
+        tags: Array.isArray(params?.tags) ? params.tags : [],
       };
 
-      // Store in database
-      await this.dbService.postgresQuery(
-        `INSERT INTO documents (id, type, content, metadata) VALUES ($1, $2, $3, $4)`,
-        [specId, "spec", JSON.stringify(spec), JSON.stringify({})]
-      );
-
-      // Create entity in knowledge graph
-      await this.kgService.createEntity(spec as any);
+      const { specId, spec, validationResults } =
+        await this.specService.createSpec(payload as any);
 
       return {
         specId,
         spec,
-        validationResults: { isValid: true, issues: [], suggestions: [] },
-        message: "Specification created successfully",
+        validationResults,
+        message: `Specification ${specId} created successfully`,
       };
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? "Unknown error");
       console.error("Error in handleCreateSpec:", error);
-      throw new Error(
-        `Failed to create specification: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
+      throw new McpError(
+        ErrorCode.InternalError,
+        "Tool execution failed",
+        `Failed to create specification: ${message}`
       );
     }
   }
@@ -1005,17 +1002,26 @@ export class MCPRouter {
     console.log("MCP Tool called: graph.search", params);
 
     try {
+      if (
+        !params ||
+        typeof params.query !== "string" ||
+        params.query.trim() === ""
+      ) {
+        throw new Error("Query parameter must be a non-empty string");
+      }
+
       // Use the KnowledgeGraphService directly for search
       const entities = await this.kgService.search(params);
+      const normalizedEntities = Array.isArray(entities) ? entities : [];
 
       // Get relationships if includeRelated is true
       let relationships: any[] = [];
       let clusters: any[] = [];
       let relevanceScore = 0;
 
-      if (params.includeRelated && entities.length > 0) {
+      if (params.includeRelated && normalizedEntities.length > 0) {
         // Get relationships for the top entities
-        const topEntities = entities.slice(0, 5);
+        const topEntities = normalizedEntities.slice(0, 5);
         for (const entity of topEntities) {
           const entityRelationships = await this.kgService.getRelationships({
             fromEntityId: entity.id,
@@ -1032,30 +1038,26 @@ export class MCPRouter {
 
       // Calculate relevance score based on number of results and relationships
       relevanceScore = Math.min(
-        entities.length * 0.3 + relationships.length * 0.2,
+        normalizedEntities.length * 0.3 + relationships.length * 0.2,
         1.0
       );
 
-      // Return in the format expected by the tests
+      const results = normalizedEntities.map((entity) => ({ ...entity }));
+
+      // Return in the format expected by the tests while keeping legacy fields
       return {
-        entities,
+        results,
+        entities: results,
         relationships,
         clusters,
         relevanceScore,
-        total: entities.length,
+        total: results.length,
         query: params.query,
-        message: `Found ${entities.length} entities matching query`,
+        message: `Found ${results.length} entities matching query`,
       };
     } catch (error) {
       console.error("Error in handleGraphSearch:", error);
-      // Return empty results instead of throwing
-      return {
-        entities: [],
-        relationships: [],
-        clusters: [],
-        relevanceScore: 0,
-        message: `Found 0 entities`,
-      };
+      throw error;
     }
   }
 
@@ -1068,36 +1070,43 @@ export class MCPRouter {
 
       // Handle non-existent entity gracefully
       if (!examples) {
+        const emptyExamples = { usageExamples: [], testExamples: [] };
         return {
           entityId: params.entityId,
+          examples: emptyExamples,
           signature: "",
-          usageExamples: [],
-          testExamples: [],
           relatedPatterns: [],
           totalExamples: 0,
           totalTestExamples: 0,
           message: `Entity ${params.entityId} not found`,
         };
       }
+      const normalizedExamples = {
+        usageExamples: Array.isArray(examples.usageExamples)
+          ? examples.usageExamples
+          : [],
+        testExamples: Array.isArray(examples.testExamples)
+          ? examples.testExamples
+          : [],
+      };
 
       return {
-        entityId: examples.entityId,
+        entityId: examples.entityId ?? params.entityId,
         signature: examples.signature || "",
-        usageExamples: examples.usageExamples || [],
-        testExamples: examples.testExamples || [],
+        examples: normalizedExamples,
         relatedPatterns: examples.relatedPatterns || [],
-        totalExamples: examples.usageExamples?.length || 0,
-        totalTestExamples: examples.testExamples?.length || 0,
+        totalExamples: normalizedExamples.usageExamples.length,
+        totalTestExamples: normalizedExamples.testExamples.length,
         message: `Retrieved examples for entity ${params.entityId}`,
       };
     } catch (error) {
       console.error("Error in handleGetExamples:", error);
       // Return empty results instead of throwing
+      const failureExamples = { usageExamples: [], testExamples: [] };
       return {
         entityId: params.entityId,
         signature: "",
-        usageExamples: [],
-        testExamples: [],
+        examples: failureExamples,
         relatedPatterns: [],
         totalExamples: 0,
         totalTestExamples: 0,
@@ -1421,136 +1430,204 @@ export class MCPRouter {
   private async handlePlanTests(params: any): Promise<any> {
     console.log("MCP Tool called: tests.plan_and_generate", params);
 
+    const request: TestPlanRequest = {
+      specId: params.specId,
+      testTypes: Array.isArray(params.testTypes)
+        ? params.testTypes.filter((type: unknown) =>
+            type === "unit" || type === "integration" || type === "e2e"
+          )
+        : undefined,
+      coverage:
+        typeof params.coverage === "object" && params.coverage !== null
+          ? {
+              minLines: params.coverage.minLines,
+              minBranches: params.coverage.minBranches,
+              minFunctions: params.coverage.minFunctions,
+            }
+          : undefined,
+      includePerformanceTests:
+        params.includePerformanceTests === undefined
+          ? undefined
+          : Boolean(params.includePerformanceTests),
+      includeSecurityTests:
+        params.includeSecurityTests === undefined
+          ? undefined
+          : Boolean(params.includeSecurityTests),
+    };
+
     try {
-      // Try to load the specification, but don't fail hard if missing in tests
-      let spec: any;
-      try {
-        const result = await this.dbService.postgresQuery(
-          "SELECT content FROM documents WHERE id = $1 AND type = $2",
-          [params.specId, "spec"]
-        );
-        const rows = (result as any)?.rows ?? [];
-        spec = rows.length > 0 ? JSON.parse(rows[0].content) : undefined;
-      } catch {
-        spec = undefined;
-      }
-      if (!spec) {
-        spec = {
-          id: params.specId,
-          title: params.specId,
-          acceptanceCriteria: params.acceptanceCriteria || [],
-        };
-      }
-
-      // Generate test plans based on the specification
-      const testPlan = this.generateTestPlan(spec, params);
-
-      // Estimate coverage based on acceptance criteria
-      const estimatedCoverage = this.estimateTestCoverage(spec, testPlan);
+      const planningResult = await this.testPlanningService.planTests(request);
 
       return {
-        specId: params.specId,
-        testPlan,
-        estimatedCoverage,
-        changedFiles: [],
-        message: `Generated comprehensive test plan for specification ${spec.title}`,
+        specId: request.specId,
+        ...planningResult,
+        message: `Generated comprehensive test plan for specification ${request.specId}`,
       };
     } catch (error) {
+      if (error instanceof TestPlanningValidationError) {
+        throw new McpError(ErrorCode.InvalidRequest, error.message, {
+          code: error.code,
+        });
+      }
+
+      if (error instanceof SpecNotFoundError) {
+        const fallbackPlan = await this.generateFallbackTestPlan(request);
+        if (fallbackPlan) {
+          return fallbackPlan;
+        }
+
+        throw new McpError(
+          ErrorCode.InternalError,
+          "Tool execution failed",
+          {
+            code: error.code,
+            message: `Specification ${request.specId} not found`,
+          }
+        );
+      }
+
       console.error("Error in handlePlanTests:", error);
-      throw new Error(
-        `Failed to plan tests: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
+      const message =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      throw new McpError(ErrorCode.InternalError, "Tool execution failed", {
+        message,
+      });
     }
   }
 
-  private generateTestPlan(spec: any, params: any): any {
-    const testPlan = {
-      unitTests: [] as any[],
-      integrationTests: [] as any[],
-      e2eTests: [] as any[],
-      performanceTests: [] as any[],
+  private async generateFallbackTestPlan(
+    request: TestPlanRequest
+  ): Promise<
+    | {
+        specId: string;
+        testPlan: Record<string, any>;
+        estimatedCoverage: Record<string, number>;
+        changedFiles: string[];
+        message: string;
+      }
+    | null
+  > {
+    const specId = request.specId;
+    if (!specId) {
+      return null;
+    }
+
+    const rows = this.extractQueryRows(
+      await this.dbService.postgresQuery(
+        `SELECT content FROM documents WHERE id = $1 AND type = $2 LIMIT 1`,
+        [specId, "spec"]
+      )
+    );
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const rawContent = rows[0]?.content ?? rows[0];
+    let parsed: any;
+    try {
+      parsed =
+        typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
+    } catch (parseError) {
+      console.warn(
+        `Failed to parse specification ${specId} from database:`,
+        parseError
+      );
+      return null;
+    }
+
+    const normalizedSpec = {
+      id: String(parsed?.id ?? specId),
+      title: String(parsed?.title ?? ""),
+      description: String(parsed?.description ?? ""),
+      acceptanceCriteria: Array.isArray(parsed?.acceptanceCriteria)
+        ? parsed.acceptanceCriteria.map((criterion: any) => String(criterion))
+        : [],
+      priority:
+        typeof parsed?.priority === "string"
+          ? parsed.priority
+          : ("medium" as const),
     };
 
-    // Generate unit tests for each acceptance criterion
-    if (params.testTypes?.includes("unit") || !params.testTypes) {
-      spec.acceptanceCriteria?.forEach((criterion: string, index: number) => {
-        testPlan.unitTests.push({
-          id: `unit_${spec.id}_${index}`,
-          name: `Unit test for: ${criterion.substring(0, 50)}...`,
-          description: `Test that ${criterion}`,
-          testCode: `describe('${spec.title}', () => {\n  it('should ${criterion}', () => {\n    // TODO: Implement test\n  });\n});`,
-          assertions: [criterion],
-          estimatedEffort: "medium",
-        });
-      });
-    }
+    const criteria =
+      normalizedSpec.acceptanceCriteria.length > 0
+        ? normalizedSpec.acceptanceCriteria
+        : [normalizedSpec.description || normalizedSpec.title || "Core behaviour"];
 
-    // Generate integration tests
-    if (params.testTypes?.includes("integration") || !params.testTypes) {
-      testPlan.integrationTests.push({
-        id: `integration_${spec.id}`,
-        name: `Integration test for ${spec.title}`,
-        description: `Test integration of components for ${spec.title}`,
-        testCode: `describe('${spec.title} Integration', () => {\n  it('should integrate properly', () => {\n    // TODO: Implement integration test\n  });\n});`,
-        assertions: spec.acceptanceCriteria || [],
-        estimatedEffort: "high",
-      });
-    }
+    const unitTests = criteria.map((criterion, index) => ({
+      id: `${normalizedSpec.id}-unit-${index + 1}`,
+      name: `Unit test ${index + 1}`,
+      objective: criterion,
+      coverageFocus: "logic",
+    }));
 
-    // Generate E2E tests
-    if (params.testTypes?.includes("e2e") || !params.testTypes) {
-      testPlan.e2eTests.push({
-        id: `e2e_${spec.id}`,
-        name: `E2E test for ${spec.title}`,
-        description: `End-to-end test for ${spec.title} user journey`,
-        testCode: `describe('${spec.title} E2E', () => {\n  it('should complete user journey', () => {\n    // TODO: Implement E2E test\n  });\n});`,
-        assertions: spec.acceptanceCriteria || [],
-        estimatedEffort: "high",
-      });
-    }
+    const integrationTests = [
+      {
+        id: `${normalizedSpec.id}-integration-1`,
+        name: "End-to-end flow validation",
+        objective:
+          normalizedSpec.description ||
+          `Validate integrated behaviour for ${normalizedSpec.title}`,
+        relatedCriteria: criteria.map((_, index) => index),
+      },
+    ];
 
-    // Generate performance tests if requested
-    if (params.includePerformanceTests) {
-      testPlan.performanceTests.push({
-        id: `perf_${spec.id}`,
-        name: `Performance test for ${spec.title}`,
-        description: `Performance test to ensure ${spec.title} meets performance requirements`,
-        testCode: `describe('${spec.title} Performance', () => {\n  it('should meet performance requirements', () => {\n    // TODO: Implement performance test\n  });\n});`,
-        metrics: ["responseTime", "throughput", "memoryUsage"],
-        thresholds: {
-          responseTime: "< 100ms",
-          throughput: "> 1000 req/sec",
-        },
-        estimatedEffort: "high",
-      });
-    }
+    const includePerformance =
+      request.includePerformanceTests === true ||
+      normalizedSpec.priority === "high" ||
+      normalizedSpec.priority === "critical";
 
-    return testPlan;
-  }
+    const performanceTests = includePerformance
+      ? [
+          {
+            id: `${normalizedSpec.id}-performance-1`,
+            name: "Performance baseline assessment",
+            objective: "Measure response time under expected load",
+            thresholdMs: 500,
+          },
+        ]
+      : [];
 
-  private estimateTestCoverage(spec: any, testPlan: any): any {
-    const totalTests =
-      testPlan.unitTests.length +
-      testPlan.integrationTests.length +
-      testPlan.e2eTests.length +
-      testPlan.performanceTests.length;
-
-    const coveragePercentage = Math.min(95, 70 + totalTests * 5); // Rough estimation
+    const estimatedCoverage = {
+      lines: Math.min(0.9, 0.55 + unitTests.length * 0.05),
+      branches: Math.min(0.85, 0.45 + unitTests.length * 0.04),
+      functions: Math.min(0.88, 0.5 + unitTests.length * 0.04),
+      statements: Math.min(0.9, 0.52 + unitTests.length * 0.05),
+    };
 
     return {
-      lines: coveragePercentage,
-      branches: Math.max(0, coveragePercentage - 10),
-      functions: coveragePercentage,
-      statements: coveragePercentage,
-      estimatedTests: totalTests,
-      coverageGaps: [
-        "Edge cases not covered",
-        "Error handling scenarios",
-        "Boundary conditions",
-      ],
+      specId,
+      testPlan: {
+        unitTests,
+        integrationTests,
+        performanceTests,
+        generatedBy: "mcp-fallback",
+      },
+      estimatedCoverage,
+      changedFiles: [],
+      message: `Generated heuristic test plan for specification ${specId}`,
     };
+  }
+
+  private extractQueryRows(result: any): Array<Record<string, any>> {
+    if (!result) {
+      return [];
+    }
+    if (Array.isArray(result)) {
+      return result as Array<Record<string, any>>;
+    }
+    if (Array.isArray(result.rows)) {
+      return result.rows as Array<Record<string, any>>;
+    }
+    return [];
+  }
+
+  private normalizeErrorMessage(message: string): string {
+    if (!message) {
+      return "Tool execution failed";
+    }
+    const cleaned = message.replace(/^MCP error -?\d+:\s*/, "").trim();
+    return cleaned.length > 0 ? cleaned : "Tool execution failed";
   }
 
   private async handleSecurityScan(params: any): Promise<any> {
@@ -1821,254 +1898,69 @@ export class MCPRouter {
     return false;
   }
 
-  private evaluateDeploymentGate(documentationImpact: {
-    staleDocs: any[];
-    missingDocs: any[];
-    freshnessPenalty: number;
-  }) {
-    const missingCount = documentationImpact.missingDocs?.length || 0;
-    const staleCount = documentationImpact.staleDocs?.length || 0;
-    const freshnessPenalty = documentationImpact.freshnessPenalty || 0;
-
-    const reasons: string[] = [];
-    let blocked = false;
-    let level: "none" | "advisory" | "required" = "none";
-
-    if (missingCount > 0) {
-      blocked = true;
-      level = "required";
-      reasons.push(
-        `${missingCount} impacted entities lack linked documentation`
-      );
-    }
-
-    if (staleCount > 3 || freshnessPenalty > 5) {
-      if (!blocked) {
-        level = "advisory";
-      }
-      reasons.push(
-        `${staleCount} documentation artefact${staleCount === 1 ? "" : "s"} marked stale`
-      );
-    }
-
-    return {
-      blocked,
-      level,
-      reasons,
-      stats: {
-        missingDocs: missingCount,
-        staleDocs: staleCount,
-        freshnessPenalty,
-      },
-    };
-  }
-
   private async handleImpactAnalysis(params: any): Promise<any> {
     console.log("MCP Tool called: impact.analyze", params);
 
+    const changes = Array.isArray(params?.changes) ? params.changes : [];
+    const includeIndirect = params?.includeIndirect !== false;
+    const maxDepth =
+      typeof params?.maxDepth === "number" && Number.isFinite(params.maxDepth)
+        ? Math.max(1, Math.min(8, Math.floor(params.maxDepth)))
+        : undefined;
+
     try {
-      const directImpact: any[] = [];
-      const cascadingImpact: any[] = [];
-      const testImpact = {
-        affectedTests: [] as any[],
-        requiredUpdates: [] as string[],
-        coverageImpact: 0,
-      };
-      const documentationImpact = {
-        staleDocs: [] as any[],
-        missingDocs: [] as any[],
-        requiredUpdates: [] as string[],
-        freshnessPenalty: 0,
-      };
-      const recommendations: any[] = [];
+      const analysis = await this.kgService.analyzeImpact(changes, {
+        includeIndirect,
+        maxDepth,
+      });
 
-      // Analyze each change for impact
-      for (const change of params.changes) {
-        // Get the entity from the knowledge graph (or create mock data for testing)
-        let entity = await this.kgService.getEntity(change.entityId);
-
-        // If entity doesn't exist, create a mock entity for testing
-        if (!entity) {
-          entity = {
-            id: change.entityId,
-            type: "symbol",
-            name: change.entityId,
-            path: `src/${change.entityId}.ts`,
-            hash: "",
-            language: "typescript",
-            lastModified: new Date(),
-            created: new Date(),
-          } as any;
-        }
-
-        // Analyze direct impact
-        const direct = await this.analyzeDirectImpact(change, entity);
-        directImpact.push(...direct);
-
-        // Analyze cascading impact if requested
-        if (params.includeIndirect !== false) {
-          const cascading = await this.analyzeCascadingImpact(
-            change,
-            entity,
-            params.maxDepth || 3
-          );
-          cascadingImpact.push(...cascading);
-        }
-
-        // Analyze test impact
-        const testResults = await this.analyzeTestImpact(change, entity);
-        testImpact.affectedTests.push(...testResults.affectedTests);
-        testImpact.requiredUpdates.push(...testResults.requiredUpdates);
-        testImpact.coverageImpact += testResults.coverageImpact;
-
-        // Analyze documentation impact
-        const docResults = await this.analyzeDocumentationImpact(
-          change,
-          entity
-        );
-        documentationImpact.staleDocs.push(...docResults.staleDocs);
-        documentationImpact.missingDocs.push(...docResults.missingDocs);
-        documentationImpact.requiredUpdates.push(...docResults.requiredUpdates);
-        documentationImpact.freshnessPenalty += docResults.freshnessPenalty || 0;
-      }
-
-      const dedupeById = <T extends { docId?: string; entityId?: string }>(
-        items: T[]
-      ): T[] => {
-        const seen = new Set<string>();
-        const out: T[] = [];
-        for (const item of items) {
-          const key = item.docId || item.entityId || JSON.stringify(item);
-          if (!seen.has(key)) {
-            seen.add(key);
-            out.push(item);
-          }
-        }
-        return out;
-      };
-
-      documentationImpact.staleDocs = dedupeById(documentationImpact.staleDocs);
-      documentationImpact.missingDocs = dedupeById(
-        documentationImpact.missingDocs
+      const totalDirect = analysis.directImpact.reduce(
+        (sum, entry) => sum + entry.entities.length,
+        0
       );
-      documentationImpact.requiredUpdates = Array.from(
-        new Set(documentationImpact.requiredUpdates)
+      const totalCascading = analysis.cascadingImpact.reduce(
+        (sum, entry) => sum + entry.entities.length,
+        0
       );
 
-      // Ensure we have at least some impact data for testing
-      if (params.changes.length > 0 && directImpact.length === 0) {
-        // Add mock direct impact
-        directImpact.push({
-          entity: {
-            id: params.changes[0].entityId,
-            name: params.changes[0].entityId,
-            type: "symbol",
-          },
-          severity: params.changes[0].signatureChange ? "high" : "medium",
-          reason:
-            params.changes[0].changeType === "delete"
-              ? "Entity is being deleted"
-              : params.changes[0].signatureChange
-              ? "Signature change detected"
-              : "Entity is being modified",
-          relationship: "DIRECT",
-          changeType: params.changes[0].changeType,
-        });
-      }
+      const summary = {
+        totalAffectedEntities: totalDirect + totalCascading,
+        riskLevel: this.calculateRiskLevel(
+          analysis.directImpact,
+          analysis.cascadingImpact,
+          analysis.documentationImpact
+        ),
+        estimatedEffort: this.estimateEffort(
+          analysis.directImpact,
+          analysis.cascadingImpact,
+          analysis.testImpact,
+          analysis.documentationImpact
+        ),
+        deploymentGate: analysis.deploymentGate,
+      };
 
-      // Add cascading impact if includeIndirect is true
-      if (params.includeIndirect !== false && params.changes.length > 0) {
-        // Add mock cascading impact
-        cascadingImpact.push({
-          level: 1,
-          entity: {
-            id: `dependent_${params.changes[0].entityId}`,
-            name: `Dependent of ${params.changes[0].entityId}`,
-            type: "symbol",
-          },
-          relationship: "USES",
-          confidence: 0.8,
-          path: [
-            params.changes[0].entityId,
-            `dependent_${params.changes[0].entityId}`,
-          ],
-        });
-      }
-
-      const deploymentGate = this.evaluateDeploymentGate(documentationImpact);
-
-      // Generate recommendations based on impact analysis
-      recommendations.push(
-        ...this.generateImpactRecommendations(
-          directImpact,
-          cascadingImpact,
-          testImpact,
-          documentationImpact
-        )
-      );
+      const message =
+        summary.totalAffectedEntities > 0
+          ? `Impact analysis completed. ${summary.totalAffectedEntities} entities affected`
+          : "Impact analysis completed. No downstream entities detected.";
 
       return {
-        directImpact,
-        cascadingImpact,
-        testImpact,
-        documentationImpact,
-        deploymentGate,
-        recommendations,
-        changes: params.changes,
-        summary: {
-          totalAffectedEntities: directImpact.length + cascadingImpact.length,
-          riskLevel: this.calculateRiskLevel(
-            directImpact,
-            cascadingImpact,
-            documentationImpact
-          ),
-          estimatedEffort: this.estimateEffort(
-            directImpact,
-            cascadingImpact,
-            testImpact,
-            documentationImpact
-          ),
-          deploymentGate,
-        },
-        message: `Impact analysis completed. ${
-          directImpact.length + cascadingImpact.length
-        } entities affected`,
+        ...analysis,
+        changes,
+        summary,
+        message,
       };
     } catch (error) {
       console.error("Error in handleImpactAnalysis:", error);
-      // Return empty structure instead of throwing
+      const fallback = await this.kgService.analyzeImpact([], { includeIndirect: false });
       return {
-        directImpact: [],
-        cascadingImpact: [],
-        testImpact: {
-          affectedTests: [],
-          requiredUpdates: [],
-          coverageImpact: 0,
-        },
-        documentationImpact: {
-          staleDocs: [],
-          missingDocs: [],
-          requiredUpdates: [],
-          freshnessPenalty: 0,
-        },
-        deploymentGate: {
-          blocked: false,
-          level: "none" as const,
-          reasons: [],
-          stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
-        },
-        recommendations: [],
-        changes: params.changes || [],
+        ...fallback,
+        changes,
         summary: {
           totalAffectedEntities: 0,
           riskLevel: "low",
           estimatedEffort: "low",
-          deploymentGate: {
-            blocked: false,
-            level: "none" as const,
-            reasons: [],
-            stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
-          },
+          deploymentGate: fallback.deploymentGate,
         },
         message: `Impact analysis failed: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -2077,375 +1969,6 @@ export class MCPRouter {
     }
   }
 
-  private async analyzeDirectImpact(change: any, entity: any): Promise<any[]> {
-    const impacts: Array<Record<string, unknown>> = [];
-
-    try {
-      // Get relationships for this entity
-      const relationships = await this.kgService.getRelationships({
-        fromEntityId: entity.id,
-        limit: 50,
-      });
-
-      for (const rel of relationships) {
-        let severity = "medium";
-        let reason = "Related entity may be affected by the change";
-
-        // Determine severity based on relationship type and change type
-        if (change.changeType === "delete") {
-          severity = "high";
-          reason = "Deletion will break dependent relationships";
-        } else if (change.changeType === "rename" && change.signatureChange) {
-          severity = "high";
-          reason = "Signature change will break dependent code";
-        }
-
-        // Get the related entity
-        const relatedEntity = await this.kgService.getEntity(rel.toEntityId);
-
-        impacts.push({
-          entity: relatedEntity || {
-            id: rel.toEntityId,
-            name: "Unknown Entity",
-          },
-          severity,
-          reason,
-          relationship: rel.type,
-          changeType: change.changeType,
-        });
-      }
-    } catch (error) {
-      console.warn("Error analyzing direct impact:", error);
-    }
-
-    return impacts;
-  }
-
-  private async analyzeCascadingImpact(
-    change: any,
-    entity: any,
-    maxDepth: number
-  ): Promise<any[]> {
-    const impacts: Array<Record<string, unknown>> = [];
-    const visited = new Set([entity.id]);
-
-    // BFS to find cascading impacts
-    const queue = [{ entity, depth: 0, path: [entity.id] }];
-
-    while (queue.length > 0 && impacts.length < 100) {
-      // Limit to prevent infinite loops
-      const { entity: currentEntity, depth, path } = queue.shift()!;
-
-      if (depth >= maxDepth) continue;
-
-      const relationships = await this.kgService.getRelationships({
-        fromEntityId: currentEntity.id,
-        limit: 20,
-      });
-
-      for (const rel of relationships) {
-        if (!visited.has(rel.toEntityId)) {
-          visited.add(rel.toEntityId);
-
-          const relatedEntity = await this.kgService.getEntity(rel.toEntityId);
-          if (relatedEntity) {
-            impacts.push({
-              level: depth + 1,
-              entity: relatedEntity,
-              relationship: rel.type,
-              confidence: Math.max(0.1, 1.0 - depth * 0.2), // Decrease confidence with depth
-              path: [...path, rel.toEntityId],
-            });
-
-            queue.push({
-              entity: relatedEntity,
-              depth: depth + 1,
-              path: [...path, rel.toEntityId],
-            });
-          }
-        }
-      }
-    }
-
-    return impacts;
-  }
-
-  private async analyzeTestImpact(change: any, entity: any): Promise<any> {
-    const affectedTests: Array<Record<string, unknown>> = [];
-    const requiredUpdates: string[] = [];
-    let coverageImpact = 0;
-
-    try {
-      // Search for test entities that might be affected
-      const testEntities = await this.kgService.search({
-        query: (entity as any).name || entity.id,
-        limit: 20,
-      });
-
-      for (const testEntity of testEntities) {
-        affectedTests.push({
-          testId: testEntity.id,
-          testName: (testEntity as any).name || testEntity.id,
-          type: "unit", // Assume unit test for now
-          reason: `Test covers ${
-            (entity as any).name || entity.id
-          } which is being modified`,
-        });
-
-        requiredUpdates.push(
-          `Update ${
-            (testEntity as any).name || testEntity.id
-          } to reflect changes to ${(entity as any).name || entity.id}`
-        );
-        coverageImpact += 5; // Rough estimate
-      }
-    } catch (error) {
-      console.warn("Error analyzing test impact:", error);
-    }
-
-    return { affectedTests, requiredUpdates, coverageImpact };
-  }
-
-  private async analyzeDocumentationImpact(
-    change: any,
-    entity: any
-  ): Promise<any> {
-    const staleDocs: Array<Record<string, unknown>> = [];
-    const missingDocs: Array<Record<string, unknown>> = [];
-    const requiredUpdates: string[] = [];
-    let freshnessPenalty = 0;
-
-    try {
-      const docEdges = await this.kgService.getRelationships({
-        fromEntityId: entity.id,
-        type: RelationshipType.DOCUMENTED_BY,
-        limit: 100,
-      });
-
-      const docIds = Array.from(
-        new Set(
-          docEdges
-            .map((rel) => rel.toEntityId)
-            .filter((id): id is string => typeof id === "string" && id.length > 0)
-        )
-      );
-
-      if (docIds.length === 0) {
-        missingDocs.push({
-          entityId: entity.id,
-          reason: "No DOCUMENTED_BY relationships present",
-        });
-        freshnessPenalty += 2;
-
-        const searchResults = await this.kgService.search({
-          query: (entity as any).name || entity.id,
-          limit: 5,
-        });
-
-        for (const docEntity of searchResults) {
-          requiredUpdates.push(
-            `Create documentation coverage linking ${
-              (entity as any).name || entity.id
-            } to ${
-              (docEntity as any).title || (docEntity as any).name || docEntity.id
-            }`
-          );
-        }
-      } else {
-        const docMap = new Map<string, any>();
-        await Promise.all(
-          docIds.map(async (docId) => {
-            try {
-              const docEntity = await this.kgService.getEntity(docId);
-              if (docEntity) {
-                docMap.set(docId, docEntity);
-              }
-            } catch {}
-          })
-        );
-
-        const freshnessWindowMs = this.getDocFreshnessWindowMs();
-        const now = Date.now();
-        const shouldForceOutdated = this.shouldFlagDocumentationOutdated(change);
-        const needsFlag = shouldForceOutdated
-          ? docEdges.some((rel) =>
-              ((rel as any).documentationQuality || rel.metadata?.documentationQuality) !==
-              "outdated"
-            )
-          : false;
-
-        if (shouldForceOutdated && needsFlag) {
-          try {
-            await this.kgService.markEntityDocumentationOutdated(entity.id, {
-              reason: `Change ${change.changeType || "update"} pending review`,
-              staleSince: change.timestamp ? new Date(change.timestamp) : undefined,
-            });
-            docEdges.forEach((rel) => ((rel as any).documentationQuality = "outdated"));
-          } catch (error) {
-            console.warn(
-              "Failed to mark documentation outdated during impact analysis:",
-              error instanceof Error ? error.message : error
-            );
-          }
-        }
-
-        for (const rel of docEdges) {
-          const docId = rel.toEntityId as string;
-          const docEntity = docMap.get(docId);
-          const title =
-            docEntity?.title || (docEntity as any)?.name || docId || "Unknown doc";
-          const relAny: any = rel as any;
-          const md = relAny.metadata || {};
-          const quality: string | undefined =
-            relAny.documentationQuality || md.documentationQuality;
-          const lastValidatedRaw = relAny.lastValidated || md.lastValidated;
-          const lastValidated =
-            typeof lastValidatedRaw === "string"
-              ? new Date(lastValidatedRaw)
-              : lastValidatedRaw instanceof Date
-              ? lastValidatedRaw
-              : undefined;
-          const ageMs = lastValidated ? now - lastValidated.getTime() : Number.POSITIVE_INFINITY;
-          const isOutdated = quality === "outdated";
-          const isPartial = quality === "partial";
-          const isStaleByTime = ageMs > freshnessWindowMs;
-          const needsRefresh = isOutdated || isPartial || isStaleByTime;
-
-          if (needsRefresh) {
-            const reason = isOutdated
-              ? "outdated"
-              : isPartial
-              ? "partial-coverage"
-              : "stale-freshness";
-
-            staleDocs.push({
-              docId,
-              title,
-              documentationQuality: quality || "unknown",
-              lastValidated: lastValidated ? lastValidated.toISOString() : null,
-              coverageScope: relAny.coverageScope || md.coverageScope || null,
-              reason,
-            });
-
-            requiredUpdates.push(
-              `Refresh ${title} to reflect changes to ${(entity as any).name || entity.id}`
-            );
-
-            freshnessPenalty += 1;
-          }
-        }
-      }
-    } catch (error) {
-      console.warn("Error analyzing documentation impact:", error);
-    }
-
-    return { staleDocs, missingDocs, requiredUpdates, freshnessPenalty };
-  }
-
-  private generateImpactRecommendations(
-    directImpact: any[],
-    cascadingImpact: any[],
-    testImpact: any,
-    documentationImpact: any
-  ): any[] {
-    const recommendations: Array<Record<string, unknown>> = [];
-
-    // Risk-based recommendations
-    if (directImpact.some((i) => i.severity === "high")) {
-      recommendations.push({
-        priority: "immediate",
-        description:
-          "High-severity direct impacts detected - immediate review required",
-        effort: "high",
-        impact: "breaking",
-        actions: [
-          "Review all high-severity impacts before proceeding",
-          "Consider breaking changes into smaller PRs",
-          "Communicate changes to affected teams",
-        ],
-      });
-    }
-
-    // Test impact recommendations
-    if (testImpact.affectedTests.length > 10) {
-      recommendations.push({
-        priority: "immediate",
-        description:
-          "Large number of tests affected - comprehensive testing required",
-        effort: "high",
-        impact: "functional",
-        actions: [
-          "Run full test suite before and after changes",
-          "Consider test refactoring to reduce coupling",
-          "Update test documentation",
-        ],
-      });
-    }
-
-    if (documentationImpact.missingDocs?.length) {
-      const missingCount = documentationImpact.missingDocs.length;
-      recommendations.push({
-        priority: missingCount > 2 ? "immediate" : "high",
-        description: `${missingCount} impacted entities have no linked documentation`,
-        effort: missingCount > 4 ? "high" : "medium",
-        impact: "knowledge-gap",
-        actions: [
-          "Author or link documentation for uncovered entities",
-          "Ensure architectural decisions are captured before merge",
-          "Update onboarding/runbooks to reflect new behaviour",
-        ],
-      });
-    }
-
-    if (documentationImpact.staleDocs.length > 0) {
-      const staleCount = documentationImpact.staleDocs.length;
-      recommendations.push({
-        priority: staleCount > 3 ? "immediate" : "high",
-        description: `Refresh ${staleCount} stale documentation artefact${
-          staleCount === 1 ? "" : "s"
-        }`,
-        effort: staleCount > 5 ? "high" : "medium",
-        impact: "governance",
-        actions: [
-          "Review documentation linked to the change set",
-          "Re-run documentation sync after updates",
-          "Notify stakeholders responsible for governance docs",
-        ],
-      });
-    }
-
-    // Documentation recommendations
-    if (documentationImpact.staleDocs.length > 0) {
-      recommendations.push({
-        priority: "planned",
-        description: "Documentation updates required",
-        effort: "medium",
-        impact: "cosmetic",
-        actions: [
-          "Update API documentation",
-          "Review and update code comments",
-          "Update architectural documentation",
-        ],
-      });
-    }
-
-    // Cascading impact recommendations
-    if (cascadingImpact.length > 20) {
-      recommendations.push({
-        priority: "planned",
-        description: "Complex cascading impacts detected",
-        effort: "high",
-        impact: "breaking",
-        actions: [
-          "Perform thorough integration testing",
-          "Consider phased rollout strategy",
-          "Implement feature flags for safe deployment",
-        ],
-      });
-    }
-
-    return recommendations;
-  }
 
   private calculateRiskLevel(
     directImpact: any[],
@@ -2837,6 +2360,7 @@ export class MCPRouter {
   public registerRoutes(app: FastifyInstance): void {
     // MCP JSON-RPC endpoint (supports both JSON-RPC and simple tool call formats)
     app.post("/mcp", {
+      attachValidation: true,
       schema: {
         body: {
           type: "object",
@@ -2850,7 +2374,7 @@ export class MCPRouter {
                 method: { type: "string" },
                 params: { type: "object" },
               },
-              required: ["jsonrpc", "id", "method"],
+              required: ["jsonrpc", "method"],
             },
             // Simple tool call format (for backward compatibility)
             {
@@ -2866,8 +2390,85 @@ export class MCPRouter {
       },
       handler: async (request, reply) => {
         try {
+          if ((request as any).validationError) {
+            const validationError = (request as any).validationError;
+            const message =
+              validationError?.message ||
+              "Invalid MCP request payload";
+            return reply.status(200).send({
+              jsonrpc: "2.0",
+              id: null,
+              error: {
+                code: -32600,
+                message,
+                details:
+                  validationError?.validation ||
+                  validationError?.errors ||
+                  validationError,
+              },
+            });
+          }
+
           const body = request.body as any;
+          if (Array.isArray(body)) {
+            const responses = await Promise.all(
+              body.map(async (entry) => {
+                if (!entry || typeof entry !== "object") {
+                  return {
+                    jsonrpc: "2.0",
+                    id: null,
+                    error: {
+                      code: -32600,
+                      message: "Invalid request",
+                      details: entry,
+                    },
+                  };
+                }
+                try {
+                  const result = await this.processMCPRequest(entry);
+                  return result;
+                } catch (batchError) {
+                  const errorMessage =
+                    batchError instanceof Error
+                      ? batchError.message
+                      : String(batchError);
+                  return {
+                    jsonrpc: "2.0",
+                    id: entry.id ?? null,
+                    error: {
+                      code: -32603,
+                      message: "Internal error",
+                      data: errorMessage,
+                    },
+                  };
+                }
+              })
+            );
+
+            const filtered = responses.filter(
+              (item) => item !== null && item !== undefined
+            );
+
+            if (filtered.length === 0) {
+              return reply.status(204).send();
+            }
+
+            return reply.status(200).send(filtered);
+          }
+
           const response = await this.processMCPRequest(body);
+          if (response === null || response === undefined) {
+            return reply.status(204).send();
+          }
+          if (
+            response &&
+            typeof response === "object" &&
+            !Array.isArray(response) &&
+            "error" in response &&
+            (response as any).error?.code === -32600
+          ) {
+            return reply.status(400).send(response);
+          }
           return reply.send(response);
         } catch (error) {
           const errorMessage =
@@ -2878,17 +2479,27 @@ export class MCPRouter {
             errorMessage.includes("Tool") &&
             errorMessage.includes("not found")
           ) {
-            return reply.status(404).send({
-              error: "Tool not found",
-              message: errorMessage,
+            return reply.status(400).send({
+              error: {
+                code: -32601,
+                message: errorMessage,
+              },
               availableTools: Array.from(this.tools.keys()),
             });
           }
 
-          if (errorMessage.includes("Missing required parameters")) {
+          if (
+            errorMessage.includes("Missing required parameters") ||
+            errorMessage.includes("Parameter validation errors") ||
+            errorMessage.includes("must be a non-empty string") ||
+            errorMessage.includes("Invalid params")
+          ) {
             return reply.status(400).send({
-              error: "Invalid parameters",
-              message: errorMessage,
+              error: {
+                code: -32602,
+                message: "Invalid parameters",
+                details: errorMessage,
+              },
             });
           }
 
@@ -3844,17 +3455,97 @@ export class MCPRouter {
 
   // Process MCP JSON-RPC requests
   private async processMCPRequest(request: any): Promise<any> {
-    const { method, params, id } = request;
+    const isSimpleCall = request && request.toolName && request.arguments;
+    const method = request?.method;
+    const params = request?.params;
+    const id = request?.id;
+    const isJsonRpcRequest =
+      !isSimpleCall &&
+      request &&
+      typeof request === "object" &&
+      request.jsonrpc === "2.0";
+    const isNotificationMethod =
+      typeof method === "string" && method.startsWith("notifications/");
+    const isJsonRpcNotification =
+      isJsonRpcRequest &&
+      (id === undefined || id === null) &&
+      isNotificationMethod;
+
+    if (
+      isJsonRpcRequest &&
+      (id === undefined || id === null) &&
+      !isNotificationMethod
+    ) {
+      return {
+        jsonrpc: "2.0",
+        id: null,
+        error: {
+          code: -32600,
+          message: `Invalid request: id is required for method '${
+            typeof method === "string" ? method : "unknown"
+          }'`,
+        },
+      };
+    }
 
     // Handle backward compatibility for simple tool calls (not JSON-RPC format)
-    if (request.toolName && request.arguments) {
+    if (isSimpleCall) {
       return this.handleSimpleToolCall(request);
     }
 
     try {
+      if (
+        !isSimpleCall &&
+        typeof method === "string" &&
+        this.tools.has(method)
+      ) {
+        try {
+          const toolResult = await this.handleSimpleToolCall({
+            toolName: method,
+            arguments: params || {},
+          });
+
+          if (isJsonRpcNotification) {
+            return null;
+          }
+
+          const payload =
+            toolResult && typeof toolResult === "object" && "result" in toolResult
+              ? (toolResult as any).result
+              : toolResult;
+
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: payload,
+          };
+        } catch (toolError) {
+          const message =
+            toolError instanceof Error ? toolError.message : String(toolError);
+          const code = message.includes("not found") ? -32601 : -32602;
+
+          if (isJsonRpcNotification) {
+            return null;
+          }
+
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code,
+              message: code === -32601 ? "Method not found" : "Invalid params",
+              data: message,
+            },
+          };
+        }
+      }
+
       switch (method) {
         case "initialize":
           // Handle MCP server initialization
+          if (isJsonRpcNotification) {
+            return null;
+          }
           return {
             jsonrpc: "2.0",
             id,
@@ -3879,6 +3570,9 @@ export class MCPRouter {
             description: tool.description,
             inputSchema: tool.inputSchema,
           }));
+          if (isJsonRpcNotification) {
+            return null;
+          }
           return {
             jsonrpc: "2.0",
             id,
@@ -3886,7 +3580,8 @@ export class MCPRouter {
           };
 
         case "tools/call":
-          const { name, arguments: args } = params;
+          const toolParams = params || {};
+          const { name, arguments: args } = toolParams as any;
           const tool = this.tools.get(name);
           if (!tool) {
             const startTime = new Date();
@@ -3898,6 +3593,9 @@ export class MCPRouter {
               `Tool '${name}' not found`,
               args
             );
+            if (isJsonRpcNotification) {
+              return null;
+            }
             return {
               jsonrpc: "2.0",
               id,
@@ -3914,16 +3612,11 @@ export class MCPRouter {
             (key: string) => !(args && key in args)
           );
           if (missing.length > 0) {
-            return {
-              jsonrpc: "2.0",
-              id,
-              error: {
-                code: -32602,
-                message: `Invalid params: required fields missing: ${missing.join(
-                  ", "
-                )}`,
-              },
-            };
+            console.warn(
+              `MCP tool '${name}' invoked with missing required params: ${missing.join(
+                ", "
+              )}`
+            );
           }
 
           const startTime = new Date();
@@ -3939,6 +3632,9 @@ export class MCPRouter {
               args
             );
 
+            if (isJsonRpcNotification) {
+              return null;
+            }
             return {
               jsonrpc: "2.0",
               id,
@@ -3969,13 +3665,34 @@ export class MCPRouter {
               args
             );
 
+            if (isJsonRpcNotification) {
+              return null;
+            }
+            let code: number = ErrorCode.InternalError;
+            let message = "Tool execution failed";
+            let data: any = errorMessage;
+
+            if (toolError instanceof McpError) {
+              code =
+                typeof toolError.code === "number"
+                  ? toolError.code
+                  : ErrorCode.InternalError;
+              message = this.normalizeErrorMessage(toolError.message);
+              data = toolError.data ?? data;
+            } else if (
+              typeof (toolError as any)?.code === "number" &&
+              !Number.isNaN((toolError as any).code)
+            ) {
+              code = (toolError as any).code;
+            }
+
             return {
               jsonrpc: "2.0",
               id,
               error: {
-                code: -32602,
-                message: "Invalid params",
-                data: errorMessage,
+                code,
+                message,
+                ...(data !== undefined ? { data } : {}),
               },
             };
           }
@@ -3989,6 +3706,9 @@ export class MCPRouter {
             `Method '${method}' not found`,
             params
           );
+          if (isJsonRpcNotification) {
+            return null;
+          }
           return {
             jsonrpc: "2.0",
             id,
@@ -4007,6 +3727,9 @@ export class MCPRouter {
         error instanceof Error ? error.message : String(error),
         params
       );
+      if (isJsonRpcNotification) {
+        return null;
+      }
       return {
         jsonrpc: "2.0",
         id,
@@ -4129,7 +3852,9 @@ export class MCPRouter {
               100
             : 0,
         flakyTests: includeFlakyAnalysis
-          ? await this.testEngine.analyzeFlakyTests(testResults)
+          ? await this.testEngine.analyzeFlakyTests(testResults, {
+              persist: false,
+            })
           : [],
         performanceInsights: includePerformanceAnalysis
           ? await this.analyzePerformanceTrends(testResults)

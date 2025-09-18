@@ -53,10 +53,10 @@ export class PostgreSQLService implements IPostgreSQLService {
           process.env.NODE_ENV === "test" ||
           process.env.RUN_INTEGRATION === "1"
         ) {
-          // In tests, parse JSONB as objects for easier testing
+          // In tests, parse JSONB as objects for easier assertions (callers can re-stringify if needed)
           types.setTypeParser(3802, (value: string) => JSON.parse(value)); // JSONB oid = 3802
         } else {
-          // In production, return as string for performance
+          // In production, return raw string for performance
           types.setTypeParser(3802, (value: string) => value); // JSONB oid = 3802
         }
 

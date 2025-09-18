@@ -1,0 +1,59 @@
+{
+  "timestamp": "2025-09-17T14:54:06.578Z",
+  "nodes": [
+    {
+      "labels": [
+        "symbol"
+      ],
+      "props": "{type: symbol, path: src/services/ASTParser.ts:nm, id: sym:src/services/ASTParser.ts#nm@8110d281, hash: f96429602e84f2a25b12daf809ff526451cd62a5e571e50c209abdb39936a7e5, language: typescript, lastModified: 2025-09-17T11:42:52.833Z, created: 2025-09-17T11:42:52.832Z, name: nm, kind: variable, signature: nm = String(child.text || ''), docstring: , visibility: public, isExported: false, isDeprecated: false}",
+      "id": 2421
+    },
+    {
+      "labels": [
+        "symbol"
+      ],
+      "props": "{type: symbol, path: src/services/ASTParser.ts:child, id: sym:src/services/ASTParser.ts#child@0e93069c, hash: ddc9e669194254cef019a29d3619a2c16592e5d52e1a81e98b01bd52319149a3, language: typescript, lastModified: 2025-09-17T11:42:52.833Z, created: 2025-09-17T11:42:52.832Z, name: child, kind: variable, signature: child, docstring: , visibility: public, isExported: false, isDeprecated: false}",
+      "id": 2422
+    },
+    {
+      "labels": [
+        "symbol"
+      ],
+      "props": "{type: symbol, path: src/services/ASTParser.ts:accessPath, id: sym:src/services/ASTParser.ts#accessPath@e34be46c, hash: 20a01740cb265c464228a817aac5ba3879a2ff05e0bea20db41d44e5f8d93095, language: typescript, lastModified: 2025-09-17T11:42:52.833Z, created: 2025-09-17T11:42:52.832Z, name: accessPath, kind: variable, signature: accessPath = String(child.text || ''), docstring: , visibility: public, isExported: false, isDeprecated: false}",
+      "id": 2423
+    },
+    {
+      "labels": [
+        "symbol"
+      ],
+      "props": "{type: symbol, path: src/services/ASTParser.ts:propName, id: sym:src/services/ASTParser.ts#propName@610cb263, hash: cb92984fd82ba58aa3ff026035ea54937d423b0c961de80ea9abe62ed86834cd, language: typescript, lastModified: 2025-09-17T11:42:52.833Z, created: 2025-09-17T11:42:52.832Z, name: propName, kind: variable, signature: propName = prop ? String(prop.text || '') : '', docstring: , visibility: public, isExported: false, isDeprecated: false}",
+      "id": 2424
+    },
+    {
+      "labels": [
+        "symbol"
+      ],
+      "props": "{type: symbol, path: src/services/ASTParser.ts:prop, id: sym:src/services/ASTParser.ts#prop@1158b53e, hash: 074ee4f264d85dacf747e59d0ebe97ad763445a0bb9fb9958ba9b109c51c6cef, language: typescript, lastModified: 2025-09-17T11:42:52.833Z, created: 2025-09-17T11:42:52.832Z, name: prop, kind: variable, signature: prop = (child.children || []).find((c: any) => c.type === 'property_identifier' || c.type === 'identifier'), docstring: , visibility: public, isExported: false, isDeprecated: false}",
+      "id": 2425
+    },
+    {
+      "labels": [
+        "symbol"
+      ],
+      "props": "{type: symbol, path: src/services/ASTParser.ts:toId, id: sym:src/services/ASTParser.ts#toId@7246567d, hash: 0a50725e8a95133e45c2a52fd9430f027ee2022c05dffc75fa3bf6a588659edb, language: typescript, lastModified: 2025-09-17T11:42:52.833Z, created: 2025-09-17T11:42:52.832Z, name: toId, kind: variable, signature: toId = ctx?.locals?.get(nm) || \\`external:${nm}\\`, docstring: , visibility: public, isExported: false, isDeprecated: false}",
+      "id": 2426
+    },
+    {
+      "labels": [
+        "symbol"
+      ],
+      "props": "{type: symbol, path: src/services/ASTParser.ts:leftName, id: sym:src/services/ASTParser.ts#leftName@65d4014e, hash: 38b4f77430681d39c0c4f1a5fe7ad67b54e1ea738fe0fbda95ce281525fbea3e, language: typescript, lastModified: 2025-09-17T11:42:52.833Z, created: 2025-09-17T11:42:52.832Z, name: leftName, kind: variable, signature: leftName = (left?.type === 'identifier') ? String(left.text || '') : undefined, docstring: , visibility: public, isExported: false, isDeprecated: false}",
+      "id": 2427
+    }
+  ],
+  "relationships": [],
+  "metadata": {
+    "nodeCount": 7,
+    "relationshipCount": 0
+  }
+}

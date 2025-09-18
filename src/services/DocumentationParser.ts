@@ -19,6 +19,10 @@ import {
   RelationshipType,
   DocumentationRelationship,
 } from "../models/relationships.js";
+import {
+  DocumentationIntelligenceProvider,
+  HeuristicDocumentationIntelligenceProvider,
+} from "./DocumentationIntelligenceProvider.js";
 
 export interface ParsedDocument {
   title: string;
@@ -65,10 +69,17 @@ export class DocumentationParser {
   private kgService: KnowledgeGraphService;
   private dbService: DatabaseService;
   private supportedExtensions = [".md", ".txt", ".rst", ".adoc"];
+  private intelligenceProvider: DocumentationIntelligenceProvider;
 
-  constructor(kgService: KnowledgeGraphService, dbService: DatabaseService) {
+  constructor(
+    kgService: KnowledgeGraphService,
+    dbService: DatabaseService,
+    intelligenceProvider?: DocumentationIntelligenceProvider
+  ) {
     this.kgService = kgService;
     this.dbService = dbService;
+    this.intelligenceProvider =
+      intelligenceProvider ?? new HeuristicDocumentationIntelligenceProvider();
   }
 
   private inferDocIntent(
@@ -137,30 +148,32 @@ export class DocumentationParser {
 
       switch (extension) {
         case ".md":
-          parsedContent = await this.parseMarkdown(content);
+          parsedContent = await this.parseMarkdown(content, filePath);
           break;
         case ".txt":
-          parsedContent = this.parsePlaintext(content);
+          parsedContent = await this.parsePlaintext(content, filePath);
           break;
         case ".rst":
-          parsedContent = this.parseRestructuredText(content);
+          parsedContent = await this.parseRestructuredText(content, filePath);
           break;
         case ".adoc":
-          parsedContent = this.parseAsciiDoc(content);
+          parsedContent = await this.parseAsciiDoc(content, filePath);
           break;
         default:
-          parsedContent = this.parsePlaintext(content);
+          parsedContent = await this.parsePlaintext(content, filePath);
       }
 
       const checksum = this.calculateChecksum(content);
-      const inferredIntent = this.inferDocIntent(filePath, parsedContent.docType);
+      const providerIntent = parsedContent.docIntent;
+      const inferredIntent =
+        providerIntent ?? this.inferDocIntent(filePath, parsedContent.docType);
       const locale = this.inferDocLocale(filePath, parsedContent.metadata);
       const now = new Date();
 
       parsedContent.docIntent = inferredIntent;
       parsedContent.docVersion = checksum;
       parsedContent.docHash = checksum;
-      parsedContent.docSource = "parser";
+      parsedContent.docSource = parsedContent.docSource || "parser";
       parsedContent.docLocale = locale;
       parsedContent.lastIndexed = now;
 
@@ -189,12 +202,12 @@ export class DocumentationParser {
   /**
    * Parse markdown content using marked library
    */
-  async parseMarkdown(content: string): Promise<ParsedDocument> {
+  async parseMarkdown(
+    content: string,
+    filePath?: string
+  ): Promise<ParsedDocument> {
     const tokens = marked.lexer(content);
     const title = this.extractTitle(tokens);
-    const businessDomains = this.extractBusinessDomains(content);
-    const stakeholders = this.extractStakeholders(content);
-    const technologies = this.extractTechnologies(content);
     const docType = this.inferDocType(content, title);
 
     // Compute headings and conditionally remove the first H1 used as title
@@ -210,121 +223,170 @@ export class DocumentationParser {
       allHeadings.length > 1 &&
       allHeadings.length <= 5
     ) {
-      // In simple docs (title + a few sections), exclude title from headings
       headings = allHeadings
         .slice(0, idxFirstH1)
         .concat(allHeadings.slice(idxFirstH1 + 1));
     }
 
+    const markdownMetadata = {
+      format: "markdown",
+      headings,
+      links: this.extractLinksFromContent(content, tokens),
+      codeBlocks: this.extractCodeBlocks(tokens),
+      tokens,
+      wordCount: content.split(/\s+/).filter(Boolean).length,
+      lineCount: content.split(/\n/).length,
+    };
+
+    const signals = await this.intelligenceProvider.extractSignals({
+      content,
+      format: "markdown",
+      filePath,
+      docTypeHint: docType,
+      metadata: markdownMetadata,
+    });
+
     return {
       title,
       content,
-      businessDomains,
-      stakeholders,
-      technologies,
+      businessDomains: signals.businessDomains ?? [],
+      stakeholders: signals.stakeholders ?? [],
+      technologies: signals.technologies ?? [],
       docType,
-      docIntent: "ai-context",
+      docIntent: signals.docIntent ?? "ai-context",
       docVersion: "",
       docHash: "",
-      docSource: "parser",
-      docLocale: "en",
+      docSource: signals.docSource ?? "parser",
+      docLocale: signals.docLocale,
       lastIndexed: new Date(),
-      metadata: {
-        headings,
-        links: this.extractLinksFromContent(content, tokens),
-        codeBlocks: this.extractCodeBlocks(tokens),
-      },
+      metadata: markdownMetadata,
     };
   }
 
   /**
    * Parse plaintext content
    */
-  parsePlaintext(content: string): ParsedDocument {
+  private async parsePlaintext(
+    content: string,
+    filePath?: string
+  ): Promise<ParsedDocument> {
     const lines = content.split("\n");
     const title = lines[0]?.trim() || "Untitled Document";
-    const businessDomains = this.extractBusinessDomains(content);
-    const stakeholders = this.extractStakeholders(content);
-    const technologies = this.extractTechnologies(content);
     const docType = this.inferDocType(content, title);
+
+    const baseMetadata = {
+      lineCount: lines.length,
+      wordCount: content.split(/\s+/).filter(Boolean).length,
+      format: "plaintext",
+    };
+
+    const signals = await this.intelligenceProvider.extractSignals({
+      content,
+      format: "plaintext",
+      filePath,
+      docTypeHint: docType,
+      metadata: baseMetadata,
+    });
 
     return {
       title,
       content,
-      businessDomains,
-      stakeholders,
-      technologies,
+      businessDomains: signals.businessDomains ?? [],
+      stakeholders: signals.stakeholders ?? [],
+      technologies: signals.technologies ?? [],
       docType,
-      docIntent: "ai-context",
+      docIntent: signals.docIntent ?? "ai-context",
       docVersion: "",
       docHash: "",
-      docSource: "parser",
-      docLocale: "en",
+      docSource: signals.docSource ?? "parser",
+      docLocale: signals.docLocale,
       lastIndexed: new Date(),
-      metadata: {
-        lineCount: lines.length,
-        wordCount: content.split(/\s+/).length,
-      },
+      metadata: baseMetadata,
     };
   }
 
   /**
    * Parse reStructuredText content (basic implementation)
    */
-  private parseRestructuredText(content: string): ParsedDocument {
-    // Basic RST parsing - could be enhanced with a dedicated library
+  private async parseRestructuredText(
+    content: string,
+    filePath?: string
+  ): Promise<ParsedDocument> {
     const lines = content.split("\n");
     const title = this.extractRstTitle(lines);
-    const businessDomains = this.extractBusinessDomains(content);
-    const stakeholders = this.extractStakeholders(content);
-    const technologies = this.extractTechnologies(content);
     const docType = this.inferDocType(content, title);
+
+    const rstMetadata = {
+      sections: this.extractRstSections(lines),
+      format: "rst",
+      lineCount: lines.length,
+      wordCount: content.split(/\s+/).filter(Boolean).length,
+    };
+
+    const signals = await this.intelligenceProvider.extractSignals({
+      content,
+      format: "rst",
+      filePath,
+      docTypeHint: docType,
+      metadata: rstMetadata,
+    });
 
     return {
       title,
       content,
-      businessDomains,
-      stakeholders,
-      technologies,
+      businessDomains: signals.businessDomains ?? [],
+      stakeholders: signals.stakeholders ?? [],
+      technologies: signals.technologies ?? [],
       docType,
-      docIntent: "ai-context",
+      docIntent: signals.docIntent ?? "ai-context",
       docVersion: "",
       docHash: "",
-      docSource: "parser",
-      docLocale: "en",
+      docSource: signals.docSource ?? "parser",
+      docLocale: signals.docLocale,
       lastIndexed: new Date(),
-      metadata: {
-        sections: this.extractRstSections(lines),
-      },
+      metadata: rstMetadata,
     };
   }
 
   /**
    * Parse AsciiDoc content (basic implementation)
    */
-  private parseAsciiDoc(content: string): ParsedDocument {
-    // Basic AsciiDoc parsing - could be enhanced with a dedicated library
+  private async parseAsciiDoc(
+    content: string,
+    filePath?: string
+  ): Promise<ParsedDocument> {
     const lines = content.split("\n");
     const title = this.extractAsciiDocTitle(lines);
-    const businessDomains = this.extractBusinessDomains(content);
-    const stakeholders = this.extractStakeholders(content);
-    const technologies = this.extractTechnologies(content);
     const docType = this.inferDocType(content, title);
+
+    const adocMetadata = {
+      format: "asciidoc",
+      lineCount: lines.length,
+      wordCount: content.split(/\s+/).filter(Boolean).length,
+    };
+
+    const signals = await this.intelligenceProvider.extractSignals({
+      content,
+      format: "asciidoc",
+      filePath,
+      docTypeHint: docType,
+      metadata: adocMetadata,
+    });
 
     return {
       title,
       content,
-      businessDomains,
-      stakeholders,
-      technologies,
+      businessDomains: signals.businessDomains ?? [],
+      stakeholders: signals.stakeholders ?? [],
+      technologies: signals.technologies ?? [],
       docType,
-      docIntent: "ai-context",
+      docIntent: signals.docIntent ?? "ai-context",
       docVersion: "",
       docHash: "",
-      docSource: "parser",
-      docLocale: "en",
+      docSource: signals.docSource ?? "parser",
+      docLocale: signals.docLocale,
       lastIndexed: new Date(),
-      metadata: {},
+      metadata: adocMetadata,
     };
   }
 
@@ -340,283 +402,6 @@ export class DocumentationParser {
     return "Untitled Document";
   }
 
-  /**
-   * Extract business domains from content using pattern matching
-   */
-  private extractBusinessDomains(content: string): string[] {
-    const domainPatterns = [
-      // User and customer management domains
-      /\b(?:user|customer|client)\s+(?:registration|authentication|authorization|management|service|support)\b/gi,
-      /\b(?:user|customer|client)\s+(?:account|profile|portal|dashboard)\s+(?:management|service)?\b/gi,
-      /\b(?:customer|client)\s+(?:relationship|service|support)\s+(?:management|system)?\b/gi,
-
-      // Authentication and security domains
-      /\b(?:authentication|authorization|security|compliance|audit)\s*(?:system|service|module|management)?\b/gi,
-      /\b(?:multi.?factor|two.?factor)\s+(?:authentication|auth)\b/gi,
-
-      // Payment and financial domains
-      /\b(?:payment|billing|subscription|pricing|financial)\s*(?:processing|system|service|module|management)?\b/gi,
-      /\b(?:credit\s+card|bank|paypal|stripe)\s+(?:payment|processing|integration)\b/gi,
-
-      // Inventory and supply chain domains
-      /\b(?:inventory|warehouse|supply\s+chain|logistics|shipping)\s*(?:management|system|tracking)?\b/gi,
-
-      // Reporting and analytics domains
-      /\b(?:reporting|analytics|dashboard|metrics|business\s+intelligence)\s*(?:system|service|platform)?\b/gi,
-
-      // Communication and messaging domains
-      /\b(?:communication|messaging|notification|email|sms)\s*(?:system|service|platform)?\b/gi,
-
-      // Content and document management domains
-      /\b(?:content|media|file|document)\s+(?:management|storage|processing|system)\b/gi,
-
-      // Human resources and employee domains
-      /\b(?:human\s+resources|employee|hr|payroll|benefits)\s*(?:management|system|service)?\b/gi,
-
-      // Sales and marketing domains
-      /\b(?:sales|marketing|campaign|ecommerce)\s*(?:management|system|platform)?\b/gi,
-
-      // Infrastructure and operations domains
-      /\b(?:infrastructure|deployment|monitoring|maintenance)\s*(?:management|system)?\b/gi,
-
-      // Data management domains
-      /\b(?:data|database|backup|recovery)\s*(?:management|processing|storage|system)?\b/gi,
-
-      // API and integration domains
-      /\b(?:api|integration|webhook|middleware)\s*(?:management|service|platform)?\b/gi,
-
-      // Generic management domains
-      /\b(?:user|customer|client|patient|student|employee|admin|manager)\s+(?:management|service|portal|dashboard|system)\b/gi,
-
-      // Single word domains (keep these for backwards compatibility)
-      /\b(?:authentication|authorization|security|compliance|audit|inventory|warehouse|reporting|analytics|communication|messaging)\b/gi,
-    ];
-
-    const domains = new Set<string>();
-
-    for (const pattern of domainPatterns) {
-      const matches = content.match(pattern);
-      if (matches) {
-        matches.forEach((match) => {
-          const norm = match.toLowerCase().trim();
-          domains.add(norm);
-
-          // Extract base terms from compound phrases for better matching
-          const baseMatch = norm.match(
-            /^(payment|billing|subscription|pricing|financial|customer|user|client|authentication|authorization|security)\b/
-          );
-          if (baseMatch) {
-            domains.add(baseMatch[1]);
-          }
-
-          // Handle specific multi-word combinations that should be preserved
-          if (norm.includes("customer relationship")) {
-            domains.add("customer relationship management");
-          }
-          if (norm.includes("customer service")) {
-            domains.add("customer service management");
-          }
-          if (norm.includes("user registration")) {
-            domains.add("user registration");
-          }
-          if (norm.includes("user management")) {
-            domains.add("user management");
-          }
-          if (norm.includes("payment processing")) {
-            domains.add("payment processing");
-          }
-          if (norm.includes("data processing")) {
-            domains.add("data processing");
-          }
-          if (norm.includes("document management")) {
-            domains.add("document management");
-          }
-        });
-      }
-    }
-
-    // Also look for explicit domain mentions in structured format
-    const explicitDomains = content.match(/domain[s]?:?\s*([^.\n]+)/gi);
-    if (explicitDomains) {
-      explicitDomains.forEach((match) => {
-        const domainPart = match.replace(/domain[s]?:?\s*/i, "").trim();
-        // Split comma-separated or 'and' separated lists
-        const parts = domainPart
-          .split(/,|\band\b/gi)
-          .map((p) => p.trim())
-          .filter((p) => p.length > 0);
-        parts.forEach((p) => {
-          const normalized = p.toLowerCase();
-          domains.add(normalized);
-          // Also add variations without "management" suffix for better matching
-          if (normalized.endsWith(" management")) {
-            domains.add(normalized.replace(" management", ""));
-          }
-        });
-      });
-    }
-
-    // Handle Unicode/special characters in domain extraction
-    // Look for patterns with accented characters
-    const unicodePatterns = [
-      /\b(?:naïve|naive)\s+(?:user|customer|client)\s+(?:management|service|system)\b/gi,
-      /\b[\wàâäçéèêëïîôùûüÿñáéíóúü]+\s+(?:management|service|system|processing)\b/gi,
-    ];
-
-    for (const pattern of unicodePatterns) {
-      const matches = content.match(pattern);
-      if (matches) {
-        matches.forEach((match) => {
-          const norm = match.toLowerCase().trim();
-          domains.add(norm);
-          // Also extract base terms for Unicode words
-          const baseMatch = norm.match(/^([\wàâäçéèêëïîôùûüÿñáéíóúü]+)\s+/);
-          if (baseMatch) {
-            domains.add(baseMatch[1]);
-          }
-        });
-      }
-    }
-
-    return Array.from(domains);
-  }
-
-  /**
-   * Extract stakeholders from content
-   */
-  private extractStakeholders(content: string): string[] {
-    const stakeholderPatterns = [
-      // Team roles and positions
-      /\b(?:product|project|tech|engineering|development|qa|testing|devops|security)\s+(?:team|manager|lead|director|specialist|engineer|coordinator)\b/gi,
-      /\b(?:business|product|system|technical|solution|data)\s+(?:analyst|architect|owner|consultant)\b/gi,
-
-      // User types and roles
-      /\b(?:end\s+)?(?:user|customer|client|consumer|subscriber|member|participant|visitor)s?\b/gi,
-      /\b(?:admin|administrator|operator|maintainer|supervisor|moderator)s?\b/gi,
-
-      // Organization roles
-      /\b(?:partner|vendor|supplier|contractor)s?\b/gi,
-      /\b(?:stakeholder|shareholder|investor)s?\b/gi,
-
-      // Individual roles
-      /\b(?:developer|programmer|coder|architect|designer)s?\b/gi,
-
-      // Department roles
-      /\b(?:sales|marketing|support|customer service|help desk|it|hr)\s+(?:team|manager|representative|specialist|agent)\b/gi,
-
-      // Generic user mentions (more specific patterns first)
-      /\busers?\b/gi,
-      /\bpeople\b/gi,
-      /\bpersonnel\b/gi,
-    ];
-
-    const stakeholders = new Set<string>();
-
-    for (const pattern of stakeholderPatterns) {
-      const matches = content.match(pattern);
-      if (matches) {
-        matches.forEach((match) => {
-          let s = match.toLowerCase().trim();
-
-          // Normalize common plurals and variations to singular for consistency
-          s = s
-            .replace(/\bdevelopers\b/g, "developer")
-            .replace(/\busers\b/g, "user")
-            .replace(/\bcustomers\b/g, "customer")
-            .replace(/\bclients\b/g, "client")
-            .replace(/\bpartners\b/g, "partner")
-            .replace(/\bvendors\b/g, "vendor")
-            .replace(/\bstakeholders\b/g, "stakeholder")
-            .replace(/\badministrators\b/g, "administrator")
-            .replace(/\bmanagers\b/g, "manager")
-            .replace(/\bteams\b/g, "team")
-            .replace(/\bengineers\b/g, "engineer")
-            .replace(/\banalysts\b/g, "analyst")
-            .replace(/\barchitects\b/g, "architect")
-            .replace(/\bspecialists\b/g, "specialist")
-            .replace(/\bsupervisors\b/g, "supervisor")
-            .replace(/\bmoderators\b/g, "moderator")
-            .replace(/\boperators\b/g, "operator")
-            .replace(/\bmaintainers\b/g, "maintainer")
-            .replace(/\bcoordinators\b/g, "coordinator")
-            .replace(/\bconsultants\b/g, "consultant")
-            .replace(/\bdesigners\b/g, "designer")
-            .replace(/\bprogrammers\b/g, "programmer")
-            .replace(/\bcoders\b/g, "coder")
-            .replace(/\brepresentatives\b/g, "representative")
-            .replace(/\bagents\b/g, "agent")
-            .replace(/\bowners\b/g, "owner")
-            .replace(/\bleads\b/g, "lead")
-            .replace(/\bdirectors\b/g, "director")
-            .replace(/\bvisitors\b/g, "visitor")
-            .replace(/\bmembers\b/g, "member")
-            .replace(/\bparticipants\b/g, "participant")
-            .replace(/\bsubscribers\b/g, "subscriber")
-            .replace(/\bconsumers\b/g, "consumer")
-            .replace(/\bshareholders\b/g, "shareholder")
-            .replace(/\binvestors\b/g, "investor")
-            .replace(/\bcontractors\b/g, "contractor")
-            .replace(/\bsuppliers\b/g, "supplier")
-            .replace(/\bpeople\b/g, "person")
-            .replace(/\bpersonnel\b/g, "person")
-            .replace(/\bend users\b/g, "end user")
-            .replace(/\bsales teams\b/g, "sales team")
-            .replace(/\bmarketing teams\b/g, "marketing team")
-            .replace(/\bsupport teams\b/g, "support team")
-            .replace(/\bcustomer service teams\b/g, "customer service team")
-            .replace(/\bhelp desk teams\b/g, "help desk team")
-            .replace(/\bit teams\b/g, "it team")
-            .replace(/\bhr teams\b/g, "hr team");
-
-          // Skip very generic terms that aren't meaningful stakeholders
-          if (
-            s !== "person" &&
-            s !== "people" &&
-            s !== "personnel" &&
-            s.length > 2
-          ) {
-            stakeholders.add(s);
-          }
-        });
-      }
-    }
-
-    return Array.from(stakeholders);
-  }
-
-  /**
-   * Extract technologies from content
-   */
-  private extractTechnologies(content: string): string[] {
-    const techPatterns = [
-      /\b(?:javascript|typescript|python|java|go|rust|cpp|c\+\+|c#)\b/gi,
-      /\b(?:react|vue|angular|svelte|next\.js|nuxt)\b/gi,
-      /\b(?:node\.js|express|fastify|django|flask|spring)\b/gi,
-      /\b(?:postgresql|mysql|mongodb|redis|elasticsearch)\b/gi,
-      /\b(?:docker|kubernetes|aws|gcp|azure)\b/gi,
-      /\b(?:rest|grpc|websocket)\b/gi,
-    ];
-
-    const technologies = new Set<string>();
-
-    // Normalize content for certain aliases before matching
-    const normalizedContent = content.replace(/\bC\+\+\b/g, "cpp");
-    if (/c\+\+/i.test(content)) {
-      technologies.add("cpp");
-    }
-    for (const pattern of techPatterns) {
-      const matches = normalizedContent.match(pattern);
-      if (matches) {
-        matches.forEach((match) => {
-          let m = match.toLowerCase().trim();
-          if (m === "c++") m = "cpp";
-          technologies.add(m);
-        });
-      }
-    }
-
-    return Array.from(technologies);
-  }
 
   /**
    * Infer document type based on content and title
@@ -1024,19 +809,19 @@ export class DocumentationParser {
 
       // Check if domain already exists
       const existingDomain = await this.kgService.getEntity(domainId);
-      if (!existingDomain) {
-        const domain: BusinessDomain = {
-          id: domainId,
-          type: "businessDomain",
-          name: domainName,
-          description: `Business domain extracted from documentation: ${parsedDoc.title}`,
-          criticality: this.inferDomainCriticality(domainName),
-          stakeholders: parsedDoc.stakeholders,
-          keyProcesses: [], // Could be extracted from content
-          extractedFrom: [parsedDoc.title],
-        };
+      const domain: BusinessDomain = {
+        id: domainId,
+        type: "businessDomain",
+        name: domainName,
+        description: `Business domain extracted from documentation: ${parsedDoc.title}`,
+        criticality: this.inferDomainCriticality(domainName),
+        stakeholders: parsedDoc.stakeholders,
+        keyProcesses: [], // Could be extracted from content
+        extractedFrom: [parsedDoc.title],
+      };
 
-        await this.kgService.createEntity(domain);
+      await this.kgService.createEntity(domain);
+      if (!existingDomain) {
         newDomainsCount++;
       }
 

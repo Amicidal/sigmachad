@@ -1051,6 +1051,7 @@ setInterval(async () => {
 - Queue depth > 1000 items
 - Sync latency > 30 seconds
 - Vector embedding failures
+- Unresolved synchronization alerts should persist across retention cycles; cleanup routines may only purge resolved entries older than the retention window.
 
 ### Recovery Mechanisms
 

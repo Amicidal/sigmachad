@@ -1,3 +1,4 @@
+This document is stale and has yet to be updated. It may or may not reflect codebase state.
 # Memento - AI Coding Assistant with Knowledge Graph
 
 Memento is an AI-first coding assistant that provides comprehensive codebase awareness through a knowledge graph system. It enables AI agents to have full context of code changes and architectural decisions, preventing context drift and ensuring code quality.
@@ -344,3 +345,4 @@ MIT License - see LICENSE file for details.
 ---
 
 For more detailed documentation, see the [docs](./docs/) directory.
+

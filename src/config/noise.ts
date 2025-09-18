@@ -35,7 +35,7 @@ export const noiseConfig = {
   // AST heuristics
   AST_MIN_NAME_LENGTH: intFromEnv('AST_MIN_NAME_LENGTH', 3, 1, 32),
   AST_STOPLIST_EXTRA: new Set(listFromEnv('AST_STOPLIST_EXTRA').map((s) => s.toLowerCase())),
-  MIN_INFERRED_CONFIDENCE: floatFromEnv('MIN_INFERRED_CONFIDENCE', 0.5, 0, 1),
+  MIN_INFERRED_CONFIDENCE: floatFromEnv('MIN_INFERRED_CONFIDENCE', 0.4, 0, 1),
   AST_CONF_EXTERNAL: floatFromEnv('AST_CONF_EXTERNAL', 0.4, 0, 1),
   AST_CONF_FILE: floatFromEnv('AST_CONF_FILE', 0.6, 0, 1),
   AST_CONF_CONCRETE: floatFromEnv('AST_CONF_CONCRETE', 0.9, 0, 1),

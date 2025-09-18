@@ -7,90 +7,150 @@ import { FastifyInstance } from "fastify";
 import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
 import { DatabaseService } from "../../services/DatabaseService.js";
 import { TestEngine } from "../../services/TestEngine.js";
+import { TestPlanningService, SpecNotFoundError, TestPlanningValidationError } from "../../services/TestPlanningService.js";
+import { RelationshipType } from "../../models/relationships.js";
+import type { TestPerformanceMetrics } from "../../models/entities.js";
+import type {
+  TestPlanRequest,
+  TestPlanResponse,
+  TestExecutionResult,
+} from "../../models/types.js";
 
-interface TestPlanRequest {
-  specId: string;
-  testTypes?: ("unit" | "integration" | "e2e")[];
-  coverage?: {
-    minLines?: number;
-    minBranches?: number;
-    minFunctions?: number;
-  };
-  includePerformanceTests?: boolean;
-  includeSecurityTests?: boolean;
-}
+const createEmptyPerformanceMetrics = (): TestPerformanceMetrics => ({
+  averageExecutionTime: 0,
+  p95ExecutionTime: 0,
+  successRate: 0,
+  trend: "stable",
+  benchmarkComparisons: [],
+  historicalData: [],
+});
 
-interface TestPlanResponse {
-  testPlan: {
-    unitTests: {
-      name: string;
-      description: string;
-      testCode: string;
-      estimatedCoverage: {
-        lines: number;
-        branches: number;
-        functions: number;
-        statements: number;
-      };
-    }[];
-    integrationTests: {
-      name: string;
-      description: string;
-      testCode: string;
-      estimatedCoverage: {
-        lines: number;
-        branches: number;
-        functions: number;
-        statements: number;
-      };
-    }[];
-    e2eTests: {
-      name: string;
-      description: string;
-      testCode: string;
-      estimatedCoverage: {
-        lines: number;
-        branches: number;
-        functions: number;
-        statements: number;
-      };
-    }[];
-    performanceTests: {
-      name: string;
-      description: string;
-      testCode: string;
-      estimatedCoverage: {
-        lines: number;
-        branches: number;
-        functions: number;
-        statements: number;
-      };
-    }[];
-  };
-  estimatedCoverage: any;
-  changedFiles: string[];
-}
+const aggregatePerformanceMetrics = (
+  metrics: TestPerformanceMetrics[]
+): TestPerformanceMetrics => {
+  if (metrics.length === 0) {
+    return createEmptyPerformanceMetrics();
+  }
 
-interface TestExecutionResult {
-  testId: string;
-  testSuite: string;
-  testName: string;
-  status: "passed" | "failed" | "skipped" | "error";
-  duration: number;
-  errorMessage?: string;
-  stackTrace?: string;
-  coverage?: {
-    lines: number;
-    branches: number;
-    functions: number;
-    statements: number;
+  const total = metrics.length;
+  const sum = metrics.reduce(
+    (acc, item) => {
+      acc.averageExecutionTime += item.averageExecutionTime ?? 0;
+      acc.p95ExecutionTime += item.p95ExecutionTime ?? 0;
+      acc.successRate += item.successRate ?? 0;
+      if (item.trend === "degrading") {
+        acc.trend.degrading += 1;
+      } else if (item.trend === "improving") {
+        acc.trend.improving += 1;
+      } else {
+        acc.trend.stable += 1;
+      }
+      if (Array.isArray(item.benchmarkComparisons)) {
+        acc.benchmarkComparisons.push(...item.benchmarkComparisons);
+      }
+      if (Array.isArray(item.historicalData)) {
+        acc.historicalData.push(...item.historicalData);
+      }
+      return acc;
+    },
+    {
+      averageExecutionTime: 0,
+      p95ExecutionTime: 0,
+      successRate: 0,
+      trend: { improving: 0, stable: 0, degrading: 0 },
+      benchmarkComparisons: [] as TestPerformanceMetrics["benchmarkComparisons"],
+      historicalData: [] as TestPerformanceMetrics["historicalData"],
+    }
+  );
+
+  const dominantTrend = sum.trend.degrading
+    ? "degrading"
+    : sum.trend.improving
+    ? "improving"
+    : "stable";
+
+  // Limit historical data to the most recent entries to avoid large payloads
+  const historicalData = sum.historicalData
+    .map((entry) => ({
+      ...entry,
+      timestamp:
+        entry.timestamp instanceof Date
+          ? entry.timestamp
+          : new Date(entry.timestamp),
+    }))
+    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+    .slice(-100);
+
+  return {
+    averageExecutionTime: sum.averageExecutionTime / total,
+    p95ExecutionTime: sum.p95ExecutionTime / total,
+    successRate: sum.successRate / total,
+    trend: dominantTrend,
+    benchmarkComparisons: sum.benchmarkComparisons,
+    historicalData,
   };
-  performance?: {
-    memoryUsage?: number;
-    cpuUsage?: number;
-    networkRequests?: number;
+};
+
+const extractSearchTokens = (
+  input: string | string[] | undefined
+): string[] => {
+  if (!input) {
+    return [];
+  }
+  const text = Array.isArray(input) ? input.join(" ") : input;
+  const matches = text.match(/[A-Za-z][A-Za-z0-9_-]{4,}/g) || [];
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+  for (const match of matches) {
+    const token = match.toLowerCase();
+    if (token.length < 6) continue;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    tokens.push(token);
+  }
+  return tokens;
+};
+
+const generateTokenVariants = (token: string): string[] => {
+  const variants = new Set<string>();
+  const base = token.toLowerCase();
+  if (base.length >= 6) {
+    variants.add(base);
+  }
+
+  const addStem = (stem: string) => {
+    if (stem.length >= 5) {
+      variants.add(stem);
+    }
   };
-}
+
+  if (base.endsWith("ies") && base.length > 3) {
+    addStem(base.slice(0, -3) + "y");
+  }
+  if (base.endsWith("ing") && base.length > 5) {
+    addStem(base.slice(0, -3));
+  }
+  if (base.endsWith("ed") && base.length > 4) {
+    addStem(base.slice(0, -2));
+  }
+  if (base.endsWith("s") && base.length > 5) {
+    addStem(base.slice(0, -1));
+  }
+  if (base.endsWith("ency") && base.length > 6) {
+    addStem(base.slice(0, -4));
+  }
+  if (base.endsWith("ance") && base.length > 6) {
+    addStem(base.slice(0, -4));
+  }
+  if ((base.endsWith("ent") || base.endsWith("ant")) && base.length > 5) {
+    addStem(base.slice(0, -3));
+  }
+  if (base.endsWith("tion") && base.length > 6) {
+    addStem(base.slice(0, -4));
+  }
+
+  return Array.from(variants);
+};
 
 interface TestCoverage {
   entityId: string;
@@ -133,6 +193,8 @@ export async function registerTestRoutes(
   dbService: DatabaseService,
   testEngine: TestEngine
 ): Promise<void> {
+  const testPlanningService = new TestPlanningService(kgService);
+
   // POST /api/tests/plan-and-generate - Plan and generate tests
   app.post(
     "/tests/plan-and-generate",
@@ -163,129 +225,38 @@ export async function registerTestRoutes(
     },
     async (request: any, reply: any) => {
       try {
-        const params: TestPlanRequest = request.body as TestPlanRequest;
-
-        // Validate required parameters
-        if (!params.specId || params.specId.trim() === "") {
-          return reply.status(400).send({
-            success: false,
-            error: {
-              code: "INVALID_REQUEST",
-              message: "Specification ID is required and cannot be empty",
-            },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
-          });
-        }
-
-        // Get the specification from knowledge graph
-        const spec = await kgService.getEntity(params.specId);
-        if (!spec || spec.type !== "spec") {
-          return reply.status(404).send({
-            success: false,
-            error: {
-              code: "SPEC_NOT_FOUND",
-              message: "Specification not found or invalid",
-            },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
-          });
-        }
-
-        // Generate test plan based on specification
-        const testPlan: TestPlanResponse["testPlan"] = {
-          unitTests: [],
-          integrationTests: [],
-          e2eTests: [],
-          performanceTests: [],
-        };
-
-        // Generate unit tests for each acceptance criterion
-        if (params.testTypes?.includes("unit") || !params.testTypes) {
-          for (const criterion of spec.acceptanceCriteria) {
-            testPlan.unitTests.push({
-              name: `Unit test for: ${criterion.substring(0, 50)}...`,
-              description: `Test that ${criterion}`,
-              testCode: `describe('${spec.title}', () => {\n  it('should ${criterion}', () => {\n    // TODO: Implement test\n  });\n});`,
-              estimatedCoverage: {
-                lines: 80,
-                branches: 75,
-                functions: 85,
-                statements: 80,
-              },
-            });
-          }
-        }
-
-        // Generate integration tests
-        if (params.testTypes?.includes("integration") || !params.testTypes) {
-          testPlan.integrationTests.push({
-            name: `Integration test for ${spec.title}`,
-            description: `Test integration of components for ${spec.title}`,
-            testCode: `describe('${spec.title} Integration', () => {\n  it('should integrate properly', () => {\n    // TODO: Implement integration test\n  });\n});`,
-            estimatedCoverage: {
-              lines: 60,
-              branches: 55,
-              functions: 65,
-              statements: 60,
-            },
-          });
-        }
-
-        // Generate E2E tests
-        if (params.testTypes?.includes("e2e") || !params.testTypes) {
-          testPlan.e2eTests.push({
-            name: `E2E test for ${spec.title}`,
-            description: `End-to-end test for ${spec.title}`,
-            testCode: `describe('${spec.title} E2E', () => {\n  it('should work end-to-end', () => {\n    // TODO: Implement E2E test\n  });\n});`,
-            estimatedCoverage: {
-              lines: 40,
-              branches: 35,
-              functions: 45,
-              statements: 40,
-            },
-          });
-        }
-
-        // Generate performance tests if requested
-        if (params.includePerformanceTests) {
-          testPlan.performanceTests.push({
-            name: `Performance test for ${spec.title}`,
-            description: `Performance test to ensure ${spec.title} meets requirements`,
-            testCode: `describe('${spec.title} Performance', () => {\n  it('should meet performance requirements', () => {\n    // TODO: Implement performance test\n  });\n});`,
-            estimatedCoverage: {
-              lines: 30,
-              branches: 25,
-              functions: 35,
-              statements: 30,
-            },
-          });
-        }
-
-        // Calculate estimated coverage
-        const totalTests =
-          testPlan.unitTests.length +
-          testPlan.integrationTests.length +
-          testPlan.e2eTests.length +
-          testPlan.performanceTests.length;
-        const estimatedCoverage = {
-          lines: Math.min(95, 70 + totalTests * 5),
-          branches: Math.max(0, Math.min(95, 65 + totalTests * 4)),
-          functions: Math.min(95, 75 + totalTests * 4),
-          statements: Math.min(95, 70 + totalTests * 5),
-        };
-
-        const response: TestPlanResponse = {
-          testPlan,
-          estimatedCoverage,
-          changedFiles: [], // Would need to track changed files during development
-        };
+        const params = request.body as TestPlanRequest;
+        const planningResult = await testPlanningService.planTests(params);
 
         reply.send({
           success: true,
-          data: response,
+          data: planningResult satisfies TestPlanResponse,
         });
       } catch (error) {
+        if (error instanceof TestPlanningValidationError) {
+          return reply.status(400).send({
+            success: false,
+            error: {
+              code: error.code,
+              message: error.message,
+            },
+            requestId: (request as any).id,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        if (error instanceof SpecNotFoundError) {
+          return reply.status(404).send({
+            success: false,
+            error: {
+              code: error.code,
+              message: "Specification not found",
+            },
+            requestId: (request as any).id,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
         console.error("Test planning error:", error);
         reply.status(500).send({
           success: false,
@@ -513,7 +484,6 @@ export async function registerTestRoutes(
       try {
         const { entityId } = request.params as { entityId: string };
 
-        // Return 404 if the entity doesn't exist in the KG
         const entity = await kgService.getEntity(entityId);
         if (!entity) {
           return reply
@@ -524,9 +494,165 @@ export async function registerTestRoutes(
             });
         }
 
-        const metrics = await testEngine.getPerformanceMetrics(entityId);
+        const entityType = (entity as any)?.type;
+        if (entityType === "test") {
+          let metrics = (entity as any)?.performanceMetrics as
+            | TestPerformanceMetrics
+            | undefined;
+          if (!metrics) {
+            try {
+              metrics = await testEngine.getPerformanceMetrics(entityId);
+            } catch (error) {
+              metrics = undefined;
+            }
+          }
 
-        reply.send({ success: true, data: metrics });
+          reply.send({
+            success: true,
+            data: metrics ?? createEmptyPerformanceMetrics(),
+          });
+          return;
+        }
+
+        const relatedEdges = await kgService.getRelationships({
+          toEntityId: entityId,
+          type: [RelationshipType.VALIDATES, RelationshipType.TESTS],
+          limit: 50,
+        });
+
+        const relatedTestIds = new Set<string>();
+        for (const edge of relatedEdges || []) {
+          if (edge?.fromEntityId) {
+            relatedTestIds.add(edge.fromEntityId);
+          }
+        }
+
+        if (relatedTestIds.size === 0) {
+          const specEdges = await kgService.getRelationships({
+            fromEntityId: entityId,
+            type: [RelationshipType.REQUIRES, RelationshipType.IMPACTS],
+            limit: 50,
+          });
+
+          const candidateTargets = new Set<string>();
+          for (const edge of specEdges || []) {
+            if (edge?.toEntityId) {
+              candidateTargets.add(edge.toEntityId);
+            }
+          }
+
+          if (candidateTargets.size > 0) {
+            const downstreamEdges = await Promise.all(
+              Array.from(candidateTargets).map((targetId) =>
+                kgService
+                  .getRelationships({
+                    toEntityId: targetId,
+                    type: RelationshipType.TESTS,
+                    limit: 50,
+                  })
+                  .catch(() => [])
+              )
+            );
+
+            for (const edgeGroup of downstreamEdges) {
+              for (const edge of edgeGroup || []) {
+                if (edge?.fromEntityId) {
+                  relatedTestIds.add(edge.fromEntityId);
+                }
+              }
+            }
+          }
+
+          if (relatedTestIds.size === 0) {
+            const acceptanceTokens = extractSearchTokens(
+              (entity as any)?.acceptanceCriteria
+            );
+            const variantSet = new Set<string>();
+            for (const token of acceptanceTokens) {
+              for (const variant of generateTokenVariants(token)) {
+                variantSet.add(variant);
+              }
+            }
+
+            if (variantSet.size === 0) {
+              const fallbackTokens = extractSearchTokens(
+                (entity as any)?.description || (entity as any)?.title
+              );
+              for (const token of fallbackTokens) {
+                for (const variant of generateTokenVariants(token)) {
+                  variantSet.add(variant);
+                }
+              }
+            }
+
+            const tokenList = Array.from(variantSet).slice(0, 5);
+            for (const token of tokenList) {
+              try {
+                const results = await kgService.search({
+                  query: token,
+                  entityTypes: ["test"],
+                  searchType: "structural",
+                  limit: 5,
+                });
+                for (const result of results) {
+                  if ((result as any)?.type === "test" && result.id) {
+                    relatedTestIds.add(result.id);
+                  }
+                }
+              } catch (error) {
+                // Ignore search failures and continue with other tokens
+              }
+            }
+
+            if (relatedTestIds.size === 0) {
+              return reply.status(404).send({
+                success: false,
+                error: {
+                  code: "METRICS_NOT_FOUND",
+                  message: "No performance metrics recorded for this entity",
+                },
+              });
+            }
+          }
+        }
+
+        const metricsResults = await Promise.all(
+          Array.from(relatedTestIds).map(async (testId) => {
+            try {
+              const relatedEntity = await kgService.getEntity(testId);
+              if (!relatedEntity || (relatedEntity as any).type !== "test") {
+                return null;
+              }
+              const existing = (relatedEntity as any)
+                .performanceMetrics as TestPerformanceMetrics | undefined;
+              if (existing) {
+                return existing;
+              }
+              return await testEngine.getPerformanceMetrics(testId).catch(() => null);
+            } catch (error) {
+              return null;
+            }
+          })
+        );
+
+        const aggregatedMetrics = metricsResults.filter(
+          (item): item is TestPerformanceMetrics => item !== null && item !== undefined
+        );
+
+        if (aggregatedMetrics.length === 0) {
+          return reply.status(404).send({
+            success: false,
+            error: {
+              code: "METRICS_NOT_FOUND",
+              message: "No performance metrics recorded for this entity",
+            },
+          });
+        }
+
+        reply.send({
+          success: true,
+          data: aggregatePerformanceMetrics(aggregatedMetrics),
+        });
       } catch (error) {
         reply.status(500).send({
           success: false,
@@ -601,12 +727,8 @@ export async function registerTestRoutes(
       try {
         const { entityId } = request.params as { entityId: string };
 
-        // Get flaky test analysis for the specific entity from TestEngine
-        // Prefer server-side filtering when supported
-        // Analyze using existing results API: none available here, so return empty analysis list
-        const analyses = await testEngine.analyzeFlakyTests([] as any);
+        const analyses = await testEngine.getFlakyTestAnalysis(entityId);
 
-        // Find analysis for specific entity
         const analysis = analyses.find((a) => a.testId === entityId);
 
         if (!analysis) {

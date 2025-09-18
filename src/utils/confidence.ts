@@ -16,7 +16,14 @@ export interface InferredEdgeFeatures {
  * Defaults are chosen to match prior constants so existing tests remain stable.
  */
 export function scoreInferredEdge(features: InferredEdgeFeatures): number {
-  const { toId, fromFileRel, usedTypeChecker, isExported, nameLength, importDepth } = features;
+  const {
+    toId,
+    fromFileRel,
+    usedTypeChecker,
+    isExported,
+    nameLength,
+    importDepth,
+  } = features;
 
   // Base score by resolution bucket
   let score: number;
@@ -53,13 +60,17 @@ export function scoreInferredEdge(features: InferredEdgeFeatures): number {
     }
 
     // Name length step (above min length)
-    if (typeof nameLength === 'number' && Number.isFinite(nameLength)) {
+    if (typeof nameLength === "number" && Number.isFinite(nameLength)) {
       const over = Math.max(0, nameLength - 3);
       score += Math.min(10, over) * noiseConfig.AST_STEP_NAME_LEN;
     }
 
     // Import depth penalty (if available)
-    if (typeof importDepth === 'number' && Number.isFinite(importDepth) && importDepth > 0) {
+    if (
+      typeof importDepth === "number" &&
+      Number.isFinite(importDepth) &&
+      importDepth > 0
+    ) {
       score -= importDepth * noiseConfig.AST_PENALTY_IMPORT_DEPTH;
     }
   } catch {
@@ -68,12 +79,18 @@ export function scoreInferredEdge(features: InferredEdgeFeatures): number {
 
   // Phase 3: lightweight calibration via env overrides
   try {
-    const mult = parseFloat(process.env.AST_CONF_MULTIPLIER || '1');
+    const mult = parseFloat(process.env.AST_CONF_MULTIPLIER || "1");
     if (Number.isFinite(mult)) score *= mult;
-    const minClamp = process.env.AST_CONF_MIN ? parseFloat(process.env.AST_CONF_MIN) : undefined;
-    const maxClamp = process.env.AST_CONF_MAX ? parseFloat(process.env.AST_CONF_MAX) : undefined;
-    if (Number.isFinite(minClamp as number)) score = Math.max(score, minClamp as number);
-    if (Number.isFinite(maxClamp as number)) score = Math.min(score, maxClamp as number);
+    const minClamp = process.env.AST_CONF_MIN
+      ? parseFloat(process.env.AST_CONF_MIN)
+      : undefined;
+    const maxClamp = process.env.AST_CONF_MAX
+      ? parseFloat(process.env.AST_CONF_MAX)
+      : undefined;
+    if (Number.isFinite(minClamp as number))
+      score = Math.max(score, minClamp as number);
+    if (Number.isFinite(maxClamp as number))
+      score = Math.min(score, maxClamp as number);
   } catch {}
 
   // Clamp
@@ -82,5 +99,7 @@ export function scoreInferredEdge(features: InferredEdgeFeatures): number {
 }
 
 function normalizePath(p: string): string {
-  return String(p || "").replace(/\\/g, "/").replace(/\/+/g, "/");
+  return String(p || "")
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/");
 }

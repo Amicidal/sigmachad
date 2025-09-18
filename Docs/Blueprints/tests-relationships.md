@@ -8,6 +8,13 @@ Testing edges (`TESTS`, `VALIDATES`) connect automated tests to code and specs s
 - Canonical IDs are purely `from|to|type`, so multiple suites targeting the same implementation overwrite each other, erasing granularity.
 - Query helpers (`getRelationships`) expose only code-edge-centric filters, preventing clients from retrieving tests by type, suite, or coverage thresholds.
 - Temporal helpers are stubs—no preserved history of when a test started or stopped covering an entity; flaky detection pipelines have nothing to build on.
+- Integration suites (`tests/integration/api/*.integration.test.ts`) still depend on real FalkorDB/Qdrant/PostgreSQL instances via `tests/test-utils/database-helpers.ts`. In sandboxed or containerized runs the bootstrap fails with `EPERM connect ...:6380`, so there is no in-memory test double to validate these relationships offline.
+- Unit tests referencing legacy paths/response shapes (e.g., `tests/unit/api/routes/impact.test.ts:95-165`) will keep failing until they are updated to reflect the graph-backed APIs described here.
+- Integration runs of `TestEngine` show core persistence gaps: bulk result ingestion fails with `null value in column "test_id"`, large-result-set scenarios short-circuit before asserting, and historical trend calculations don't emit any data. The current suite (`Test Result Recording > should record test suite results to database`, `Coverage Analysis > should aggregate coverage from multiple tests`, `File-based Test Processing > should parse and record test results from file`) returns `null` entities or zero assertions. The engine needs deterministic test ID assignment and fixture seeding before historical/test-impact edges can be relied upon.
+- Flaky analysis persistence still expects the trimmed columns (`failureCount`, `lastFailure`, `failurePatterns`). `TestEngine` now emits richer analytics (score, rates, recommendations) and forwards them verbatim, so PostgreSQL writers must be updated to denormalise or map the extended schema instead of dropping data.
+- `TestResultParser` still extracts suite metadata via regex heuristics and misses canonical names for JUnit inputs; align implementation with XML parsing so suite identifiers persist alongside per-test results.
+- MCP integration currently leaks Fastify validation errors (`code: "FST_ERR_VALIDATION"`, string `message`s) instead of JSON-RPC-spec error objects. Invalid/batch requests and notification flows therefore fail the MCP compliance suite, which expects numeric `code` + `message` pairs and `200` responses for notifications. We need a transport adapter that wraps Fastify validation failures (and tool errors) in proper MCP error envelopes before these workflows can pass.
+- Running the MCP protocol/compliance integration suite still assumes a local FalkorDB/Redis instance is listening on `redis://localhost:6380`. When the service is absent the health check in `setupTestDatabase` fails and Vitest skips the entire suite. Document the dependency in the test harness and provide either a lightweight stub or container recipe so the CI/DEV environments can bring FalkorDB up before exercising MCP tests.
 
 ## 3. Desired Capabilities
 1. Persist test metadata (type, suite, run identifiers, coverage percentages, confidence) both as scalar properties and in structured metadata JSON.
@@ -58,6 +65,7 @@ Testing edges (`TESTS`, `VALIDATES`) connect automated tests to code and specs s
    - `getTestsForEntity(entityId, { includeSpecs?: boolean, limit?: number })` returning structured objects with test metadata.
    - `getCoverageSummary(entityId)` aggregating coverage values and run counts.
    - `getTestsBySuite(suiteId)` for dashboards.
+   - `getFlakyTestAnalysis(entityId)` now retrieves execution history from PostgreSQL, scores flakiness via `TestEngine`, and powers `/api/tests/flaky-analysis/:entityId` responses.
 3. **API Documentation**: Update `Docs/MementoAPIDesign.md` to describe parameters and example payloads.
 4. **Caching**: Evaluate caching of frequent queries (e.g., impacted tests) with invalidation triggered by new edges.
 

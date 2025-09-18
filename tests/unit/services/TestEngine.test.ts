@@ -39,6 +39,7 @@ const mockKnowledgeGraphService = {
 const mockDatabaseService = {
   storeTestSuiteResult: vi.fn().mockResolvedValue(undefined),
   storeFlakyTestAnalyses: vi.fn().mockResolvedValue(undefined),
+  getTestExecutionHistory: vi.fn().mockResolvedValue([]),
 };
 
 const mockTestResultParser = {
@@ -79,9 +80,11 @@ const createMockTestResult = (overrides: Partial<TestResult> = {}): TestResult =
 
 const createMockTestSuiteResult = (overrides: Partial<TestSuiteResult> = {}): TestSuiteResult => ({
   suiteName: 'MyTestSuite',
+  name: 'MyTestSuite', // Add both suiteName and name for compatibility
   timestamp: new Date(),
   results: [createMockTestResult()],
   framework: 'jest',
+  status: 'passed', // Add status field
   totalTests: 1,
   passedTests: 1,
   failedTests: 0,
@@ -94,7 +97,7 @@ const createMockTestSuiteResult = (overrides: Partial<TestSuiteResult> = {}): Te
     statements: 85
   },
   ...overrides
-});
+} as any);
 
 const createMockTestEntity = (overrides: Partial<Test> = {}): Test => ({
   id: 'test-123',
@@ -397,7 +400,7 @@ describe('TestEngine', () => {
       const analyses = await testEngine.analyzeFlakyTests([]);
 
       expect(analyses).toEqual([]);
-      expect(mockDbService.storeFlakyTestAnalyses).toHaveBeenCalledWith([]);
+      expect(mockDbService.storeFlakyTestAnalyses).not.toHaveBeenCalled();
     });
 
     it('should identify highly flaky tests', async () => {
@@ -479,6 +482,97 @@ describe('TestEngine', () => {
 
       // Verify storage was attempted
       expect(mockDbService.storeFlakyTestAnalyses).toHaveBeenCalled();
+    });
+  });
+
+  describe('getFlakyTestAnalysis', () => {
+    const entityId = 'test-entity-123';
+
+    beforeEach(() => {
+      mockDatabaseService.getTestExecutionHistory.mockResolvedValue([]);
+    });
+
+    it('should retrieve execution history and analyze without persisting', async () => {
+      const historyRows = [
+        {
+          test_id: entityId,
+          test_name: 'should handle async race',
+          status: 'passed',
+          duration: 120,
+          suite_name: 'AsyncSuite',
+          suite_timestamp: '2024-03-21T10:00:00Z',
+        },
+        {
+          test_id: entityId,
+          test_name: 'should handle async race',
+          status: 'failed',
+          duration: 150,
+          suite_name: 'AsyncSuite',
+          suite_timestamp: '2024-03-22T10:00:00Z',
+          error_message: 'Timeout',
+        },
+      ];
+
+      const analysisResult: FlakyTestAnalysis[] = [
+        {
+          testId: entityId,
+          testName: 'should handle async race',
+          flakyScore: 0.6,
+          totalRuns: 2,
+          failureRate: 0.5,
+          successRate: 0.5,
+          recentFailures: 1,
+          patterns: { timeOfDay: 'morning' },
+          recommendations: ['Investigate intermittent timeout'],
+        },
+      ];
+
+      mockDatabaseService.getTestExecutionHistory.mockResolvedValue(historyRows);
+
+      const analyzeSpy = vi
+        .spyOn(testEngine, 'analyzeFlakyTests')
+        .mockResolvedValue(analysisResult);
+
+      const result = await testEngine.getFlakyTestAnalysis(entityId);
+
+      expect(mockDatabaseService.getTestExecutionHistory).toHaveBeenCalledWith(
+        entityId,
+        200
+      );
+      expect(analyzeSpy).toHaveBeenCalledTimes(1);
+      const [normalizedResults, options] = analyzeSpy.mock.calls[0];
+      expect(options).toEqual({ persist: false });
+      expect(normalizedResults).toHaveLength(2);
+      expect(normalizedResults[0]).toEqual(
+        expect.objectContaining({
+          testId: entityId,
+          testSuite: 'AsyncSuite',
+          testName: 'should handle async race',
+          status: 'passed',
+        })
+      );
+      expect(result).toEqual(analysisResult);
+
+      analyzeSpy.mockRestore();
+    });
+
+    it('should return empty array when there is no execution history', async () => {
+      mockDatabaseService.getTestExecutionHistory.mockResolvedValue([]);
+
+      const analyzeSpy = vi.spyOn(testEngine, 'analyzeFlakyTests');
+
+      const result = await testEngine.getFlakyTestAnalysis(entityId);
+
+      expect(result).toEqual([]);
+      expect(analyzeSpy).not.toHaveBeenCalled();
+
+      analyzeSpy.mockRestore();
+    });
+
+    it('should throw an error when entityId is missing', async () => {
+      await expect(testEngine.getFlakyTestAnalysis(''))
+        .rejects
+        .toThrow('entityId is required to retrieve flaky analysis');
     });
   });
 

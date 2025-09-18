@@ -18,6 +18,24 @@ export interface CacheConfig {
   strategy: 'LRU' | 'LFU' | 'FIFO';
 }
 
+export interface FeatureFlags {
+  enableAI: boolean;
+  betaAccess: boolean;
+  maintenanceMode?: boolean;
+  experimentalPipelines?: string[];
+}
+
+export interface AppConfig {
+  environment: 'development' | 'staging' | 'production';
+  database: DatabaseConfig;
+  cache: CacheConfig;
+  logging: {
+    level: LogLevel;
+    format?: 'json' | 'text';
+  };
+  features: FeatureFlags;
+}
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export enum HttpStatus {

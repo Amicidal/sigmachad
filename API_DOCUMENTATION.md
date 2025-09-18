@@ -1,995 +1,633 @@
-# Memento API Documentation
+# API Documentation
 
-## Overview
+## Impact Analysis
 
-Memento provides a comprehensive REST API for code analysis, knowledge graph operations, and system management. The API is organized around the following main areas:
+### POST `/api/impact/analyze`
+Performs cascading impact analysis for one or more code or spec entities. The endpoint wraps the knowledge graph helpers so REST, MCP, and tRPC clients receive the same payload structure.
 
-- **Graph Operations**: Search, query, and analyze the knowledge graph
-- **Code Analysis**: Validate, analyze, and refactor code
-- **Administration**: Monitor system health and manage synchronization
-- **Real-time Updates**: WebSocket support for live updates
+**Request Body**
 
-## Base URL
-```
-http://localhost:3000/api/v1
-```
-
-## Authentication
-- Development: no authentication required by default.
-- Production (optional, recommended): set `ADMIN_API_TOKEN` env var to enforce a simple API key guard on `/api/v1/admin/*` and `/api/v1/history/*` endpoints.
-  - Provide key via header `x-api-key: <token>` or `Authorization: Bearer <token>`.
-
-## Rate Limiting
-The API implements rate limiting with the following defaults:
-- **Search endpoints**: 100 requests per minute
-- **Admin endpoints**: 50 requests per minute
-- **General endpoints**: 1000 requests per hour
-
-Rate limit headers are included in responses:
-- `X-RateLimit-Limit`: Maximum requests allowed
-- `X-RateLimit-Remaining`: Remaining requests in current window
-- `X-RateLimit-Reset`: Time when the rate limit resets
-
-## Error Handling
-
-All endpoints return errors in a consistent format:
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "Human-readable error message",
-    "details": "Additional error details"
-  }
-}
-```
-
-## Graph Operations API
-
-### Search Entities
-Search across the knowledge graph using semantic or structural queries.
-
-```http
-POST /api/v1/graph/search
-```
-
-**Request Body:**
-```json
-{
-  "query": "user authentication",
-  "entityTypes": ["function", "class"],
-  "searchType": "semantic",
-  "filters": {
-    "language": "typescript",
-    "path": "src/auth",
-    "checkpointId": "chk_abc123"
-  },
-  "includeRelated": true,
-  "limit": 20
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "entities": [...],
-    "relationships": [...],
-    "clusters": [],
-    "relevanceScore": 0.85
-  }
-}
-```
-
-Notes:
-- When `filters.checkpointId` is provided, semantic search applies a Qdrant `filter.must` on `checkpointId`. Structural search also restricts results to checkpoint members. If the checkpoint has no embedded vectors (e.g., `HISTORY_EMBED_VERSIONS=false`), results come from the structural filter only.
-
-### List Entities
-Retrieve entities with filtering and pagination.
-
-```http
-GET /api/v1/graph/entities?type=function&language=typescript&limit=50&offset=0
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": [...],
-  "pagination": {
-    "page": 1,
-    "pageSize": 50,
-    "total": 150,
-    "hasMore": true
-  }
-}
-```
-
-### Get Entity Examples
-Retrieve usage examples and tests for a specific entity.
-
-```http
-GET /api/v1/graph/examples/{entityId}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "entityId": "user-auth-123",
-    "signature": "function authenticateUser(credentials)",
-    "usageExamples": [...],
-    "testExamples": [...],
-    "relatedPatterns": [...]
-  }
-}
-```
-
-### Analyze Dependencies
-Get dependency analysis for an entity.
-
-```http
-GET /api/v1/graph/dependencies/{entityId}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "entityId": "user-auth-123",
-    "directDependencies": [...],
-    "indirectDependencies": [...],
-    "reverseDependencies": [...],
-    "circularDependencies": [...]
-  }
-}
-```
-
-### List Relationships
-Retrieve relationships with filtering.
-
-```http
-GET /api/v1/graph/relationships?type=USES&limit=50
-```
-
-## Code Analysis API
-
-### Validate Code
-Run comprehensive code validation including TypeScript, ESLint, security, and architecture checks.
-
-```http
-POST /api/v1/code/validate
-```
-
-**Request Body:**
-```json
-{
-  "files": ["src/auth/user.ts", "src/auth/session.ts"],
-  "includeTypes": ["typescript", "eslint", "security"],
-  "failOnWarnings": false
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "overall": {
-      "passed": true,
-      "score": 92,
-      "duration": 1250
-    },
-    "typescript": {
-      "errors": 0,
-      "warnings": 3,
-      "issues": [...]
-    },
-    "eslint": {
-      "errors": 0,
-      "warnings": 2,
-      "issues": [...]
-    },
-    "security": {
-      "critical": 0,
-      "high": 1,
-      "medium": 2,
-      "low": 0,
-      "issues": [...]
-    },
-    "tests": {
-      "passed": 85,
-      "failed": 3,
-      "skipped": 2,
-      "coverage": {
-        "lines": 87.5,
-        "branches": 82.3,
-        "functions": 91.2,
-        "statements": 88.7
-      }
-    },
-    "architecture": {
-      "violations": 1,
-      "issues": [...]
-    }
-  }
-}
-```
-
-### Analyze Code
-Perform various types of code analysis.
-
-```http
-POST /api/v1/code/analyze
-```
-
-**Request Body:**
-```json
-{
-  "files": ["src/"],
-  "analysisType": "complexity",
-  "options": {}
-}
-```
-
-**Supported Analysis Types:**
-- `complexity`: Code complexity analysis
-- `patterns`: Code pattern detection
-- `duplicates`: Duplicate code detection
-- `dependencies`: Dependency analysis
-
-### Propose Code Changes
-Analyze proposed code changes and their impact.
-
-```http
-POST /api/v1/code/propose-diff
-```
-
-**Request Body:**
 ```json
 {
   "changes": [
     {
-      "file": "src/auth/user.ts",
-      "type": "modify",
-      "oldContent": "...",
-      "newContent": "...",
-      "lineStart": 10,
-      "lineEnd": 20
+      "entityId": "symbol:src/services/KnowledgeGraphService.ts#calculateImpact",
+      "changeType": "modify",
+      "signatureChange": true
     }
   ],
-  "description": "Add user authentication validation",
-  "relatedSpecId": "auth-spec-123"
+  "includeIndirect": true,
+  "maxDepth": 4
 }
 ```
 
-### Additional Code Utilities
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `changes[]` | array | ✅ | Each change describes the impacted entity and change metadata. |
+| `changes[].entityId` | string | ✅ | Graph entity identifier (file, symbol, spec, etc.). |
+| `changes[].changeType` | enum (`modify`, `delete`, `rename`) | ✅ | High-level change classification. |
+| `changes[].signatureChange` | boolean | ❌ | Flag significant interface shifts for severity scoring. |
+| `includeIndirect` | boolean | ❌ | When `false`, skips transitive traversal. Defaults to `true`. |
+| `maxDepth` | number | ❌ | Traversal depth (1-8). Defaults to `3`. |
 
-List and analyze code symbols and suggestions.
+**Response Body**
 
-```http
-GET /api/v1/code/symbols
-```
-
-Response:
-```json
-{ "success": true, "data": [] }
-```
-
-```http
-GET /api/v1/code/suggestions/{file}
-```
-
-Query Parameters:
-- `lineStart` (optional)
-- `lineEnd` (optional)
-- `types` (optional): ["performance", "security", "maintainability", "best-practices"]
-
-Response:
 ```json
 {
   "success": true,
   "data": {
-    "file": "src/path/to/file.ts",
-    "lineRange": { "start": 1, "end": 200 },
-    "suggestions": []
-  }
-}
-```
-
-```http
-POST /api/v1/code/refactor
-```
-
-Request Body:
-```json
-{
-  "files": ["src/a.ts", "src/b.ts"],
-  "refactorType": "extract-function",
-  "options": {}
-}
-```
-
-Response:
-```json
-{
-  "success": true,
-  "data": { "refactorType": "extract-function", "files": ["src/a.ts"], "suggestedRefactorings": [] }
-}
-```
-
-## Administration API
-
-### System Health
-Get comprehensive system health information.
-
-```http
-GET /api/v1/admin/admin-health
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "overall": "healthy",
-    "components": {
-      "graphDatabase": { "status": "healthy" },
-      "vectorDatabase": { "status": "healthy" },
-      "fileWatcher": { "status": "healthy" },
-      "apiServer": { "status": "healthy" }
+    "directImpact": [
+      {
+        "entities": [
+          {
+            "id": "symbol:src/routes/impact.ts#registerImpactRoutes",
+            "type": "symbol",
+            "name": "registerImpactRoutes",
+            "path": "src/routes/impact.ts"
+          }
+        ],
+        "severity": "high",
+        "reason": "1 entity depends on calculateImpact"
+      }
+    ],
+    "cascadingImpact": [
+      {
+        "level": 2,
+        "relationship": "CALLS",
+        "confidence": 0.7,
+        "entities": [
+          {
+            "id": "symbol:src/workflows/impact.ts#transitiveConsumer",
+            "type": "symbol",
+            "name": "transitiveConsumer"
+          }
+        ]
+      }
+    ],
+    "testImpact": {
+      "affectedTests": [
+        {
+          "id": "test:tests/unit/api/routes/impact.test.ts#validatesAnalysis",
+          "type": "test",
+          "path": "tests/unit/api/routes/impact.test.ts"
+        }
+      ],
+      "requiredUpdates": [
+        "Update test tests/unit/api/routes/impact.test.ts#validatesAnalysis to reflect calculateImpact"
+      ],
+      "coverageImpact": 85
     },
-    "metrics": {
-      "uptime": 3600,
-      "totalEntities": 15420,
-      "totalRelationships": 45680,
-      "syncLatency": 250,
-      "errorRate": 0.02
-    }
-  }
-}
-```
-
-### Synchronization Status
-Get current synchronization status and metrics.
-
-```http
-GET /api/v1/admin/sync-status
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "isActive": true,
-    "lastSync": "2024-01-15T10:30:00Z",
-    "queueDepth": 5,
-    "processingRate": 15.2,
-    "errors": {
-      "count": 2,
-      "recent": ["Failed to parse file src/utils/helpers.ts"]
+    "documentationImpact": {
+      "staleDocs": [
+        {
+          "docId": "doc:Docs/MementoAPIDesign.md",
+          "title": "Memento API Design",
+          "status": "deprecated",
+          "relationship": "DOCUMENTED_BY",
+          "stalenessScore": 0.8
+        }
+      ],
+      "missingDocs": [],
+      "requiredUpdates": [
+        "Refresh documentation Memento API Design to reflect calculateImpact"
+      ],
+      "freshnessPenalty": 1.8
     },
-    "performance": {
-      "syncLatency": 245,
-      "throughput": 15.2,
-      "successRate": 0.98
-    }
-  }
-}
-```
-
-### System Analytics
-Get system usage and performance analytics.
-
-```http
-GET /api/v1/admin/analytics?since=2024-01-01T00:00:00Z&until=2024-01-15T23:59:59Z
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "period": {
-      "since": "2024-01-01T00:00:00Z",
-      "until": "2024-01-15T23:59:59Z"
-    },
-    "usage": {
-      "apiCalls": 15420,
-      "uniqueUsers": 12,
-      "popularEndpoints": {
-        "/api/v1/graph/search": 4520,
-        "/api/v1/code/validate": 3210
+    "specImpact": {
+      "relatedSpecs": [
+        {
+          "specId": "spec:critical-impact",
+          "spec": {
+            "id": "spec:critical-impact",
+            "title": "Critical Impact Workflow",
+            "priority": "critical",
+            "status": "approved",
+            "assignee": "team-alpha",
+            "tags": [
+              "impact"
+            ]
+          },
+          "priority": "critical",
+          "impactLevel": "high",
+          "status": "approved",
+          "ownerTeams": [
+            "team-alpha"
+          ],
+          "acceptanceCriteriaIds": [
+            "AC-1"
+          ],
+          "relationships": [
+            {
+              "type": "REQUIRES",
+              "impactLevel": "high",
+              "priority": "critical",
+              "acceptanceCriteriaIds": [
+                "AC-1"
+              ],
+              "ownerTeam": "team-alpha",
+              "confidence": 0.92,
+              "status": "approved"
+            }
+          ]
+        }
+      ],
+      "requiredUpdates": [
+        "Resolve the linked critical specification before merging."
+      ],
+      "summary": {
+        "byPriority": {
+          "critical": 1,
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        },
+        "byImpactLevel": {
+          "critical": 0,
+          "high": 1,
+          "medium": 0,
+          "low": 0
+        },
+        "statuses": {
+          "draft": 0,
+          "approved": 1,
+          "implemented": 0,
+          "deprecated": 0,
+          "unknown": 0
+        },
+        "acceptanceCriteriaReferences": 1,
+        "pendingSpecs": 1
       }
     },
-    "performance": {
-      "averageResponseTime": 245,
-      "p95ResponseTime": 1200,
-      "errorRate": 0.02
+    "deploymentGate": {
+      "blocked": false,
+      "level": "advisory",
+      "reasons": [
+        "1 documentation artefact marked stale"
+      ],
+      "stats": {
+        "missingDocs": 0,
+        "staleDocs": 1,
+        "freshnessPenalty": 1.8
+      }
     },
-    "content": {
-      "totalEntities": 15420,
-      "totalRelationships": 45680,
-      "growthRate": 0.15,
-      "mostActiveDomains": ["auth", "api", "utils"]
-    }
+    "recommendations": [
+      {
+        "priority": "immediate",
+        "description": "Resolve the high-risk dependency before merging.",
+        "effort": "high",
+        "impact": "breaking",
+        "type": "warning",
+        "actions": [
+          "src/routes/impact.ts"
+        ]
+      },
+      {
+        "priority": "planned",
+        "description": "Review cascading impacts up to level 2 to prevent regressions.",
+        "effort": "medium",
+        "impact": "functional",
+        "type": "requirement",
+        "actions": [
+          "transitiveConsumer"
+        ]
+      }
+    ]
   }
 }
 ```
 
-### Trigger Synchronization
-Manually trigger a full system synchronization.
+**Behaviour Notes**
+- Direct impacts aggregate immediate dependents and upstream dependencies when the change is breaking (`delete` or `signatureChange`).
+- Cascading impact levels attenuate confidence (0.9 → 0.3) as traversal depth increases.
+- Tests include coverage scoring derived from edge metadata and stored test coverage metrics.
+- Documentation penalties contribute to the deployment gate status; missing docs automatically elevate the gate to `required`.
+- Specification metadata is hoisted into `specImpact.summary`; critical or high-priority specs escalate risk scores and drive targeted recommendations/required updates.
+- Recommendations summarise urgent follow-up actions, using the same prioritisation surfaced through the MCP interface.
 
-```http
-POST /api/v1/admin/admin/sync
-```
+### GET `/api/impact/changes`
+Returns a time-bounded summary of recently modified entities with graph-backed metrics. By default the window covers the last 24 hours and up to 10 entities.
 
-**Request Body:**
+**Query Parameters**
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `since` | ISO date-time | ❌ | Defaults to 24 hours ago when ommitted. |
+| `limit` | number | ❌ | Number of entities to analyse (1–25, default 10). |
+| `includeIndirect` | boolean | ❌ | Toggle cascading traversal (default `true`). |
+| `maxDepth` | number | ❌ | Traversal depth bound (1–8). |
+
+**Response Body**
+
 ```json
 {
-  "force": false,
-  "includeEmbeddings": true,
-  "includeTests": true,
-  "includeSecurity": true
-}
-```
-
-Note: Convenience alias routes are also available within the same versioned prefix for ease-of-use in local development:
-- `GET /api/v1/admin-health` (alias of `/api/v1/admin/admin-health`)
-- `GET /api/v1/analytics` (alias of `/api/v1/admin/analytics`)
-- `GET /api/v1/sync-status` (alias of `/api/v1/admin/sync-status`)
-- `POST /api/v1/sync` (alias of `/api/v1/admin/admin/sync`)
-
-## WebSocket API
-
-### Real-time Updates
-Connect to WebSocket for real-time file change notifications.
-
-```javascript
-const ws = new WebSocket('ws://localhost:3000/ws');
-
-// Subscribe to file changes
-ws.send(JSON.stringify({
-  type: 'subscribe',
-  event: 'file_change',
-  filter: {
-    path: 'src/',
-    type: 'modify'
+  "success": true,
+  "data": {
+    "since": "2024-06-04T09:12:00.000Z",
+    "limit": 10,
+    "analyzedEntities": 2,
+    "riskSummary": {
+      "critical": 0,
+      "high": 1,
+      "medium": 0,
+      "low": 1
+    },
+    "aggregateMetrics": {
+      "directDependents": 1,
+      "cascadingDependents": 1,
+      "impactedTests": 1,
+      "missingDocs": 0,
+      "staleDocs": 1,
+      "coverageImpact": 45
+    },
+    "records": [
+      {
+        "entity": {
+          "id": "symbol:src/services/ImpactService.ts#compute",
+          "type": "symbol",
+          "name": "compute",
+          "path": "src/services/ImpactService.ts"
+        },
+        "changeType": "modify",
+        "analysis": { "directImpact": [], "cascadingImpact": [], "testImpact": { "affectedTests": [], "requiredUpdates": [], "coverageImpact": 0 }, "documentationImpact": { "staleDocs": [], "missingDocs": [], "requiredUpdates": [], "freshnessPenalty": 0 }, "deploymentGate": { "blocked": false, "level": "none", "reasons": [], "stats": { "missingDocs": 0, "staleDocs": 0, "freshnessPenalty": 0 } }, "recommendations": [] },
+        "metrics": {
+          "directDependents": 1,
+          "cascadingDependents": 1,
+          "highestCascadeLevel": 2,
+          "impactedTests": 1,
+          "coverageImpact": 45,
+          "missingDocs": 0,
+          "staleDocs": 1,
+          "deploymentGate": {
+            "blocked": false,
+            "level": "advisory",
+            "reasons": ["1 stale documentation artefact"],
+            "stats": { "missingDocs": 0, "staleDocs": 1, "freshnessPenalty": 2 }
+          }
+        },
+        "riskLevel": "high",
+        "recommendations": [
+          {
+            "priority": "immediate",
+            "description": "Resolve the high-risk dependency before merging.",
+            "effort": "high",
+            "impact": "breaking",
+            "type": "warning",
+            "actions": ["src/services/ImpactService.ts"]
+          }
+        ]
+      }
+    ]
   }
-}));
-
-// Handle messages
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Received:', data);
-};
+}
 ```
 
-## Health Check
+### GET `/api/impact/entity/{entityId}`
+Calculates the impact surface for a single entity, returning full graph analysis, derived metrics, and deployment gating signals.
 
-Basic health check endpoint (no authentication required):
+**Query Parameters**
 
-```http
-GET /health
-```
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `changeType` | enum (`modify`, `delete`, `rename`) | ❌ | Defaults to `modify`. |
+| `includeIndirect` | boolean | ❌ | Controls cascading traversal (default `true`). |
+| `maxDepth` | number | ❌ | Cascading traversal depth (1–8). |
+| `signatureChange` | boolean | ❌ | Flag interface/signature changes to elevate severity scoring. |
 
-**Response:**
+**Response Body**
+
 ```json
 {
-  "status": "healthy",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "services": {
-    "falkordb": { "status": "healthy" },
-    "qdrant": { "status": "healthy" },
-    "postgresql": { "status": "healthy" },
-    "redis": { "status": "unknown" },
-    "mcp": { "status": "healthy" }
-  },
-  "uptime": 3600,
-  "mcp": {
-    "tools": 15,
-    "validation": { "isValid": true }
+  "success": true,
+  "data": {
+    "entity": {
+      "id": "symbol:src/services/ImpactService.ts#compute",
+      "type": "symbol",
+      "name": "compute",
+      "path": "src/services/ImpactService.ts"
+    },
+    "change": {
+      "changeType": "modify",
+      "signatureChange": true
+    },
+    "analysis": { "directImpact": [], "cascadingImpact": [], "testImpact": { "affectedTests": [], "requiredUpdates": [], "coverageImpact": 0 }, "documentationImpact": { "staleDocs": [], "missingDocs": [], "requiredUpdates": [], "freshnessPenalty": 0 }, "deploymentGate": { "blocked": false, "level": "none", "reasons": [], "stats": { "missingDocs": 0, "staleDocs": 0, "freshnessPenalty": 0 } }, "recommendations": [] },
+    "metrics": {
+      "directDependents": 1,
+      "cascadingDependents": 1,
+      "highestCascadeLevel": 2,
+      "impactedTests": 1,
+      "coverageImpact": 45,
+      "missingDocs": 0,
+      "staleDocs": 1,
+      "deploymentGate": {
+        "blocked": false,
+        "level": "advisory",
+        "reasons": ["1 stale documentation artefact"],
+        "stats": { "missingDocs": 0, "staleDocs": 1, "freshnessPenalty": 2 }
+      }
+    },
+    "riskLevel": "high",
+    "deploymentGate": {
+      "blocked": false,
+      "level": "advisory",
+      "reasons": ["1 stale documentation artefact"],
+      "stats": { "missingDocs": 0, "staleDocs": 1, "freshnessPenalty": 2 }
+    },
+    "recommendations": [
+      {
+        "priority": "immediate",
+        "description": "Resolve the high-risk dependency before merging.",
+        "effort": "high",
+        "impact": "breaking",
+        "type": "warning",
+        "actions": ["src/services/ImpactService.ts"]
+      }
+    ]
   }
 }
 ```
 
-## OpenAPI Documentation
+## Test Management
 
-Access the OpenAPI specification:
+### POST `/api/tests/plan-and-generate`
+Generates graph-aware unit, integration, end-to-end, and performance test plans for a specification. The response aligns with the MCP `tests.plan_and_generate` tool.
 
-```http
-GET /docs
-```
+**Request Body**
 
-This returns the complete OpenAPI 3.0 specification for the API.
-The document is generated from tRPC routes via `trpc-openapi` and includes `info.title`, `info.version`, and tags for Graph Operations, Code Analysis, and Administration.
-
-## Tests API
-
-### Plan And Generate Tests
-```http
-POST /api/v1/tests/plan-and-generate
-```
-
-Request Body:
 ```json
 {
-  "specId": "spec_123",
-  "testTypes": ["unit", "integration", "e2e"],
-  "coverage": { "minLines": 80, "minBranches": 70, "minFunctions": 75 },
-  "includePerformanceTests": false,
-  "includeSecurityTests": false
+  "specId": "spec-checkout",
+  "testTypes": ["unit", "integration"],
+  "includePerformanceTests": true,
+  "includeSecurityTests": true
 }
 ```
 
-Response:
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `specId` | string | ✅ | Specification entity identifier in the knowledge graph. |
+| `testTypes[]` | array of enum (`unit`, `integration`, `e2e`) | ❌ | Restricts generated tests to the selected types. Absent means all. |
+| `coverage.minLines` | number | ❌ | Target minimum line coverage percentage. |
+| `coverage.minBranches` | number | ❌ | Target minimum branch coverage percentage. |
+| `coverage.minFunctions` | number | ❌ | Target minimum function coverage percentage. |
+| `includePerformanceTests` | boolean | ❌ | When `true`, adds a performance guardrail test. High/critical specs auto-enable when omitted. |
+| `includeSecurityTests` | boolean | ❌ | Adds a security-focused integration test. |
+
+**Response Body**
+
 ```json
 {
   "success": true,
   "data": {
     "testPlan": {
-      "unitTests": [...],
-      "integrationTests": [...],
-      "e2eTests": [...],
-      "performanceTests": [...]
+      "unitTests": [
+        {
+          "name": "[AC-1] Unit chargeCustomer happy path",
+          "description": "Validate acceptance criterion AC-1 for Checkout Workflow.",
+          "type": "unit",
+          "targetFunction": "chargeCustomer",
+          "assertions": [
+            "Implements acceptance criterion AC-1: Order succeeds with valid payment",
+            "Covers chargeCustomer core behaviour and edge conditions",
+            "Establishes regression harness for new functionality"
+          ],
+          "dataRequirements": [
+            "Include dataset covering valid payment tokens.",
+            "Provide negative cases capturing rejection paths."
+          ]
+        }
+      ],
+      "integrationTests": [
+        {
+          "name": "[AC-1] Integration chargeCustomer ↔ ledger",
+          "description": "Exercise system collaboration for Checkout Workflow. Cover integration between chargeCustomer, ledger writer, payments API.",
+          "type": "integration",
+          "targetFunction": "chargeCustomer & ledger",
+          "assertions": [
+            "Coordinates chargeCustomer, ledger writer, payments API end-to-end",
+            "Verifies cross-cutting requirements for AC-1: Order succeeds with valid payment",
+            "Document integration contract assumptions and fixtures"
+          ],
+          "dataRequirements": [
+            "Provision upstream and downstream fixtures mirroring production.",
+            "Include dataset covering declined card responses."
+          ]
+        },
+        {
+          "name": "Checkout Workflow security posture",
+          "description": "Validate authentication, authorization, and data handling rules tied to Checkout Workflow.",
+          "type": "integration",
+          "targetFunction": "Checkout Workflow",
+          "assertions": [
+            "Rejects requests lacking required claims or tokens",
+            "Enforces least privilege access for privileged operations",
+            "Scrubs sensitive fields from logs and downstream payloads"
+          ],
+          "dataRequirements": [
+            "Generate signed and tampered tokens",
+            "Include role combinations from spec metadata",
+            "Verify encryption-in-transit and at-rest paths"
+          ]
+        }
+      ],
+      "e2eTests": [
+        {
+          "name": "Checkout Workflow happy path flow",
+          "description": "Exercise the primary workflow covering 2 acceptance criteria for Checkout Workflow.",
+          "type": "e2e",
+          "targetFunction": "Checkout Workflow",
+          "assertions": [
+            "Satisfies AC-1: Order succeeds with valid payment",
+            "Satisfies AC-2: Order fails with declined card"
+          ],
+          "dataRequirements": [
+            "Mirror production-like happy path data and environment.",
+            "Enumerate rollback or recovery steps for failed stages."
+          ]
+        }
+      ],
+      "performanceTests": [
+        {
+          "name": "Checkout Workflow performance guardrail",
+          "description": "Protect high priority specification against latency regressions by validating hot paths under load.",
+          "type": "performance",
+          "targetFunction": "chargeCustomer",
+          "assertions": [
+            "Throughput remains within baseline for chargeCustomer",
+            "P95 latency does not regress beyond 10% of current benchmark",
+            "Resource utilization stays below allocated service limits"
+          ],
+          "dataRequirements": [
+            "Replay representative production workload",
+            "Include peak load burst scenarios",
+            "Capture CPU, memory, and downstream dependency timings"
+          ]
+        }
+      ]
     },
-    "estimatedCoverage": { "lines": 85, "branches": 75, "functions": 80, "statements": 85 },
-    "changedFiles": []
+    "estimatedCoverage": {
+      "lines": 78,
+      "branches": 70,
+      "functions": 74,
+      "statements": 77
+    },
+    "changedFiles": [
+      "src/services/payments.ts",
+      "tests/integration/checkout.test.ts"
+    ]
   }
 }
 ```
 
-### Record Test Execution
-```http
-POST /api/v1/tests/record-execution
-```
+### POST `/api/impact/simulate`
+Runs multi-scenario comparisons to identify the riskiest change set before landing. Each scenario reuses the graph analysis output and exposes derived metrics.
 
-Request Body (single or array):
+**Request Body**
+
 ```json
 {
-  "testId": "unit-1",
-  "testSuite": "UserAuth",
-  "testName": "should authenticate valid user",
-  "status": "passed",
-  "duration": 120,
-  "coverage": { "lines": 90, "branches": 80, "functions": 95, "statements": 92 }
+  "scenarios": [
+    {
+      "name": "High risk change",
+      "changes": [
+        { "entityId": "symbol:src/core/auth.ts#login", "changeType": "modify", "signatureChange": true }
+      ],
+      "maxDepth": 6
+    },
+    {
+      "name": "Low risk rename",
+      "changes": [
+        { "entityId": "symbol:src/utils/time.ts#formatDate", "changeType": "rename" }
+      ],
+      "includeIndirect": false
+    }
+  ]
 }
 ```
 
-### Parse Test Results File
-```http
-POST /api/v1/tests/parse-results
-```
+**Response Body**
 
-Request Body:
-```json
-{ "filePath": "coverage/junit.xml", "format": "junit" }
-```
-
-### Get Performance Metrics
-```http
-GET /api/v1/tests/performance/{entityId}
-```
-
-### Get Coverage Analysis
-```http
-GET /api/v1/tests/coverage/{entityId}
-```
-
-### Get Flaky Test Analysis
-```http
-GET /api/v1/tests/flaky-analysis/{entityId}
-```
-
-## Security API
-
-### Run Security Scan
-```http
-POST /api/v1/security/scan
-```
-
-Request Body (all fields optional):
-```json
-{
-  "entityIds": ["src/auth/user.ts"],
-  "scanTypes": ["sast", "sca", "secrets", "dependency"],
-  "severity": ["critical", "high", "medium", "low"]
-}
-```
-
-### Vulnerability Report
-```http
-GET /api/v1/security/vulnerabilities
-```
-
-### Security Audit
-```http
-POST /api/v1/security/audit
-```
-
-Request Body:
-```json
-{ "scope": "full", "includeDevDependencies": false, "includeTransitive": true }
-```
-
-### Generate Security Fix
-```http
-POST /api/v1/security/fix
-```
-
-Request Body (one of `issueId` or `vulnerabilityId` required):
-```json
-{ "issueId": "ISSUE-123" }
-```
-
-### Compliance Status
-```http
-GET /api/v1/security/compliance?framework=owasp&scope=full
-```
-
-### Setup Security Monitoring
-```http
-POST /api/v1/security/monitor
-```
-
-Request Body:
-```json
-{
-  "alerts": [
-    { "type": "vuln.new", "severity": "high", "threshold": 1, "channels": ["console"] }
-  ],
-  "schedule": "daily"
-}
-```
-
-## SCM API
-
-### Commit And/Or Create PR
-```http
-POST /api/v1/scm/commit-pr
-```
-
-Request Body:
-```json
-{
-  "title": "Fix login validation",
-  "description": "Add stricter checks",
-  "changes": ["src/auth/user.ts"],
-  "relatedSpecId": "spec_123",
-  "createPR": true,
-  "branchName": "feat/login-validation"
-}
-```
-
-### SCM Status
-```http
-GET /api/v1/scm/status
-```
-
-### Branches
-```http
-GET /api/v1/scm/branches
-```
-
-### Create Branch
-```http
-POST /api/v1/scm/branch
-```
-
-Request Body:
-```json
-{ "name": "feature/new", "from": "main" }
-```
-
-### Recent Changes
-```http
-GET /api/v1/scm/changes
-```
-
-### Diff
-```http
-GET /api/v1/scm/diff?from=HEAD~1&to=HEAD&files=src/auth/user.ts
-```
-
-## History API
-
-### Create Checkpoint
-```http
-POST /api/v1/history/checkpoints
-```
-
-Request Body:
-```json
-{
-  "seedEntities": ["entity_1", "entity_2"],
-  "reason": "manual",
-  "hops": 2,
-  "window": { "since": "2024-01-01T00:00:00Z", "until": "2024-01-31T23:59:59Z" }
-}
-```
-
-### List Checkpoints
-```http
-GET /api/v1/history/checkpoints?limit=20&offset=0
-```
-
-### Export Checkpoint
-```http
-GET /api/v1/history/checkpoints/{id}/export?includeRelationships=true
-```
-
-### Import Checkpoint
-```http
-POST /api/v1/history/checkpoints/import
-```
-
-Request Body:
-```json
-{ "checkpoint": {"id": "chk_123", "createdAt": "..."}, "members": [], "relationships": [] }
-```
-
-### Get Checkpoint Members
-```http
-GET /api/v1/history/checkpoints/{id}?limit=50&offset=0
-```
-
-### Checkpoint Summary
-```http
-GET /api/v1/history/checkpoints/{id}/summary
-```
-
-### Time-Travel Graph Traversal
-```http
-POST /api/v1/graph/time-travel
-```
-
-Request Body:
-```json
-{ "startId": "entity_1", "since": "2024-01-01T00:00:00Z", "until": "2024-01-31T23:59:59Z", "maxDepth": 2 }
-```
-
-### Admin: History Prune
-```http
-POST /api/v1/admin/history/prune
-```
-
-Request Body:
-```json
-{ "retentionDays": 30, "dryRun": false }
-```
-
-## Graph Viewer Helpers
-
-### Subgraph Snapshot
-```http
-GET /api/v1/graph/subgraph?limit=2000&type=symbol
-```
-
-Returns a snapshot suitable for visualization with fields:
-```json
-{ "success": true, "data": { "nodes": [...], "edges": [...] } }
-```
-
-### Neighbors
-```http
-GET /api/v1/graph/neighbors?id={entityId}&limit=1000
-```
-
-Errors:
-- 400 INVALID_ID when `id` is missing
-
-## Additional Admin Endpoints
-
-### Create Backup
-```http
-POST /api/v1/admin/backup
-```
-
-Request Body:
-```json
-{ "type": "full", "includeData": true, "includeConfig": true, "compression": true, "destination": "./backups" }
-```
-
-### Restore From Backup
-```http
-POST /api/v1/admin/restore
-```
-
-Request Body:
-```json
-{ "backupId": "backup_2024_09_10", "dryRun": true }
-```
-
-### Query Logs
-```http
-GET /api/v1/admin/logs?level=info&since=2024-01-01T00:00:00Z&limit=100&component=api
-```
-
-## Development
-
-### Running the API
-
-```bash
-# Start the development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Start production server
-npm start
-```
-
-### Testing Endpoints
-
-```bash
-# Test health endpoint
-curl http://localhost:3000/health
-
-# Test graph search
-curl -X POST http://localhost:3000/api/v1/graph/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "user authentication", "limit": 10}'
-```
-
-## Error Codes
-
-| Code | Description |
-|------|-------------|
-| `VALIDATION_ERROR` | Request validation failed |
-| `GRAPH_SEARCH_FAILED` | Graph search operation failed |
-| `DEPENDENCY_ANALYSIS_FAILED` | Dependency analysis failed |
-| `CODE_ANALYSIS_FAILED` | Code analysis operation failed |
-| `VALIDATION_FAILED` | Code validation failed |
-| `SYNC_STATUS_FAILED` | Sync status retrieval failed |
-| `ANALYTICS_FAILED` | Analytics generation failed |
-| `RATE_LIMIT_EXCEEDED` | Rate limit exceeded |
-
-## Best Practices
-
-1. **Use appropriate limits**: Always specify reasonable `limit` values for list endpoints
-2. **Handle rate limits**: Implement exponential backoff for rate-limited requests
-3. **Validate inputs**: Use the provided validation schemas when making requests
-4. **Monitor health**: Check `/health` endpoint before making important requests
-5. **Use WebSocket for real-time**: Subscribe to file changes for live updates
-
-## Support
-
-For API support and questions:
-- Check the OpenAPI documentation at `/docs`
-- Review the implementation plan in `MementoImplementationPlan.md`
-- Create issues in the project repository
-### Metrics Summary
-Snapshot of graph, history, and synchronization metrics.
-
-```http
-GET /api/v1/admin/metrics
-```
-
-**Response:**
 ```json
 {
   "success": true,
   "data": {
-    "graph": { "nodes": 12345, "relationships": 67890 },
-    "history": {
-      "versions": 4321,
-      "checkpoints": 12,
-      "checkpointMembers": { "avg": 145.3, "min": 2, "max": 1200 },
-      "temporalEdges": { "open": 512, "closed": 2048 },
-      "lastPrune": { "retentionDays": 30, "cutoff": "2025-09-01T00:00:00.000Z", "versions": 100, "closedEdges": 50, "checkpoints": 1, "dryRun": false }
-    },
-    "synchronization": {
-      "operations": { "operationsTotal": 10, "operationsSuccessful": 9, "operationsFailed": 1, "averageSyncTime": 250, "throughput": 1.5 },
-      "health": { "overallHealth": "healthy", "lastSyncTime": "2025-09-12T12:00:00Z", "consecutiveFailures": 0 }
-    },
-    "timestamp": "2025-09-12T12:34:56.789Z"
-  }
-}
-```
-
-### History Prune (Dry Run)
-Preview pruning impact without deleting data.
-
-```http
-POST /api/v1/history/prune
-{
-  "retentionDays": 30,
-  "dryRun": true
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": { "versionsDeleted": 100, "edgesClosed": 50, "checkpointsDeleted": 1, "retentionDays": 30, "dryRun": true }
-}
-```
-### Index Health
-Inspect graph database indexes and expected coverage for common queries.
-
-```http
-GET /api/v1/admin/index-health
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "supported": true,
-    "indexes": [/* database-specific rows */],
-    "expected": {
-      "file_path": true,
-      "symbol_path": true,
-      "version_entity": true,
-      "checkpoint_id": true,
-      "rel_validFrom": true,
-      "rel_validTo": true
-    },
-    "notes": ["...optional information..."]
-  }
-}
-```
-
-### Benchmarks (Preliminary)
-Run quick, non-destructive micro-benchmarks to gauge query timings.
-
-```http
-GET /api/v1/admin/benchmarks?mode=quick
-```
-
-Modes:
-- `quick` (default): essential counts and lookups, basic time-travel traversal
-- `full`: adds neighbor fanout checks
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "mode": "quick",
-    "totals": { "nodes": 1000, "edges": 2500 },
-    "timings": {
-      "nodes.count": 12,
-      "edges.count": 15,
-      "sample.id.fetch": 2,
-      "lookup.byId": 1,
-      "versions.count": 3,
-      "checkpoint.sample": 1,
-      "checkpoint.members": 4,
-      "temporal.open": 5,
-      "temporal.closed": 5,
-      "timetravel.depth2": 20
-    },
-    "samples": {
-      "entityId": "file_src_index_ts",
-      "checkpointId": "chk_abcd1234"
+    "scenarios": [
+      {
+        "name": "High risk change",
+        "request": {
+          "includeIndirect": true,
+          "maxDepth": 6
+        },
+        "analysis": { "directImpact": [], "cascadingImpact": [], "testImpact": { "affectedTests": [], "requiredUpdates": [], "coverageImpact": 0 }, "documentationImpact": { "staleDocs": [], "missingDocs": [], "requiredUpdates": [], "freshnessPenalty": 0 }, "deploymentGate": { "blocked": false, "level": "none", "reasons": [], "stats": { "missingDocs": 0, "staleDocs": 0, "freshnessPenalty": 0 } }, "recommendations": [] },
+        "metrics": {
+          "directDependents": 1,
+          "cascadingDependents": 1,
+          "highestCascadeLevel": 2,
+          "impactedTests": 1,
+          "coverageImpact": 45,
+          "missingDocs": 0,
+          "staleDocs": 1,
+          "deploymentGate": {
+            "blocked": false,
+            "level": "advisory",
+            "reasons": ["1 stale documentation artefact"],
+            "stats": { "missingDocs": 0, "staleDocs": 1, "freshnessPenalty": 2 }
+          }
+        },
+        "riskLevel": "high",
+        "recommendations": []
+      },
+      {
+        "name": "Low risk rename",
+        "request": {
+          "includeIndirect": false
+        },
+        "analysis": { "directImpact": [], "cascadingImpact": [], "testImpact": { "affectedTests": [], "requiredUpdates": [], "coverageImpact": 0 }, "documentationImpact": { "staleDocs": [], "missingDocs": [], "requiredUpdates": [], "freshnessPenalty": 0 }, "deploymentGate": { "blocked": false, "level": "none", "reasons": [], "stats": { "missingDocs": 0, "staleDocs": 0, "freshnessPenalty": 0 } }, "recommendations": [] },
+        "metrics": {
+          "directDependents": 1,
+          "cascadingDependents": 0,
+          "highestCascadeLevel": 0,
+          "impactedTests": 0,
+          "coverageImpact": 0,
+          "missingDocs": 0,
+          "staleDocs": 0,
+          "deploymentGate": {
+            "blocked": false,
+            "level": "none",
+            "reasons": [],
+            "stats": { "missingDocs": 0, "staleDocs": 0, "freshnessPenalty": 0 }
+          }
+        },
+        "riskLevel": "low",
+        "recommendations": []
+      }
+    ],
+    "summary": {
+      "highestRiskScenario": {
+        "name": "High risk change",
+        "riskLevel": "high"
+      },
+      "riskDistribution": {
+        "critical": 0,
+        "high": 1,
+        "medium": 0,
+        "low": 1
+      }
     }
   }
 }
 ```
 
-### Ensure Indexes
-Create recommended indexes if missing (best-effort; idempotent).
+### GET `/api/impact/history/{entityId}`
+Retrieves persisted impact analyses for an entity. Entries originate from previous `/impact/analyze` invocations persisted in PostgreSQL.
 
-```http
-POST /api/v1/admin/indexes/ensure
-```
+**Query Parameters**
 
-**Response:**
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `since` | ISO date-time | ❌ | Only return records captured after the timestamp. |
+| `limit` | number | ❌ | Maximum records to return (1–100, default 20). |
+
+**Response Body**
+
 ```json
 {
   "success": true,
   "data": {
-    "ensured": true,
-    "health": { /* same shape as index-health */ }
+    "entityId": "symbol:src/services/ImpactService.ts#compute",
+    "totalRecords": 1,
+    "records": [
+      {
+        "id": "c3b7f0f2-5f1f-4bf7-8bc6-2b5fa7e2ad5f",
+        "timestamp": "2024-06-04T09:12:00.000Z",
+        "changeType": "modify",
+        "directImpactCount": 1,
+        "cascadingImpactCount": 1,
+        "analysis": { "directImpact": [], "cascadingImpact": [], "testImpact": { "affectedTests": [], "requiredUpdates": [], "coverageImpact": 0 }, "documentationImpact": { "staleDocs": [], "missingDocs": [], "requiredUpdates": [], "freshnessPenalty": 0 }, "deploymentGate": { "blocked": false, "level": "none", "reasons": [], "stats": { "missingDocs": 0, "staleDocs": 0, "freshnessPenalty": 0 } }, "recommendations": [] },
+        "metrics": {
+          "directDependents": 1,
+          "cascadingDependents": 1,
+          "highestCascadeLevel": 2,
+          "impactedTests": 1,
+          "coverageImpact": 45,
+          "missingDocs": 0,
+          "staleDocs": 1,
+          "deploymentGate": {
+            "blocked": false,
+            "level": "advisory",
+            "reasons": ["1 stale documentation artefact"],
+            "stats": { "missingDocs": 0, "staleDocs": 1, "freshnessPenalty": 2 }
+          }
+        },
+        "riskLevel": "high",
+        "metadata": {
+          "entityId": "symbol:src/services/ImpactService.ts#compute",
+          "changeType": "modify",
+          "timestamp": "2024-06-04T09:12:00.000Z",
+          "directImpactCount": 1,
+          "cascadingImpactCount": 1
+        }
+      }
+    ]
   }
 }
 ```

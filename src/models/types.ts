@@ -417,6 +417,7 @@ export interface ImpactAnalysis {
     requiredUpdates: string[];
     freshnessPenalty: number;
   };
+  specImpact: ImpactAnalysisSpecImpact;
   deploymentGate: {
     blocked: boolean;
     level: "none" | "advisory" | "required";
@@ -435,6 +436,37 @@ export interface ImpactAnalysis {
     type?: "warning" | "requirement" | "suggestion";
     actions?: string[];
   }[];
+}
+
+export interface ImpactAnalysisSpecImpact {
+  relatedSpecs: Array<{
+    specId: string;
+    spec?: Pick<Spec, "id" | "title" | "priority" | "status" | "assignee" | "tags">;
+    priority?: "critical" | "high" | "medium" | "low";
+    impactLevel?: "critical" | "high" | "medium" | "low";
+    status?: Spec["status"] | "unknown";
+    ownerTeams: string[];
+    acceptanceCriteriaIds: string[];
+    relationships: Array<{
+      type: RelationshipType;
+      impactLevel?: "critical" | "high" | "medium" | "low";
+      priority?: "critical" | "high" | "medium" | "low";
+      acceptanceCriteriaId?: string;
+      acceptanceCriteriaIds?: string[];
+      rationale?: string;
+      ownerTeam?: string;
+      confidence?: number;
+      status?: Spec["status"] | "unknown";
+    }>;
+  }>;
+  requiredUpdates: string[];
+  summary: {
+    byPriority: Record<"critical" | "high" | "medium" | "low", number>;
+    byImpactLevel: Record<"critical" | "high" | "medium" | "low", number>;
+    statuses: Record<"draft" | "approved" | "implemented" | "deprecated" | "unknown", number>;
+    acceptanceCriteriaReferences: number;
+    pendingSpecs: number;
+  };
 }
 
 // Vector Database Types

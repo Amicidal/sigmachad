@@ -8,6 +8,8 @@ Session relationships (`SESSION_MODIFIED`, `SESSION_IMPACTED`, `SESSION_CHECKPOI
 - Canonical IDs collide (based on `from|to|type`), causing multiple events per session to overwrite each other.
 - Query APIs provide no way to reconstruct session timelines or filter by session metadata.
 - Integration with checkpoints is unimplemented—`SESSION_CHECKPOINT` edges do not trigger snapshot creation.
+- The Source Control REST endpoints (`/api/v1/scm/*`) are placeholders that return HTTP 501. The REST integration suite expects commit/branch data sourced from the session graph, so we need an implementation that pipes session/SCM events into the knowledge graph (or a stubbed fixture) before these endpoints can pass.
+- WebSocket session notifications are not wired up; connection keep-alives, file change broadcasts, and subscription teardown events never fire, causing all WebSocket integration tests to hit the "zero assertions" guard. We need a proper WebSocket adapter on top of `SynchronizationCoordinator` so session edges can stream to clients.
 
 ## 3. Desired Capabilities
 1. Persist ordered session events with metadata capturing change details, state transitions, and impacts.

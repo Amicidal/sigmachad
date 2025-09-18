@@ -75,7 +75,11 @@ export class FalkorDBService implements IFalkorDBService {
       // Replace $param placeholders with actual values using sanitized parameters
       for (const [key, value] of Object.entries(sanitizedParams)) {
         const placeholder = `$${key}`;
-        const replacementValue = this.parameterToCypherString(value);
+        const replacementValue = this.parameterToCypherString(
+          value,
+          key,
+          query
+        );
 
         // Use word boundaries to ensure exact matches
         const regex = new RegExp(`\\$${key}\\b`, "g");
@@ -359,7 +363,11 @@ export class FalkorDBService implements IFalkorDBService {
     return value;
   }
 
-  private parameterToCypherString(value: any): string {
+  private parameterToCypherString(
+    value: any,
+    key?: string,
+    queryForContext?: string
+  ): string {
     if (value === null || value === undefined) {
       return "null";
     }
@@ -378,13 +386,49 @@ export class FalkorDBService implements IFalkorDBService {
     }
 
     if (typeof value === "object") {
-      // Represent plain objects as Cypher map literals for property updates (SET n += $props)
-      // Values inside the map are handled (quoted/escaped) by objectToCypherProperties
-      return this.objectToCypherProperties(value as Record<string, any>);
+      if (this.shouldTreatObjectAsMap(key, queryForContext)) {
+        return this.objectToCypherProperties(value as Record<string, any>);
+      }
+
+      const json = JSON.stringify(value);
+      const escaped = json.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      return `'${escaped}'`;
     }
 
     // For other types, convert to string and quote
     return `'${String(value)}'`;
+  }
+
+  private shouldTreatObjectAsMap(
+    key?: string,
+    queryForContext?: string
+  ): boolean {
+    if (!key) {
+      return false;
+    }
+
+    const normalized = key.toLowerCase();
+    if (
+      normalized === "props" ||
+      normalized.endsWith("props") ||
+      normalized.endsWith("properties") ||
+      normalized.endsWith("map")
+    ) {
+      return true;
+    }
+
+    if (!queryForContext) {
+      return false;
+    }
+
+    const mapPatterns = [
+      new RegExp(`SET\\s+\\w+\\s*\\+=\\s*\\$${key}\\b`, "i"),
+      new RegExp(`SET\\s+\\w+\\.\\w+\\s*\\+=\\s*\\$${key}\\b`, "i"),
+      new RegExp(`ON\\s+MATCH\\s+SET\\s+\\w+\\s*\\+=\\s*\\$${key}\\b`, "i"),
+      new RegExp(`ON\\s+CREATE\\s+SET\\s+\\w+\\s*\\+=\\s*\\$${key}\\b`, "i"),
+    ];
+
+    return mapPatterns.some((pattern) => pattern.test(queryForContext));
   }
 
   private objectToCypherProperties(obj: Record<string, any>): string {
@@ -440,7 +484,11 @@ export class FalkorDBService implements IFalkorDBService {
     }
     for (const [key, value] of Object.entries(sanitizedParams)) {
       const regex = new RegExp(`\\$${key}\\b`, "g");
-      const replacement = this.parameterToCypherString(value);
+      const replacement = this.parameterToCypherString(
+        value,
+        key,
+        query
+      );
       processedQuery = processedQuery.replace(regex, replacement);
     }
     return processedQuery;

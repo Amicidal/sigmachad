@@ -11,8 +11,8 @@ describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRe
   beforeEach(() => {
     kgService = {
       findSymbolInFile: vi.fn(),
-      findNearbySymbols: vi.fn(),
-      findSymbolsByName: vi.fn(),
+      findNearbySymbols: vi.fn().mockResolvedValue([]), // Default to empty array
+      findSymbolsByName: vi.fn().mockResolvedValue([]), // Default to empty array
       getEntity: vi.fn(),
       createRelationship: vi.fn(),
     };
@@ -29,8 +29,9 @@ describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRe
       toRef: { kind: 'entity', id: 'sym:abc' }
     };
 
-    const id = await coord.resolveRelationshipTarget(rel);
-    expect(id).toBe('sym:abc');
+    const result = await coord.resolveRelationshipTarget(rel);
+    expect(result.id).toBe('sym:abc');
+    expect(result.resolutionPath).toBe('entity');
     expect(kgService.findSymbolInFile).not.toHaveBeenCalled();
   });
 
@@ -43,8 +44,9 @@ describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRe
       toRef: { kind: 'fileSymbol', file: 'src/a.ts', symbol: 'Foo', name: 'Foo' }
     };
 
-    const id = await coord.resolveRelationshipTarget(rel);
-    expect(id).toBe('sym:fileFoo');
+    const result = await coord.resolveRelationshipTarget(rel);
+    expect(result.id).toBe('sym:fileFoo');
+    expect(result.resolutionPath).toBe('fileSymbol');
     expect(kgService.findSymbolInFile).toHaveBeenCalledWith('src/a.ts', 'Foo');
   });
 
@@ -58,9 +60,10 @@ describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRe
       fromRef: { kind: 'fileSymbol', file: 'src/x.ts', symbol: 'From' }
     };
 
-    const id = await coord.resolveRelationshipTarget(rel);
+    const result = await coord.resolveRelationshipTarget(rel);
     expect(kgService.findSymbolInFile).toHaveBeenCalledWith('src/x.ts', 'Bar');
-    expect(id).toBe('sym:localBar');
+    expect(result.id).toBe('sym:localBar');
+    expect(result.resolutionPath).toBe('external-local');
   });
 
   it('derives current file from fromRef.entity when resolving external toRef', async () => {
@@ -75,10 +78,11 @@ describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRe
       fromRef: { kind: 'entity', id: 'sym:from' }
     };
 
-    const id = await coord.resolveRelationshipTarget(rel);
+    const result = await coord.resolveRelationshipTarget(rel);
     expect(kgService.getEntity).toHaveBeenCalledWith('sym:from');
     expect(kgService.findNearbySymbols).toHaveBeenCalled();
-    expect(id).toBe('sym:nearBaz');
+    expect(result.id).toBe('sym:nearBaz');
+    expect(result.resolutionPath).toBe('external-name');
   });
 });
 

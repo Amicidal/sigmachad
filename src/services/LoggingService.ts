@@ -328,29 +328,29 @@ export class LoggingService {
     this.captureLog("debug", component, message, data);
   }
 
-  // Get log statistics
+  // Get log statistics for in-memory entries
   getLogStats(): {
     totalLogs: number;
-    byLevel: Record<string, number>;
-    byComponent: Record<string, number>;
+    logsByLevel: Record<string, number>;
+    logsByComponent: Record<string, number>;
     oldestLog?: Date;
     newestLog?: Date;
   } {
     const stats = {
       totalLogs: this.logs.length,
-      byLevel: {} as Record<string, number>,
-      byComponent: {} as Record<string, number>,
+      logsByLevel: {} as Record<string, number>,
+      logsByComponent: {} as Record<string, number>,
       oldestLog: undefined as Date | undefined,
       newestLog: undefined as Date | undefined,
     };
 
     for (const log of this.logs) {
       // Count by level
-      stats.byLevel[log.level] = (stats.byLevel[log.level] || 0) + 1;
+      stats.logsByLevel[log.level] = (stats.logsByLevel[log.level] || 0) + 1;
 
       // Count by component
-      stats.byComponent[log.component] =
-        (stats.byComponent[log.component] || 0) + 1;
+      stats.logsByComponent[log.component] =
+        (stats.logsByComponent[log.component] || 0) + 1;
 
       // Track oldest and newest
       if (!stats.oldestLog || log.timestamp < stats.oldestLog) {

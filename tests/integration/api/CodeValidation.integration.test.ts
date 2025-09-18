@@ -688,55 +688,39 @@ describe("Code Validation API Integration", () => {
 
       await kgService.createEntity(warningFile);
 
-      // Test with failOnWarnings: false
-      const lenientRequest = {
-        files: ["src/services/WarningService.ts"],
-        includeTypes: ["typescript", "eslint"],
-        failOnWarnings: false,
-      };
-
-      const lenientResponse = await app.inject({
-        method: "POST",
-        url: "/api/v1/code/validate",
-        headers: {
-          "content-type": "application/json",
-        },
-        payload: JSON.stringify(lenientRequest),
-      });
-
-      if (lenientResponse.statusCode === 200) {
-        const lenientBody = JSON.parse(lenientResponse.payload);
-        expectSuccess(lenientBody);
-      } else if (lenientResponse.statusCode === 404) {
-        const lenientBody = JSON.parse(lenientResponse.payload || '{}');
-        expectError(lenientBody);
-      }
-
-        // Test with failOnWarnings: true
-        const strictRequest = {
-          files: ["src/services/WarningService.ts"],
-          includeTypes: ["typescript", "eslint"],
-          failOnWarnings: true,
-        };
-
-        const strictResponse = await app.inject({
+      const sendValidation = async (failOnWarnings: boolean) => {
+        const response = await app.inject({
           method: "POST",
           url: "/api/v1/code/validate",
           headers: {
             "content-type": "application/json",
           },
-          payload: JSON.stringify(strictRequest),
+          payload: JSON.stringify({
+            files: ["src/services/WarningService.ts"],
+            includeTypes: ["typescript", "eslint"],
+            failOnWarnings,
+          }),
         });
 
-        if (strictResponse.statusCode === 200) {
-          const strictBody = JSON.parse(strictResponse.payload);
+        // Some implementations may not provide lint data; treat 404 as acceptable fallback
+        expect([200, 404]).toContain(response.statusCode);
 
-          // Strict validation returns a structured data object
-          expect(strictBody.data).toEqual(expect.any(Object));
-        } else if (strictResponse.statusCode === 404) {
-          const strictBody = JSON.parse(strictResponse.payload || '{}');
-          expectError(strictBody);
-        }
+        const body = JSON.parse(response.payload || "{}");
+        return { response, body } as const;
+      };
+
+      const lenient = await sendValidation(false);
+      if (lenient.response.statusCode === 200) {
+        expectSuccess(lenient.body);
+      } else {
+        expectError(lenient.body);
+      }
+
+      const strict = await sendValidation(true);
+      if (strict.response.statusCode === 200) {
+        expect(strict.body.data).toEqual(expect.any(Object));
+      } else {
+        expectError(strict.body);
       }
     });
 

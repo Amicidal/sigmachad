@@ -207,7 +207,11 @@ export class MaintenanceService {
         SELECT tablename FROM pg_tables
         WHERE schemaname = 'public'
       `);
-      const tables = ((tablesResult as any)?.rows ?? []) as Array<{ tablename: string }>;
+      const tables = (
+        Array.isArray(tablesResult)
+          ? tablesResult
+          : (tablesResult as any)?.rows ?? []
+      ) as Array<{ tablename: string }>;
       for (const table of tables) {
         try {
           await this.dbService.postgresQuery(`REINDEX TABLE ${table.tablename}`);
@@ -418,7 +422,14 @@ export class MaintenanceService {
   }
 
   getTaskStatus(taskId: string): MaintenanceTask | undefined {
-    // First check active tasks, then completed tasks
-    return this.activeTasks.get(taskId) || this.completedTasks.get(taskId);
+    return this.activeTasks.get(taskId);
+  }
+
+  getCompletedTask(taskId: string): MaintenanceTask | undefined {
+    return this.completedTasks.get(taskId);
+  }
+
+  getCompletedTasks(): MaintenanceTask[] {
+    return Array.from(this.completedTasks.values());
   }
 }

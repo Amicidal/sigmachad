@@ -1,0 +1,17 @@
+{
+  "falkordb": {
+    "url": "redis://localhost:6380",
+    "database": 1
+  },
+  "qdrant": {
+    "url": "http://localhost:6335"
+  },
+  "postgresql": {
+    "connectionString": "postgresql://memento_test:memento_test@localhost:5433/memento_test",
+    "max": 5,
+    "idleTimeoutMillis": 30000
+  },
+  "redis": {
+    "url": "redis://localhost:6381"
+  }
+}

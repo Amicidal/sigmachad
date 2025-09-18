@@ -10,6 +10,11 @@ import { readFileSync } from 'fs';
 import { DocumentationParser } from '../../../src/services/DocumentationParser';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
 import { DatabaseService } from '../../../src/services/DatabaseService';
+import {
+  DocumentationIntelligenceProvider,
+  DocumentationIntelligenceRequest,
+  DocumentationSignals,
+} from '../../../src/services/DocumentationIntelligenceProvider';
 
 // Mock file system
 vi.mock('fs', () => ({
@@ -70,15 +75,59 @@ class MockDatabaseService {
   async close(): Promise<void> {}
 }
 
+class MockIntelligenceProvider implements DocumentationIntelligenceProvider {
+  public lastRequest: DocumentationIntelligenceRequest | undefined;
+  private response: DocumentationSignals = {
+    businessDomains: [],
+    stakeholders: [],
+    technologies: [],
+  };
+
+  setResponse(partial: Partial<DocumentationSignals>): void {
+    this.response = {
+      businessDomains: partial.businessDomains ?? [],
+      stakeholders: partial.stakeholders ?? [],
+      technologies: partial.technologies ?? [],
+      docIntent: partial.docIntent,
+      docSource: partial.docSource,
+      docLocale: partial.docLocale,
+      rawModelResponse: partial.rawModelResponse,
+      confidence: partial.confidence,
+    };
+  }
+
+  async extractSignals(
+    request: DocumentationIntelligenceRequest
+  ): Promise<DocumentationSignals> {
+    this.lastRequest = request;
+    return {
+      businessDomains: [...this.response.businessDomains],
+      stakeholders: [...this.response.stakeholders],
+      technologies: [...this.response.technologies],
+      docIntent: this.response.docIntent,
+      docSource: this.response.docSource,
+      docLocale: this.response.docLocale,
+      rawModelResponse: this.response.rawModelResponse,
+      confidence: this.response.confidence,
+    };
+  }
+}
+
 describe('DocumentationParser', () => {
   let documentationParser: DocumentationParser;
   let mockKgService: MockKnowledgeGraphService;
   let mockDbService: MockDatabaseService;
+  let mockIntelligenceProvider: MockIntelligenceProvider;
 
   beforeEach(() => {
     mockKgService = new MockKnowledgeGraphService();
     mockDbService = new MockDatabaseService();
-    documentationParser = new DocumentationParser(mockKgService as any, mockDbService as any);
+    mockIntelligenceProvider = new MockIntelligenceProvider();
+    documentationParser = new DocumentationParser(
+      mockKgService as any,
+      mockDbService as any,
+      mockIntelligenceProvider
+    );
 
     // Clear mocks
     vi.clearAllMocks();
@@ -109,6 +158,11 @@ console.log('test');
 `;
 
         (readFileSync as any).mockReturnValue(mockContent);
+        mockIntelligenceProvider.setResponse({
+          businessDomains: ['user management'],
+          stakeholders: ['developer'],
+          technologies: ['javascript'],
+        });
 
         const result = await documentationParser.parseFile('/path/to/test.md');
 
@@ -122,8 +176,8 @@ console.log('test');
         );
         expect(result.content).toBe(mockContent);
         expect(result.docType).toBe('readme');
-        expect(result.businessDomains.length).toBeGreaterThan(0);
-        expect(result.stakeholders.length).toBeGreaterThan(0);
+        expect(result.businessDomains).toContain('user management');
+        expect(result.stakeholders).toContain('developer');
         expect(result.technologies).toContain('javascript');
         expect(result.metadata.headings).toHaveLength(2);
         expect(result.metadata.links).toHaveLength(1);
@@ -142,6 +196,11 @@ Technology: python
 `;
 
         (readFileSync as any).mockReturnValue(mockContent);
+        mockIntelligenceProvider.setResponse({
+          businessDomains: ['user management'],
+          stakeholders: ['developer'],
+          technologies: ['python'],
+        });
 
         const result = await documentationParser.parseFile('/path/to/test.txt');
 
@@ -389,144 +448,60 @@ Content of section 2.
   });
 
   describe('Content Extraction', () => {
-    describe('Business Domain Extraction', () => {
-      it('should extract business domains from content', async () => {
-        const mockContent = `This document covers user management system and authentication services.
-We also handle payment processing and billing operations.
-The system includes reporting analytics and communication features.
-`;
+    it('should use intelligence provider signals when supplied', async () => {
+      const mockContent = `# Signals
 
-        (readFileSync as any).mockReturnValue(mockContent);
-        const result = await documentationParser.parseFile('/path/to/test.md');
+Content about observability and customer support teams.`;
 
-        expect(result.businessDomains).toContain('user management');
-        expect(result.businessDomains).toContain('authentication');
-        expect(result.businessDomains).toContain('payment');
-        expect(result.businessDomains).toContain('billing');
-        expect(result.businessDomains).toContain('reporting');
-        expect(result.businessDomains).toContain('communication');
+      (readFileSync as any).mockReturnValue(mockContent);
+      mockIntelligenceProvider.setResponse({
+        businessDomains: ['observability'],
+        stakeholders: ['support team'],
+        technologies: ['prometheus'],
+        docIntent: 'governance',
       });
 
-      it('should extract explicit domain mentions', async () => {
-        const mockContent = `Domain: user management
-This document describes the user management domain.
+      const result = await documentationParser.parseFile('/path/to/signals.md');
 
-Domains: authentication, payment processing
-`;
-
-        (readFileSync as any).mockReturnValue(mockContent);
-        const result = await documentationParser.parseFile('/path/to/test.md');
-
-        expect(result.businessDomains).toContain('user management');
-        expect(result.businessDomains).toContain('authentication');
-        expect(result.businessDomains).toContain('payment processing');
-      });
-
-      it('should deduplicate domains', async () => {
-        const mockContent = `User management system.
-Authentication services for user management.
-User management and authentication features.
-`;
-
-        (readFileSync as any).mockReturnValue(mockContent);
-        const result = await documentationParser.parseFile('/path/to/test.md');
-
-        const userManagementCount = result.businessDomains.filter(d => d.includes('user management')).length;
-        const authCount = result.businessDomains.filter(d => d.includes('authentication')).length;
-
-        expect(userManagementCount).toBe(1);
-        expect(authCount).toBe(1);
-      });
+      expect(result.businessDomains).toEqual(['observability']);
+      expect(result.stakeholders).toEqual(['support team']);
+      expect(result.technologies).toEqual(['prometheus']);
+      expect(result.docIntent).toBe('governance');
     });
 
-    describe('Stakeholder Extraction', () => {
-      it('should extract stakeholders from content', async () => {
-        const mockContent = `This system is used by development team, technical architect, and business analyst.
-The product manager and engineering team design the system.
-QA tester validates the infrastructure.
-`;
+    it('should pass markdown metadata to the intelligence provider', async () => {
+      const mockContent = `# Title
 
-        (readFileSync as any).mockReturnValue(mockContent);
-        const result = await documentationParser.parseFile('/path/to/test.md');
+## Section A
+Details here.`;
 
-        expect(result.stakeholders).toContain('development team');
-        expect(result.stakeholders).toContain('technical architect');
-        expect(result.stakeholders).toContain('business analyst');
-        expect(result.stakeholders).toContain('product manager');
-        expect(result.stakeholders).toContain('engineering team');
-        expect(result.stakeholders).toContain('qa tester');
-      });
+      (readFileSync as any).mockReturnValue(mockContent);
+      await documentationParser.parseFile('/path/to/meta.md');
 
-      it('should extract various stakeholder types', async () => {
-        const mockContent = `End user access the system through the customer portal.
-Business analyst gathers requirements from stakeholders.
-Project manager oversees development.
-Developer maintains the system.
-`;
-
-        (readFileSync as any).mockReturnValue(mockContent);
-        const result = await documentationParser.parseFile('/path/to/test.md');
-
-        expect(result.stakeholders).toContain('end user');
-        expect(result.stakeholders).toContain('customer');
-        expect(result.stakeholders).toContain('business analyst');
-        expect(result.stakeholders).toContain('stakeholder');
-        expect(result.stakeholders).toContain('project manager');
-        expect(result.stakeholders).toContain('developer');
-      });
+      expect(mockIntelligenceProvider.lastRequest).toBeDefined();
+      const metadata = mockIntelligenceProvider.lastRequest?.metadata as any;
+      expect(metadata).toBeDefined();
+      expect(Array.isArray(metadata.headings)).toBe(true);
+      expect(metadata.headings).toEqual(
+        expect.arrayContaining([{ level: 2, text: 'Section A' }])
+      );
+      expect(metadata.format ?? 'markdown').toBeDefined();
     });
 
-    describe('Technology Extraction', () => {
-      it('should extract programming languages', async () => {
-        const mockContent = `The system is built with JavaScript, TypeScript, Python, and Go.
-We use Java for backend services and C++ for performance-critical components.
-`;
+    it('should fall back to heuristic provider when none supplied', async () => {
+      const parserWithHeuristics = new DocumentationParser(
+        mockKgService as unknown as KnowledgeGraphService,
+        mockDbService as unknown as DatabaseService
+      );
 
-        (readFileSync as any).mockReturnValue(mockContent);
-        const result = await documentationParser.parseFile('/path/to/test.md');
+      const mockContent = `# Payments Guide
 
-        expect(result.technologies).toContain('javascript');
-        expect(result.technologies).toContain('typescript');
-        expect(result.technologies).toContain('python');
-        expect(result.technologies).toContain('go');
-        expect(result.technologies).toContain('java');
-        expect(result.technologies).toContain('cpp');
-      });
+This runbook covers payment processing and billing operations.`;
+      (readFileSync as any).mockReturnValue(mockContent);
 
-      it('should extract frameworks and libraries', async () => {
-        const mockContent = `Frontend uses React and Vue.js.
-Backend is built with Node.js, Express, and Django.
-We use Docker for containerization and Kubernetes for orchestration.
-`;
+      const result = await parserWithHeuristics.parseFile('/path/to/payments.md');
 
-        (readFileSync as any).mockReturnValue(mockContent);
-        const result = await documentationParser.parseFile('/path/to/test.md');
-
-        expect(result.technologies).toContain('react');
-        expect(result.technologies).toContain('vue');
-        expect(result.technologies).toContain('node.js');
-        expect(result.technologies).toContain('express');
-        expect(result.technologies).toContain('django');
-        expect(result.technologies).toContain('docker');
-        expect(result.technologies).toContain('kubernetes');
-      });
-
-      it('should extract databases and infrastructure', async () => {
-        const mockContent = `We use PostgreSQL as primary database and Redis for caching.
-Data is stored in MongoDB and Elasticsearch for search.
-The system runs on AWS with GCP backup.
-`;
-
-        (readFileSync as any).mockReturnValue(mockContent);
-        const result = await documentationParser.parseFile('/path/to/test.md');
-
-        expect(result.technologies).toContain('postgresql');
-        expect(result.technologies).toContain('redis');
-        expect(result.technologies).toContain('mongodb');
-        expect(result.technologies).toContain('elasticsearch');
-        expect(result.technologies).toContain('aws');
-        expect(result.technologies).toContain('gcp');
-      });
+      expect(result.businessDomains.length).toBeGreaterThan(0);
     });
 
     describe('Document Type Inference', () => {
@@ -651,6 +626,11 @@ This is a test document about user management for developers.
 `;
 
         (readFileSync as any).mockReturnValue(mockContent);
+        mockIntelligenceProvider.setResponse({
+          businessDomains: ['user management'],
+          stakeholders: ['developer'],
+          technologies: [],
+        });
 
         const parsedDoc = await documentationParser.parseFile('/path/to/test.md');
 
@@ -675,6 +655,11 @@ This is a test document about user management for developers.
         const mockContent = `This document covers payment processing and user authentication domains.`;
 
         (readFileSync as any).mockReturnValue(mockContent);
+        mockIntelligenceProvider.setResponse({
+          businessDomains: ['payment processing', 'user authentication'],
+          stakeholders: ['finance'],
+          technologies: [],
+        });
         const parsedDoc = await documentationParser.parseFile('/path/to/test.md');
 
         // Access private method for testing
@@ -701,6 +686,11 @@ This is a test document about user management for developers.
         const mockContent = `This covers authentication and payment processing.`;
 
         (readFileSync as any).mockReturnValue(mockContent);
+        mockIntelligenceProvider.setResponse({
+          businessDomains: ['authentication', 'payment processing'],
+          stakeholders: ['security'],
+          technologies: [],
+        });
         const parsedDoc = await documentationParser.parseFile('/path/to/test.md');
 
         const createDomainsMethod = (documentationParser as any).extractAndCreateDomains.bind(documentationParser);
@@ -722,6 +712,11 @@ This is a test document about user management for developers.
         const mockContent = `This document covers user management functionality.`;
 
         (readFileSync as any).mockReturnValue(mockContent);
+        mockIntelligenceProvider.setResponse({
+          businessDomains: ['user management'],
+          stakeholders: ['support'],
+          technologies: [],
+        });
         const parsedDoc = await documentationParser.parseFile('/path/to/test.md');
 
         const updateClustersMethod = (documentationParser as any).updateSemanticClusters.bind(documentationParser);

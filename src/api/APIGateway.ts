@@ -50,6 +50,12 @@ import {
   adminRateLimit,
   startCleanupInterval,
 } from "./middleware/rate-limiting.js";
+import {
+  authenticateRequest,
+  hasPermission,
+  sendAuthError,
+} from "./middleware/authentication.js";
+import jwt from "jsonwebtoken";
 
 export interface APIGatewayConfig {
   port: number;
@@ -223,6 +229,8 @@ export class APIGateway {
   }
 
   private setupMiddleware(): void {
+    this.app.decorateRequest("auth", null);
+
     // Preflight handler to return 200 (tests expect 200, not default 204)
     this.app.addHook("onRequest", async (request, reply) => {
       if (request.method === "OPTIONS") {
@@ -347,6 +355,114 @@ export class APIGateway {
         });
       }
       done();
+    });
+
+    this.app.addHook("preHandler", async (request, reply) => {
+      if (request.method === "OPTIONS") {
+        return;
+      }
+
+      const rawUrl =
+        (request.raw?.url && request.raw.url.split("?")[0]) ||
+        (request.url && request.url.split("?")[0]) ||
+        "/";
+      const requirement = this.determineAuthRequirement(request.method, rawUrl);
+      const authEnabled = this.isAuthEnforced();
+
+      const authHeader = request.headers["authorization"] as string | undefined;
+      const apiKeyHeader = request.headers["x-api-key"] as string | undefined;
+
+      if (!authHeader && !apiKeyHeader) {
+        request.auth = { tokenType: "anonymous" };
+        if (requirement && authEnabled) {
+          return sendAuthError(
+            reply,
+            request,
+            401,
+            "UNAUTHORIZED",
+            "Authentication is required for this endpoint"
+          );
+        }
+        return;
+      }
+
+      const authContext = authenticateRequest(request);
+      request.auth = authContext;
+
+      if (authContext.tokenError) {
+        switch (authContext.tokenError) {
+          case "INVALID_API_KEY":
+            return sendAuthError(
+              reply,
+              request,
+              401,
+              "INVALID_API_KEY",
+              "Invalid API key provided"
+            );
+          case "TOKEN_EXPIRED":
+            return sendAuthError(
+              reply,
+              request,
+              401,
+              "TOKEN_EXPIRED",
+              "Authentication token has expired"
+            );
+          case "MISSING_BEARER":
+            return sendAuthError(
+              reply,
+              request,
+              401,
+              "UNAUTHORIZED",
+              "Bearer authentication scheme is required"
+            );
+          default:
+            return sendAuthError(
+              reply,
+              request,
+              401,
+              "INVALID_TOKEN",
+              "Invalid authentication token"
+            );
+        }
+      }
+
+      if (!requirement) {
+        return;
+      }
+
+      if (!authEnabled) {
+        return;
+      }
+
+      if (!authContext.user) {
+        return sendAuthError(
+          reply,
+          request,
+          401,
+          "UNAUTHORIZED",
+          "Authentication is required for this endpoint"
+        );
+      }
+
+      if (requirement === "admin" && !hasPermission(authContext.user, "admin")) {
+        return sendAuthError(
+          reply,
+          request,
+          403,
+          "INSUFFICIENT_PERMISSIONS",
+          "Admin permissions are required for this endpoint"
+        );
+      }
+
+      if (requirement === "read" && !hasPermission(authContext.user, "read")) {
+        return sendAuthError(
+          reply,
+          request,
+          403,
+          "INSUFFICIENT_PERMISSIONS",
+          "Read permissions are required for this endpoint"
+        );
+      }
     });
 
     // Security headers (minimal set for tests)
@@ -569,6 +685,97 @@ export class APIGateway {
     // API v1 routes
     this.app.register(
       async (app) => {
+        app.post("/auth/refresh", async (request, reply) => {
+          const body = (request.body ?? {}) as { refreshToken?: string };
+          const refreshToken =
+            typeof body.refreshToken === "string" ? body.refreshToken : undefined;
+
+          if (!refreshToken) {
+            return reply.status(401).send({
+              success: false,
+              error: {
+                code: "INVALID_TOKEN",
+                message: "Refresh token is required",
+              },
+              requestId: request.id,
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          const secret = process.env.JWT_SECRET;
+          if (!secret) {
+            return reply.status(401).send({
+              success: false,
+              error: {
+                code: "INVALID_TOKEN",
+                message: "Refresh token is invalid",
+              },
+              requestId: request.id,
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          try {
+            const payload = jwt.verify(refreshToken, secret) as jwt.JwtPayload;
+            if (payload.type && payload.type !== "refresh") {
+              return reply.status(401).send({
+                success: false,
+                error: {
+                  code: "INVALID_TOKEN",
+                  message: "Refresh token is invalid",
+                },
+                requestId: request.id,
+                timestamp: new Date().toISOString(),
+              });
+            }
+
+            const baseClaims = {
+              userId: payload.userId ?? payload.sub ?? payload.id ?? "unknown-user",
+              role: payload.role ?? "user",
+              permissions: Array.isArray(payload.permissions)
+                ? payload.permissions
+                : [],
+            };
+
+            const issuer = typeof payload.iss === "string" ? payload.iss : "memento";
+            const accessToken = jwt.sign(
+              { ...baseClaims, type: "access" },
+              secret,
+              { expiresIn: "1h", issuer }
+            );
+            const newRefreshToken = jwt.sign(
+              { ...baseClaims, type: "refresh" },
+              secret,
+              { expiresIn: "7d", issuer }
+            );
+
+            return reply.send({
+              success: true,
+              data: {
+                accessToken,
+                refreshToken: newRefreshToken,
+                tokenType: "Bearer",
+                expiresIn: 3600,
+              },
+              requestId: request.id,
+              timestamp: new Date().toISOString(),
+            });
+          } catch (error) {
+            const isExpired = error instanceof jwt.TokenExpiredError;
+            return reply.status(401).send({
+              success: false,
+              error: {
+                code: "INVALID_TOKEN",
+                message: isExpired
+                  ? "Refresh token has expired"
+                  : "Invalid refresh token",
+              },
+              requestId: request.id,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        });
+
         try {
           // Register all route modules
           registerDesignRoutes(app, this.kgService, this.dbService);
@@ -798,6 +1005,32 @@ export class APIGateway {
         process.exit(1);
       });
     }
+  }
+
+  private determineAuthRequirement(
+    method: string,
+    fullPath: string
+  ): "admin" | "read" | null {
+    const normalizedPath = (fullPath || "/").split("?")[0] || "/";
+    const upperMethod = (method || "GET").toUpperCase();
+
+    if (normalizedPath.startsWith("/api/v1/admin")) {
+      return "admin";
+    }
+
+    if (normalizedPath.startsWith("/api/v1/graph/search") && upperMethod === "POST") {
+      return "read";
+    }
+
+    return null;
+  }
+
+  private isAuthEnforced(): boolean {
+    return Boolean(
+      process.env.JWT_SECRET ||
+        process.env.API_KEY_SECRET ||
+        process.env.ADMIN_API_TOKEN
+    );
   }
 
   private getErrorCode(error: any): string {

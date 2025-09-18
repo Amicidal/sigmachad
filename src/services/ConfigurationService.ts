@@ -40,7 +40,7 @@ export interface SystemConfiguration {
   };
   system: {
     uptime: number;
-    memoryUsage: NodeJS.MemoryUsage;
+    memoryUsage?: NodeJS.MemoryUsage;
     cpuUsage?: any;
     platform: string;
     nodeVersion: string;
@@ -49,9 +49,9 @@ export interface SystemConfiguration {
 
 export class ConfigurationService {
   constructor(
-    private dbService: DatabaseService,
-    private syncCoordinator?: SynchronizationCoordinator,
-    private testWorkingDir?: string
+    private readonly dbService?: DatabaseService,
+    private readonly syncCoordinator?: SynchronizationCoordinator,
+    private readonly testWorkingDir?: string
   ) {}
 
   private cachedConfig: Partial<SystemConfiguration> = {};
@@ -183,13 +183,14 @@ export class ConfigurationService {
     };
 
     // If database service is not available, return unavailable status
-    if (!this.dbService) {
+    const dbService = this.dbService;
+    if (!dbService) {
       return status;
     }
 
     try {
       // Check FalkorDB
-      await this.dbService.falkordbQuery("MATCH (n) RETURN count(n) LIMIT 1");
+      await dbService.falkordbQuery("MATCH (n) RETURN count(n) LIMIT 1");
       status.falkordb = "configured";
     } catch (error) {
       console.warn("FalkorDB connection check failed:", error);
@@ -198,7 +199,7 @@ export class ConfigurationService {
 
     try {
       // Check Qdrant
-      const qdrantClient = this.dbService.getQdrantClient();
+      const qdrantClient = dbService.getQdrantClient();
       await qdrantClient.getCollections();
       status.qdrant = "configured";
     } catch (error) {
@@ -208,7 +209,7 @@ export class ConfigurationService {
 
     try {
       // Check PostgreSQL
-      await this.dbService.postgresQuery("SELECT 1");
+      await dbService.postgresQuery("SELECT 1");
       status.postgres = "configured";
     } catch (error) {
       console.warn("PostgreSQL connection check failed:", error);
@@ -229,9 +230,14 @@ export class ConfigurationService {
       history: (process.env.HISTORY_ENABLED || "true").toLowerCase() !== "false",
     };
 
+    const dbService = this.dbService;
+    if (!dbService) {
+      return features;
+    }
+
     try {
       // Check graph search capability
-      const testQuery = await this.dbService.falkordbQuery(
+      const testQuery = await dbService.falkordbQuery(
         "MATCH (n) RETURN count(n) LIMIT 1"
       );
       features.graphSearch = Array.isArray(testQuery);
@@ -241,7 +247,7 @@ export class ConfigurationService {
 
     try {
       // Check vector search capability
-      const qdrantClient = this.dbService.getQdrantClient();
+      const qdrantClient = dbService.getQdrantClient();
       const collections = await qdrantClient.getCollections();
       features.vectorSearch =
         collections.collections && collections.collections.length >= 0;
@@ -274,13 +280,18 @@ export class ConfigurationService {
     const overrides = (this.cachedConfig.performance ?? {}) as Partial<
       SystemConfiguration["performance"]
     >;
+    const resolvedMaxConcurrentSync =
+      typeof overrides.maxConcurrentSync === "number" &&
+      overrides.maxConcurrentSync >= 1
+        ? overrides.maxConcurrentSync
+        : defaults.maxConcurrentSync;
+
+    const maxConcurrentSync = this.syncCoordinator
+      ? resolvedMaxConcurrentSync
+      : 1;
 
     return {
-      maxConcurrentSync:
-        typeof overrides.maxConcurrentSync === "number" &&
-        overrides.maxConcurrentSync >= 1
-          ? overrides.maxConcurrentSync
-          : defaults.maxConcurrentSync,
+      maxConcurrentSync,
       cacheSize:
         typeof overrides.cacheSize === "number" && overrides.cacheSize >= 0
           ? overrides.cacheSize
@@ -297,7 +308,10 @@ export class ConfigurationService {
     await this.ensureConfigLoaded();
 
     const defaults = {
-      rateLimiting: process.env.ENABLE_RATE_LIMITING === "true",
+      rateLimiting:
+        process.env.ENABLE_RATE_LIMITING === undefined
+          ? true
+          : process.env.ENABLE_RATE_LIMITING === "true",
       authentication: process.env.ENABLE_AUTHENTICATION === "true",
       auditLogging: process.env.ENABLE_AUDIT_LOGGING === "true",
     };
@@ -349,15 +363,7 @@ export class ConfigurationService {
 
     return {
       uptime: process.uptime(),
-      memoryUsage:
-        memUsage ||
-        ({
-          rss: 0,
-          heapTotal: 0,
-          heapUsed: 0,
-          external: 0,
-          arrayBuffers: 0,
-        } as NodeJS.MemoryUsage),
+      memoryUsage: memUsage,
       cpuUsage,
       platform: process.platform,
       nodeVersion: process.version,
@@ -369,18 +375,21 @@ export class ConfigurationService {
   ): Promise<void> {
     // Validate updates
     if (updates.performance) {
+      const { maxConcurrentSync, cacheSize, requestTimeout } =
+        updates.performance;
+
       if (
-        updates.performance.maxConcurrentSync &&
-        updates.performance.maxConcurrentSync < 1
+        typeof maxConcurrentSync === "number" &&
+        maxConcurrentSync < 1
       ) {
         throw new Error("maxConcurrentSync must be at least 1");
       }
-      if (updates.performance.cacheSize && updates.performance.cacheSize < 0) {
+      if (typeof cacheSize === "number" && cacheSize < 0) {
         throw new Error("cacheSize cannot be negative");
       }
       if (
-        updates.performance.requestTimeout &&
-        updates.performance.requestTimeout < 1000
+        typeof requestTimeout === "number" &&
+        requestTimeout < 1000
       ) {
         throw new Error("requestTimeout must be at least 1000ms");
       }
@@ -396,40 +405,6 @@ export class ConfigurationService {
     this.cachedConfig = this.deepMergeConfig(this.cachedConfig, updates);
     this.configLoaded = true;
 
-    if (updates.performance) {
-      if (typeof updates.performance.maxConcurrentSync === "number") {
-        process.env.MAX_CONCURRENT_SYNC = String(
-          updates.performance.maxConcurrentSync
-        );
-      }
-      if (typeof updates.performance.cacheSize === "number") {
-        process.env.CACHE_SIZE = String(updates.performance.cacheSize);
-      }
-      if (typeof updates.performance.requestTimeout === "number") {
-        process.env.REQUEST_TIMEOUT = String(
-          updates.performance.requestTimeout
-        );
-      }
-    }
-
-    if (updates.security) {
-      if (typeof updates.security.rateLimiting === "boolean") {
-        process.env.ENABLE_RATE_LIMITING = String(
-          updates.security.rateLimiting
-        );
-      }
-      if (typeof updates.security.authentication === "boolean") {
-        process.env.ENABLE_AUTHENTICATION = String(
-          updates.security.authentication
-        );
-      }
-      if (typeof updates.security.auditLogging === "boolean") {
-        process.env.ENABLE_AUDIT_LOGGING = String(
-          updates.security.auditLogging
-        );
-      }
-    }
-
     await this.persistConfiguration(this.cachedConfig).catch((error) => {
       console.warn(
         "Configuration persistence failed; continuing with in-memory overrides",
@@ -443,13 +418,14 @@ export class ConfigurationService {
       return;
     }
 
-    if (!this.dbService.isInitialized()) {
+    const dbService = this.dbService;
+    if (!dbService || !dbService.isInitialized()) {
       this.configLoaded = true;
       return;
     }
 
     try {
-      const result = await this.dbService.postgresQuery(
+      const result = await dbService.postgresQuery(
         `SELECT content FROM documents WHERE id = $1::uuid AND type = $2 LIMIT 1`,
         [SYSTEM_CONFIG_DOCUMENT_ID, SYSTEM_CONFIG_DOCUMENT_TYPE]
       );
@@ -517,7 +493,8 @@ export class ConfigurationService {
   private async persistConfiguration(
     config: Partial<SystemConfiguration>
   ): Promise<void> {
-    if (!this.dbService.isInitialized()) {
+    const dbService = this.dbService;
+    if (!dbService || !dbService.isInitialized()) {
       return;
     }
 
@@ -530,7 +507,7 @@ export class ConfigurationService {
       2
     );
 
-    await this.dbService.postgresQuery(
+    await dbService.postgresQuery(
       `INSERT INTO documents (id, type, content, created_at, updated_at)
        VALUES ($1::uuid, $2, $3::jsonb, $4, $4)
        ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, updated_at = EXCLUDED.updated_at`,
@@ -548,6 +525,24 @@ export class ConfigurationService {
     qdrant: any;
     postgres: any;
   }> {
+    const dbService = this.dbService;
+    if (!dbService) {
+      return {
+        falkordb: {
+          status: "unavailable",
+          error: "Database service not configured",
+        },
+        qdrant: {
+          status: "unavailable",
+          error: "Database service not configured",
+        },
+        postgres: {
+          status: "unavailable",
+          error: "Database service not configured",
+        },
+      };
+    }
+
     const health = {
       falkordb: null as any,
       qdrant: null as any,
@@ -556,7 +551,7 @@ export class ConfigurationService {
 
     try {
       // Get FalkorDB stats
-      const falkordbStats = await this.dbService.falkordbQuery("INFO");
+      const falkordbStats = await dbService.falkordbQuery("INFO");
       health.falkordb = {
         status: "healthy",
         stats: falkordbStats,
@@ -570,7 +565,7 @@ export class ConfigurationService {
 
     try {
       // Get Qdrant health
-      const qdrantClient = this.dbService.getQdrantClient();
+      const qdrantClient = dbService.getQdrantClient();
       const qdrantHealth = await qdrantClient.getCollections();
       health.qdrant = {
         status: "healthy",
@@ -585,7 +580,7 @@ export class ConfigurationService {
 
     try {
       // Get PostgreSQL stats
-      const postgresStats = await this.dbService.postgresQuery(`
+      const postgresStats = await dbService.postgresQuery(`
         SELECT
           schemaname,
           tablename,
@@ -712,13 +707,17 @@ export class ConfigurationService {
     }
 
     // Check memory usage
-    const memUsage = process.memoryUsage();
-    const memUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
-    if (memUsagePercent > 90) {
-      issues.push("High memory usage detected");
-      recommendations.push(
-        "Consider increasing memory limits or optimizing memory usage"
-      );
+    try {
+      const memUsage = process.memoryUsage();
+      const memUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
+      if (memUsagePercent > 90) {
+        issues.push("High memory usage detected");
+        recommendations.push(
+          "Consider increasing memory limits or optimizing memory usage"
+        );
+      }
+    } catch (error) {
+      recommendations.push("Could not determine memory usage");
     }
 
     return {

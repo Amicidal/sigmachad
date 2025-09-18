@@ -97,25 +97,26 @@ describe('MCP Protocol Integration', () => {
         url: '/mcp/capabilities',
       });
 
-      if (response.statusCode === 200) {
-        const capabilities = JSON.parse(response.payload);
-        expect(capabilities).toEqual(
-          expect.objectContaining({ protocol: expect.any(String), tools: expect.anything() })
-        );
-      } else if (response.statusCode === 404 || response.statusCode === 405) {
+      const { statusCode, payload, headers } = response;
+      expect([200, 404, 405]).toContain(statusCode);
+
+      if (statusCode !== 200) {
         // MCP capabilities might not be exposed as REST endpoint; accept explicit 404/405
-        // Optionally check response content-type if available
-        const ct = response.headers['content-type'] as string | undefined;
+        const ct = headers['content-type'] as string | undefined;
         if (ct && ct.includes('application/json')) {
           try {
-            JSON.parse(response.payload || '{}');
+            JSON.parse(payload || '{}');
           } catch {
             // allow non-JSON payloads too
           }
         }
-      } else {
-        throw new Error(`Unexpected /mcp/capabilities status: ${response.statusCode}`);
+        return;
       }
+
+      const capabilities = JSON.parse(payload);
+      expect(capabilities).toEqual(
+        expect.objectContaining({ protocol: expect.any(String), tools: expect.anything() })
+      );
     });
   });
 
@@ -199,20 +200,21 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.jsonrpc).toBe('2.0');
-        expect(mcpResponse.id).toBe(1);
-        expect(mcpResponse).toEqual(
-          expect.objectContaining({ result: expect.objectContaining({ tools: expect.any(Array) }) })
-        );
-        expect(mcpResponse.result.tools.length).toBeGreaterThan(0);
-      } else if (response.statusCode === 404 || response.statusCode === 405) {
-        // MCP endpoint might not be available as REST
-        // Accept explicit 404/405; assert no unexpected status
-      } else {
-        throw new Error(`Unexpected /mcp status: ${response.statusCode}`);
+      const { statusCode, payload } = response;
+      expect([200, 404, 405]).toContain(statusCode);
+
+      if (statusCode !== 200) {
+        // MCP endpoint might not be available as REST; accept explicit 404/405
+        return;
       }
+
+      const mcpResponse = JSON.parse(payload);
+      expect(mcpResponse.jsonrpc).toBe('2.0');
+      expect(mcpResponse.id).toBe(1);
+      expect(mcpResponse).toEqual(
+        expect.objectContaining({ result: expect.objectContaining({ tools: expect.any(Array) }) })
+      );
+      expect(mcpResponse.result.tools.length).toBeGreaterThan(0);
     });
   });
 
@@ -240,13 +242,13 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.jsonrpc).toBe('2.0');
-        expect(mcpResponse).toEqual(
-          expect.objectContaining({ result: expect.objectContaining({ content: expect.anything() }) })
-        );
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.jsonrpc).toBe('2.0');
+      expect(mcpResponse).toEqual(
+        expect.objectContaining({ result: expect.objectContaining({ content: expect.anything() }) })
+      );
     });
 
     it('should execute graph.entities.list tool', async () => {
@@ -272,10 +274,10 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse).toEqual(expect.objectContaining({ result: expect.anything() }));
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse).toEqual(expect.objectContaining({ result: expect.anything() }));
     });
 
     it('should execute graph.dependencies.analyze tool', async () => {
@@ -285,40 +287,47 @@ describe('MCP Protocol Integration', () => {
         url: '/api/v1/graph/entities?limit=1',
       });
 
-      if (entitiesResponse.statusCode === 200) {
-        const entitiesBody = JSON.parse(entitiesResponse.payload);
-        
-        if (entitiesBody.data && entitiesBody.data.length > 0) {
-          const entityId = entitiesBody.data[0].id;
+      expect(entitiesResponse.statusCode).toBe(200);
 
-          const mcpRequest = {
-            jsonrpc: '2.0',
-            id: 3,
-            method: 'tools/call',
-            params: {
-              name: 'graph.dependencies.analyze',
-              arguments: {
-                entityId: entityId,
-                depth: 2,
-              },
-            },
-          };
+      const entitiesBody = JSON.parse(entitiesResponse.payload || '{}');
+      const entities = Array.isArray(entitiesBody?.data)
+        ? entitiesBody.data
+        : Array.isArray(entitiesBody?.data?.entities)
+        ? entitiesBody.data.entities
+        : [];
 
-          const response = await app.inject({
-            method: 'POST',
-            url: '/mcp',
-            headers: {
-              'content-type': 'application/json',
-            },
-            payload: JSON.stringify(mcpRequest),
-          });
+      expect(Array.isArray(entities)).toBe(true);
+      expect(entities.length).toBeGreaterThan(0);
 
-          if (response.statusCode === 200) {
-            const mcpResponse = JSON.parse(response.payload);
-            expect(mcpResponse.result).toEqual(expect.any(Object));
-          }
-        }
-      }
+      const entityId = entities[0]?.id;
+      expect(entityId).toBeDefined();
+
+      const mcpRequest = {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'graph.dependencies.analyze',
+          arguments: {
+            entityId,
+            depth: 2,
+          },
+        },
+      };
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: {
+          'content-type': 'application/json',
+        },
+        payload: JSON.stringify(mcpRequest),
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(expect.any(Object));
     });
   });
 
@@ -349,10 +358,10 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse).toEqual(expect.objectContaining({ result: expect.anything() }));
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse).toEqual(expect.objectContaining({ result: expect.anything() }));
     });
 
     it('should execute tests.validate_coverage tool', async () => {
@@ -379,10 +388,10 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(expect.any(Object));
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(expect.any(Object));
     });
   });
 
@@ -420,12 +429,12 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(
-          expect.objectContaining({ content: expect.any(Array) })
-        );
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(
+        expect.objectContaining({ content: expect.any(Array) })
+      );
     });
 
     it('should execute design.validate_spec tool', async () => {
@@ -451,10 +460,10 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(expect.any(Object));
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(expect.any(Object));
     });
   });
 
@@ -486,10 +495,10 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(expect.any(Object));
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(expect.any(Object));
     });
 
     it('should execute code.validate tool', async () => {
@@ -516,10 +525,10 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(expect.any(Object));
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(expect.any(Object));
     });
 
     it('should execute code.propose_changes tool', async () => {
@@ -553,10 +562,10 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(expect.any(Object));
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(expect.any(Object));
     });
   });
 
@@ -584,12 +593,12 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(
-          expect.objectContaining({ content: expect.any(Array) })
-        );
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(
+        expect.objectContaining({ content: expect.any(Array) })
+      );
     });
 
     it('should execute admin.sync_status tool', async () => {
@@ -615,10 +624,10 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(mcpRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(expect.any(Object));
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(expect.any(Object));
     });
   });
 
@@ -640,14 +649,14 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(invalidRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.jsonrpc).toBe('2.0');
-        expect(mcpResponse.id).toBe(999);
-        expect(mcpResponse.error).toEqual(expect.any(Object));
-        expect(typeof mcpResponse.error.code).toBe('number');
-        expect(typeof mcpResponse.error.message).toBe('string');
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.jsonrpc).toBe('2.0');
+      expect(mcpResponse.id).toBe(999);
+      expect(mcpResponse.error).toEqual(expect.any(Object));
+      expect(typeof mcpResponse.error.code).toBe('number');
+      expect(typeof mcpResponse.error.message).toBe('string');
     });
 
     it('should handle malformed JSON-RPC requests', async () => {
@@ -666,11 +675,11 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(malformedRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.error).toEqual(expect.any(Object));
-        expect(mcpResponse.error.code).toBe(-32600); // Invalid Request
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.error).toEqual(expect.any(Object));
+      expect(mcpResponse.error.code).toBe(-32600); // Invalid Request
     });
 
     it('should handle tool calls with invalid parameters', async () => {
@@ -696,11 +705,11 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(invalidToolCall),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.error).toEqual(expect.any(Object));
-        expect(mcpResponse.error.code).toBe(-32602); // Invalid params
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.error).toEqual(expect.any(Object));
+      expect(mcpResponse.error.code).toBe(-32602); // Invalid params
     });
 
     it('should handle non-existent tool calls', async () => {
@@ -723,11 +732,11 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(nonExistentToolCall),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.error).toEqual(expect.any(Object));
-        expect(mcpResponse.error.code).toBe(-32601); // Method not found
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.error).toEqual(expect.any(Object));
+      expect(mcpResponse.error.code).toBe(-32601); // Method not found
     });
 
     it('should support MCP notifications (no response expected)', async () => {
@@ -752,9 +761,8 @@ describe('MCP Protocol Integration', () => {
       });
 
       // Notifications should not return a response
-      if (response.statusCode === 200) {
-        expect(response.payload).toBe('');
-      }
+      expect([200, 204]).toContain(response.statusCode);
+      expect(response.payload || '').toBe('');
     });
 
     it('should handle batch MCP requests', async () => {
@@ -782,16 +790,16 @@ describe('MCP Protocol Integration', () => {
         payload: JSON.stringify(batchRequest),
       });
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(Array.isArray(mcpResponse)).toBe(true);
-        expect(mcpResponse).toHaveLength(2);
-        
-        mcpResponse.forEach((res: any, index: number) => {
-          expect(res.jsonrpc).toBe('2.0');
-          expect(res.id).toBe(index + 1);
-        });
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(Array.isArray(mcpResponse)).toBe(true);
+      expect(mcpResponse).toHaveLength(2);
+
+      mcpResponse.forEach((res: any, index: number) => {
+        expect(res.jsonrpc).toBe('2.0');
+        expect(res.id).toBe(index + 1);
+      });
     });
   });
 
@@ -824,14 +832,14 @@ describe('MCP Protocol Integration', () => {
           payload: JSON.stringify(mcpRequest),
         });
 
-        if (response.statusCode === 200) {
-          const mcpResponse = JSON.parse(response.payload);
-          
-          // Should either succeed (if defaults are provided) or return validation error
-          if (mcpResponse.error) {
-            expect(mcpResponse.error.code).toBe(-32602); // Invalid params
-            expect(mcpResponse.error.message).toContain('required');
-          }
+        expect(response.statusCode).toBe(200);
+
+        const mcpResponse = JSON.parse(response.payload);
+
+        // Should either succeed (if defaults are provided) or return validation error
+        if (mcpResponse.error) {
+          expect(mcpResponse.error.code).toBe(-32602); // Invalid params
+          expect(mcpResponse.error.message).toContain('required');
         }
       }
     });
@@ -871,13 +879,13 @@ describe('MCP Protocol Integration', () => {
           payload: JSON.stringify(mcpRequest),
         });
 
-        if (response.statusCode === 200) {
-          const mcpResponse = JSON.parse(response.payload);
-          
-          // Should return type validation error
-          if (mcpResponse.error) {
-            expect(mcpResponse.error.code).toBe(-32602); // Invalid params
-          }
+        expect(response.statusCode).toBe(200);
+
+        const mcpResponse = JSON.parse(response.payload);
+
+        // Should return type validation error
+        if (mcpResponse.error) {
+          expect(mcpResponse.error.code).toBe(-32602); // Invalid params
         }
       }
     });
@@ -916,11 +924,10 @@ describe('MCP Protocol Integration', () => {
 
       // All requests should succeed or fail gracefully
       responses.forEach((response, index) => {
-        if (response.statusCode === 200) {
-          const mcpResponse = JSON.parse(response.payload);
-          expect(mcpResponse.jsonrpc).toBe('2.0');
-          expect(mcpResponse.id).toBe(index);
-        }
+        expect(response.statusCode).toBe(200);
+        const mcpResponse = JSON.parse(response.payload);
+        expect(mcpResponse.jsonrpc).toBe('2.0');
+        expect(mcpResponse.id).toBe(index);
       });
     });
 
@@ -952,16 +959,16 @@ describe('MCP Protocol Integration', () => {
       const endTime = performance.now();
       const responseTime = endTime - startTime;
 
-      if (response.statusCode === 200) {
-        const mcpResponse = JSON.parse(response.payload);
-        expect(mcpResponse.result).toEqual(expect.any(Object));
-        
-        // Should handle large responses efficiently
-        expect(responseTime).toBeLessThan(2000); // Less than 2 seconds
-        
-        console.log(`Large MCP response time: ${responseTime.toFixed(2)}ms`);
-        console.log(`Response payload size: ${response.payload.length} bytes`);
-      }
+      expect(response.statusCode).toBe(200);
+
+      const mcpResponse = JSON.parse(response.payload);
+      expect(mcpResponse.result).toEqual(expect.any(Object));
+
+      // Should handle large responses efficiently
+      expect(responseTime).toBeLessThan(2000); // Less than 2 seconds
+
+      console.log(`Large MCP response time: ${responseTime.toFixed(2)}ms`);
+      console.log(`Response payload size: ${response.payload.length} bytes`);
     });
   });
 });

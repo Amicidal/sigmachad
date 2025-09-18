@@ -1,0 +1,14 @@
+{
+  "id": "test-backup-id",
+  "type": "full",
+  "timestamp": "2025-09-17T20:50:53.073Z",
+  "size": 0,
+  "checksum": "dummy",
+  "components": {
+    "falkordb": true,
+    "qdrant": true,
+    "postgres": true,
+    "config": true
+  },
+  "status": "completed"
+}

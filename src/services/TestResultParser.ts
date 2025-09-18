@@ -96,8 +96,6 @@ export class TestResultParser {
 
     const testSuites: ParsedTestSuite[] = [];
     const suiteRegex = /<testsuite[^>]*>(.*?)<\/testsuite>/gs;
-    const testcaseRegex = /<testcase\b[^>]*>(.*?)<\/testcase>/gs;
-    const selfClosingTestcaseRegex = /<testcase\b[^>]*\/>/gs;
 
     let suiteMatch;
     while ((suiteMatch = suiteRegex.exec(content)) !== null) {
@@ -116,77 +114,69 @@ export class TestResultParser {
         results: [],
       };
 
+      const testcaseStartRegex = /<testcase\b[^>]*\/?>/g;
       let testMatch;
-      while ((testMatch = testcaseRegex.exec(suiteContent)) !== null) {
-        const testAttrs = this.parseXMLAttributes(testMatch[0]);
-        const testContent = testMatch[1] || "";
+      while ((testMatch = testcaseStartRegex.exec(suiteContent)) !== null) {
+        const startTag = testMatch[0];
+        const attrs = this.parseXMLAttributes(startTag);
+        const trimmedStart = startTag.trimEnd();
+        const isSelfClosing = trimmedStart.endsWith('/>');
+
+        let testContent = "";
+        if (!isSelfClosing) {
+          const closeTag = "</testcase>";
+          const closeIndex = suiteContent.indexOf(closeTag, testcaseStartRegex.lastIndex);
+          if (closeIndex === -1) {
+            continue; // malformed XML; skip
+          }
+          testContent = suiteContent.substring(testcaseStartRegex.lastIndex, closeIndex);
+          testcaseStartRegex.lastIndex = closeIndex + closeTag.length;
+        }
 
         const testResult: ParsedTestResult = {
-          testId: `${suite.suiteName}:${testAttrs.name}`,
+          testId: `${suite.suiteName}:${attrs.name}`,
           testSuite: suite.suiteName,
-          testName: testAttrs.name || "Unknown Test",
-          duration: parseFloat(testAttrs.time || "0") * 1000,
+          testName: attrs.name || "Unknown Test",
+          duration: parseFloat(attrs.time || "0") * 1000,
           status: "passed",
         };
 
-        // Check for failure
-        if (/<failure\b/.test(testContent)) {
-          testResult.status = "failed";
-          const failureMatch = testContent.match(
-            /<failure[^>]*>(.*?)<\/failure>/s
-          );
-          if (failureMatch) {
-            testResult.errorMessage = this.stripXMLTags(failureMatch[1]);
+        if (!isSelfClosing) {
+          if (/<failure\b/.test(testContent)) {
+            testResult.status = "failed";
+            const failureMatch = testContent.match(/<failure[^>]*>([\s\S]*?)<\/failure>/);
+            if (failureMatch) {
+              testResult.errorMessage = this.stripXMLTags(failureMatch[1]);
+            }
           }
-        }
 
-        // Check for error
-        if (/<error\b/.test(testContent)) {
-          testResult.status = "error";
-          const errorMatch = testContent.match(/<error[^>]*>(.*?)<\/error>/s);
-          if (errorMatch) {
-            testResult.errorMessage = this.stripXMLTags(errorMatch[1]);
+          if (/<error\b/.test(testContent)) {
+            testResult.status = "error";
+            const errorMatch = testContent.match(/<error[^>]*>([\s\S]*?)<\/error>/);
+            if (errorMatch) {
+              testResult.errorMessage = this.stripXMLTags(errorMatch[1]);
+            }
           }
-        }
 
-        // Check for skipped
-        if (/<skipped\b/.test(testContent)) {
-          testResult.status = "skipped";
+          if (/<skipped\b/.test(testContent)) {
+            testResult.status = "skipped";
+          }
         }
 
         suite.results.push(testResult);
 
-        // Update suite counters
         switch (testResult.status) {
           case "passed":
             suite.passedTests++;
             break;
           case "failed":
+          case "error":
             suite.failedTests++;
             break;
           case "skipped":
             suite.skippedTests++;
             break;
         }
-      }
-
-      // Handle self-closing <testcase ... /> entries (no inner content)
-      let selfClosingMatch;
-      while (
-        (selfClosingMatch = selfClosingTestcaseRegex.exec(suiteContent)) !==
-        null
-      ) {
-        const testAttrs = this.parseXMLAttributes(selfClosingMatch[0]);
-        const testResult: ParsedTestResult = {
-          testId: `${suite.suiteName}:${testAttrs.name}`,
-          testSuite: suite.suiteName,
-          testName: testAttrs.name || "Unknown Test",
-          duration: parseFloat(testAttrs.time || "0") * 1000,
-          status: "passed",
-        };
-
-        suite.results.push(testResult);
-        suite.passedTests++;
       }
 
       // Ensure totalTests reflects parsed results if attribute missing or incorrect
@@ -551,17 +541,7 @@ export class TestResultParser {
 
   private mergeTestSuites(suites: ParsedTestSuite[]): TestSuiteResult {
     if (suites.length === 0) {
-      return {
-        suiteName: "JUnit Test Suite",
-        timestamp: new Date(),
-        framework: "junit",
-        totalTests: 0,
-        passedTests: 0,
-        failedTests: 0,
-        skippedTests: 0,
-        duration: 0,
-        results: [],
-      };
+      throw new Error("No test suites found");
     }
 
     if (suites.length === 1) {

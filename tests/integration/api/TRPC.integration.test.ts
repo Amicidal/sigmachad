@@ -661,6 +661,7 @@ describe('tRPC Integration', () => {
       });
 
       expect(restResponse.statusCode).toBe(200);
+      expect([200, 404]).toContain(trpcResponse.statusCode);
       if (trpcResponse.statusCode === 200) {
         // Basic shape check for tRPC success envelope
         const body = JSON.parse(trpcResponse.payload || '{}');
@@ -692,6 +693,7 @@ describe('tRPC Integration', () => {
         }),
       });
 
+      expect([200, 404]).toContain(trpcResponse.statusCode);
       if (trpcResponse.statusCode === 200) {
         // Should have request ID in response headers
         expect(typeof trpcResponse.headers['x-request-id']).toBe('string');

@@ -59,9 +59,7 @@ describe("KnowledgeGraphService Integration", () => {
       await kgService.createEntity(testEntity);
       const retrieved = await kgService.getEntity(testEntity.id);
 
-      expect(retrieved).toEqual(
-        expect.objectContaining({ id: testEntity.id })
-      );
+      expect(retrieved).toEqual(expect.objectContaining({ id: testEntity.id }));
       expect(retrieved?.path).toBe(testEntity.path);
       expect(retrieved?.language).toBe(testEntity.language);
       expect(retrieved?.type).toBe("file");
@@ -304,7 +302,11 @@ describe("KnowledgeGraphService Integration", () => {
       });
 
       expect(timeRangeResults.length).toBe(1);
-      expect(timeRangeResults[0].id).toBe(relationship.id);
+      // The system generates canonical IDs based on relationship content
+      expect(timeRangeResults[0].id).toMatch(/^rel_[a-f0-9]{40}$/);
+      expect(timeRangeResults[0].fromEntityId).toBe(relationship.fromEntityId);
+      expect(timeRangeResults[0].toEntityId).toBe(relationship.toEntityId);
+      expect(timeRangeResults[0].type).toBe(relationship.type);
     });
 
     it("normalizes code edges when persisting relationships", async () => {
@@ -359,11 +361,29 @@ describe("KnowledgeGraphService Integration", () => {
           confidence: 0.7,
           source: "ts",
           evidence: [
-            { source: "ast", location: { path: "src/foo.ts", line: 7, column: 3 }, note: "Meta note", extractorVersion: "v42" },
-            { source: "ast", location: { path: "src/foo.ts", line: 7, column: 3 } },
+            {
+              source: "ast",
+              location: { path: "src/foo.ts", line: 7, column: 3 },
+              note: "Meta note",
+              extractorVersion: "v42",
+            },
+            {
+              source: "ast",
+              location: { path: "src/foo.ts", line: 7, column: 3 },
+            },
           ],
-          toRef: { kind: "fileSymbol", file: "src/bar.ts", symbol: "Symbol", name: "Symbol" },
-          fromRef: { kind: "fileSymbol", file: "src/foo.ts", symbol: "useLocal", name: "useLocal" },
+          toRef: {
+            kind: "fileSymbol",
+            file: "src/bar.ts",
+            symbol: "Symbol",
+            name: "Symbol",
+          },
+          fromRef: {
+            kind: "fileSymbol",
+            file: "src/foo.ts",
+            symbol: "useLocal",
+            name: "useLocal",
+          },
           inferred: true,
         },
         evidence: [
@@ -381,23 +401,41 @@ describe("KnowledgeGraphService Integration", () => {
 
       await kgService.createRelationship(codeEdge);
 
-      const results = await kgService.getRelationships({ fromEntityId: fromSymbol.id });
+      const results = await kgService.getRelationships({
+        fromEntityId: fromSymbol.id,
+      });
       expect(results.length).toBe(1);
 
       const stored = results[0];
       const expectedSiteIdBase = "src/foo.ts|7|2|useLocal";
       const expectedSiteId =
-        "site_" + crypto.createHash("sha1").update(expectedSiteIdBase).digest("hex").slice(0, 12);
+        "site_" +
+        crypto
+          .createHash("sha1")
+          .update(expectedSiteIdBase)
+          .digest("hex")
+          .slice(0, 12);
 
-      expect(stored.id).toBe(canonicalRelationshipId(stored.fromEntityId, stored));
+      expect(stored.id).toBe(
+        canonicalRelationshipId(stored.fromEntityId, stored)
+      );
       expect(stored.type).toBe(RelationshipType.TYPE_USES);
       expect(stored.source).toBe("type-checker");
       expect(stored.confidence).toBeCloseTo(0.7, 5);
       expect(stored.context).toBe("src/foo.ts:7");
-      expect(stored.location).toEqual({ path: "src/foo.ts", line: 7, column: 2 });
+      expect(stored.location).toEqual({
+        path: "src/foo.ts",
+        line: 7,
+        column: 2,
+      });
       expect(stored.evidence).toEqual([
         { source: "type-checker", location: { path: "src/foo.ts", line: 5 } },
-        { source: "ast", location: { path: "src/foo.ts", line: 7, column: 3 }, note: "Meta note", extractorVersion: "v42" },
+        {
+          source: "ast",
+          location: { path: "src/foo.ts", line: 7, column: 3 },
+          note: "Meta note",
+          extractorVersion: "v42",
+        },
         { source: "heuristic", location: { path: "src/foo.ts", line: 12 } },
       ]);
       expect(Array.isArray(stored.locations)).toBe(true);
@@ -417,10 +455,22 @@ describe("KnowledgeGraphService Integration", () => {
         confidence: 0.7,
         source: "ts",
         inferred: true,
-        toRef: { kind: "fileSymbol", file: "src/bar.ts", symbol: "Symbol", name: "Symbol" },
-        fromRef: { kind: "fileSymbol", file: "src/foo.ts", symbol: "useLocal", name: "useLocal" },
+        toRef: {
+          kind: "fileSymbol",
+          file: "src/bar.ts",
+          symbol: "Symbol",
+          name: "Symbol",
+        },
+        fromRef: {
+          kind: "fileSymbol",
+          file: "src/foo.ts",
+          symbol: "useLocal",
+          name: "useLocal",
+        },
       });
-      expect(stored.metadata && Array.isArray((stored.metadata as any).evidence)).toBe(true);
+      expect(
+        stored.metadata && Array.isArray((stored.metadata as any).evidence)
+      ).toBe(true);
       if (Array.isArray(stored.sites)) {
         expect(stored.sites).toContain(expectedSiteId);
       } else if (typeof stored.sites === "string") {
@@ -476,7 +526,10 @@ describe("KnowledgeGraphService Integration", () => {
           occurrencesScan: 1,
           accessPath: "useBulk",
           evidence: [
-            { source: "type-checker", location: { path: "src/bulkSource.ts", line: 12 } },
+            {
+              source: "type-checker",
+              location: { path: "src/bulkSource.ts", line: 12 },
+            },
           ] as any,
           locations: [{ path: "src/bulkSource.ts", line: 12 }],
           sites: ["seed_site"],
@@ -485,7 +538,10 @@ describe("KnowledgeGraphService Integration", () => {
             line: 12,
             scope: "imported",
             evidence: [
-              { source: "ast", location: { path: "src/bulkSource.ts", line: 12, column: 2 } },
+              {
+                source: "ast",
+                location: { path: "src/bulkSource.ts", line: 12, column: 2 },
+              },
             ],
             toRef: {
               kind: "fileSymbol",
@@ -505,14 +561,20 @@ describe("KnowledgeGraphService Integration", () => {
           occurrencesScan: 2,
           resolved: true,
           evidence: [
-            { source: "heuristic", location: { path: "src/bulkSource.ts", line: 18 } },
+            {
+              source: "heuristic",
+              location: { path: "src/bulkSource.ts", line: 18 },
+            },
           ] as any,
           sites: ["another_site"],
           metadata: {
             path: "src/bulkSource.ts",
             line: 18,
             evidence: [
-              { source: "type-checker", location: { path: "src/bulkSource.ts", line: 18 } },
+              {
+                source: "type-checker",
+                location: { path: "src/bulkSource.ts", line: 18 },
+              },
             ],
             locations: [{ path: "src/bulkSource.ts", line: 18 }],
           },
@@ -528,13 +590,10 @@ describe("KnowledgeGraphService Integration", () => {
       expect(storedRelationships).toHaveLength(1);
 
       const stored = storedRelationships[0];
-      const expectedId = canonicalRelationshipId(
-        fromSymbol.id,
-        {
-          toEntityId: toSymbol.id,
-          type: RelationshipType.CALLS,
-        } as GraphRelationship,
-      );
+      const expectedId = canonicalRelationshipId(fromSymbol.id, {
+        toEntityId: toSymbol.id,
+        type: RelationshipType.CALLS,
+      } as GraphRelationship);
 
       expect(stored.id).toBe(expectedId);
       expect(stored.type).toBe(RelationshipType.CALLS);
@@ -548,24 +607,40 @@ describe("KnowledgeGraphService Integration", () => {
 
       expect(stored.evidence).toEqual(
         expect.arrayContaining([
-          { source: "type-checker", location: { path: "src/bulkSource.ts", line: 12 } },
-          { source: "type-checker", location: { path: "src/bulkSource.ts", line: 18 } },
-          { source: "ast", location: { path: "src/bulkSource.ts", line: 12, column: 2 } },
-          { source: "heuristic", location: { path: "src/bulkSource.ts", line: 18 } },
-        ]),
+          {
+            source: "type-checker",
+            location: { path: "src/bulkSource.ts", line: 12 },
+          },
+          {
+            source: "type-checker",
+            location: { path: "src/bulkSource.ts", line: 18 },
+          },
+          {
+            source: "ast",
+            location: { path: "src/bulkSource.ts", line: 12, column: 2 },
+          },
+          {
+            source: "heuristic",
+            location: { path: "src/bulkSource.ts", line: 18 },
+          },
+        ])
       );
 
       expect(stored.locations).toEqual(
         expect.arrayContaining([
           { path: "src/bulkSource.ts", line: 12 },
           { path: "src/bulkSource.ts", line: 18 },
-        ]),
+        ])
       );
 
       const sites = Array.isArray(stored.sites)
         ? stored.sites
-        : (stored.sites ? [stored.sites] : []);
-      expect(sites).toEqual(expect.arrayContaining(["seed_site", "another_site"]));
+        : stored.sites
+        ? [stored.sites]
+        : [];
+      expect(sites).toEqual(
+        expect.arrayContaining(["seed_site", "another_site"])
+      );
       expect(stored.siteId).toBeDefined();
       if (stored.siteId) {
         expect(sites).toContain(stored.siteId);
@@ -918,7 +993,7 @@ describe("KnowledgeGraphService Integration", () => {
 
       expect(examples).toEqual(expect.any(Object));
       expect(examples.entityId).toBe(dependencyEntities[0].id);
-      expect(typeof examples.signature).toBe('string');
+      expect(typeof examples.signature).toBe("string");
       // Usage examples depend on relationships, may be empty in simple test
       expect(examples.usageExamples).toEqual(expect.any(Array));
     });

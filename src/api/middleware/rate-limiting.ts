@@ -24,10 +24,7 @@ const bucketStores = new Set<Map<string, TokenBucket>>();
 const DEFAULT_CONFIGS: Record<string, RateLimitConfig> = {
   search: { maxRequests: 100, windowMs: 60000 }, // 100 requests per minute for search
   admin: { maxRequests: 50, windowMs: 60000 }, // 50 requests per minute for admin
-  default:
-    process.env.NODE_ENV === "test" || process.env.RUN_INTEGRATION === "1"
-      ? { maxRequests: 10000, windowMs: 60000 } // 10000 requests per minute for tests
-      : { maxRequests: 1000, windowMs: 3600000 }, // 1000 requests per hour default
+  default: { maxRequests: 1000, windowMs: 3600000 }, // 1000 requests per hour default
 };
 
 // Rate limiting middleware factory

@@ -416,8 +416,6 @@ export async function registerGraphRoutes(
               code: "INVALID_REQUEST",
               message: "Request body must be a valid JSON object",
             },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
           });
         }
 
@@ -431,8 +429,6 @@ export async function registerGraphRoutes(
               code: "INVALID_REQUEST",
               message: "Query parameter is required and cannot be empty",
             },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
           });
         }
 
@@ -493,8 +489,6 @@ export async function registerGraphRoutes(
             message: "Failed to perform graph search",
             details: error instanceof Error ? error.message : "Unknown error",
           },
-          requestId: (request as any).id,
-          timestamp: new Date().toISOString(),
         });
       }
     }
@@ -530,8 +524,6 @@ export async function registerGraphRoutes(
               code: "INVALID_REQUEST",
               message: "Entity ID is required and must be a non-empty string",
             },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
           });
         }
 
@@ -546,32 +538,25 @@ export async function registerGraphRoutes(
               code: "ENTITY_NOT_FOUND",
               message: "Entity not found",
             },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
           });
         }
 
-        // Check if examples exist
-        if (
-          Array.isArray(examples.usageExamples) &&
-          examples.usageExamples.length === 0 &&
-          Array.isArray(examples.testExamples) &&
-          examples.testExamples.length === 0
-        ) {
-          return reply.status(404).send({
-            success: false,
-            error: {
-              code: "EXAMPLES_NOT_FOUND",
-              message: "No examples found for the specified entity",
-            },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
-          });
-        }
+        const sanitizedExamples = {
+          ...examples,
+          usageExamples: Array.isArray(examples.usageExamples)
+            ? examples.usageExamples
+            : [],
+          testExamples: Array.isArray(examples.testExamples)
+            ? examples.testExamples
+            : [],
+          relatedPatterns: Array.isArray(examples.relatedPatterns)
+            ? examples.relatedPatterns
+            : [],
+        };
 
         reply.send({
           success: true,
-          data: examples,
+          data: sanitizedExamples,
         });
       } catch (error) {
         console.error("Examples retrieval error:", error);
@@ -582,8 +567,6 @@ export async function registerGraphRoutes(
             message: "Failed to retrieve usage examples",
             details: error instanceof Error ? error.message : "Unknown error",
           },
-          requestId: (request as any).id,
-          timestamp: new Date().toISOString(),
         });
       }
     }
@@ -619,8 +602,6 @@ export async function registerGraphRoutes(
               code: "INVALID_REQUEST",
               message: "Entity ID is required and must be a non-empty string",
             },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
           });
         }
 
@@ -635,35 +616,28 @@ export async function registerGraphRoutes(
               code: "ENTITY_NOT_FOUND",
               message: "Entity not found",
             },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
           });
         }
 
-        // Check if analysis has any meaningful data
-        if (
-          (!analysis.directDependencies ||
-            analysis.directDependencies.length === 0) &&
-          (!analysis.indirectDependencies ||
-            analysis.indirectDependencies.length === 0) &&
-          (!analysis.reverseDependencies ||
-            analysis.reverseDependencies.length === 0)
-        ) {
-          return reply.status(404).send({
-            success: false,
-            error: {
-              code: "DEPENDENCIES_NOT_FOUND",
-              message:
-                "No dependency information found for the specified entity",
-            },
-            requestId: (request as any).id,
-            timestamp: new Date().toISOString(),
-          });
-        }
+        const sanitizedAnalysis = {
+          ...analysis,
+          directDependencies: Array.isArray(analysis.directDependencies)
+            ? analysis.directDependencies
+            : [],
+          indirectDependencies: Array.isArray(analysis.indirectDependencies)
+            ? analysis.indirectDependencies
+            : [],
+          reverseDependencies: Array.isArray(analysis.reverseDependencies)
+            ? analysis.reverseDependencies
+            : [],
+          circularDependencies: Array.isArray(analysis.circularDependencies)
+            ? analysis.circularDependencies
+            : [],
+        };
 
         reply.send({
           success: true,
-          data: analysis,
+          data: sanitizedAnalysis,
         });
       } catch (error) {
         console.error("Dependency analysis error:", error);
@@ -674,8 +648,6 @@ export async function registerGraphRoutes(
             message: "Failed to analyze dependencies",
             details: error instanceof Error ? error.message : "Unknown error",
           },
-          requestId: (request as any).id,
-          timestamp: new Date().toISOString(),
         });
       }
     }

@@ -168,6 +168,11 @@ async function listSpecs(params?: ListSpecsParams): Promise<PaginatedResponse<Sp
 
 Generates test plans and implementations for a specification.
 
+- Leverages knowledge graph relationships (`REQUIRES`, `IMPLEMENTS_SPEC`, `VALIDATES`) to map acceptance criteria to concrete code targets and existing tests.
+- Generates `TestSpec` entries per criterion and test type, including assertions, target symbols, and data requirements.
+- Estimates coverage uplift based on existing coverage history plus projected impact from newly generated tests.
+- Returns a `changedFiles` list derived from impacted code and test artefacts so tooling can stage updates automatically.
+
 ```typescript
 interface TestPlanRequest {
   specId: string;
@@ -193,6 +198,109 @@ interface TestPlanResponse {
 }
 
 async function planAndGenerateTests(params: TestPlanRequest): Promise<TestPlanResponse>
+```
+
+**Sample Response**
+
+```json
+{
+  "testPlan": {
+    "unitTests": [
+      {
+        "name": "[AC-1] Unit chargeCustomer happy path",
+        "description": "Validate acceptance criterion AC-1 for Checkout Workflow.",
+        "type": "unit",
+        "targetFunction": "chargeCustomer",
+        "assertions": [
+          "Implements acceptance criterion AC-1: Order succeeds with valid payment",
+          "Covers chargeCustomer core behaviour and edge conditions",
+          "Establishes regression harness for new functionality"
+        ],
+        "dataRequirements": [
+          "Include dataset covering valid payment tokens.",
+          "Provide negative cases capturing rejection paths."
+        ]
+      }
+    ],
+    "integrationTests": [
+      {
+        "name": "[AC-1] Integration chargeCustomer ↔ ledger",
+        "description": "Exercise system collaboration for Checkout Workflow. Cover integration between chargeCustomer, ledger writer, payments API.",
+        "type": "integration",
+        "targetFunction": "chargeCustomer & ledger",
+        "assertions": [
+          "Coordinates chargeCustomer, ledger writer, payments API end-to-end",
+          "Verifies cross-cutting requirements for AC-1: Order succeeds with valid payment",
+          "Document integration contract assumptions and fixtures"
+        ],
+        "dataRequirements": [
+          "Provision upstream and downstream fixtures mirroring production.",
+          "Include dataset covering declined card responses."
+        ]
+      },
+      {
+        "name": "Checkout Workflow security posture",
+        "description": "Validate authentication, authorization, and data handling rules tied to Checkout Workflow.",
+        "type": "integration",
+        "targetFunction": "Checkout Workflow",
+        "assertions": [
+          "Rejects requests lacking required claims or tokens",
+          "Enforces least privilege access for privileged operations",
+          "Scrubs sensitive fields from logs and downstream payloads"
+        ],
+        "dataRequirements": [
+          "Generate signed and tampered tokens",
+          "Include role combinations from spec metadata",
+          "Verify encryption-in-transit and at-rest paths"
+        ]
+      }
+    ],
+    "e2eTests": [
+      {
+        "name": "Checkout Workflow happy path flow",
+        "description": "Exercise the primary workflow covering 2 acceptance criteria for Checkout Workflow.",
+        "type": "e2e",
+        "targetFunction": "Checkout Workflow",
+        "assertions": [
+          "Satisfies AC-1: Order succeeds with valid payment",
+          "Satisfies AC-2: Order fails with declined card"
+        ],
+        "dataRequirements": [
+          "Mirror production-like happy path data and environment.",
+          "Enumerate rollback or recovery steps for failed stages."
+        ]
+      }
+    ],
+    "performanceTests": [
+      {
+        "name": "Checkout Workflow performance guardrail",
+        "description": "Protect high priority specification against latency regressions by validating hot paths under load.",
+        "type": "performance",
+        "targetFunction": "chargeCustomer",
+        "assertions": [
+          "Throughput remains within baseline for chargeCustomer",
+          "P95 latency does not regress beyond 10% of current benchmark",
+          "Resource utilization stays below allocated service limits"
+        ],
+        "dataRequirements": [
+          "Replay representative production workload",
+          "Include peak load burst scenarios",
+          "Capture CPU, memory, and downstream dependency timings"
+        ]
+      }
+    ]
+  },
+  "estimatedCoverage": {
+    "lines": 78,
+    "branches": 70,
+    "functions": 74,
+    "statements": 77
+  },
+  "changedFiles": [
+    "src/services/payments.ts",
+    "tests/integration/checkout.test.ts"
+  ]
+}
 ```
 
 ### 2.2 Record Test Execution
@@ -521,18 +629,67 @@ interface ImpactAnalysis {
   };
   documentationImpact: {
     staleDocs: DocumentationNode[];
+    missingDocs: Array<{
+      entityId: string;
+      entityName: string;
+      reason: string;
+    }>;
     requiredUpdates: string[];
+    freshnessPenalty: number;
+  };
+  specImpact: {
+    relatedSpecs: Array<{
+      specId: string;
+      spec?: Pick<Spec, 'id' | 'title' | 'priority' | 'status' | 'assignee' | 'tags'>;
+      priority?: 'critical' | 'high' | 'medium' | 'low';
+      impactLevel?: 'critical' | 'high' | 'medium' | 'low';
+      status?: Spec['status'] | 'unknown';
+      ownerTeams: string[];
+      acceptanceCriteriaIds: string[];
+      relationships: Array<{
+        type: RelationshipType;
+        impactLevel?: 'critical' | 'high' | 'medium' | 'low';
+        priority?: 'critical' | 'high' | 'medium' | 'low';
+        acceptanceCriteriaIds?: string[];
+        ownerTeam?: string;
+        rationale?: string;
+        confidence?: number;
+        status?: Spec['status'] | 'unknown';
+      }>;
+    }>;
+    requiredUpdates: string[];
+    summary: {
+      byPriority: Record<'critical' | 'high' | 'medium' | 'low', number>;
+      byImpactLevel: Record<'critical' | 'high' | 'medium' | 'low', number>;
+      statuses: Record<'draft' | 'approved' | 'implemented' | 'deprecated' | 'unknown', number>;
+      acceptanceCriteriaReferences: number;
+      pendingSpecs: number;
+    };
+  };
+  deploymentGate: {
+    blocked: boolean;
+    level: 'none' | 'advisory' | 'required';
+    reasons: string[];
+    stats: {
+      missingDocs: number;
+      staleDocs: number;
+      freshnessPenalty: number;
+    };
   };
   recommendations: {
     priority: 'immediate' | 'planned' | 'optional';
     description: string;
     effort: 'low' | 'medium' | 'high';
     impact: 'breaking' | 'functional' | 'cosmetic';
+    type?: 'warning' | 'requirement' | 'suggestion';
+    actions?: string[];
   }[];
 }
 
 async function analyzeImpact(params: ImpactAnalysisRequest): Promise<ImpactAnalysis>
 ```
+
+The handler normalises graph traversal depth (`maxDepth` 1–8) and aggregates secondary metrics for consumers (risk scoring, documentation gating). Documentation freshness drives the `deploymentGate` status: any missing documentation pushes the gate to `required`, while stale references escalate to `advisory`. Linked specifications influence both the risk level and recommendation feed—critical/high-priority specs trigger immediate actions, while acceptance-criteria references surface targeted follow-ups. Recommendations surface immediate remediation steps (e.g., update tests, resolve high-risk dependencies, close spec gaps) and include machine-generated context for MCP tooling.
 
 ---
 
@@ -904,6 +1061,12 @@ interface AuthenticatedRequest {
 // - 'admin' - Administrative operations
 // - 'security' - Security-related operations
 ```
+
+> Current implementation: when either `JWT_SECRET` or `API_KEY_SECRET` is configured the integration layer enforces authentication on `/api/v1/admin*` routes. Admin endpoints require JWTs carrying the `admin` permission. API keys are limited to read-only scenarios and receive `INSUFFICIENT_PERMISSIONS` on admin routes.
+
+### Token lifecycle
+
+`POST /api/v1/auth/refresh` accepts `{ refreshToken }` and returns a fresh access token plus refresh token. Expired or malformed refresh tokens respond with `TOKEN_EXPIRED` or `INVALID_TOKEN` payloads to mirror the integration test contract.
 
 ## Rate Limiting
 

@@ -534,6 +534,7 @@ describe('REST API Endpoints Integration', () => {
     it('GET /api/v1/admin/admin-health responds with status and metrics', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/admin/admin-health' });
       const body = JSON.parse(res.payload || '{}');
+      expect([200, 503]).toContain(res.statusCode);
       if (res.statusCode === 200) {
         expect(body).toEqual(
           expect.objectContaining({

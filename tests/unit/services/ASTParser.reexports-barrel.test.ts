@@ -37,4 +37,3 @@ describe('ASTParser barrel re-export resolution', () => {
     expect(match, `Expected file:*a.ts:original in ${JSON.stringify(relStrs)}`).toBeTruthy();
   });
 });
-

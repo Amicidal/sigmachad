@@ -31,6 +31,8 @@ const DEFAULT_POSTGRES_TABLES = [
   "coverage_history",
 ];
 
+const POSTGRES_FIXTURE_LOCK_KEY = 0xc0def11;
+
 export const TEST_FIXTURE_IDS = {
   documents: {
     code: "00000000-0000-4000-8000-000000000001",
@@ -107,6 +109,9 @@ export async function setupTestDatabase(
       if (allCoreHealthy) {
         await dbService.setupDatabase();
         log("✅ Database schema setup complete");
+
+        // Always start tests from a blank slate to avoid cross-suite leakage.
+        await clearTestData(dbService, { silent: true });
       } else {
         warn("⚠️ Some database services are not healthy, schema setup skipped");
         warn("Health status:", health);
@@ -165,13 +170,41 @@ export async function clearTestData(
     cleanupTasks.push(
       (async () => {
         try {
-          const truncateList = postgresTables
-            .map((table) => `"${table}"`)
-            .join(", ");
-          await dbService.postgresQuery(
-            `TRUNCATE TABLE IF EXISTS ${truncateList} RESTART IDENTITY CASCADE`
-          );
-          log("✅ Truncated PostgreSQL tables");
+          let truncatedTables: string[] | null = null;
+
+          await dbService.postgresTransaction(async (client) => {
+            await client.query(
+              "SELECT pg_advisory_xact_lock($1)",
+              [POSTGRES_FIXTURE_LOCK_KEY]
+            );
+
+            const existing = await client.query(
+              "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' AND tablename = ANY($1::text[])",
+              [postgresTables]
+            );
+
+            const existingTables = (existing.rows ?? [])
+              .map((row) => row.tablename as string)
+              .filter(Boolean);
+
+            truncatedTables = existingTables;
+
+            if (existingTables.length) {
+              const truncateList = existingTables
+                .map((table) => `"${table}"`)
+                .join(", ");
+
+              await client.query(
+                `TRUNCATE TABLE ${truncateList} RESTART IDENTITY CASCADE`
+              );
+            }
+          });
+
+          if (truncatedTables && truncatedTables.length) {
+            log("✅ Truncated PostgreSQL tables");
+          } else {
+            log("ℹ️ No PostgreSQL tables found to truncate");
+          }
         } catch (error) {
           warn("⚠️ Could not truncate PostgreSQL tables:", error);
         }
@@ -442,155 +475,185 @@ export async function insertTestFixtures(
     throw new Error("Database service not initialized");
   }
 
-  // Insert documents
-  for (let i = 0; i < TEST_FIXTURES.documents.length; i++) {
-    const doc = TEST_FIXTURES.documents[i];
-    await dbService.postgresQuery(
-      "INSERT INTO documents (id, type, content, metadata) VALUES ($1, $2, $3, $4)",
-      [
-        doc.id || uuidv4(),
-        doc.type,
-        JSON.stringify(doc.content),
-        JSON.stringify(doc.metadata),
-      ]
-    );
-  }
-
-  // Insert sessions
-  for (const session of TEST_FIXTURES.sessions) {
-    await dbService.postgresQuery(
-      "INSERT INTO sessions (agent_type, user_id, start_time, end_time, status, metadata) VALUES ($1, $2, $3, $4, $5, $6)",
-      [
-        session.agent_type,
-        session.user_id,
-        session.start_time,
-        session.end_time,
-        session.status,
-        JSON.stringify(session.metadata),
-      ]
-    );
-  }
-
-  // Insert changes
-  for (const change of TEST_FIXTURES.changes) {
-    await dbService.postgresQuery(
-      `
-      INSERT INTO changes (change_type, entity_type, entity_id, timestamp, author, commit_hash, diff, previous_state, new_state, session_id, spec_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-    `,
-      [
-        change.change_type,
-        change.entity_type,
-        change.entity_id,
-        change.timestamp,
-        change.author,
-        change.commit_hash,
-        change.diff,
-        JSON.stringify(change.previous_state),
-        JSON.stringify(change.new_state),
-        change.session_id,
-        change.spec_id,
-      ]
-    );
-  }
-
-  // Insert test suites and results
-  for (const suite of TEST_FIXTURES.testSuites) {
-    const suiteResult = await dbService.postgresQuery(
-      `
-      INSERT INTO test_suites (suite_name, timestamp, framework, total_tests, passed_tests, failed_tests, skipped_tests, duration)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id
-    `,
-      [
-        suite.suiteName,
-        suite.timestamp,
-        suite.framework,
-        suite.totalTests,
-        suite.passedTests,
-        suite.failedTests,
-        suite.skippedTests,
-        suite.duration,
-      ]
+  await dbService.postgresTransaction(async (client) => {
+    await client.query(
+      "SELECT pg_advisory_xact_lock($1)",
+      [POSTGRES_FIXTURE_LOCK_KEY]
     );
 
-    const suiteId = suiteResult.rows?.[0]?.id;
+    // Insert documents
+    for (let i = 0; i < TEST_FIXTURES.documents.length; i++) {
+      const doc = TEST_FIXTURES.documents[i];
+      const docId = doc.id || uuidv4();
+      await client.query(
+        `
+        INSERT INTO documents (id, type, content, metadata)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (id) DO UPDATE SET
+          type = EXCLUDED.type,
+          content = EXCLUDED.content,
+          metadata = EXCLUDED.metadata,
+          updated_at = NOW()
+      `,
+        [
+          docId,
+          doc.type,
+          JSON.stringify(doc.content),
+          JSON.stringify(doc.metadata),
+        ]
+      );
+    }
 
-    if (suiteId) {
-      // Insert test results for this suite
-      for (const result of TEST_FIXTURES.testResults.filter(
-        (r) => r.test_suite === suite.suiteName
-      )) {
-        await dbService.postgresQuery(
-          `
-          INSERT INTO test_results (test_id, test_name, status, duration, error_message, stack_trace, timestamp, suite_id)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `,
-          [
-            result.test_id,
-            result.test_name,
-            result.status,
-            result.duration,
-            result.error_message,
-            result.stack_trace,
-            result.timestamp,
-            suiteId,
-          ]
-        );
+    // Insert sessions
+    for (const session of TEST_FIXTURES.sessions) {
+      await client.query(
+        "INSERT INTO sessions (agent_type, user_id, start_time, end_time, status, metadata) VALUES ($1, $2, $3, $4, $5, $6)",
+        [
+          session.agent_type,
+          session.user_id,
+          session.start_time,
+          session.end_time,
+          session.status,
+          JSON.stringify(session.metadata),
+        ]
+      );
+    }
+
+    // Insert changes
+    for (const change of TEST_FIXTURES.changes) {
+      await client.query(
+        `
+        INSERT INTO changes (change_type, entity_type, entity_id, timestamp, author, commit_hash, diff, previous_state, new_state, session_id, spec_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `,
+        [
+          change.change_type,
+          change.entity_type,
+          change.entity_id,
+          change.timestamp,
+          change.author,
+          change.commit_hash,
+          change.diff,
+          JSON.stringify(change.previous_state),
+          JSON.stringify(change.new_state),
+          change.session_id,
+          change.spec_id,
+        ]
+      );
+    }
+
+    // Insert test suites and results
+    for (const suite of TEST_FIXTURES.testSuites) {
+      const suiteTimestamp = new Date().toISOString();
+      const suiteResult = await client.query(
+        `
+        INSERT INTO test_suites (suite_name, timestamp, framework, total_tests, passed_tests, failed_tests, skipped_tests, duration)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (suite_name, timestamp) DO UPDATE SET
+          framework = EXCLUDED.framework,
+          total_tests = EXCLUDED.total_tests,
+          passed_tests = EXCLUDED.passed_tests,
+          failed_tests = EXCLUDED.failed_tests,
+          skipped_tests = EXCLUDED.skipped_tests,
+          duration = EXCLUDED.duration
+        RETURNING id
+      `,
+        [
+          suite.suiteName,
+          suiteTimestamp,
+          suite.framework,
+          suite.totalTests,
+          suite.passedTests,
+          suite.failedTests,
+          suite.skippedTests,
+          suite.duration,
+        ]
+      );
+
+      const suiteId = suiteResult.rows?.[0]?.id;
+
+      if (suiteId) {
+        // Insert test results for this suite
+        for (const result of TEST_FIXTURES.testResults.filter(
+          (r) => r.test_suite === suite.suiteName
+        )) {
+          await client.query(
+            `
+            INSERT INTO test_results (test_id, test_name, status, duration, error_message, stack_trace, timestamp, suite_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (test_id, suite_id) DO UPDATE SET
+              status = EXCLUDED.status,
+              duration = EXCLUDED.duration,
+              error_message = EXCLUDED.error_message,
+              stack_trace = EXCLUDED.stack_trace,
+              timestamp = EXCLUDED.timestamp
+          `,
+            [
+              result.test_id,
+              result.test_name,
+              result.status,
+              result.duration,
+              result.error_message,
+              result.stack_trace,
+              result.timestamp,
+              suiteId,
+            ]
+          );
+        }
       }
     }
-  }
 
-  // Insert flaky analyses (idempotent to avoid unique constraint violations between runs)
-  for (const analysis of TEST_FIXTURES.flakyAnalyses) {
-    await dbService.postgresQuery(
-      `
-      INSERT INTO flaky_test_analyses (test_id, test_name, failure_count, flaky_score, total_runs, failure_rate, success_rate, recent_failures, patterns, recommendations, analyzed_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      ON CONFLICT (test_id) DO UPDATE SET
-        test_name = EXCLUDED.test_name,
-        failure_count = EXCLUDED.failure_count,
-        flaky_score = EXCLUDED.flaky_score,
-        total_runs = EXCLUDED.total_runs,
-        failure_rate = EXCLUDED.failure_rate,
-        success_rate = EXCLUDED.success_rate,
-        recent_failures = EXCLUDED.recent_failures,
-        patterns = EXCLUDED.patterns,
-        recommendations = EXCLUDED.recommendations,
-        analyzed_at = EXCLUDED.analyzed_at
-    `,
-      [
-        analysis.testId,
-        analysis.testName,
-        Number(analysis.failureCount || analysis.failure_count || 0),
-        Number(analysis.flakyScore || 0),
-        Number(analysis.totalRuns || 0),
-        Number(analysis.failureRate || 0),
-        Number(analysis.successRate || 0),
-        Number(analysis.recentFailures || 0),
-        JSON.stringify(analysis.patterns || {}),
-        JSON.stringify(analysis.recommendations || {}),
-        analysis.analyzedAt || analysis.analyzed_at || new Date().toISOString(),
-      ]
-    );
-  }
+    // Insert flaky analyses (idempotent to avoid unique constraint violations between runs)
+    for (const analysis of TEST_FIXTURES.flakyAnalyses) {
+      await client.query(
+        `
+        INSERT INTO flaky_test_analyses (test_id, test_name, failure_count, flaky_score, total_runs, failure_rate, success_rate, recent_failures, patterns, recommendations, analyzed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (test_id) DO UPDATE SET
+          test_name = EXCLUDED.test_name,
+          failure_count = EXCLUDED.failure_count,
+          flaky_score = EXCLUDED.flaky_score,
+          total_runs = EXCLUDED.total_runs,
+          failure_rate = EXCLUDED.failure_rate,
+          success_rate = EXCLUDED.success_rate,
+          recent_failures = EXCLUDED.recent_failures,
+          patterns = EXCLUDED.patterns,
+          recommendations = EXCLUDED.recommendations,
+          analyzed_at = EXCLUDED.analyzed_at
+      `,
+        [
+          analysis.testId,
+          analysis.testName,
+          Number(analysis.failureCount || analysis.failure_count || 0),
+          Number(analysis.flakyScore || 0),
+          Number(analysis.totalRuns || 0),
+          Number(analysis.failureRate || 0),
+          Number(analysis.successRate || 0),
+          Number(analysis.recentFailures || 0),
+          JSON.stringify(analysis.patterns || {}),
+          JSON.stringify(analysis.recommendations || {}),
+          analysis.analyzedAt || analysis.analyzed_at || new Date().toISOString(),
+        ]
+      );
+    }
 
-  // Insert test performance data
-  for (const perf of TEST_FIXTURES.testPerformance) {
-    await dbService.postgresQuery(
-      `
-      INSERT INTO test_performance (test_id, memory_usage, cpu_usage, network_requests, created_at)
-      VALUES ($1, $2, $3, $4, $5)
-    `,
-      [
-        perf.test_id,
-        Number(perf.memory_usage || 0),
-        Number(perf.cpu_usage || 0),
-        Number(perf.network_requests || 0),
-        perf.timestamp || new Date().toISOString(),
-      ]
-    );
-  }
+    // Insert test performance data
+    for (const perf of TEST_FIXTURES.testPerformance) {
+      await client.query(
+        `
+        INSERT INTO test_performance (test_id, memory_usage, cpu_usage, network_requests, created_at)
+        VALUES ($1, $2, $3, $4, $5)
+      `,
+        [
+          perf.test_id,
+          Number(perf.memory_usage || 0),
+          Number(perf.cpu_usage || 0),
+          Number(perf.network_requests || 0),
+          perf.timestamp || new Date().toISOString(),
+        ]
+      );
+    }
+  });
 
   // Insert FalkorDB entities for testing
   try {
