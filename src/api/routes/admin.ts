@@ -72,7 +72,42 @@ export async function registerAdminRoutes(
   maintenanceService?: MaintenanceService,
   configurationService?: ConfigurationService
 ): Promise<void> {
-  app.get('/admin-health', async (_request, reply) => {
+  const registeredAdminRoutes = new Set<string>();
+  const joinPaths = (base: string, suffix: string) => {
+    const trimmedBase = base.endsWith('/') ? base.slice(0, -1) : base;
+    const normalisedSuffix = suffix.startsWith('/') ? suffix : `/${suffix}`;
+    return `${trimmedBase}${normalisedSuffix}`;
+  };
+
+  const registerWithAdminAliases = (
+    method: 'get' | 'post' | 'put' | 'patch' | 'delete',
+    path: string,
+    ...args: any[]
+  ) => {
+    const register = (route: string) => {
+      const key = `${method}:${route}`;
+      if (!registeredAdminRoutes.has(key)) {
+        (app as any)[method](route, ...args);
+        registeredAdminRoutes.add(key);
+      }
+    };
+
+    register(path);
+
+    const adminPath = joinPaths('/admin', path);
+    if (adminPath !== path) {
+      register(adminPath);
+    }
+
+    if (!path.startsWith('/admin')) {
+      const doubleAdminPath = joinPaths('/admin', adminPath);
+      if (doubleAdminPath !== adminPath) {
+        register(doubleAdminPath);
+      }
+    }
+  };
+
+  registerWithAdminAliases('get', '/admin-health', async (_request, reply) => {
     try {
       const health = typeof dbService.healthCheck === 'function'
         ? await dbService.healthCheck()
@@ -162,7 +197,7 @@ export async function registerAdminRoutes(
     }
   });
 
-  app.get('/sync-status', async (_request, reply) => {
+  registerWithAdminAliases('get', '/sync-status', async (_request, reply) => {
     try {
       const getSyncMetrics = (syncMonitor as unknown as { getSyncMetrics?: Function })?.getSyncMetrics;
       const getHealthMetrics = (syncMonitor as unknown as { getHealthMetrics?: Function })?.getHealthMetrics;
@@ -235,7 +270,7 @@ export async function registerAdminRoutes(
     }
   });
 
-  app.post('/sync', {
+  registerWithAdminAliases('post', '/sync', {
     schema: {
       body: {
         type: 'object',
@@ -285,7 +320,7 @@ export async function registerAdminRoutes(
     }
   });
 
-  app.get('/analytics', {
+  registerWithAdminAliases('get', '/analytics', {
     schema: {
       querystring: {
         type: 'object',
@@ -498,7 +533,7 @@ export async function registerAdminRoutes(
     app.get('/admin/benchmarks', benchmarksHandler);
   }
 
-  app.post('/backup', {
+  registerWithAdminAliases('post', '/backup', {
     schema: {
       body: {
         type: 'object',
@@ -546,7 +581,7 @@ export async function registerAdminRoutes(
     }
   });
 
-  app.post('/restore', {
+  registerWithAdminAliases('post', '/restore', {
     schema: {
       body: {
         type: 'object',
@@ -587,7 +622,7 @@ export async function registerAdminRoutes(
     }
   });
 
-  app.get('/logs', {
+  registerWithAdminAliases('get', '/logs', {
     schema: {
       querystring: {
         type: 'object',
@@ -646,7 +681,7 @@ export async function registerAdminRoutes(
     }
   });
 
-  app.post('/maintenance', {
+  registerWithAdminAliases('post', '/maintenance', {
     schema: {
       body: {
         type: 'object',
@@ -743,18 +778,7 @@ export async function registerAdminRoutes(
       }
     };
 
-    app.post('/history/prune', {
-      schema: {
-        body: {
-          type: 'object',
-          properties: {
-            retentionDays: { type: 'number', minimum: 1 },
-            dryRun: { type: 'boolean' },
-          },
-        },
-      },
-    }, historyPruneHandler);
-    app.post('/admin/history/prune', {
+    registerWithAdminAliases('post', '/history/prune', {
       schema: {
         body: {
           type: 'object',
@@ -767,7 +791,7 @@ export async function registerAdminRoutes(
     }, historyPruneHandler);
   }
 
-  app.get('/config', async (_request, reply) => {
+  registerWithAdminAliases('get', '/config', async (_request, reply) => {
     try {
       if (!configurationService || typeof configurationService.getSystemConfiguration !== 'function') {
         reply.status(503).send({
@@ -793,7 +817,7 @@ export async function registerAdminRoutes(
     }
   });
 
-  app.put('/config', {
+  registerWithAdminAliases('put', '/config', {
     schema: {
       body: {
         type: 'object',

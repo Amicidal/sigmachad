@@ -23,7 +23,25 @@
 - `tests/unit/services/MaintenanceService.test.ts` *(covers task orchestration, stats, and concurrency; good regression net)*
 - `tests/unit/services/SynchronizationMonitoring.test.ts` *(broad coverage of metrics/alerts lifecycle; high quality and still aligned with service behaviour)*
 - `tests/unit/services/TestResultParser.test.ts` *(exercise for multi-framework parsing; highlights missing suite-name extraction in JUnit path—implementation gap logged in blueprint)*
+- `tests/integration/api/AdminEndpoints.integration.test.ts` *(verified admin route aliases for `/admin/*` legacy paths and clarified health-check contract: critical failures surface as HTTP 503, sync messaging now compared case-insensitively. High-value coverage across admin flows; maintain alias support per blueprint note.)*
 
 ## Failing Tests (to investigate)
-- None pending
-_(Last updated: 2025-09-18 01:42:00)_
+- tests/integration/api/AdminRestore.integration.test.ts
+- tests/integration/api/Authentication.integration.test.ts
+- tests/integration/api/RESTEndpoints.integration.test.ts
+- tests/integration/api/ImpactAnalysis.integration.test.ts
+- tests/integration/services/KnowledgeGraphService.integration.test.ts
+- tests/integration/services/MaintenanceService.integration.test.ts
+- tests/integration/services/RollbackCapabilities.integration.test.ts
+- tests/integration/api/MCPToolIntegration.integration.test.ts
+- tests/integration/api/MCPProtocol.integration.test.ts
+- tests/integration/api/MCPToolIntegration.integration.test.ts
+- tests/integration/models/entities.integration.test.ts
+- tests/integration/models/relationships.integration.test.ts
+- tests/integration/services/TestEngine.integration.test.ts
+- tests/integration/services/TestResultParser.integration.test.ts
+- tests/integration/services/SecurityScanner.integration.test.ts
+- tests/integration/services/SynchronizationCoordinator.integration.test.ts
+- tests/integration/services/FalkorDBService.integration.test.ts
+- tests/integration/services/DocumentationParser.integration.test.ts
+_(Last updated: 2025-09-18 02:32:39 UTC)_

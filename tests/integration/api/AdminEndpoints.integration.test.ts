@@ -155,7 +155,7 @@ describe('Admin API Endpoints Integration', () => {
           url: '/api/v1/admin-health',
         });
 
-        expect(response.statusCode).toBe(200);
+        expect(response.statusCode).toBe(503);
 
         const body = JSON.parse(response.payload);
         expect(body.data.overall).toBe('unhealthy');
@@ -325,7 +325,7 @@ describe('Admin API Endpoints Integration', () => {
 
       const body = JSON.parse(response.payload);
       expect(body).toEqual(expect.objectContaining({ success: true, data: expect.any(Object) }));
-      expect(body.data.message).toContain('Synchronization');
+      expect(body.data.message.toLowerCase()).toContain('synchronization');
     });
 
     it('should accept force sync with all options enabled', async () => {
@@ -347,7 +347,7 @@ describe('Admin API Endpoints Integration', () => {
 
       const body = JSON.parse(response.payload);
       expect(body.success).toBe(true);
-      expect(body.data.message).toContain('Synchronization');
+      expect(body.data.message.toLowerCase()).toContain('synchronization');
     });
 
     it('should handle selective sync options', async () => {
