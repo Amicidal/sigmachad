@@ -318,14 +318,18 @@ describe('Graph Routes', () => {
       await searchHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: expect.objectContaining({
-          code: 'GRAPH_SEARCH_FAILED',
-          message: 'Failed to perform graph search',
-          details: 'Search service failed'
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.objectContaining({
+            code: 'GRAPH_SEARCH_FAILED',
+            message: 'Failed to perform graph search',
+            details: 'Search service failed'
+          }),
+          requestId: expect.any(String),
+          timestamp: expect.any(String)
         })
-      });
+      );
     });
 
     it('should validate required query parameter', async () => {
@@ -454,14 +458,18 @@ describe('Graph Routes', () => {
       await examplesHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: expect.objectContaining({
-          code: 'EXAMPLES_RETRIEVAL_FAILED',
-          message: 'Failed to retrieve usage examples',
-          details: 'Examples service failed'
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.objectContaining({
+            code: 'EXAMPLES_RETRIEVAL_FAILED',
+            message: 'Failed to retrieve usage examples',
+            details: 'Examples service failed'
+          }),
+          requestId: expect.any(String),
+          timestamp: expect.any(String)
         })
-      });
+      );
     });
 
     it('should handle complex examples with multiple patterns', async () => {
@@ -674,14 +682,18 @@ describe('Graph Routes', () => {
       await dependenciesHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: expect.objectContaining({
-          code: 'DEPENDENCY_ANALYSIS_FAILED',
-          message: 'Failed to analyze dependencies',
-          details: 'Dependency analysis failed'
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.objectContaining({
+            code: 'DEPENDENCY_ANALYSIS_FAILED',
+            message: 'Failed to analyze dependencies',
+            details: 'Dependency analysis failed'
+          }),
+          requestId: expect.any(String),
+          timestamp: expect.any(String)
         })
-      });
+      );
     });
 
     it('should handle complex dependency graphs', async () => {
@@ -799,7 +811,8 @@ describe('Graph Routes', () => {
       await entitiesHandler(mockRequest, mockReply);
 
       expect(mockKgService.listEntities).toHaveBeenCalledWith({
-        type: 'function',
+        type: 'symbol',
+        kind: 'function',
         language: 'typescript',
         path: 'src/',
         tags: ['utility', 'helper'],
@@ -873,14 +886,18 @@ describe('Graph Routes', () => {
       await entitiesHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: expect.objectContaining({
-          code: 'ENTITIES_LIST_FAILED',
-          message: 'Failed to list entities',
-          details: 'List entities failed'
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.objectContaining({
+            code: 'ENTITIES_LIST_FAILED',
+            message: 'Failed to list entities',
+            details: 'List entities failed'
+          }),
+          requestId: expect.any(String),
+          timestamp: expect.any(String)
         })
-      });
+      );
     });
 
     it('should handle large entity sets with pagination', async () => {
@@ -1078,14 +1095,18 @@ describe('Graph Routes', () => {
       await relationshipsHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: expect.objectContaining({
-          code: 'RELATIONSHIPS_LIST_FAILED',
-          message: 'Failed to list relationships',
-          details: 'List relationships failed'
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.objectContaining({
+            code: 'RELATIONSHIPS_LIST_FAILED',
+            message: 'Failed to list relationships',
+            details: 'List relationships failed'
+          }),
+          requestId: expect.any(String),
+          timestamp: expect.any(String)
         })
-      });
+      );
     });
 
     it('should handle unidirectional relationship queries', async () => {
@@ -1237,12 +1258,16 @@ describe('Graph Routes', () => {
       await examplesHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: expect.objectContaining({
-          details: 'Network timeout'
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.objectContaining({
+            details: 'Network timeout'
+          }),
+          requestId: expect.any(String),
+          timestamp: expect.any(String)
         })
-      });
+      );
     });
 
     it('should handle malformed JSON in request body', async () => {
@@ -1481,7 +1506,8 @@ describe('Graph Routes', () => {
       await entitiesHandler(mockRequest, mockReply);
 
       expect(mockKgService.listEntities).toHaveBeenCalledWith({
-        type: 'function',
+        type: 'symbol',
+        kind: 'function',
         language: 'typescript',
         path: 'src/utils/',
         tags: ['utility', 'filter', 'typescript'],

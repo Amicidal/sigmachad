@@ -13,9 +13,13 @@
 - 2025-09-19: `tests/unit/services/SynchronizationCoordinator.test.ts` — PASS — Extensive happy-path and edge-case coverage (queueing, cancellation, partial/incremental modes) continues to read as high value; mocks remain realistic though the log stream is verbose.
 - 2025-09-19: `tests/unit/services/SynchronizationCoordinator.resolver.test.ts` — PASS — Resolver helpers stay deterministic and provide good signal on relationship target resolution; compact but meaningful.
 - 2025-09-19: `tests/integration/services/SynchronizationCoordinator.integration.test.ts` — PASS — Full-stack sync exercises (full/incremental/partial/conflict flows) now complete without Falkor map errors after sanitizer fix; still emits expected embedding warnings when `OPENAI_API_KEY` is absent (documented in the synchronization blueprint).
+- 2025-09-19: `tests/unit/services/DocumentationParser.test.ts` — PASS — Revalidated heuristics-driven parsing across Markdown/RST/AsciiDoc; signal extraction continues to surface business domains and locales without regression.
+- 2025-09-19: `tests/integration/services/DocumentationParser.integration.test.ts` — PASS — Cross-service ingest/search against Docker Postgres/Falkor/Qdrant/Redis still succeeds; section linkage and relationship freshness remain healthy.
+- 2025-09-19: `tests/unit/api/routes/graph.test.ts` — PASS — Exercised new `buildErrorResponse` helper to guarantee graph endpoints emit `requestId`/`timestamp` metadata on server failures; aligned expectations with symbol-kind filters; captured follow-up in `Docs/Blueprints/api-error-handling.md`.
+- 2025-09-19: `tests/integration/api/APIGateway.integration.test.ts` — PASS — Gateway now returns consistent error envelopes (code/message/details plus request metadata) when graph search fails, restoring parity with logging and client expectations; blueprint noted under `Docs/Blueprints/api-error-handling.md`.
 
 ## Failing Tests (to investigate)
 - Services:DocumentationParser, SecurityScanner, LoggingService, BackupService, ConflictResolution
-  API: AdminRestore, APIGateway, EndToEnd, MCPToolIntegration, Middleware, RESTEndpoints, SourceControlManagement, TRPC
+  API: AdminRestore, EndToEnd, MCPToolIntegration, Middleware, RESTEndpoints, SourceControlManagement, TRPC
   Models: entities
-_(Last updated: 2025-09-19 23:04:47 UTC)_
+_(Last updated: 2025-09-19 23:19:15 UTC)_

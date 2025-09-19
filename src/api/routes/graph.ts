@@ -28,6 +28,16 @@ const GRAPH_SYMBOL_KIND_LOOKUP: Record<string, string> = {
   variable: "variable",
 };
 
+const buildErrorResponse = (
+  request: { id?: string } | null | undefined,
+  error: { code: string; message: string; details?: string }
+) => ({
+  success: false,
+  error,
+  requestId: request?.id ?? "unknown",
+  timestamp: new Date().toISOString(),
+});
+
 interface GraphSearchRequest {
   query: string;
   entityTypes?: ("function" | "class" | "interface" | "file" | "module")[];
@@ -141,14 +151,15 @@ export async function registerGraphRoutes(
 
         reply.send({ success: true, data: entity });
       } catch (error) {
-        reply.status(500).send({
-          success: false,
-          error: {
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
             code: "ENTITY_FETCH_FAILED",
             message: "Failed to fetch entity",
-            details: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+            details,
+          })
+        );
       }
     }
   );
@@ -199,14 +210,15 @@ export async function registerGraphRoutes(
 
         reply.send({ success: true, data: rel });
       } catch (error) {
-        reply.status(500).send({
-          success: false,
-          error: {
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
             code: "RELATIONSHIP_FETCH_FAILED",
             message: "Failed to fetch relationship",
-            details: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+            details,
+          })
+        );
       }
     }
   );
@@ -239,7 +251,15 @@ export async function registerGraphRoutes(
         const evidence = await kgService.getEdgeEvidenceNodes(relationshipId, Math.max(1, Math.min(Number(limit) || 200, 1000)));
         reply.send({ success: true, data: evidence });
       } catch (error) {
-        reply.status(500).send({ success: false, error: { code: 'EVIDENCE_FETCH_FAILED', message: 'Failed to fetch evidence', details: error instanceof Error ? error.message : 'Unknown error' } });
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
+            code: "EVIDENCE_FETCH_FAILED",
+            message: "Failed to fetch evidence",
+            details,
+          })
+        );
       }
     }
   );
@@ -272,7 +292,15 @@ export async function registerGraphRoutes(
         const sites = await kgService.getEdgeSites(relationshipId, Math.max(1, Math.min(Number(limit) || 50, 500)));
         reply.send({ success: true, data: sites });
       } catch (error) {
-        reply.status(500).send({ success: false, error: { code: 'SITES_FETCH_FAILED', message: 'Failed to fetch sites', details: error instanceof Error ? error.message : 'Unknown error' } });
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
+            code: "SITES_FETCH_FAILED",
+            message: "Failed to fetch sites",
+            details,
+          })
+        );
       }
     }
   );
@@ -305,7 +333,15 @@ export async function registerGraphRoutes(
         const candidates = await kgService.getEdgeCandidates(relationshipId, Math.max(1, Math.min(Number(limit) || 50, 500)));
         reply.send({ success: true, data: candidates });
       } catch (error) {
-        reply.status(500).send({ success: false, error: { code: 'CANDIDATES_FETCH_FAILED', message: 'Failed to fetch candidates', details: error instanceof Error ? error.message : 'Unknown error' } });
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
+            code: "CANDIDATES_FETCH_FAILED",
+            message: "Failed to fetch candidates",
+            details,
+          })
+        );
       }
     }
   );
@@ -347,14 +383,15 @@ export async function registerGraphRoutes(
 
         reply.send({ success: true, data: { relationship: rel, from, to } });
       } catch (error) {
-        reply.status(500).send({
-          success: false,
-          error: {
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
             code: "RELATIONSHIP_FULL_FETCH_FAILED",
             message: "Failed to fetch relationship details",
-            details: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+            details,
+          })
+        );
       }
     }
   );
@@ -503,14 +540,15 @@ export async function registerGraphRoutes(
         });
       } catch (error) {
         console.error("Graph search error:", error);
-        reply.status(500).send({
-          success: false,
-          error: {
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
             code: "GRAPH_SEARCH_FAILED",
             message: "Failed to perform graph search",
-            details: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+            details,
+          })
+        );
       }
     }
   );
@@ -581,14 +619,15 @@ export async function registerGraphRoutes(
         });
       } catch (error) {
         console.error("Examples retrieval error:", error);
-        reply.status(500).send({
-          success: false,
-          error: {
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
             code: "EXAMPLES_RETRIEVAL_FAILED",
             message: "Failed to retrieve usage examples",
-            details: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+            details,
+          })
+        );
       }
     }
   );
@@ -662,14 +701,15 @@ export async function registerGraphRoutes(
         });
       } catch (error) {
         console.error("Dependency analysis error:", error);
-        reply.status(500).send({
-          success: false,
-          error: {
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
             code: "DEPENDENCY_ANALYSIS_FAILED",
             message: "Failed to analyze dependencies",
-            details: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+            details,
+          })
+        );
       }
     }
   );
@@ -748,14 +788,15 @@ export async function registerGraphRoutes(
           },
         });
       } catch (error) {
-        reply.status(500).send({
-          success: false,
-          error: {
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
             code: "ENTITIES_LIST_FAILED",
             message: "Failed to list entities",
-            details: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+            details,
+          })
+        );
       }
     }
   );
@@ -807,14 +848,15 @@ export async function registerGraphRoutes(
           },
         });
       } catch (error) {
-        reply.status(500).send({
-          success: false,
-          error: {
+        const details =
+          error instanceof Error ? error.message : "Unknown error";
+        reply.status(500).send(
+          buildErrorResponse(request, {
             code: "RELATIONSHIPS_LIST_FAILED",
             message: "Failed to list relationships",
-            details: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+            details,
+          })
+        );
       }
     }
   );

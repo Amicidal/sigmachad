@@ -7,6 +7,7 @@ import { vi } from 'vitest';
 
 // Mock Fastify request interface
 export interface MockFastifyRequest {
+  id?: string;
   ip: string;
   method: string;
   url: string;
@@ -28,6 +29,7 @@ export interface MockFastifyReply {
 // Create a mock Fastify request
 export function createMockRequest(overrides: Partial<MockFastifyRequest> = {}): MockFastifyRequest {
   return {
+    id: overrides.id ?? 'mock-request-id',
     ip: '127.0.0.1',
     method: 'GET',
     url: '/api/test',
