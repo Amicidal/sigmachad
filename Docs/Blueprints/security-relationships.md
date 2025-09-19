@@ -9,7 +9,7 @@ Security relationships (`HAS_SECURITY_ISSUE`, `DEPENDS_ON_VULNERABLE`, `SECURITY
 - No lifecycle tracking (open/fixed/accepted) exists; history stubs cannot capture remediation timelines.
 - Query interfaces cannot filter by severity, status, or specific vulnerability identifiers, limiting dashboards and automation.
 - Dependency scanning routines require outbound calls to OSV during unit tests; lack of a mockable client makes offline runs noisy and potentially flaky. Introduce an injectable advisory provider with deterministic fixtures before claiming hermetic coverage.
-- FalkorDB bootstrap still issues legacy `CREATE CONSTRAINT` Cypher and logs "use the GRAPH.CONSTRAINT command" during integration runs; migrate schema initialization to the supported command set to avoid noisy warnings and future compatibility issues.
+- Security scanner now provisions unique constraints through `GRAPH.CONSTRAINT CREATE` with an index preflight and falls back to the legacy Cypher only when running against older engines; continue monitoring for engines that report missing index support despite the preflight.
 - OSV batch responses only include `id`/`modified`, forcing the scanner to re-query individual advisories for full metadata. The new fallback restores CVE normalization but doubles external calls per dependency; design caching or mirror strategy before scaling to larger dependency graphs.
 
 ## 3. Desired Capabilities

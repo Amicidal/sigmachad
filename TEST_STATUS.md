@@ -17,9 +17,13 @@
 - 2025-09-19: `tests/integration/services/DocumentationParser.integration.test.ts` — PASS — Cross-service ingest/search against Docker Postgres/Falkor/Qdrant/Redis still succeeds; section linkage and relationship freshness remain healthy.
 - 2025-09-19: `tests/unit/api/routes/graph.test.ts` — PASS — Exercised new `buildErrorResponse` helper to guarantee graph endpoints emit `requestId`/`timestamp` metadata on server failures; aligned expectations with symbol-kind filters; captured follow-up in `Docs/Blueprints/api-error-handling.md`.
 - 2025-09-19: `tests/integration/api/APIGateway.integration.test.ts` — PASS — Gateway now returns consistent error envelopes (code/message/details plus request metadata) when graph search fails, restoring parity with logging and client expectations; blueprint noted under `Docs/Blueprints/api-error-handling.md`.
+- 2025-09-19: `tests/unit/services/SecurityScanner.test.ts` — PASS — Extensive coverage across scan orchestration, rule loading, monitoring config, and database interactions; tests remain high quality despite verbose mocks and validate resilience to errors like malformed package manifests.
+- 2025-09-19: `tests/unit/services/SecurityScanner.issues-suppression.test.ts` — PASS — Focused suppression rule matching scenarios stay tightly scoped and continue to reflect current suppression semantics.
+- 2025-09-19: `tests/integration/services/SecurityScanner.integration.test.ts` — PASS — Full-stack security ingest across Falkor/Qdrant/Postgres/Redis continues to validate scan orchestration and persistence; bootstrap now provisions unique constraints via `GRAPH.CONSTRAINT` with index preflight and only falls back when engines lack support (tracked in `Docs/Blueprints/security-relationships.md`).
+
 
 ## Failing Tests (to investigate)
-- Services:DocumentationParser, SecurityScanner, LoggingService, BackupService, ConflictResolution
+- Services: LoggingService, BackupService, ConflictResolution
   API: AdminRestore, EndToEnd, MCPToolIntegration, Middleware, RESTEndpoints, SourceControlManagement, TRPC
   Models: entities
-_(Last updated: 2025-09-19 23:19:15 UTC)_
+_(Last updated: 2025-09-19 03:49:27 UTC)_

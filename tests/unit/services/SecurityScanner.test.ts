@@ -343,13 +343,60 @@ describe("SecurityScanner", () => {
     });
 
     it("should set up security schema constraints", async () => {
-      const mockQuery = vi.spyOn(mockDb, "falkordbQuery");
+      const mockCommand = vi.spyOn(mockDb, "falkordbCommand");
 
       await securityScanner.initialize();
 
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("CREATE CONSTRAINT"),
-        expect.any(Object)
+      const constraintCalls = mockCommand.mock.calls.filter(
+        (call) => call[0] === "GRAPH.CONSTRAINT"
+      );
+
+      expect(constraintCalls).toEqual(
+        expect.arrayContaining([
+          expect.arrayContaining([
+            "GRAPH.CONSTRAINT",
+            "CREATE",
+            expect.any(String),
+            "UNIQUE",
+            "NODE",
+            "SecurityIssue",
+            "PROPERTIES",
+            "1",
+            "id",
+          ]),
+          expect.arrayContaining([
+            "GRAPH.CONSTRAINT",
+            "CREATE",
+            expect.any(String),
+            "UNIQUE",
+            "NODE",
+            "Vulnerability",
+            "PROPERTIES",
+            "1",
+            "id",
+          ]),
+        ])
+      );
+
+      const indexCalls = mockCommand.mock.calls.filter(
+        (call) => call[0] === "GRAPH.QUERY"
+      );
+
+      expect(indexCalls).toEqual(
+        expect.arrayContaining([
+          expect.arrayContaining([
+            "GRAPH.QUERY",
+            expect.any(String),
+            expect.stringContaining("CREATE INDEX FOR (n:SecurityIssue) ON (n.id)"),
+          ]),
+          expect.arrayContaining([
+            "GRAPH.QUERY",
+            expect.any(String),
+            expect.stringContaining(
+              "CREATE INDEX FOR (n:Vulnerability) ON (n.id)"
+            ),
+          ]),
+        ])
       );
     });
 

@@ -229,25 +229,142 @@ export class SecurityScanner extends EventEmitter {
   }
 
   private async ensureSecuritySchema(): Promise<void> {
-    // Create graph constraints for security entities
-    try {
-      await this.db.falkordbQuery(
-        `
-        CREATE CONSTRAINT ON (si:SecurityIssue) ASSERT si.id IS UNIQUE
-      `,
-        {}
-      );
+    const config = this.db.getConfig?.();
+    const graphKey = config?.falkordb?.graphKey ?? "memento";
 
-      await this.db.falkordbQuery(
-        `
-        CREATE CONSTRAINT ON (v:Vulnerability) ASSERT v.id IS UNIQUE
-      `,
-        {}
+    const constraints: Array<{ label: string; property: string }> = [
+      { label: "SecurityIssue", property: "id" },
+      { label: "Vulnerability", property: "id" },
+    ];
+
+    for (const constraint of constraints) {
+      await this.ensureUniqueConstraint(graphKey, constraint.label, constraint.property);
+    }
+
+    console.log("Security schema constraints check completed");
+  }
+
+  private async ensureUniqueConstraint(
+    graphKey: string,
+    label: string,
+    property: string
+  ): Promise<void> {
+    await this.ensureExactMatchIndex(graphKey, label, property);
+
+    try {
+      await this.db.falkordbCommand(
+        "GRAPH.CONSTRAINT",
+        "CREATE",
+        graphKey,
+        "UNIQUE",
+        "NODE",
+        label,
+        "PROPERTIES",
+        "1",
+        property
       );
     } catch (error) {
-      // Constraints might already exist, continue
-      console.log("Security schema constraints check completed");
+      const message = this.normalizeErrorMessage(error);
+
+      if (this.isConstraintAlreadyExistsMessage(message)) {
+        return;
+      }
+
+      if (this.shouldFallbackToLegacyConstraint(message)) {
+        await this.ensureLegacyConstraint(graphKey, label, property);
+        return;
+      }
+
+      console.warn(
+        `Failed to create security constraint for ${label}.${property} via GRAPH.CONSTRAINT:`,
+        error
+      );
     }
+  }
+
+  private async ensureExactMatchIndex(
+    graphKey: string,
+    label: string,
+    property: string
+  ): Promise<void> {
+    try {
+      await this.db.falkordbCommand(
+        "GRAPH.QUERY",
+        graphKey,
+        `CREATE INDEX FOR (n:${label}) ON (n.${property})`
+      );
+    } catch (error) {
+      const message = this.normalizeErrorMessage(error);
+      if (this.isIndexAlreadyExistsMessage(message)) {
+        return;
+      }
+
+      console.warn(
+        `Failed to create exact-match index for ${label}.${property}:`,
+        error
+      );
+    }
+  }
+
+  private async ensureLegacyConstraint(
+    graphKey: string,
+    label: string,
+    property: string
+  ): Promise<void> {
+    try {
+      await this.db.falkordbCommand(
+        "GRAPH.QUERY",
+        graphKey,
+        `CREATE CONSTRAINT ON (n:${label}) ASSERT n.${property} IS UNIQUE`
+      );
+    } catch (error) {
+      const message = this.normalizeErrorMessage(error);
+      if (this.isConstraintAlreadyExistsMessage(message)) {
+        return;
+      }
+
+      console.warn(
+        `Failed to create legacy security constraint for ${label}.${property}:`,
+        error
+      );
+    }
+  }
+
+  private normalizeErrorMessage(error: unknown): string {
+    if (!error) {
+      return "";
+    }
+
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return String(error);
+  }
+
+  private isIndexAlreadyExistsMessage(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes("already indexed") ||
+      normalized.includes("already exists")
+    );
+  }
+
+  private isConstraintAlreadyExistsMessage(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes("constraint already exists") ||
+      normalized.includes("already exists")
+    );
+  }
+
+  private shouldFallbackToLegacyConstraint(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes("unknown command") ||
+      normalized.includes("invalid constraint") ||
+      normalized.includes("not yet implemented")
+    );
   }
 
   private async loadMonitoringConfig(): Promise<void> {
