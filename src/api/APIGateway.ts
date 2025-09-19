@@ -52,10 +52,19 @@ import {
 } from "./middleware/rate-limiting.js";
 import {
   authenticateRequest,
-  hasPermission,
   sendAuthError,
+  scopesSatisfyRequirement,
 } from "./middleware/authentication.js";
 import jwt from "jsonwebtoken";
+import {
+  DEFAULT_SCOPE_RULES,
+  ScopeCatalog,
+  ScopeRequirement,
+  ScopeRule,
+} from "./middleware/scope-catalog.js";
+import { RefreshSessionStore } from "./middleware/refresh-session-store.js";
+import { randomUUID } from "crypto";
+import { isApiKeyRegistryConfigured } from "./middleware/api-key-registry.js";
 
 export interface APIGatewayConfig {
   port: number;
@@ -67,6 +76,9 @@ export interface APIGatewayConfig {
   rateLimit: {
     max: number;
     timeWindow: string;
+  };
+  auth?: {
+    scopeRules?: ScopeRule[];
   };
 }
 
@@ -95,6 +107,8 @@ export class APIGateway {
   private _historyIntervals: { prune?: NodeJS.Timeout; checkpoint?: NodeJS.Timeout } = {};
   private healthCheckCache: { data: any; timestamp: number } | null = null;
   private readonly HEALTH_CACHE_TTL = 5000; // Cache health check for 5 seconds
+  private scopeCatalog: ScopeCatalog;
+  private refreshSessionStore = RefreshSessionStore.getInstance();
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -106,6 +120,9 @@ export class APIGateway {
     config: Partial<APIGatewayConfig> = {},
     syncServices?: SynchronizationServices
   ) {
+    const initialScopeRules = config.auth?.scopeRules ?? DEFAULT_SCOPE_RULES;
+    this.scopeCatalog = new ScopeCatalog(initialScopeRules);
+
     this.config = {
       // In test environment, default to ephemeral port 0 to avoid EADDRINUSE
       port:
@@ -126,6 +143,9 @@ export class APIGateway {
         max: config.rateLimit?.max || 100,
         timeWindow: config.rateLimit?.timeWindow || "1 minute",
       },
+      auth: {
+        scopeRules: [...initialScopeRules],
+      },
     };
 
     this.syncServices = syncServices;
@@ -136,6 +156,12 @@ export class APIGateway {
       },
       disableRequestLogging: false,
       ignoreTrailingSlash: true,
+      ajv: {
+        customOptions: {
+          allowUnionTypes: true,
+          strict: false,
+        },
+      },
     });
 
     // Initialize TestEngine
@@ -170,11 +196,14 @@ export class APIGateway {
     );
 
     // Initialize Admin Services
+    this.loggingService = new LoggingService("./logs/memento.log");
     this.backupService = new BackupService(
       this.dbService,
-      this.dbService.getConfig()
+      this.dbService.getConfig(),
+      {
+        loggingService: this.loggingService,
+      }
     );
-    this.loggingService = new LoggingService("./logs/memento.log");
     this.maintenanceService = new MaintenanceService(
       this.dbService,
       this.kgService
@@ -366,103 +395,181 @@ export class APIGateway {
         (request.raw?.url && request.raw.url.split("?")[0]) ||
         (request.url && request.url.split("?")[0]) ||
         "/";
-      const requirement = this.determineAuthRequirement(request.method, rawUrl);
+      const requirement = this.resolveScopeRequirement(request.method, rawUrl);
       const authEnabled = this.isAuthEnforced();
-
-      const authHeader = request.headers["authorization"] as string | undefined;
-      const apiKeyHeader = request.headers["x-api-key"] as string | undefined;
-
-      if (!authHeader && !apiKeyHeader) {
-        request.auth = { tokenType: "anonymous" };
-        if (requirement && authEnabled) {
-          return sendAuthError(
-            reply,
-            request,
-            401,
-            "UNAUTHORIZED",
-            "Authentication is required for this endpoint"
-          );
-        }
-        return;
-      }
 
       const authContext = authenticateRequest(request);
       request.auth = authContext;
 
-      if (authContext.tokenError) {
-        switch (authContext.tokenError) {
-          case "INVALID_API_KEY":
-            return sendAuthError(
-              reply,
-              request,
-              401,
-              "INVALID_API_KEY",
-              "Invalid API key provided"
-            );
-          case "TOKEN_EXPIRED":
-            return sendAuthError(
-              reply,
-              request,
-              401,
-              "TOKEN_EXPIRED",
-              "Authentication token has expired"
-            );
-          case "MISSING_BEARER":
-            return sendAuthError(
-              reply,
-              request,
-              401,
-              "UNAUTHORIZED",
-              "Bearer authentication scheme is required"
-            );
-          default:
-            return sendAuthError(
-              reply,
-              request,
-              401,
-              "INVALID_TOKEN",
-              "Invalid authentication token"
-            );
-        }
+      const logDecision = (decision: "granted" | "denied", info?: Record<string, unknown>) => {
+        authContext.decision = decision;
+        const auditPayload = {
+          event: "auth.decision",
+          decision,
+          tokenType: authContext.tokenType,
+          userId: authContext.user?.userId,
+          scopes: authContext.scopes,
+          requiredScopes: requirement?.scopes,
+          tokenError: authContext.tokenError,
+          reason: authContext.tokenErrorDetail,
+          requestId: request.id,
+          ip: request.ip,
+          ...info,
+        };
+        request.log.info(auditPayload, "Authorization decision evaluated");
+        this.loggingService?.info(
+          "auth",
+          "Authorization decision evaluated",
+          auditPayload
+        );
+      };
+
+      if (authContext.scopes.length > 0) {
+        reply.header("x-auth-scopes", authContext.scopes.join(" "));
       }
 
-      if (!requirement) {
-        return;
+      if (requirement?.scopes?.length) {
+        reply.header("x-auth-required-scopes", requirement.scopes.join(" "));
       }
 
       if (!authEnabled) {
+        authContext.requiredScopes = requirement?.scopes;
+        logDecision("granted", { bypass: true });
         return;
       }
 
-      if (!authContext.user) {
+      if (authContext.tokenError) {
+        const tokenErrorMap: Record<
+          NonNullable<typeof authContext.tokenError>,
+          {
+            status: number;
+            code: string;
+            message: string;
+            remediation: string;
+            reason: string;
+          }
+        > = {
+          INVALID_API_KEY: {
+            status: 401,
+            code: "INVALID_API_KEY",
+            message: "Invalid API key provided",
+            remediation: "Generate a new API key or verify the credential",
+            reason: "invalid_api_key",
+          },
+          TOKEN_EXPIRED: {
+            status: 401,
+            code: "TOKEN_EXPIRED",
+            message: "Authentication token has expired",
+            remediation: "Request a new access token",
+            reason: "token_expired",
+          },
+          MISSING_BEARER: {
+            status: 401,
+            code: "UNAUTHORIZED",
+            message: "Bearer authentication scheme is required",
+            remediation: "Prefix the Authorization header with 'Bearer '",
+            reason: "missing_bearer",
+          },
+          INVALID_TOKEN: {
+            status: 401,
+            code: "INVALID_TOKEN",
+            message: "Invalid authentication token",
+            remediation: "Obtain a valid token before retrying",
+            reason: "invalid_token",
+          },
+          MISSING_SCOPES: {
+            status: 401,
+            code: "INVALID_TOKEN",
+            message: "Authentication token is missing required scopes",
+            remediation: "Issue the token with the expected scopes",
+            reason: "missing_scopes",
+          },
+          CHECKSUM_MISMATCH: {
+            status: 401,
+            code: "CHECKSUM_MISMATCH",
+            message: "API key registry integrity validation failed",
+            remediation: "Rotate the API key and update the registry entry",
+            reason: "checksum_mismatch",
+          },
+        };
+
+        const errorDescriptor = tokenErrorMap[authContext.tokenError];
+        logDecision("denied");
+        return sendAuthError(
+          reply,
+          request,
+          errorDescriptor.status,
+          errorDescriptor.code,
+          errorDescriptor.message,
+          {
+            reason: errorDescriptor.reason,
+            detail: authContext.tokenErrorDetail,
+            remediation: errorDescriptor.remediation,
+            tokenType: authContext.tokenType,
+            expiresAt: authContext.expiresAt,
+            requiredScopes: requirement?.scopes,
+            providedScopes: authContext.scopes,
+          }
+        );
+      }
+
+      if (!requirement) {
+        logDecision("granted");
+        return;
+      }
+
+      authContext.requiredScopes = requirement.scopes;
+
+      if (
+        authContext.tokenType === "anonymous" &&
+        requirement.scopes?.includes("session:refresh") &&
+        request.method === "POST" &&
+        rawUrl === "/api/v1/auth/refresh"
+      ) {
+        logDecision("granted", { bypass: "refresh_token_exchange" });
+        return;
+      }
+
+      if (authContext.tokenType === "anonymous") {
+        logDecision("denied", { reason: "anonymous access" });
         return sendAuthError(
           reply,
           request,
           401,
           "UNAUTHORIZED",
-          "Authentication is required for this endpoint"
+          "Authentication is required for this endpoint",
+          {
+            reason: "authentication_required",
+            detail: requirement.description,
+            remediation: "Attach a valid token with the required scopes",
+            requiredScopes: requirement.scopes,
+          }
         );
       }
 
-      if (requirement === "admin" && !hasPermission(authContext.user, "admin")) {
+      if (!scopesSatisfyRequirement(authContext.scopes, requirement.scopes)) {
+        logDecision("denied", { reason: "insufficient_scope" });
         return sendAuthError(
           reply,
           request,
           403,
-          "INSUFFICIENT_PERMISSIONS",
-          "Admin permissions are required for this endpoint"
+          "INSUFFICIENT_SCOPES",
+          "Provided credentials do not include the required scopes",
+          {
+            reason: "insufficient_scope",
+            remediation: "Re-issue the token with the scopes demanded by this route",
+            tokenType: authContext.tokenType,
+            requiredScopes: requirement.scopes,
+            providedScopes: authContext.scopes,
+          }
         );
       }
 
-      if (requirement === "read" && !hasPermission(authContext.user, "read")) {
-        return sendAuthError(
-          reply,
-          request,
-          403,
-          "INSUFFICIENT_PERMISSIONS",
-          "Read permissions are required for this endpoint"
-        );
+      if (authContext.user?.userId) {
+        reply.header("x-auth-subject", authContext.user.userId);
       }
+
+      logDecision("granted");
     });
 
     // Security headers (minimal set for tests)
@@ -691,60 +798,142 @@ export class APIGateway {
             typeof body.refreshToken === "string" ? body.refreshToken : undefined;
 
           if (!refreshToken) {
-            return reply.status(401).send({
-              success: false,
-              error: {
-                code: "INVALID_TOKEN",
-                message: "Refresh token is required",
-              },
-              requestId: request.id,
-              timestamp: new Date().toISOString(),
-            });
+            return sendAuthError(
+              reply,
+              request,
+              401,
+              "INVALID_TOKEN",
+              "Refresh token is required",
+              {
+                reason: "missing_refresh_token",
+                detail: "Missing refreshToken in request payload",
+                remediation: "Include a valid refresh token in the request body",
+                tokenType: "jwt",
+                requiredScopes: ["session:refresh"],
+              }
+            );
           }
 
           const secret = process.env.JWT_SECRET;
           if (!secret) {
-            return reply.status(401).send({
-              success: false,
-              error: {
-                code: "INVALID_TOKEN",
-                message: "Refresh token is invalid",
-              },
-              requestId: request.id,
-              timestamp: new Date().toISOString(),
-            });
+            return sendAuthError(
+              reply,
+              request,
+              500,
+              "SERVER_MISCONFIGURED",
+              "Refresh token could not be validated",
+              {
+                reason: "server_misconfigured",
+                detail: "JWT_SECRET is not configured",
+                remediation: "Set JWT_SECRET before invoking the refresh endpoint",
+                requiredScopes: ["session:refresh"],
+              }
+            );
           }
 
           try {
             const payload = jwt.verify(refreshToken, secret) as jwt.JwtPayload;
             if (payload.type && payload.type !== "refresh") {
-              return reply.status(401).send({
-                success: false,
-                error: {
-                  code: "INVALID_TOKEN",
-                  message: "Refresh token is invalid",
+              return sendAuthError(
+                reply,
+                request,
+                401,
+                "INVALID_TOKEN",
+                "Refresh token is invalid",
+                {
+                  reason: "invalid_token_type",
+                  detail: `Unexpected token type: ${payload.type}`,
+                  remediation: "Provide a token minted for the refresh flow",
+                  tokenType: "jwt",
+                  providedScopes: Array.isArray(payload.scopes)
+                    ? (payload.scopes as string[])
+                    : undefined,
+                  requiredScopes: ["session:refresh"],
+                }
+              );
+            }
+
+            const sessionIdFromPayload =
+              typeof (payload as any)?.sessionId === "string"
+                ? ((payload as any).sessionId as string)
+                : typeof payload.sub === "string"
+                ? payload.sub
+                : undefined;
+            const rotationIdFromPayload =
+              typeof (payload as any)?.rotationId === "string"
+                ? ((payload as any).rotationId as string)
+                : undefined;
+            const tokenExpiresAt =
+              typeof payload.exp === "number" ? (payload.exp as number) : undefined;
+
+            const validation = this.refreshSessionStore.validatePresentedToken(
+              sessionIdFromPayload,
+              rotationIdFromPayload,
+              tokenExpiresAt
+            );
+
+            if (!validation.ok) {
+              return sendAuthError(
+                reply,
+                request,
+                401,
+                "TOKEN_REPLAY",
+                "Refresh token has already been exchanged",
+                {
+                  reason: "token_replayed",
+                  remediation: "Sign in again to obtain a fresh refresh token",
+                  tokenType: "jwt",
+                  providedScopes: Array.isArray(payload.scopes)
+                    ? (payload.scopes as string[])
+                    : undefined,
+                  requiredScopes: ["session:refresh"],
+                }
+              );
+            }
+
+            if (validation.reason && validation.reason !== "token_replayed") {
+              request.log.warn(
+                {
+                  event: "auth.refresh",
+                  reason: validation.reason,
+                  requestId: request.id,
                 },
-                requestId: request.id,
-                timestamp: new Date().toISOString(),
-              });
+                "Refresh token missing session metadata"
+              );
             }
 
             const baseClaims = {
               userId: payload.userId ?? payload.sub ?? payload.id ?? "unknown-user",
               role: payload.role ?? "user",
               permissions: Array.isArray(payload.permissions)
-                ? payload.permissions
+                ? (payload.permissions as string[])
                 : [],
+              scopes: Array.isArray(payload.scopes)
+                ? (payload.scopes as string[])
+                : ["session:refresh"],
+              sessionId: sessionIdFromPayload,
             };
 
+            const resolvedSessionId =
+              typeof baseClaims.sessionId === "string" && baseClaims.sessionId.length > 0
+                ? baseClaims.sessionId
+                : sessionIdFromPayload ?? randomUUID();
+            baseClaims.sessionId = resolvedSessionId;
+
             const issuer = typeof payload.iss === "string" ? payload.iss : "memento";
+            const refreshExpiresInSeconds = 7 * 24 * 60 * 60;
+            const refreshExpiresAt = Math.floor(Date.now() / 1000) + refreshExpiresInSeconds;
+            const nextRotationId = this.refreshSessionStore.rotate(
+              resolvedSessionId,
+              refreshExpiresAt
+            );
             const accessToken = jwt.sign(
               { ...baseClaims, type: "access" },
               secret,
               { expiresIn: "1h", issuer }
             );
             const newRefreshToken = jwt.sign(
-              { ...baseClaims, type: "refresh" },
+              { ...baseClaims, type: "refresh", rotationId: nextRotationId },
               secret,
               { expiresIn: "7d", issuer }
             );
@@ -756,23 +945,27 @@ export class APIGateway {
                 refreshToken: newRefreshToken,
                 tokenType: "Bearer",
                 expiresIn: 3600,
+                scopes: baseClaims.scopes,
               },
               requestId: request.id,
               timestamp: new Date().toISOString(),
             });
           } catch (error) {
             const isExpired = error instanceof jwt.TokenExpiredError;
-            return reply.status(401).send({
-              success: false,
-              error: {
-                code: "INVALID_TOKEN",
-                message: isExpired
-                  ? "Refresh token has expired"
-                  : "Invalid refresh token",
-              },
-              requestId: request.id,
-              timestamp: new Date().toISOString(),
-            });
+            return sendAuthError(
+              reply,
+              request,
+              401,
+              isExpired ? "TOKEN_EXPIRED" : "INVALID_TOKEN",
+              isExpired ? "Refresh token has expired" : "Invalid refresh token",
+              {
+                reason: isExpired ? "token_expired" : "invalid_token",
+                remediation: "Initiate a new login flow to obtain a fresh refresh token",
+                tokenType: "jwt",
+                providedScopes: undefined,
+                requiredScopes: ["session:refresh"],
+              }
+            );
           }
         });
 
@@ -1007,30 +1200,30 @@ export class APIGateway {
     }
   }
 
-  private determineAuthRequirement(
+  registerScopeRule(rule: ScopeRule): void {
+    this.scopeCatalog.registerRule(rule);
+    this.config.auth = this.config.auth || {};
+    this.config.auth.scopeRules = this.scopeCatalog.listRules();
+  }
+
+  registerScopeRules(rules: ScopeRule[]): void {
+    this.scopeCatalog.registerRules(rules);
+    this.config.auth = this.config.auth || {};
+    this.config.auth.scopeRules = this.scopeCatalog.listRules();
+  }
+
+  private resolveScopeRequirement(
     method: string,
     fullPath: string
-  ): "admin" | "read" | null {
-    const normalizedPath = (fullPath || "/").split("?")[0] || "/";
-    const upperMethod = (method || "GET").toUpperCase();
-
-    if (normalizedPath.startsWith("/api/v1/admin")) {
-      return "admin";
-    }
-
-    if (normalizedPath.startsWith("/api/v1/graph/search") && upperMethod === "POST") {
-      return "read";
-    }
-
-    return null;
+  ): ScopeRequirement | null {
+    return this.scopeCatalog.resolveRequirement(method, fullPath);
   }
 
   private isAuthEnforced(): boolean {
-    return Boolean(
-      process.env.JWT_SECRET ||
-        process.env.API_KEY_SECRET ||
-        process.env.ADMIN_API_TOKEN
-    );
+    if (process.env.JWT_SECRET || process.env.ADMIN_API_TOKEN) {
+      return true;
+    }
+    return isApiKeyRegistryConfigured();
   }
 
   private getErrorCode(error: any): string {

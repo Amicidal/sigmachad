@@ -557,13 +557,9 @@ describe('RollbackCapabilities Integration', () => {
       // Create rollback service with invalid database
       const invalidRollbackService = new RollbackCapabilities(kgService, {} as DatabaseService);
 
-      try {
-        await invalidRollbackService.createRollbackPoint('error_test', 'Error handling test');
-        // If it doesn't throw, verify it handles the error gracefully
-      } catch (error) {
-        // Expected to fail with database connection issues
-        expect(error).toBeInstanceOf(Error);
-      }
+      await expect(
+        invalidRollbackService.createRollbackPoint('error_test', 'Error handling test')
+      ).rejects.toThrow('Database service not initialized');
     });
 
     it('should handle concurrent rollback operations', async () => {

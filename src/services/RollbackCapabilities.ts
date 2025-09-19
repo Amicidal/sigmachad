@@ -56,6 +56,19 @@ export class RollbackCapabilities {
     private dbService: DatabaseService
   ) {}
 
+  private ensureDatabaseReady(context: string): void {
+    if (
+      !this.dbService ||
+      typeof this.dbService.isInitialized !== "function" ||
+      !this.dbService.isInitialized()
+    ) {
+      const message = context
+        ? `Database service not initialized (${context})`
+        : "Database service not initialized";
+      throw new Error(message);
+    }
+  }
+
   /**
    * Create a rollback point before making changes
    */
@@ -63,6 +76,7 @@ export class RollbackCapabilities {
     operationId: string,
     description: string
   ): Promise<string> {
+    this.ensureDatabaseReady("createRollbackPoint");
     const rollbackId = `rollback_${operationId}_${Date.now()}`;
 
     // Capture current state of all entities and relationships
@@ -181,6 +195,7 @@ export class RollbackCapabilities {
     previousState?: Entity,
     newState?: Entity
   ): Promise<void> {
+    this.ensureDatabaseReady("recordEntityChange");
     const rollbackPoint = this.rollbackPoints.get(rollbackId);
     if (!rollbackPoint) {
       throw new Error(`Rollback point ${rollbackId} not found`);
@@ -209,6 +224,7 @@ export class RollbackCapabilities {
     previousState?: GraphRelationship,
     newState?: GraphRelationship
   ): void {
+    this.ensureDatabaseReady("recordRelationshipChange");
     const rollbackPoint = this.rollbackPoints.get(rollbackId);
     if (!rollbackPoint) {
       throw new Error(`Rollback point ${rollbackId} not found`);
@@ -226,6 +242,7 @@ export class RollbackCapabilities {
    * Perform a rollback to a specific point
    */
   async rollbackToPoint(rollbackId: string): Promise<RollbackResult> {
+    this.ensureDatabaseReady("rollbackToPoint");
     const rollbackPoint = this.rollbackPoints.get(rollbackId);
     if (!rollbackPoint) {
       return {

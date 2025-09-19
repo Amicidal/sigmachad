@@ -732,6 +732,7 @@ describe('TestResultParser', () => {
             totalTests: 2,
             passedTests: 2,
             failedTests: 0,
+            errorTests: 0,
             skippedTests: 0,
             duration: 200,
             results: [
@@ -746,6 +747,7 @@ describe('TestResultParser', () => {
             totalTests: 1,
             passedTests: 0,
             failedTests: 1,
+            errorTests: 0,
             skippedTests: 0,
             duration: 150,
             results: [
@@ -773,6 +775,7 @@ describe('TestResultParser', () => {
           totalTests: 1,
           passedTests: 1,
           failedTests: 0,
+          errorTests: 0,
           skippedTests: 0,
           duration: 100,
           results: [
@@ -785,11 +788,15 @@ describe('TestResultParser', () => {
         expect(merged).toBe(suites[0]);
       });
 
-      it('should throw error for empty suites array', () => {
+      it('should return an empty suite when no suites are provided', () => {
         const parser = new TestResultParser();
 
-        expect(() => (parser as any).mergeTestSuites([]))
-          .toThrow('No test suites found');
+        const merged = (parser as any).mergeTestSuites([]);
+
+        expect(merged.totalTests).toBe(0);
+        expect(merged.failedTests).toBe(0);
+        expect(merged.errorTests).toBe(0);
+        expect(merged.results).toEqual([]);
       });
     });
 

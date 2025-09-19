@@ -5,6 +5,8 @@
 
 import { DatabaseService } from './DatabaseService.js';
 import { KnowledgeGraphService } from './KnowledgeGraphService.js';
+import { MaintenanceMetrics } from './metrics/MaintenanceMetrics.js';
+import { MaintenanceOperationError } from './BackupService.js';
 
 export interface MaintenanceTask {
   id: string;
@@ -37,7 +39,11 @@ export class MaintenanceService {
   ) {}
 
   async runMaintenanceTask(taskType: string): Promise<MaintenanceResult> {
+    this.ensureDependenciesReady(taskType);
+
     const taskId = `${taskType}_${Date.now()}`;
+    const metrics = MaintenanceMetrics.getInstance();
+    const startedAt = Date.now();
 
     const task: MaintenanceTask = {
       id: taskId,
@@ -79,6 +85,12 @@ export class MaintenanceService {
       // Move completed task to completed tasks map
       this.completedTasks.set(taskId, { ...task });
 
+      metrics.recordMaintenanceTask({
+        taskType,
+        status: 'success',
+        durationMs: result.duration ?? Date.now() - startedAt,
+      });
+
       return result;
 
     } catch (error) {
@@ -88,6 +100,12 @@ export class MaintenanceService {
       
       // Move failed task to completed tasks map
       this.completedTasks.set(taskId, { ...task });
+
+      metrics.recordMaintenanceTask({
+        taskType,
+        status: 'failure',
+        durationMs: Date.now() - startedAt,
+      });
 
       throw error;
     } finally {
@@ -431,5 +449,43 @@ export class MaintenanceService {
 
   getCompletedTasks(): MaintenanceTask[] {
     return Array.from(this.completedTasks.values());
+  }
+
+  private ensureDependenciesReady(taskType: string): void {
+    if (!this.dbService || typeof this.dbService.isInitialized !== 'function') {
+      throw new MaintenanceOperationError(
+        `Database service unavailable. Cannot run maintenance task "${taskType}".`,
+        {
+          code: 'DEPENDENCY_UNAVAILABLE',
+          statusCode: 503,
+          component: 'database',
+          stage: 'maintenance',
+        }
+      );
+    }
+
+    if (!this.dbService.isInitialized()) {
+      throw new MaintenanceOperationError(
+        `Database service not initialized. Cannot run maintenance task "${taskType}".`,
+        {
+          code: 'DEPENDENCY_UNAVAILABLE',
+          statusCode: 503,
+          component: 'database',
+          stage: 'maintenance',
+        }
+      );
+    }
+
+    if (!this.kgService) {
+      throw new MaintenanceOperationError(
+        `Knowledge graph service unavailable. Cannot run maintenance task "${taskType}".`,
+        {
+          code: 'DEPENDENCY_UNAVAILABLE',
+          statusCode: 503,
+          component: 'knowledge_graph',
+          stage: 'maintenance',
+        }
+      );
+    }
   }
 }

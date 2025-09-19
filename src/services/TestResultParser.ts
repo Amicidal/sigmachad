@@ -13,6 +13,7 @@ export interface ParsedTestSuite {
   totalTests: number;
   passedTests: number;
   failedTests: number;
+  errorTests: number;
   skippedTests: number;
   duration: number;
   results: ParsedTestResult[];
@@ -109,6 +110,7 @@ export class TestResultParser {
         totalTests: 0,
         passedTests: 0,
         failedTests: 0,
+        errorTests: 0,
         skippedTests: 0,
         duration: parseFloat(suiteAttrs.time || "0") * 1000, // Convert to milliseconds
         results: [],
@@ -170,8 +172,10 @@ export class TestResultParser {
             suite.passedTests++;
             break;
           case "failed":
-          case "error":
             suite.failedTests++;
+            break;
+          case "error":
+            suite.errorTests++;
             break;
           case "skipped":
             suite.skippedTests++;
@@ -182,6 +186,21 @@ export class TestResultParser {
       // Ensure totalTests reflects parsed results if attribute missing or incorrect
       suite.totalTests = suite.results.length;
       testSuites.push(suite);
+    }
+
+    if (testSuites.length === 0) {
+      return {
+        suiteName: "Empty JUnit Suite",
+        timestamp: new Date(),
+        framework: "junit",
+        totalTests: 0,
+        passedTests: 0,
+        failedTests: 0,
+        errorTests: 0,
+        skippedTests: 0,
+        duration: 0,
+        results: [],
+      };
     }
 
     // Merge multiple test suites if present
@@ -198,6 +217,7 @@ export class TestResultParser {
     let totalTests = 0;
     let passedTests = 0;
     let failedTests = 0;
+    let errorTests = 0;
     let skippedTests = 0;
     let totalDuration = 0;
 
@@ -231,6 +251,9 @@ export class TestResultParser {
             case "failed":
               failedTests++;
               break;
+            case "error":
+              errorTests++;
+              break;
             case "skipped":
               skippedTests++;
               break;
@@ -246,6 +269,7 @@ export class TestResultParser {
       totalTests,
       passedTests,
       failedTests,
+      errorTests,
       skippedTests,
       duration: totalDuration,
       results: results.map((r) => ({
@@ -270,6 +294,7 @@ export class TestResultParser {
     let totalTests = 0;
     let passedTests = 0;
     let failedTests = 0;
+    let errorTests = 0;
     let skippedTests = 0;
     let totalDuration = 0;
 
@@ -308,6 +333,9 @@ export class TestResultParser {
           case "failed":
             failedTests++;
             break;
+          case "error":
+            errorTests++;
+            break;
           case "skipped":
             skippedTests++;
             break;
@@ -332,6 +360,7 @@ export class TestResultParser {
       totalTests,
       passedTests,
       failedTests,
+      errorTests,
       skippedTests,
       duration: data.stats?.duration || totalDuration,
       results: results.map((r) => ({
@@ -364,6 +393,7 @@ export class TestResultParser {
     let totalTests = 0;
     let passedTests = 0;
     let failedTests = 0;
+    let errorTests = 0;
     let skippedTests = 0;
     let totalDuration = 0;
 
@@ -406,6 +436,9 @@ export class TestResultParser {
           case "failed":
             failedTests++;
             break;
+          case "error":
+            errorTests++;
+            break;
           case "skipped":
             skippedTests++;
             break;
@@ -426,6 +459,7 @@ export class TestResultParser {
       totalTests,
       passedTests,
       failedTests,
+      errorTests,
       skippedTests,
       duration: totalDuration,
       results: results.map((r) => ({
@@ -450,6 +484,7 @@ export class TestResultParser {
     let totalTests = 0;
     let passedTests = 0;
     let failedTests = 0;
+    let errorTests = 0;
     let skippedTests = 0;
     let totalDuration = 0;
 
@@ -483,6 +518,9 @@ export class TestResultParser {
               case "failed":
                 failedTests++;
                 break;
+              case "error":
+                errorTests++;
+                break;
               case "skipped":
                 skippedTests++;
                 break;
@@ -509,6 +547,7 @@ export class TestResultParser {
       totalTests,
       passedTests,
       failedTests,
+      errorTests,
       skippedTests,
       duration: totalDuration,
       results: results.map((r) => ({
@@ -541,7 +580,18 @@ export class TestResultParser {
 
   private mergeTestSuites(suites: ParsedTestSuite[]): TestSuiteResult {
     if (suites.length === 0) {
-      throw new Error("No test suites found");
+      return {
+        suiteName: "Empty Test Suite",
+        timestamp: new Date(),
+        framework: "unknown",
+        totalTests: 0,
+        passedTests: 0,
+        failedTests: 0,
+        errorTests: 0,
+        skippedTests: 0,
+        duration: 0,
+        results: [],
+      };
     }
 
     if (suites.length === 1) {
@@ -556,6 +606,7 @@ export class TestResultParser {
       totalTests: 0,
       passedTests: 0,
       failedTests: 0,
+      errorTests: 0,
       skippedTests: 0,
       duration: 0,
       results: [],
@@ -565,6 +616,7 @@ export class TestResultParser {
       merged.totalTests += suite.totalTests;
       merged.passedTests += suite.passedTests;
       merged.failedTests += suite.failedTests;
+      merged.errorTests = (merged.errorTests || 0) + (suite.errorTests || 0);
       merged.skippedTests += suite.skippedTests;
       merged.duration += suite.duration;
       merged.results.push(...suite.results);

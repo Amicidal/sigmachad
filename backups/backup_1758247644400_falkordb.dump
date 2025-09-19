@@ -1,0 +1,38 @@
+{
+  "timestamp": "2025-09-19T02:07:24.403Z",
+  "nodes": [
+    {
+      "labels": [
+        "businessDomain"
+      ],
+      "props": "{id: domain_technologies, type: businessDomain, name: technologies, description: Business domain extracted from documentation: Database Design, criticality: utility, stakeholders: [], keyProcesses: [], extractedFrom: [\"Database Design\"]}",
+      "id": 3155
+    },
+    {
+      "labels": [
+        "businessDomain"
+      ],
+      "props": "{id: domain_redis_caching, type: businessDomain, name: redis caching, description: Business domain extracted from documentation: Database Design, criticality: utility, stakeholders: [], keyProcesses: [], extractedFrom: [\"Database Design\"]}",
+      "id": 3156
+    },
+    {
+      "labels": [
+        "businessDomain"
+      ],
+      "props": "{id: domain_postgresql_schema, type: businessDomain, name: postgresql schema, description: Business domain extracted from documentation: Database Design, criticality: utility, stakeholders: [], keyProcesses: [], extractedFrom: [\"Database Design\"]}",
+      "id": 3157
+    },
+    {
+      "labels": [
+        "businessDomain"
+      ],
+      "props": "{id: domain_architecture, type: businessDomain, name: architecture, description: Business domain extracted from documentation: Database Design, criticality: utility, stakeholders: [], keyProcesses: [], extractedFrom: [\"Database Design\"]}",
+      "id": 3158
+    }
+  ],
+  "relationships": [],
+  "metadata": {
+    "nodeCount": 4,
+    "relationshipCount": 0
+  }
+}

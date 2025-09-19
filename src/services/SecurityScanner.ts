@@ -714,7 +714,22 @@ export class SecurityScanner extends EventEmitter {
     const out: Vulnerability[] = [];
     for (const v of vulns || []) {
       try {
-        const id = String(v.id || v.database_specific?.cwe || (Array.isArray(v.aliases) && v.aliases[0]) || `${packageName}-${version}`);
+        const aliases = Array.isArray(v.aliases)
+          ? v.aliases.map((alias: unknown) => String(alias))
+          : [];
+        const cveAlias = aliases.find((alias) => /^CVE-\d{4}-\d{3,}$/i.test(alias));
+        const ghsaAlias = aliases.find((alias) => /^GHSA-/i.test(alias));
+        const fallbackAlias = aliases[0];
+
+        const preferredVulnerabilityId = (cveAlias
+          ? cveAlias.toUpperCase()
+          : v.database_specific?.cve
+          ? String(v.database_specific.cve).toUpperCase()
+          : ghsaAlias
+          ? ghsaAlias.toUpperCase()
+          : undefined) || String(v.id || fallbackAlias || `${packageName}-${version}`);
+
+        const storageKey = String(v.id || preferredVulnerabilityId);
         const summary = String(v.summary || v.details || '');
         const published = v.published || v.modified || new Date().toISOString();
         const modified = v.modified || published;
@@ -724,13 +739,38 @@ export class SecurityScanner extends EventEmitter {
         let sev: Vulnerability['severity'] = 'medium';
         const severities = Array.isArray(v.severity) ? v.severity : [];
         for (const s of severities) {
-          const score = parseFloat(s.score || '');
-          if (Number.isFinite(score) && score > cvssScore) cvssScore = score;
+          if (!s) continue;
+          const raw = typeof s.score === 'number' ? s.score : String(s.score || '');
+          const numeric = typeof raw === 'number' ? raw : parseFloat(/^[0-9.]+$/.test(raw) ? raw : '');
+          if (Number.isFinite(numeric) && numeric > cvssScore) {
+            cvssScore = numeric;
+          }
         }
+
         if (cvssScore >= 9.0) sev = 'critical';
         else if (cvssScore >= 7.0) sev = 'high';
         else if (cvssScore >= 4.0) sev = 'medium';
-        else sev = 'low';
+        else if (cvssScore > 0) sev = 'low';
+
+        if (cvssScore === 0) {
+          const mapped = String(v.database_specific?.severity || '').toLowerCase();
+          if (mapped) {
+            const severityMap: Record<string, { sev: Vulnerability['severity']; score: number }> = {
+              critical: { sev: 'critical', score: 9.5 },
+              high: { sev: 'high', score: 8 },
+              severe: { sev: 'high', score: 8 },
+              moderate: { sev: 'medium', score: 6 },
+              medium: { sev: 'medium', score: 6 },
+              low: { sev: 'low', score: 3 },
+              info: { sev: 'info', score: 0.1 },
+            };
+            const mappedEntry = severityMap[mapped];
+            if (mappedEntry) {
+              sev = mappedEntry.sev;
+              cvssScore = mappedEntry.score;
+            }
+          }
+        }
 
         // Try to find fixed version from ranges
         let fixedIn = '';
@@ -747,11 +787,11 @@ export class SecurityScanner extends EventEmitter {
         }
 
         out.push({
-          id: `${packageName}_${id}`,
+          id: `${packageName}_${storageKey}`,
           type: 'vulnerability',
           packageName,
           version,
-          vulnerabilityId: id,
+          vulnerabilityId: preferredVulnerabilityId,
           severity: sev,
           description: summary,
           cvssScore: cvssScore || 0,
@@ -763,10 +803,25 @@ export class SecurityScanner extends EventEmitter {
         });
       } catch {}
     }
+    const severityRank: Record<string, number> = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1,
+      info: 0,
+    };
+    out.sort((a, b) => {
+      const rankDiff = (severityRank[b.severity] || 0) - (severityRank[a.severity] || 0);
+      if (rankDiff !== 0) return rankDiff;
+      const aTime = a.publishedAt instanceof Date ? a.publishedAt.getTime() : 0;
+      const bTime = b.publishedAt instanceof Date ? b.publishedAt.getTime() : 0;
+      return bTime - aTime;
+    });
     return out;
   }
 
   private async fetchOSVVulnerabilitiesBatch(pairs: Array<{ name: string; version: string }>): Promise<Vulnerability[]> {
+    const osvEnabled = (process.env.SECURITY_OSV_ENABLED || 'true').toLowerCase() !== 'false';
     // Deduplicate and honor cache
     const unique = new Map<string, { name: string; version: string }>();
     for (const p of pairs) {
@@ -792,7 +847,21 @@ export class SecurityScanner extends EventEmitter {
     const results: any[] = Array.isArray(res?.results) ? res.results : [];
     for (let i = 0; i < toQuery.length; i++) {
       const p = toQuery[i];
-      const vulns = this.mapOSVVulns(p.name, p.version, Array.isArray(results[i]?.vulns) ? results[i].vulns : []);
+      const rawVulns = Array.isArray(results[i]?.vulns) ? results[i].vulns : [];
+      let vulns = this.mapOSVVulns(p.name, p.version, rawVulns);
+
+      const needsDetail = rawVulns.length > 0 && rawVulns.some((v) => !v || Object.keys(v).length <= 2);
+      if ((vulns.length === 0 || needsDetail) && osvEnabled) {
+        try {
+          const detailed = await this.fetchOSVVulnerabilities(p.name, p.version);
+          if (detailed.length > 0) {
+            vulns = detailed;
+          }
+        } catch (e) {
+          console.warn('OSV detail fallback failed:', e);
+        }
+      }
+
       this.osvCache.set(`${p.name}@${p.version}`, vulns);
       outputs.push(...vulns);
     }
@@ -1206,11 +1275,20 @@ export class SecurityScanner extends EventEmitter {
         }
 
         if (vuln && typeof vuln === "object" && vuln.id) {
+          if (typeof vuln.severity === "string") {
+            vuln.severity = vuln.severity.toLowerCase();
+          }
+          const severity = ["critical", "high", "medium", "low", "info"].includes(
+            vuln.severity
+          )
+            ? vuln.severity
+            : "medium";
+
           report.vulnerabilities.push(vuln);
           report.summary.total++;
 
           // Count by severity
-          switch (vuln.severity) {
+          switch (severity) {
             case "critical":
               report.summary.critical++;
               break;
@@ -1242,11 +1320,11 @@ export class SecurityScanner extends EventEmitter {
 
           // Categorize remediation
           const pkgName = packageName || "unknown package";
-          if (vuln.severity === "critical") {
+          if (severity === "critical") {
             report.remediation.immediate.push(
               `Fix ${vuln.vulnerabilityId} in ${pkgName}`
             );
-          } else if (vuln.severity === "high") {
+          } else if (severity === "high") {
             report.remediation.planned.push(
               `Address ${vuln.vulnerabilityId} in ${pkgName}`
             );
@@ -1565,7 +1643,7 @@ export class SecurityScanner extends EventEmitter {
 
     const audit: any = {
       scope,
-      startTime: new Date().toISOString(),
+      startTime: new Date(),
       findings: [] as any[],
       recommendations: [] as string[],
       score: 0,

@@ -3,12 +3,13 @@
  * Tests synchronization operations including full sync, incremental sync, and partial sync
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { SynchronizationCoordinator, SyncOperation, SyncOptions, PartialUpdate } from '../../../src/services/SynchronizationCoordinator';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
 import { ASTParser } from '../../../src/services/ASTParser';
 import { DatabaseService } from '../../../src/services/DatabaseService';
 import { FileChange } from '../../../src/services/FileWatcher';
+import { ConflictResolution } from '../../../src/services/ConflictResolution';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -26,35 +27,64 @@ describe('SynchronizationCoordinator Integration', () => {
   let kgService: KnowledgeGraphService;
   let astParser: ASTParser;
   let syncCoordinator: SynchronizationCoordinator;
+  let conflictResolver: ConflictResolution;
   let testDir: string;
+  const previousTestSilent = process.env.TEST_SILENT;
+  let scanSourceFilesSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  const restoreEnvFlag = () => {
+    if (previousTestSilent === undefined) {
+      delete process.env.TEST_SILENT;
+    } else {
+      process.env.TEST_SILENT = previousTestSilent;
+    }
+  };
 
   beforeAll(async () => {
+    process.env.TEST_SILENT = '1';
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+
     // Create test directory
     testDir = path.join(tmpdir(), 'sync-coordinator-integration-tests');
     await fs.mkdir(testDir, { recursive: true });
 
     // Initialize database service
-    dbService = await setupTestDatabase();
+    dbService = await setupTestDatabase({ silent: true });
 
     // Initialize knowledge graph service
     kgService = new KnowledgeGraphService(dbService);
 
     // Initialize AST parser
     astParser = new ASTParser();
-
-    // Initialize synchronization coordinator
-    syncCoordinator = new SynchronizationCoordinator(kgService, astParser, dbService);
   }, 60000);
 
   afterAll(async () => {
     // Clean up
     await cleanupTestDatabase(dbService);
     await fs.rm(testDir, { recursive: true, force: true });
+    scanSourceFilesSpy?.mockRestore();
+    restoreEnvFlag();
   });
 
   beforeEach(async () => {
     // Clear test data between tests
-    await clearTestData(dbService);
+    await clearTestData(dbService, {
+      includePostgres: false,
+      includeVector: false,
+      includeCache: false,
+      silent: true,
+    });
+
+    // Recreate conflict resolver and coordinator per test to ensure clean state
+    conflictResolver = new ConflictResolution(kgService);
+    syncCoordinator = new SynchronizationCoordinator(
+      kgService,
+      astParser,
+      dbService,
+      conflictResolver
+    );
 
     // Clear test directory
     try {
@@ -63,6 +93,19 @@ describe('SynchronizationCoordinator Integration', () => {
     } catch (error) {
       // Directory might be empty, that's okay
     }
+
+    // Limit sync scans to the isolated temp directory to keep tests scoped
+    scanSourceFilesSpy?.mockRestore();
+    scanSourceFilesSpy = vi
+      .spyOn(syncCoordinator as unknown as { scanSourceFiles: () => Promise<string[]> }, 'scanSourceFiles')
+      .mockImplementation(async () => {
+        try {
+          const entries = await fs.readdir(testDir);
+          return entries.map((file) => path.join(testDir, file));
+        } catch {
+          return [];
+        }
+      });
   });
 
   describe('Full Synchronization Integration', () => {
@@ -451,19 +494,16 @@ describe('SynchronizationCoordinator Integration', () => {
 
     it('should handle database connection failures', async () => {
       // Create coordinator with invalid database service
-      const invalidCoordinator = new SynchronizationCoordinator(
-        kgService,
-        astParser,
-        {} as DatabaseService
-      );
+    const invalidCoordinator = new SynchronizationCoordinator(
+      kgService,
+      astParser,
+      {} as DatabaseService,
+      new ConflictResolution(kgService)
+    );
 
-      try {
-        await invalidCoordinator.startFullSynchronization();
-        // If it doesn't throw, the operation should be created but may fail later
-      } catch (error) {
-        // Expected to fail with database issues
-        expect(error as any).toEqual(expect.anything());
-      }
+      await expect(
+        invalidCoordinator.startFullSynchronization()
+      ).rejects.toThrow('Database not initialized');
     });
 
     it('should handle empty file changes array', async () => {
@@ -612,6 +652,109 @@ describe('SynchronizationCoordinator Integration', () => {
 
       // Should complete all operations within reasonable time
       expect(duration).toBeLessThan(15000); // 15 seconds for 3 concurrent operations
+    });
+  });
+
+  describe('Conflict handling', () => {
+    const baseEntityTemplate: Entity = {
+      id: 'conflict-entity',
+      type: 'file',
+      path: 'src/conflict.ts',
+      hash: 'hash-old',
+      language: 'typescript',
+      lastModified: new Date('2024-01-01T00:00:00Z'),
+      created: new Date('2024-01-01T00:00:00Z'),
+      status: 'active',
+    } as any;
+
+    it('records unresolved conflicts when manual strategy is selected', async () => {
+      const conflictFile = path.join(testDir, 'conflict_manual.ts');
+      await fs.writeFile(conflictFile, 'export const value = 1;');
+
+      const existingEntity: Entity = {
+        ...baseEntityTemplate,
+        id: 'conflict-manual',
+        path: conflictFile,
+      } as any;
+      await kgService.createEntity(existingEntity);
+
+      const incomingEntity: Entity = {
+        ...existingEntity,
+        hash: 'hash-new',
+        metadata: { reason: 'manual-test' },
+        lastModified: new Date('2024-02-01T00:00:00Z'),
+      } as any;
+
+      const parseSpy = vi.spyOn(astParser, 'parseFile').mockResolvedValue({
+        entities: [incomingEntity],
+        relationships: [],
+        errors: [],
+      });
+
+      try {
+        const operationId = await syncCoordinator.startFullSynchronization({
+          conflictResolution: 'manual',
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        const operation = syncCoordinator.getOperationStatus(operationId);
+        expect(operation).toEqual(expect.any(Object));
+        expect(operation?.conflicts.length).toBeGreaterThanOrEqual(1);
+
+        const conflict = operation!.conflicts[0];
+        expect(conflict.resolved).toBe(false);
+        expect(conflict.diff).toBeDefined();
+        expect(conflict.diff?.hash?.incoming).toBe('hash-new');
+      } finally {
+        parseSpy.mockRestore();
+      }
+    });
+
+    it('auto-resolves conflicts when overwrite strategy is requested', async () => {
+      const conflictFile = path.join(testDir, 'conflict_auto.ts');
+      await fs.writeFile(conflictFile, 'export const value = 2;');
+
+      const existingEntity: Entity = {
+        ...baseEntityTemplate,
+        id: 'conflict-auto',
+        path: conflictFile,
+      } as any;
+      await kgService.createEntity(existingEntity);
+
+      const incomingEntity: Entity = {
+        ...existingEntity,
+        hash: 'hash-updated',
+        metadata: { reason: 'auto-test' },
+        lastModified: new Date('2024-03-01T00:00:00Z'),
+      } as any;
+
+      const parseSpy = vi.spyOn(astParser, 'parseFile').mockResolvedValue({
+        entities: [incomingEntity],
+        relationships: [],
+        errors: [],
+      });
+
+      try {
+        const operationId = await syncCoordinator.startFullSynchronization({
+          conflictResolution: 'overwrite',
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        const operation = syncCoordinator.getOperationStatus(operationId);
+        expect(operation).toEqual(expect.any(Object));
+        expect(operation?.conflicts.length).toBeGreaterThanOrEqual(1);
+
+        const conflict = operation!.conflicts[0];
+        expect(conflict.resolved).toBe(true);
+        expect(conflict.resolutionStrategy).toBe('overwrite');
+
+        const updated = await kgService.getEntity(existingEntity.id);
+        expect(updated?.hash).toBe('hash-updated');
+      } finally {
+        parseSpy.mockRestore();
+      }
     });
   });
 });

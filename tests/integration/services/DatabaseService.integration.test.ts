@@ -371,7 +371,7 @@ describe("DatabaseService Integration", () => {
     });
 
     it("should handle large dataset operations", async () => {
-      const batchSize = 40;
+      const batchSize = 50;
       const operations = [];
 
       // Create large batch of documents
@@ -2024,17 +2024,18 @@ describe("DatabaseService Integration", () => {
 
         expect(verifyResult.rows!.length).toBe(1);
 
-        // Safely parse metadata with fallback for serialization issues
-        let metadata;
-        try {
-          metadata = JSON.parse(verifyResult.rows![0].metadata);
-          expect(metadata.transaction_id).toBe(transactionId);
-          expect(metadata.updated).toBe(true);
-        } catch (parseError) {
-          // If JSON parsing fails, verify the field exists and is a non-empty string
-          expect(verifyResult.rows![0].metadata).toEqual(expect.any(String));
-          expect(String(verifyResult.rows![0].metadata).length).toBeGreaterThan(0);
-        }
+        const rawMetadata = verifyResult.rows![0].metadata;
+        const metadata =
+          typeof rawMetadata === "string"
+            ? JSON.parse(rawMetadata)
+            : rawMetadata;
+
+        expect(metadata).toEqual(
+          expect.objectContaining({
+            transaction_id: transactionId,
+            updated: true,
+          })
+        );
 
         // Cleanup
         await dbService.postgresQuery("DELETE FROM documents WHERE id = $1", [

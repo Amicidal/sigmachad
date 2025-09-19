@@ -21,6 +21,10 @@ import {
   SyncOptions,
   PartialUpdate,
 } from "@/services/SynchronizationCoordinator";
+import {
+  Conflict,
+  ConflictResolutionResult,
+} from "@/services/ConflictResolution";
 import { KnowledgeGraphService } from "@/services/KnowledgeGraphService";
 import { ASTParser } from "@/services/ASTParser";
 import { DatabaseService } from "@/services/DatabaseService";
@@ -182,11 +186,18 @@ class MockDatabaseService {
   }
 }
 
+class MockConflictResolution {
+  detectConflicts = vi.fn(async () => [] as Conflict[]);
+  resolveConflictsAuto = vi.fn(async () => [] as ConflictResolutionResult[]);
+  resolveConflict = vi.fn(async () => true);
+}
+
 describe("SynchronizationCoordinator", () => {
   let coordinator: SynchronizationCoordinator;
   let mockKgService: MockKnowledgeGraphService;
   let mockAstParser: MockASTParser;
   let mockDbService: MockDatabaseService;
+  let mockConflictResolution: MockConflictResolution;
   let testFilesDir: string;
 
   beforeAll(async () => {
@@ -197,6 +208,7 @@ describe("SynchronizationCoordinator", () => {
     mockDbService = new MockDatabaseService();
     mockKgService = new MockKnowledgeGraphService();
     mockAstParser = new MockASTParser();
+    mockConflictResolution = new MockConflictResolution();
 
     // Initialize mock services
     await mockDbService.initialize();
@@ -206,7 +218,8 @@ describe("SynchronizationCoordinator", () => {
     coordinator = new SynchronizationCoordinator(
       mockKgService as any,
       mockAstParser as any,
-      mockDbService as any
+      mockDbService as any,
+      mockConflictResolution as any
     );
 
     // Mock the scanSourceFiles method to use our test directory
@@ -243,12 +256,14 @@ describe("SynchronizationCoordinator", () => {
     // Clear mock data before each test
     mockKgService.clear();
     mockAstParser.clearCache();
+    mockConflictResolution = new MockConflictResolution();
 
     // Reset coordinator state by creating a new instance
     coordinator = new SynchronizationCoordinator(
       mockKgService as any,
       mockAstParser as any,
-      mockDbService as any
+      mockDbService as any,
+      mockConflictResolution as any
     );
 
     // Re-apply the scanSourceFiles mock

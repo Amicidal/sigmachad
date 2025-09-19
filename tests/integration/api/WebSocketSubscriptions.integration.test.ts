@@ -56,10 +56,14 @@ describe("WebSocket Subscriptions Integration", () => {
 
     // Create services
     kgService = new KnowledgeGraphService(dbService);
-    fileWatcher = new FileWatcher(kgService, dbService);
+    fileWatcher = new FileWatcher({
+      watchPaths: [testDir],
+      debounceMs: 25,
+      ignorePatterns: [],
+    });
 
     // Create API Gateway with WebSocket support
-    apiGateway = new APIGateway(kgService, dbService);
+    apiGateway = new APIGateway(kgService, dbService, fileWatcher);
     app = apiGateway.getApp();
 
     // Start the server
@@ -83,7 +87,7 @@ describe("WebSocket Subscriptions Integration", () => {
 
     // Clean up test directory
     try {
-      await fs.rmdir(testDir, { recursive: true });
+      await fs.rm(testDir, { recursive: true, force: true });
     } catch (error) {
       // Ignore cleanup errors
     }
@@ -177,14 +181,18 @@ describe("WebSocket Subscriptions Integration", () => {
     it("should handle WebSocket ping/pong keepalive", async () => {
       const ws = await createWebSocketConnection();
 
+      let receivedPong = false;
       const pongPromise = new Promise<void>((resolve) => {
         ws.on("pong", () => {
+          receivedPong = true;
           resolve();
         });
       });
 
       ws.ping();
       await pongPromise;
+
+      expect(receivedPong).toBe(true);
 
       ws.close();
     });
@@ -241,22 +249,13 @@ describe("WebSocket Subscriptions Integration", () => {
       await fs.writeFile(testFile, 'const modified = "content";');
 
       // Wait for notification
-      try {
-        const notification = await waitForMessage(ws, 3000);
-        expect(notification.type).toBe("file_change");
-        expect(notification.data.path).toContain("test-modify.ts");
-        expect(notification.data.changeType).toBe("modify");
-      } catch (error) {
-        // File watching might not be fully implemented yet
-        console.warn("File change notification not received:", error.message);
-      }
+      const notification = await waitForMessage(ws, 5000);
+      expect(notification.type).toBe("event");
+      expect(notification.data.path).toContain("test-modify.ts");
+      expect(notification.data.changeType).toBe("modify");
 
       // Clean up
-      try {
-        await fs.unlink(testFile);
-      } catch (error) {
-        // Ignore cleanup errors
-      }
+      await fs.unlink(testFile).catch(() => undefined);
       ws.close();
     });
 
@@ -281,20 +280,12 @@ describe("WebSocket Subscriptions Integration", () => {
       await fs.writeFile(testFile, "const newFile = true;");
 
       // Wait for notification
-      try {
-        const notification = await waitForMessage(ws, 3000);
-        expect(notification.type).toBe("file_change");
-        expect(notification.data.changeType).toBe("create");
-      } catch (error) {
-        console.warn("File creation notification not received:", error.message);
-      }
+      const notification = await waitForMessage(ws, 5000);
+      expect(notification.type).toBe("event");
+      expect(notification.data.changeType).toBe("create");
 
       // Clean up
-      try {
-        await fs.unlink(testFile);
-      } catch (error) {
-        // Ignore cleanup errors
-      }
+      await fs.unlink(testFile).catch(() => undefined);
       ws.close();
     });
 
@@ -318,17 +309,15 @@ describe("WebSocket Subscriptions Integration", () => {
       ws.send(JSON.stringify(subscriptionMessage));
       await waitForMessage(ws); // Confirmation
 
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
       // Delete the file
       await fs.unlink(testFile);
 
       // Wait for notification
-      try {
-        const notification = await waitForMessage(ws, 3000);
-        expect(notification.type).toBe("file_change");
-        expect(notification.data.changeType).toBe("delete");
-      } catch (error) {
-        console.warn("File deletion notification not received:", error.message);
-      }
+      const notification = await waitForMessage(ws, 5000);
+      expect(notification.type).toBe("event");
+      expect(notification.data.changeType).toBe("delete");
 
       ws.close();
     });
@@ -358,25 +347,14 @@ describe("WebSocket Subscriptions Integration", () => {
       await fs.writeFile(jsFile, 'const js = "javascript";');
 
       // Wait for notifications
-      try {
-        const notification = await waitForMessage(ws, 2000);
-        expect(notification.type).toBe("file_change");
-        expect(notification.data.path).toContain(".ts");
-        expect(notification.data.path).not.toContain(".js");
-      } catch (error) {
-        console.warn(
-          "Filtered file change notification not received:",
-          error.message
-        );
-      }
+      const notification = await waitForMessage(ws, 5000);
+      expect(notification.type).toBe("event");
+      expect(notification.data.path).toContain(".ts");
+      expect(notification.data.path).not.toContain(".js");
 
       // Clean up
-      try {
-        await fs.unlink(tsFile);
-        await fs.unlink(jsFile);
-      } catch (error) {
-        // Ignore cleanup errors
-      }
+      await fs.unlink(tsFile).catch(() => undefined);
+      await fs.unlink(jsFile).catch(() => undefined);
       ws.close();
     });
 
@@ -483,11 +461,20 @@ describe("WebSocket Subscriptions Integration", () => {
       ws.send(JSON.stringify(subscribeMessage));
       await waitForMessage(ws); // Confirmation
 
+      const closed = new Promise<number>((resolve) => {
+        ws.on("close", (code) => {
+          resolve(code);
+        });
+      });
+
       // Close connection
       ws.close();
 
       // Subscriptions should be automatically cleaned up
       // This is typically handled internally by the WebSocket server
+      const closeCode = await closed;
+      expect(closeCode).toBeGreaterThanOrEqual(0);
+      expect(ws.readyState).toBe(WebSocket.CLOSED);
     });
   });
 

@@ -1,47 +1,21 @@
 # Test Status Tracker
 
-## Passing Tests
-- `tests/unit/api/mcp-router.test.ts` *(broad coverage over MCP tool registration, tool handlers, and error paths; now aligned with UUID-based spec identifiers. Fallback planning still leans on DB hydration until KG exposure is fixed—see blueprint note.)*
-- `tests/unit/services/PostgreSQLService.test.ts`
-- `tests/unit/services/ASTParser.test.ts`
-- `tests/unit/services/ASTParser.reexports-barrel.test.ts` *(verifies barrel re-exports resolve to underlying file symbols; now emits paired CALLS/REFERENCES for MCP tooling.)*
-- `tests/unit/services/ASTParser.reference-confidence.test.ts` *(covers baseline confidence metadata for references and gating behaviour.)*
-- `tests/unit/services/ASTParser.reference-confidence-detailed.test.ts` *(exercises confidence tiers for local/file/external dependencies; relies on 0.4 floor for unresolved references.)*
-- `tests/unit/services/KnowledgeGraphService.test.ts`
-- `tests/unit/api/routes/admin.test.ts`
-- `tests/unit/api/routes/code.test.ts`
-- `tests/unit/services/LoggingService.test.ts` *(high quality; validates broad log behaviors and statistics)*
-- `tests/unit/api/middleware/rate-limiting.test.ts` *(solid coverage on burst handling and headers)*
-- `tests/unit/services/SecurityScanner.test.ts` *(good breadth; noisy due to live OSV fallback—consider mock injection)*
-- `tests/unit/services/BackupService.test.ts` *(excellent breadth; relies on heavy filesystem mocks but exercises critical flows)*
-- `tests/unit/api/routes/graph.test.ts` *(covers both happy-path and edge-case responses; enforces lean payloads)*
-- `tests/unit/api/routes/scm.test.ts` *(placeholder endpoints now respond consistently; schemas wired for diff/log queries)*
-- `tests/unit/services/TestEngine.test.ts` *(now exercises coverage edges, flaky scoring, and incident gating; high-value behavioral suite)*
-  - _Note_: Database persistence still expects legacy flaky-analysis columns; `TestEngine.storeFlakyTestAnalyses` forwards rich objects and needs downstream mapping update.
-- `tests/unit/services/SynchronizationCoordinator.test.ts` *(covers end-to-end sync orchestration, cancellation, and telemetry; high complexity but now deterministic)*
-- `tests/unit/services/SynchronizationCoordinator.resolver.test.ts` *(validates relationship target resolution heuristics; focused and useful)*
-- `tests/unit/services/MaintenanceService.test.ts` *(covers task orchestration, stats, and concurrency; good regression net)*
-- `tests/unit/services/SynchronizationMonitoring.test.ts` *(broad coverage of metrics/alerts lifecycle; high quality and still aligned with service behaviour)*
-- `tests/unit/services/TestResultParser.test.ts` *(exercise for multi-framework parsing; highlights missing suite-name extraction in JUnit path—implementation gap logged in blueprint)*
-- `tests/integration/api/AdminEndpoints.integration.test.ts` *(verified admin route aliases for `/admin/*` legacy paths and clarified health-check contract: critical failures surface as HTTP 503, sync messaging now compared case-insensitively. High-value coverage across admin flows; maintain alias support per blueprint note.)*
+## Worked on Tests
+- 2025-09-19: `tests/unit/services/DatabaseService.test.ts` — PASS — Covers init sequencing, getter guards, and proxy methods with dependency-injected doubles; reads as high quality and still aligned with current surface area.
+- 2025-09-19: `tests/unit/services/DatabaseService.errors.test.ts` — PASS — Realistic mocks exercise error paths, transactional propagation, and bulk query guardrails; remains a solid regression net.
+- 2025-09-19: `tests/integration/services/DatabaseService.integration.test.ts` — PASS — End-to-end verification across Postgres/Falkor/Qdrant/Redis surfaced missing `Entity` graph label and JSONB handling; label fix documented under `Docs/Blueprints/knowledge-graph-service.md`.
+- 2025-09-19: `tests/unit/services/KnowledgeGraphService.test.ts` — PASS — Exercise full entity lifecycle with rich mocks; assertions stay aligned with current API surface and remain high quality despite verbose fixture logging.
+- 2025-09-19: `tests/unit/services/KnowledgeGraphService.noise.test.ts` — PASS — Focused gating check for inferred relationships; concise and still relevant after confidence threshold tweaks.
+- 2025-09-19: `tests/unit/services/KnowledgeGraphService.impact.test.ts` — PASS — Validates composite impact aggregation across symbols, tests, docs, and specs; scenarios mirror production usage and remain high fidelity.
+- 2025-09-19: `tests/integration/services/KnowledgeGraphService.integration.test.ts` — PASS — Added defensive entity cleanup before relationship fixtures so duplicates are not carried between cases; highlights missing `TestIsolationContext` wiring in the service (see blueprint note).
+- 2025-09-19: `tests/unit/services/PostgreSQLService.test.ts` — PASS — Broad coverage across initialization, query/transaction/bulk flows, and defensive UUID validation keeps the suite high quality; mocks stay realistic via injected pools and type parsers.
+- 2025-09-19: `tests/integration/services/PostgreSQLService.integration.test.ts` — PASS — Exercises schema setup, CRUD, transactions, analytics history, and load/error scenarios against live Docker services; tests remain representative and surfaced only environment readiness gaps (docker services must be started via `pnpm docker:test-up`).
+- 2025-09-19: `tests/unit/services/SynchronizationCoordinator.test.ts` — PASS — Extensive happy-path and edge-case coverage (queueing, cancellation, partial/incremental modes) continues to read as high value; mocks remain realistic though the log stream is verbose.
+- 2025-09-19: `tests/unit/services/SynchronizationCoordinator.resolver.test.ts` — PASS — Resolver helpers stay deterministic and provide good signal on relationship target resolution; compact but meaningful.
+- 2025-09-19: `tests/integration/services/SynchronizationCoordinator.integration.test.ts` — PASS — Full-stack sync exercises (full/incremental/partial/conflict flows) now complete without Falkor map errors after sanitizer fix; still emits expected embedding warnings when `OPENAI_API_KEY` is absent (documented in the synchronization blueprint).
 
 ## Failing Tests (to investigate)
-- tests/integration/api/AdminRestore.integration.test.ts
-- tests/integration/api/Authentication.integration.test.ts
-- tests/integration/api/RESTEndpoints.integration.test.ts
-- tests/integration/api/ImpactAnalysis.integration.test.ts
-- tests/integration/services/KnowledgeGraphService.integration.test.ts
-- tests/integration/services/MaintenanceService.integration.test.ts
-- tests/integration/services/RollbackCapabilities.integration.test.ts
-- tests/integration/api/MCPToolIntegration.integration.test.ts
-- tests/integration/api/MCPProtocol.integration.test.ts
-- tests/integration/api/MCPToolIntegration.integration.test.ts
-- tests/integration/models/entities.integration.test.ts
-- tests/integration/models/relationships.integration.test.ts
-- tests/integration/services/TestEngine.integration.test.ts
-- tests/integration/services/TestResultParser.integration.test.ts
-- tests/integration/services/SecurityScanner.integration.test.ts
-- tests/integration/services/SynchronizationCoordinator.integration.test.ts
-- tests/integration/services/FalkorDBService.integration.test.ts
-- tests/integration/services/DocumentationParser.integration.test.ts
-_(Last updated: 2025-09-18 02:32:39 UTC)_
+- Services:DocumentationParser, SecurityScanner, LoggingService, BackupService, ConflictResolution
+  API: AdminRestore, APIGateway, EndToEnd, MCPToolIntegration, Middleware, RESTEndpoints, SourceControlManagement, TRPC
+  Models: entities
+_(Last updated: 2025-09-19 23:04:47 UTC)_

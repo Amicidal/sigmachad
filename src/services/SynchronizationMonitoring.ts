@@ -207,14 +207,16 @@ export class SynchronizationMonitoring extends EventEmitter {
   }
 
   recordConflict(conflict: SyncConflict | Conflict): void {
-    const conflictId = 'id' in conflict ? conflict.id : `${conflict.entityId}_${Date.now()}`;
+    const conflictId = 'id' in conflict ? conflict.id : `${conflict.entityId || conflict.relationshipId || 'conflict'}_${Date.now()}`;
     this.log('warn', conflictId, 'Conflict detected', {
       type: 'sync_conflict',
-      entityId: conflict.entityId,
-      description: conflict.description,
+      entityId: (conflict as Conflict).entityId,
+      relationshipId: (conflict as Conflict).relationshipId,
+      resolved: (conflict as Conflict).resolved,
+      description: (conflict as Conflict).description,
     });
 
-    this.emit('conflictDetected', conflict);
+    this.emit('conflictDetected', conflict as Conflict);
   }
 
   recordError(operationId: string, error: SyncError | string | unknown): void {

@@ -6,10 +6,11 @@ import type { SynchronizationCoordinator } from '../../services/SynchronizationC
 import type { SynchronizationMonitoring } from '../../services/SynchronizationMonitoring.js';
 import type { ConflictResolution } from '../../services/ConflictResolution.js';
 import type { RollbackCapabilities } from '../../services/RollbackCapabilities.js';
-import type { BackupService } from '../../services/BackupService.js';
+import { BackupService, MaintenanceOperationError } from '../../services/BackupService.js';
 import type { LoggingService } from '../../services/LoggingService.js';
 import type { MaintenanceService } from '../../services/MaintenanceService.js';
 import type { ConfigurationService } from '../../services/ConfigurationService.js';
+import { MaintenanceMetrics } from '../../services/metrics/MaintenanceMetrics.js';
 
 type HealthLevel = 'healthy' | 'degraded' | 'unhealthy';
 
@@ -105,6 +106,33 @@ export async function registerAdminRoutes(
         register(doubleAdminPath);
       }
     }
+  };
+
+  const sendMaintenanceError = (
+    reply: any,
+    error: unknown,
+    fallback: { status?: number; code: string; message: string }
+  ) => {
+    if (error instanceof MaintenanceOperationError) {
+      reply.status(error.statusCode).send({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      });
+      return;
+    }
+
+    const message =
+      error instanceof Error ? error.message : fallback.message;
+    reply.status(fallback.status ?? 500).send({
+      success: false,
+      error: {
+        code: fallback.code,
+        message,
+      },
+    });
   };
 
   registerWithAdminAliases('get', '/admin-health', async (_request, reply) => {
@@ -452,7 +480,14 @@ export async function registerAdminRoutes(
             }
           : undefined;
 
-        reply.send({ success: true, data: { history, syncSummary } });
+        reply.send({
+          success: true,
+          data: {
+            history,
+            syncSummary,
+            maintenance: MaintenanceMetrics.getInstance().getSummary(),
+          },
+        });
       } catch (error) {
         reply.status(500).send({
           success: false,
@@ -467,6 +502,18 @@ export async function registerAdminRoutes(
     app.get('/metrics', metricsHandler);
     app.get('/admin/metrics', metricsHandler);
   }
+
+  app.get('/maintenance/metrics', async (_request, reply) => {
+    const metrics = MaintenanceMetrics.getInstance().getSummary();
+    reply.send({ success: true, data: metrics });
+  });
+
+  app.get('/maintenance/metrics/prometheus', async (_request, reply) => {
+    const metricsText = MaintenanceMetrics.getInstance().toPrometheus();
+    reply
+      .header('Content-Type', 'text/plain; version=0.0.4')
+      .send(metricsText);
+  });
 
   if (typeof kgAdmin.getIndexHealth === 'function') {
     const indexHealthHandler = async (_request: any, reply: any) => {
@@ -581,14 +628,16 @@ export async function registerAdminRoutes(
     }
   });
 
-  registerWithAdminAliases('post', '/restore', {
+  registerWithAdminAliases('post', '/restore/preview', {
     schema: {
       body: {
         type: 'object',
         required: ['backupId'],
         properties: {
           backupId: { type: 'string' },
-          dryRun: { type: 'boolean', default: true },
+          validateIntegrity: { type: 'boolean', default: true },
+          destination: { type: 'string' },
+          storageProviderId: { type: 'string' },
         },
       },
     },
@@ -607,17 +656,166 @@ export async function registerAdminRoutes(
 
       const body = request.body ?? {};
       const backupId = body.backupId;
-      const dryRun = body.dryRun ?? true;
+      if (typeof backupId !== 'string' || backupId.trim().length === 0) {
+        reply.status(400).send({
+          success: false,
+          error: {
+            code: 'INVALID_BACKUP_ID',
+            message: 'A valid backupId must be provided',
+          },
+        });
+        return;
+      }
 
-      const result = await backupService.restoreBackup(backupId, { dryRun });
-      reply.send({ success: true, data: result });
-    } catch (error) {
-      reply.status(500).send({
-        success: false,
-        error: {
-          code: 'RESTORE_FAILED',
-          message: error instanceof Error ? error.message : 'Failed to restore from backup',
+      const result = await backupService.restoreBackup(backupId, {
+        dryRun: true,
+        validateIntegrity: body.validateIntegrity ?? true,
+        destination: body.destination,
+        storageProviderId: body.storageProviderId,
+        requestedBy: request.auth?.user?.userId,
+      });
+
+      const statusCode = result.success
+        ? 200
+        : result.token
+        ? 202
+        : 409;
+
+      reply.status(statusCode).send({
+        success: result.success,
+        data: result,
+        metadata: {
+          status: result.status,
+          tokenExpiresAt: result.tokenExpiresAt,
+          requiresApproval: result.requiresApproval,
         },
+      });
+    } catch (error) {
+      sendMaintenanceError(reply, error, {
+        code: 'RESTORE_PREVIEW_FAILED',
+        message: 'Failed to prepare restore preview',
+      });
+    }
+  });
+
+  registerWithAdminAliases('post', '/restore/confirm', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['backupId', 'restoreToken'],
+        properties: {
+          backupId: { type: 'string' },
+          restoreToken: { type: 'string' },
+          validateIntegrity: { type: 'boolean', default: false },
+          destination: { type: 'string' },
+          storageProviderId: { type: 'string' },
+        },
+      },
+    },
+  }, async (request: any, reply: any) => {
+    try {
+      if (!backupService || typeof backupService.restoreBackup !== 'function') {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Backup service not available',
+          },
+        });
+        return;
+      }
+
+      const body = request.body ?? {};
+      const backupId = body.backupId;
+      const restoreToken = body.restoreToken;
+      if (typeof backupId !== 'string' || typeof restoreToken !== 'string') {
+        reply.status(400).send({
+          success: false,
+          error: {
+            code: 'INVALID_RESTORE_REQUEST',
+            message: 'backupId and restoreToken are required',
+          },
+        });
+        return;
+      }
+
+      const result = await backupService.restoreBackup(backupId, {
+        dryRun: false,
+        restoreToken,
+        validateIntegrity: body.validateIntegrity ?? false,
+        destination: body.destination,
+        storageProviderId: body.storageProviderId,
+        requestedBy: request.auth?.user?.userId,
+      });
+
+      reply.status(result.success ? 200 : 500).send({
+        success: result.success,
+        data: result,
+      });
+    } catch (error) {
+      sendMaintenanceError(reply, error, {
+        code: 'RESTORE_FAILED',
+        message: 'Failed to restore from backup',
+      });
+    }
+  });
+
+  registerWithAdminAliases('post', '/restore/approve', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['token'],
+        properties: {
+          token: { type: 'string' },
+          reason: { type: 'string' },
+        },
+      },
+    },
+  }, async (request: any, reply: any) => {
+    try {
+      if (!backupService || typeof backupService.approveRestore !== 'function') {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Backup service not available',
+          },
+        });
+        return;
+      }
+
+      const body = request.body ?? {};
+      const token = body.token;
+      if (typeof token !== 'string' || token.trim().length === 0) {
+        reply.status(400).send({
+          success: false,
+          error: {
+            code: 'INVALID_RESTORE_TOKEN',
+            message: 'A valid token is required',
+          },
+        });
+        return;
+      }
+
+      const approved = backupService.approveRestore({
+        token,
+        reason: body.reason,
+        approvedBy: request.auth?.user?.userId ?? 'unknown',
+      });
+
+      reply.send({
+        success: true,
+        data: {
+          token: approved.token,
+          approvedAt: approved.approvedAt,
+          approvedBy: approved.approvedBy,
+          expiresAt: approved.expiresAt,
+        },
+      });
+    } catch (error) {
+      sendMaintenanceError(reply, error, {
+        code: 'RESTORE_APPROVAL_FAILED',
+        message: 'Failed to approve restore token',
       });
     }
   });
@@ -719,14 +917,21 @@ export async function registerAdminRoutes(
             taskId: `${task}_${Date.now()}`,
             success: false,
             error: error instanceof Error ? error.message : 'Unknown error',
+            statusCode: (error as any)?.statusCode,
           });
         }
       }
 
       const hasFailure = results.some((item) => item && item.success === false);
+      const failureStatuses = results
+        .filter((item) => item && item.success === false && item.statusCode)
+        .map((item: any) => item.statusCode as number);
+      const statusCode = hasFailure
+        ? failureStatuses[0] ?? 207
+        : 200;
 
-      reply.send({
-        success: true,
+      reply.status(statusCode).send({
+        success: !hasFailure,
         data: {
           status: hasFailure ? 'completed-with-errors' : 'completed',
           schedule,

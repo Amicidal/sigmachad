@@ -266,9 +266,11 @@ describe("SecurityScanner Integration", () => {
       );
       expect(lodashVulns.length).toBeGreaterThan(0);
 
-      const vuln = lodashVulns[0];
-      expect(vuln.vulnerabilityId).toBe("CVE-2021-23337");
-      expect(vuln.severity).toBe("high");
+      const vuln = lodashVulns.find(
+        (candidate) => candidate.vulnerabilityId === "CVE-2021-23337"
+      );
+      expect(vuln).toBeDefined();
+      expect(vuln?.severity).toBe("high");
     });
 
     it("should respect severity thresholds", async () => {

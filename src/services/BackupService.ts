@@ -4,13 +4,25 @@
  */
 
 import { DatabaseService } from "./DatabaseService.js";
-import type { DatabaseConfig } from "./database/index.js";
-import * as fs from "fs/promises";
+import type {
+  DatabaseConfig,
+  BackupConfiguration,
+  BackupProviderDefinition,
+  BackupRetentionPolicyConfig,
+} from "./database/index.js";
 import * as path from "path";
 import * as crypto from "crypto";
 import archiver from "archiver";
-import { pipeline } from "stream/promises";
-import { createWriteStream, createReadStream } from "fs";
+import type { LoggingService } from "./LoggingService.js";
+import {
+  BackupStorageProvider,
+  BackupStorageRegistry,
+  DefaultBackupStorageRegistry,
+} from "./backup/BackupStorageProvider.js";
+import { LocalFilesystemStorageProvider } from "./backup/LocalFilesystemStorageProvider.js";
+import { S3StorageProvider } from "./backup/S3StorageProvider.js";
+import { GCSStorageProvider } from "./backup/GCSStorageProvider.js";
+import { MaintenanceMetrics } from "./metrics/MaintenanceMetrics.js";
 
 export interface BackupOptions {
   type: "full" | "incremental";
@@ -18,6 +30,8 @@ export interface BackupOptions {
   includeConfig: boolean;
   compression: boolean;
   destination?: string;
+  storageProviderId?: string;
+  labels?: string[];
 }
 
 export interface BackupMetadata {
@@ -76,23 +90,154 @@ interface RestoreResult {
   estimatedDuration: string;
   integrityCheck?: RestoreIntegrityCheck;
   error?: RestoreErrorDetails;
+  token?: string;
+  tokenExpiresAt?: Date;
+  requiresApproval?: boolean;
+}
+
+interface ComponentValidation {
+  component: string;
+  action: "validate";
+  status: "valid" | "warning" | "invalid" | "missing";
+  details: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RestorePreviewToken {
+  token: string;
+  backupId: string;
+  issuedAt: Date;
+  expiresAt: Date;
+  requestedBy?: string;
+  requiresApproval: boolean;
+  approvedAt?: Date;
+  approvedBy?: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface RestorePreviewResult {
+  backupId: string;
+  token: string;
+  success: boolean;
+  expiresAt: Date;
+  changes: Array<Record<string, unknown>>;
+  estimatedDuration: string;
+  integrityCheck?: RestoreIntegrityCheck;
+}
+
+export interface RestoreApprovalPolicy {
+  requireSecondApproval: boolean;
+  tokenTtlMs: number;
+}
+
+export interface BackupServiceOptions {
+  storageProvider?: BackupStorageProvider;
+  storageRegistry?: BackupStorageRegistry;
+  loggingService?: LoggingService;
+  restorePolicy?: Partial<RestoreApprovalPolicy>;
+}
+
+export interface RestoreOptions {
+  dryRun?: boolean;
+  destination?: string;
+  validateIntegrity?: boolean;
+  storageProviderId?: string;
+  requestedBy?: string;
+  restoreToken?: string;
+}
+
+export interface RestoreApprovalRequest {
+  token: string;
+  approvedBy: string;
+  reason?: string;
+}
+
+export class MaintenanceOperationError extends Error {
+  readonly code: string;
+  readonly statusCode: number;
+  readonly component?: string;
+  readonly stage?: string;
+  readonly cause?: unknown;
+
+  constructor(
+    message: string,
+    options: {
+      code: string;
+      statusCode?: number;
+      component?: string;
+      stage?: string;
+      cause?: unknown;
+    }
+  ) {
+    super(message);
+    this.name = "MaintenanceOperationError";
+    this.code = options.code;
+    this.statusCode = options.statusCode ?? 500;
+    this.component = options.component;
+    this.stage = options.stage;
+    this.cause = options.cause;
+  }
 }
 
 export class BackupService {
   private backupDir: string = "./backups";
+  private storageRegistry: BackupStorageRegistry;
+  private storageProvider: BackupStorageProvider;
+  private loggingService?: LoggingService;
+  private restorePolicy: RestoreApprovalPolicy;
+  private restoreTokens = new Map<string, RestorePreviewToken>();
+  private retentionPolicy?: BackupRetentionPolicyConfig;
 
   constructor(
     private dbService: DatabaseService,
-    private config: DatabaseConfig
-  ) {}
+    private config: DatabaseConfig,
+    options: BackupServiceOptions = {}
+  ) {
+    this.loggingService = options.loggingService;
+
+    const backupConfig = this.config.backups;
+    if (backupConfig?.local?.basePath) {
+      this.backupDir = backupConfig.local.basePath;
+    }
+
+    const { registry, defaultProvider, retention } = this.initializeStorageProviders(
+      options,
+      backupConfig
+    );
+    this.storageRegistry = registry;
+    this.storageProvider = defaultProvider;
+    this.retentionPolicy = retention;
+
+    this.restorePolicy = {
+      requireSecondApproval: false,
+      tokenTtlMs: 15 * 60 * 1000,
+      ...options.restorePolicy,
+    };
+  }
+
+  private logInfo(component: string, message: string, data?: Record<string, unknown>) {
+    this.loggingService?.info(component, message, data);
+  }
+
+  private logError(component: string, message: string, data?: Record<string, unknown>) {
+    this.loggingService?.error(component, message, data);
+  }
 
   async createBackup(options: BackupOptions): Promise<BackupMetadata> {
+    const metrics = MaintenanceMetrics.getInstance();
+    const startedAt = Date.now();
     const backupId = `backup_${Date.now()}`;
-    this.backupDir = options.destination || "./backups";
-    const backupDir = this.backupDir;
+    await this.prepareStorageContext({
+      destination: options.destination,
+      storageProviderId: options.storageProviderId,
+    });
+    const storageProviderId = this.storageProvider.id;
 
-    // Create backup directory
-    await fs.mkdir(backupDir, { recursive: true });
+    await this.ensureServiceReadiness({
+      falkor: options.includeData,
+      qdrant: options.includeData,
+      postgres: options.includeData,
+    });
 
     const metadata: BackupMetadata = {
       id: backupId,
@@ -109,100 +254,337 @@ export class BackupService {
       status: "in_progress",
     };
 
-    try {
-      // 1. Backup FalkorDB (Redis-based graph data)
+    this.logInfo("backup", "Backup started", {
+      backupId,
+      type: options.type,
+      storageProvider: this.storageProvider.id,
+    });
 
+    try {
       if (options.includeData) {
         try {
-          await this.backupFalkorDB(backupDir, backupId, { silent: false });
+          await this.backupFalkorDB(backupId, { silent: false });
           metadata.components.falkordb = true;
         } catch (error) {
-          console.error("FalkorDB backup failed:", error);
-          // Don't mark as completed if backup fails
+          this.logError("backup", "FalkorDB backup failed", {
+            backupId,
+            error: error instanceof Error ? error.message : error,
+          });
         }
       }
 
-      // 2. Backup Qdrant (Vector embeddings)
       if (options.includeData) {
         try {
-          await this.backupQdrant(backupDir, backupId, { silent: false });
+          await this.backupQdrant(backupId, { silent: false });
           metadata.components.qdrant = true;
         } catch (error) {
-          console.error("Qdrant backup failed:", error);
-          // Don't mark as completed if backup fails
+          this.logError("backup", "Qdrant backup failed", {
+            backupId,
+            error: error instanceof Error ? error.message : error,
+          });
         }
       }
 
-      // 3. Backup PostgreSQL (Document storage)
       if (options.includeData) {
         try {
-          await this.backupPostgreSQL(backupDir, backupId);
+          await this.backupPostgreSQL(backupId);
           metadata.components.postgres = true;
         } catch (error) {
-          console.error("PostgreSQL backup failed:", error);
-          // Don't mark as completed if backup fails
+          this.logError("backup", "PostgreSQL backup failed", {
+            backupId,
+            error: error instanceof Error ? error.message : error,
+          });
         }
       }
 
-      // 4. Backup configuration (if requested)
       if (options.includeConfig) {
         try {
-          await this.backupConfig(backupDir, backupId);
+          await this.backupConfig(backupId);
           metadata.components.config = true;
         } catch (error) {
-          console.error("Config backup failed:", error);
-          throw (error instanceof Error ? error : new Error(String(error)));
+          this.logError("backup", "Configuration backup failed", {
+            backupId,
+            error: error instanceof Error ? error.message : error,
+          });
+          throw error;
         }
       }
 
-      // 5. Compress backup (if requested)
       if (options.compression) {
-        await this.compressBackup(backupDir, backupId);
+        await this.compressBackup(backupId);
       }
 
-      // 6. Calculate size and checksum
-      metadata.size = await this.calculateBackupSize(backupDir, backupId);
-      metadata.checksum = await this.calculateChecksum(backupDir, backupId);
+      metadata.size = await this.calculateBackupSize(backupId);
+      metadata.checksum = await this.calculateChecksum(backupId);
       metadata.status = "completed";
 
-      // Store backup metadata
-      await this.storeBackupMetadata(metadata);
+      await this.storeBackupMetadata(metadata, {
+        storageProviderId: this.storageProvider.id,
+        destination: options.destination ?? this.backupDir,
+        labels: options.labels ?? [],
+      });
+
+      this.logInfo("backup", "Backup completed", {
+        backupId,
+        size: metadata.size,
+        checksum: metadata.checksum,
+      });
+
+      metrics.recordBackup({
+        status: "success",
+        durationMs: Date.now() - startedAt,
+        type: options.type,
+        storageProviderId,
+        sizeBytes: metadata.size,
+      });
+
+      await this.enforceRetentionPolicy();
+
+      return metadata;
     } catch (error) {
       metadata.status = "failed";
-      console.error("Backup failed:", error);
-      throw error;
-    }
+      await this.storeBackupMetadata(metadata, {
+        storageProviderId: this.storageProvider.id,
+        destination: options.destination ?? this.backupDir,
+        labels: options.labels ?? [],
+        error: error instanceof Error ? error.message : error,
+      });
 
-    return metadata;
+      metrics.recordBackup({
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        type: options.type,
+        storageProviderId,
+      });
+
+      const failure =
+        error instanceof MaintenanceOperationError
+          ? error
+          : new MaintenanceOperationError(
+              error instanceof Error ? error.message : "Backup failed",
+              {
+                code: "BACKUP_FAILED",
+                component: "backup",
+                stage: "orchestrator",
+                cause: error,
+              }
+            );
+
+      this.logError("backup", "Backup failed", {
+        backupId,
+        error: failure.message,
+        code: failure.code,
+      });
+
+      throw failure;
+    }
   }
 
   async restoreBackup(
     backupId: string,
-    options: {
-      dryRun?: boolean;
-      destination?: string;
-      validateIntegrity?: boolean;
-    }
+    options: RestoreOptions = {}
   ): Promise<RestoreResult> {
-    // Set backup directory if provided
-    if (options.destination) {
-      this.backupDir = options.destination;
-    }
-
-    const metadata = await this.getBackupMetadata(backupId);
-    if (!metadata) {
-      throw new Error(`Backup ${backupId} not found`);
-    }
-
-    if (options.dryRun) {
-      const dryRunChanges = await this.validateBackup(backupId);
+    const metrics = MaintenanceMetrics.getInstance();
+    const startedAt = Date.now();
+    const requestedMode: "preview" | "apply" =
+      options.dryRun ?? !options.restoreToken ? "preview" : "apply";
+    const record = await this.getBackupRecord(backupId);
+    if (!record) {
+      metrics.recordRestore({
+        mode: requestedMode,
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        requiresApproval: this.restorePolicy.requireSecondApproval,
+        storageProviderId: this.storageProvider.id,
+        backupId,
+      });
       return {
         backupId,
-        status: "dry_run_completed",
-        success: true,
-        changes: dryRunChanges,
+        status: "failed",
+        success: false,
+        changes: [],
         estimatedDuration: "0 minutes",
+        error: {
+          message: `Backup ${backupId} not found`,
+          code: "NOT_FOUND",
+        },
       };
+    }
+
+    const storageProviderId =
+      options.storageProviderId ?? record.storageProviderId ?? this.storageProvider.id;
+    const destination = options.destination ?? (record.destination ?? undefined);
+    const dryRun = options.dryRun ?? !options.restoreToken;
+
+    await this.prepareStorageContext({
+      destination,
+      storageProviderId,
+    });
+
+    const requiredComponents = record.metadata.components ?? {
+      falkordb: false,
+      qdrant: false,
+      postgres: false,
+    };
+
+    if (!dryRun) {
+      await this.ensureServiceReadiness({
+        falkor: Boolean(requiredComponents.falkordb),
+        qdrant: Boolean(requiredComponents.qdrant),
+        postgres: Boolean(requiredComponents.postgres),
+      });
+    }
+
+    if (dryRun) {
+      try {
+        const changes = await this.validateBackup(backupId);
+        const hasBlockingIssues = changes.some((item) =>
+          ["invalid", "missing"].includes(item.status)
+        );
+        let integrityCheck: RestoreIntegrityCheck | undefined;
+
+        if (options.validateIntegrity) {
+          const integrityResult = await this.verifyBackupIntegrity(backupId, {
+            destination,
+            storageProviderId,
+          });
+          integrityCheck = {
+            passed: integrityResult.passed,
+            isValid: integrityResult.isValid,
+            details: {
+              message: integrityResult.details,
+              metadata: integrityResult.metadata,
+            },
+          };
+        }
+
+        const canProceed =
+          !hasBlockingIssues &&
+          (integrityCheck ? integrityCheck.passed && integrityCheck.isValid !== false : true);
+
+        const tokenRecord = this.issueRestoreToken({
+          backupId,
+          storageProviderId: this.storageProvider.id,
+          destination,
+          requestedBy: options.requestedBy,
+          requiresApproval: this.restorePolicy.requireSecondApproval,
+          metadata: {
+            canProceed,
+            requestedBy: options.requestedBy,
+            createdAt: new Date().toISOString(),
+          },
+        });
+
+        const result: RestorePreviewResult & { requiresApproval?: boolean } = {
+          backupId,
+          status: canProceed ? "dry_run_completed" : "failed",
+          success: canProceed,
+          changes,
+          estimatedDuration: "0 minutes",
+          integrityCheck,
+          token: tokenRecord.token,
+          tokenExpiresAt: tokenRecord.expiresAt,
+          requiresApproval: tokenRecord.requiresApproval,
+          error: canProceed
+            ? undefined
+            : {
+                message: "Validation detected blocking issues",
+                code: "RESTORE_VALIDATION_FAILED",
+              },
+        };
+
+        metrics.recordRestore({
+          mode: "preview",
+          status: result.success ? "success" : "failure",
+          durationMs: Date.now() - startedAt,
+          requiresApproval: Boolean(result.requiresApproval),
+          storageProviderId,
+          backupId,
+        });
+
+        return result;
+      } catch (error) {
+        const failureResult: RestoreResult = {
+          backupId,
+          status: "failed",
+          success: false,
+          changes: [],
+          estimatedDuration: "0 minutes",
+          error: {
+            message:
+              error instanceof MaintenanceOperationError
+                ? error.message
+                : error instanceof Error
+                ? error.message
+              : "Failed to validate backup metadata",
+            code: "DRY_RUN_VALIDATION_FAILED",
+            cause: error,
+          },
+        };
+
+        metrics.recordRestore({
+          mode: "preview",
+          status: "failure",
+          durationMs: Date.now() - startedAt,
+          requiresApproval: this.restorePolicy.requireSecondApproval,
+          storageProviderId,
+          backupId,
+        });
+
+        return failureResult;
+      }
+    }
+
+    const restoreToken = options.restoreToken;
+    if (!restoreToken) {
+      throw new MaintenanceOperationError("Restore token is required", {
+        code: "RESTORE_TOKEN_REQUIRED",
+        statusCode: 400,
+        component: "restore",
+      });
+    }
+
+    this.purgeExpiredRestoreTokens();
+    const tokenRecord = this.restoreTokens.get(restoreToken);
+    if (!tokenRecord || tokenRecord.backupId !== backupId) {
+      throw new MaintenanceOperationError("Restore token is invalid or expired", {
+        code: "RESTORE_TOKEN_INVALID",
+        statusCode: 410,
+        component: "restore",
+      });
+    }
+
+    if (tokenRecord.expiresAt.getTime() <= Date.now()) {
+      this.restoreTokens.delete(restoreToken);
+      throw new MaintenanceOperationError("Restore token has expired", {
+        code: "RESTORE_TOKEN_EXPIRED",
+        statusCode: 410,
+        component: "restore",
+      });
+    }
+
+    const canProceed = Boolean(tokenRecord.metadata?.canProceed !== false);
+    const isApproved = Boolean(tokenRecord.approvedAt);
+    if (!canProceed && !isApproved) {
+      throw new MaintenanceOperationError(
+        "Restore cannot proceed until blocking issues are resolved",
+        {
+          code: "RESTORE_VALIDATION_FAILED",
+          statusCode: 409,
+          component: "restore",
+        }
+      );
+    }
+
+    if (tokenRecord.requiresApproval && !tokenRecord.approvedAt) {
+      throw new MaintenanceOperationError(
+        "Restore requires secondary approval before execution",
+        {
+          code: "RESTORE_APPROVAL_REQUIRED",
+          statusCode: 403,
+          component: "restore",
+        }
+      );
     }
 
     const restoreResult: RestoreResult = {
@@ -213,10 +595,10 @@ export class BackupService {
       estimatedDuration: "10-15 minutes",
     };
 
-    // Validate integrity if requested
     if (options.validateIntegrity) {
       const integrityResult = await this.verifyBackupIntegrity(backupId, {
-        destination: options.destination,
+        destination,
+        storageProviderId,
       });
       restoreResult.integrityCheck = {
         passed: integrityResult.passed,
@@ -228,23 +610,33 @@ export class BackupService {
       };
 
       if (!integrityResult.isValid) {
-        throw new Error("Backup integrity check failed");
+        throw new MaintenanceOperationError("Backup integrity check failed", {
+          code: "RESTORE_INTEGRITY_FAILED",
+          statusCode: 412,
+          component: "restore",
+        });
       }
     }
 
     try {
-      // Perform actual restore
+      const metadata = record.metadata;
+
       if (metadata.components.falkordb) {
         await this.restoreFalkorDB(backupId);
         restoreResult.changes.push({
           component: "falkordb",
           action: "restored",
+          status: "completed",
         });
       }
 
       if (metadata.components.qdrant) {
         await this.restoreQdrant(backupId);
-        restoreResult.changes.push({ component: "qdrant", action: "restored" });
+        restoreResult.changes.push({
+          component: "qdrant",
+          action: "restored",
+          status: "completed",
+        });
       }
 
       if (metadata.components.postgres) {
@@ -252,46 +644,1102 @@ export class BackupService {
         restoreResult.changes.push({
           component: "postgres",
           action: "restored",
+          status: "completed",
         });
       }
 
       if (metadata.components.config) {
         await this.restoreConfig(backupId);
-        restoreResult.changes.push({ component: "config", action: "restored" });
+        restoreResult.changes.push({
+          component: "config",
+          action: "restored",
+          status: "completed",
+        });
       }
 
       restoreResult.status = "completed";
       restoreResult.success = true;
+      this.restoreTokens.delete(restoreToken);
+      restoreResult.requiresApproval = tokenRecord.requiresApproval;
+      metrics.recordRestore({
+        mode: "apply",
+        status: "success",
+        durationMs: Date.now() - startedAt,
+        requiresApproval: Boolean(tokenRecord.requiresApproval),
+        storageProviderId,
+        backupId,
+      });
+      return restoreResult;
     } catch (error) {
-      console.error("Restore failed:", error);
-      throw (error instanceof Error ? error : new Error(String(error)));
+      this.logError("restore", "Restore execution failed", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
+      metrics.recordRestore({
+        mode: dryRun ? "preview" : "apply",
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        requiresApproval: dryRun
+          ? this.restorePolicy.requireSecondApproval
+          : Boolean(tokenRecord?.requiresApproval ?? this.restorePolicy.requireSecondApproval),
+        storageProviderId,
+        backupId,
+      });
+
+      throw (error instanceof MaintenanceOperationError
+        ? error
+        : new MaintenanceOperationError(
+            error instanceof Error ? error.message : "Restore failed",
+            {
+              code: "RESTORE_FAILED",
+              component: "restore",
+              stage: "apply",
+              cause: error,
+            }
+          ));
+    }
+  }
+
+  approveRestore(request: RestoreApprovalRequest): RestorePreviewToken {
+    const metrics = MaintenanceMetrics.getInstance();
+    this.purgeExpiredRestoreTokens();
+    const tokenRecord = this.restoreTokens.get(request.token);
+    if (!tokenRecord) {
+      throw new MaintenanceOperationError("Restore token not found", {
+        code: "RESTORE_TOKEN_INVALID",
+        statusCode: 404,
+        component: "restore",
+      });
     }
 
-    return restoreResult;
+    tokenRecord.approvedAt = new Date();
+    tokenRecord.approvedBy = request.approvedBy;
+    tokenRecord.metadata = {
+      ...tokenRecord.metadata,
+      approvalReason: request.reason,
+    };
+
+    this.restoreTokens.set(request.token, tokenRecord);
+    metrics.recordRestoreApproval({ status: "approved" });
+    return tokenRecord;
+  }
+
+  private initializeStorageProviders(
+    options: BackupServiceOptions,
+    backupConfig?: BackupConfiguration
+  ): {
+    registry: BackupStorageRegistry;
+    defaultProvider: BackupStorageProvider;
+    retention?: BackupRetentionPolicyConfig;
+  } {
+    const localBasePath = backupConfig?.local?.basePath ?? this.backupDir;
+    const allowCreate = backupConfig?.local?.allowCreate ?? true;
+
+    let registry = options.storageRegistry;
+    let defaultProvider = options.storageProvider ?? null;
+
+    if (!registry) {
+      const provider =
+        options.storageProvider ??
+        new LocalFilesystemStorageProvider({
+          basePath: localBasePath,
+          allowCreate,
+        });
+      registry = new DefaultBackupStorageRegistry(provider);
+      defaultProvider = provider;
+    } else if (!defaultProvider) {
+      defaultProvider = new LocalFilesystemStorageProvider({
+        basePath: localBasePath,
+        allowCreate,
+      });
+      registry.register(defaultProvider.id, defaultProvider);
+    } else {
+      registry.register(defaultProvider.id, defaultProvider);
+    }
+
+    this.registerConfiguredProviders(registry, backupConfig);
+
+    if (backupConfig?.defaultProvider) {
+      const configuredDefault = registry.get(backupConfig.defaultProvider);
+      if (configuredDefault) {
+        defaultProvider = configuredDefault;
+      } else {
+        this.logError("backup", "Configured default storage provider not found", {
+          providerId: backupConfig.defaultProvider,
+        });
+      }
+    }
+
+    return {
+      registry,
+      defaultProvider: defaultProvider ?? registry.getDefault(),
+      retention: backupConfig?.retention,
+    };
+  }
+
+  private registerConfiguredProviders(
+    registry: BackupStorageRegistry,
+    backupConfig?: BackupConfiguration
+  ): void {
+    const configuredProviders = backupConfig?.providers;
+    if (!configuredProviders) {
+      return;
+    }
+
+    for (const [providerId, definition] of Object.entries(configuredProviders)) {
+      try {
+        const provider = this.instantiateConfiguredProvider(providerId, definition, backupConfig);
+        registry.register(providerId, provider);
+      } catch (error) {
+        this.logError("backup", "Failed to register backup storage provider", {
+          providerId,
+          error: error instanceof Error ? error.message : error,
+        });
+      }
+    }
+  }
+
+  private instantiateConfiguredProvider(
+    providerId: string,
+    definition: BackupProviderDefinition,
+    backupConfig?: BackupConfiguration
+  ): BackupStorageProvider {
+    const type = (definition.type ?? "local").toLowerCase();
+    const options = (definition.options ?? {}) as Record<string, unknown>;
+
+    switch (type) {
+      case "local": {
+        const basePath =
+          this.getStringOption(options, "basePath") ??
+          backupConfig?.local?.basePath ??
+          this.backupDir;
+        const allowCreate = this.getBooleanOption(options, "allowCreate");
+        return new LocalFilesystemStorageProvider({
+          basePath,
+          allowCreate: allowCreate ?? backupConfig?.local?.allowCreate ?? true,
+        });
+      }
+      case "s3": {
+        const bucket = this.getStringOption(options, "bucket");
+        if (!bucket) {
+          throw new Error(
+            `S3 storage provider "${providerId}" requires a bucket name`
+          );
+        }
+
+        const credentials = this.buildS3Credentials(options);
+
+        return new S3StorageProvider({
+          id: providerId,
+          bucket,
+          region: this.getStringOption(options, "region"),
+          prefix: this.getStringOption(options, "prefix"),
+          endpoint: this.getStringOption(options, "endpoint"),
+          forcePathStyle: this.getBooleanOption(options, "forcePathStyle") ?? undefined,
+          autoCreate: this.getBooleanOption(options, "autoCreate") ?? undefined,
+          kmsKeyId: this.getStringOption(options, "kmsKeyId"),
+          serverSideEncryption: this.getStringOption(options, "serverSideEncryption"),
+          uploadConcurrency: this.getNumberOption(options, "uploadConcurrency") ?? undefined,
+          uploadPartSizeBytes: this.getNumberOption(options, "uploadPartSizeBytes") ?? undefined,
+          credentials,
+        });
+      }
+      case "gcs": {
+        const bucket = this.getStringOption(options, "bucket");
+        if (!bucket) {
+          throw new Error(
+            `GCS storage provider "${providerId}" requires a bucket name`
+          );
+        }
+
+        const credentials = this.buildGcsCredentials(options);
+
+        return new GCSStorageProvider({
+          id: providerId,
+          bucket,
+          prefix: this.getStringOption(options, "prefix"),
+          projectId: this.getStringOption(options, "projectId"),
+          keyFilename: this.getStringOption(options, "keyFilename"),
+          autoCreate: this.getBooleanOption(options, "autoCreate") ?? undefined,
+          resumableUploads: this.getBooleanOption(options, "resumableUploads") ?? undefined,
+          makePublic: this.getBooleanOption(options, "makePublic") ?? undefined,
+          credentials,
+        });
+      }
+      default:
+        throw new Error(
+          `Unsupported backup storage provider type: ${definition.type}`
+        );
+    }
+  }
+
+  private buildS3Credentials(options: Record<string, unknown>) {
+    const accessKeyId = this.getStringOption(options, "accessKeyId");
+    const secretAccessKey = this.getStringOption(options, "secretAccessKey");
+    const sessionToken = this.getStringOption(options, "sessionToken");
+
+    const nested = options.credentials;
+    if (!accessKeyId && typeof nested === "object" && nested) {
+      const nestedCreds = nested as Record<string, unknown>;
+      return this.buildS3Credentials(nestedCreds);
+    }
+
+    if (accessKeyId && secretAccessKey) {
+      return {
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+      };
+    }
+
+    return undefined;
+  }
+
+  private buildGcsCredentials(options: Record<string, unknown>) {
+    const clientEmail = this.getStringOption(options, "clientEmail");
+    const privateKey = this.getStringOption(options, "privateKey");
+
+    const nested = options.credentials;
+    if (!clientEmail && typeof nested === "object" && nested) {
+      const nestedCreds = nested as Record<string, unknown>;
+      return this.buildGcsCredentials(nestedCreds);
+    }
+
+    if (clientEmail && privateKey) {
+      return {
+        clientEmail,
+        privateKey,
+      };
+    }
+
+    return undefined;
+  }
+
+  private getStringOption(source: Record<string, unknown>, key: string): string | undefined {
+    const value = source[key];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  }
+
+  private getBooleanOption(source: Record<string, unknown>, key: string): boolean | undefined {
+    const value = source[key];
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      if (value.toLowerCase() === "true") return true;
+      if (value.toLowerCase() === "false") return false;
+    }
+    return undefined;
+  }
+
+  private getNumberOption(source: Record<string, unknown>, key: string): number | undefined {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  }
+
+  private async ensureServiceReadiness(requirements: {
+    falkor?: boolean;
+    qdrant?: boolean;
+    postgres?: boolean;
+  }): Promise<void> {
+    if (
+      !this.dbService ||
+      typeof this.dbService.isInitialized !== "function" ||
+      !this.dbService.isInitialized()
+    ) {
+      throw new MaintenanceOperationError("Database service unavailable", {
+        code: "DEPENDENCY_UNAVAILABLE",
+        statusCode: 503,
+        component: "database",
+      });
+    }
+
+    const checks: Array<Promise<void>> = [];
+
+    if (requirements.falkor) {
+      checks.push(
+        this.ensureSpecificServiceReady(
+          () => this.dbService.getFalkorDBService(),
+          "falkordb"
+        )
+      );
+    }
+
+    if (requirements.qdrant) {
+      checks.push(
+        this.ensureSpecificServiceReady(
+          () => this.dbService.getQdrantService(),
+          "qdrant"
+        )
+      );
+    }
+
+    if (requirements.postgres) {
+      checks.push(
+        this.ensureSpecificServiceReady(
+          () => this.dbService.getPostgreSQLService(),
+          "postgres"
+        )
+      );
+    }
+
+    await Promise.all(checks);
+  }
+
+  private async ensureSpecificServiceReady(
+    getService: () => any,
+    component: string
+  ): Promise<void> {
+    try {
+      const service = getService();
+      if (service && typeof service.healthCheck === "function") {
+        const healthy = await service.healthCheck();
+        if (!healthy) {
+          throw new Error(`${component} health check reported unavailable`);
+        }
+      }
+    } catch (error) {
+      throw new MaintenanceOperationError(`${component} service unavailable`, {
+        code: "DEPENDENCY_UNAVAILABLE",
+        statusCode: 503,
+        component,
+        cause: error,
+      });
+    }
+  }
+
+  private async enforceRetentionPolicy(): Promise<void> {
+    const policy = this.retentionPolicy;
+    if (!policy) {
+      return;
+    }
+
+    try {
+      const pg = this.dbService.getPostgreSQLService();
+      const result = await pg.query(
+        `SELECT id, recorded_at, size_bytes, storage_provider
+         FROM maintenance_backups
+         ORDER BY recorded_at DESC`
+      );
+
+      const rows = Array.isArray(result.rows) ? result.rows : [];
+      if (rows.length === 0) {
+        return;
+      }
+
+      const idsToDelete = new Set<string>();
+      const now = Date.now();
+
+      if (policy.maxAgeDays && policy.maxAgeDays > 0) {
+        const cutoff = now - policy.maxAgeDays * 24 * 60 * 60 * 1000;
+        for (const row of rows) {
+          const recordedAt = new Date(row.recorded_at).getTime();
+          if (!Number.isNaN(recordedAt) && recordedAt < cutoff) {
+            idsToDelete.add(row.id);
+          }
+        }
+      }
+
+      if (policy.maxEntries && policy.maxEntries > 0) {
+        const eligible = rows.filter((row) => !idsToDelete.has(row.id));
+        for (let index = policy.maxEntries; index < eligible.length; index += 1) {
+          idsToDelete.add(eligible[index].id);
+        }
+      }
+
+      if (policy.maxTotalSizeBytes && policy.maxTotalSizeBytes > 0) {
+        let runningSize = 0;
+        const eligible = rows.filter((row) => !idsToDelete.has(row.id));
+        for (const row of eligible) {
+          const size = Number(row.size_bytes) || 0;
+          if (runningSize + size <= policy.maxTotalSizeBytes) {
+            runningSize += size;
+          } else {
+            idsToDelete.add(row.id);
+          }
+        }
+      }
+
+      if (idsToDelete.size === 0) {
+        return;
+      }
+
+      if (policy.deleteArtifacts !== false) {
+        for (const row of rows) {
+          if (!idsToDelete.has(row.id)) {
+            continue;
+          }
+          await this.deleteBackupArtifacts(row.id, row.storage_provider);
+        }
+      }
+
+      await pg.query(
+        `DELETE FROM maintenance_backups WHERE id = ANY($1::text[])`,
+        [Array.from(idsToDelete)]
+      );
+
+      this.logInfo("backup", "Retention pruning completed", {
+        removedBackups: idsToDelete.size,
+      });
+    } catch (error) {
+      this.logError("backup", "Retention enforcement failed", {
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
+  private async deleteBackupArtifacts(
+    backupId: string,
+    providerId: string
+  ): Promise<void> {
+    try {
+      let provider = this.storageRegistry.get(providerId);
+      if (!provider && this.storageProvider.id === providerId) {
+        provider = this.storageProvider;
+      }
+
+      if (!provider) {
+        this.logError("backup", "Retention pruning skipped unknown provider", {
+          backupId,
+          providerId,
+        });
+        return;
+      }
+
+      await provider.ensureReady();
+      const artifacts = await provider.list();
+      for (const artifact of artifacts) {
+        if (artifact.startsWith(backupId)) {
+          try {
+            await provider.removeFile(artifact);
+          } catch (error) {
+            this.logError("backup", "Failed to delete backup artifact", {
+              backupId,
+              providerId,
+              artifact,
+              error: error instanceof Error ? error.message : error,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      this.logError("backup", "Retention artifact cleanup failed", {
+        backupId,
+        providerId,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
+  private async exportQdrantCollectionPoints(client: any, collectionName: string): Promise<any[]> {
+    const points: any[] = [];
+    let nextOffset: unknown = undefined;
+    const batchSize = 256;
+
+    do {
+      const response = await client.scroll(collectionName, {
+        limit: batchSize,
+        offset: nextOffset,
+        with_payload: true,
+        with_vector: true,
+      });
+
+      const batch = Array.isArray(response?.points) ? response.points : [];
+      if (batch.length > 0) {
+        points.push(
+          ...batch.map((point: any) => {
+            const entry: Record<string, unknown> = {
+              id: point.id,
+            };
+            if (point.payload !== undefined) {
+              entry.payload = point.payload;
+            }
+            if (point.vector !== undefined) {
+              entry.vector = point.vector;
+            }
+            if (point.vectors !== undefined) {
+              entry.vectors = point.vectors;
+            }
+            return entry;
+          })
+        );
+      }
+
+      nextOffset = response?.next_page_offset ?? undefined;
+    } while (nextOffset);
+
+    return points;
+  }
+
+  private async collectQdrantPointArtifacts(backupId: string): Promise<string[]> {
+    const manifestArtifact = `${backupId}_qdrant_collections.json`;
+    const exists = await this.artifactExists(backupId, manifestArtifact);
+    if (!exists) {
+      return [];
+    }
+
+    const manifest = JSON.parse(
+      (await this.readArtifact(backupId, manifestArtifact)).toString("utf-8")
+    );
+
+    const collectionEntries = Array.isArray(manifest?.collections)
+      ? manifest.collections
+      : [];
+
+    return collectionEntries
+      .map((entry: any) => entry?.pointsArtifact)
+      .filter((artifact: unknown): artifact is string => typeof artifact === "string");
+  }
+
+  private async loadQdrantPoints(
+    backupId: string,
+    entry: { name: string; pointsArtifact?: string; points?: any[] }
+  ): Promise<any[]> {
+    if (Array.isArray(entry.points) && entry.points.length > 0) {
+      return entry.points;
+    }
+
+    if (!entry.pointsArtifact) {
+      return [];
+    }
+
+    const exists = await this.artifactExists(backupId, entry.pointsArtifact);
+    if (!exists) {
+      return [];
+    }
+
+    const raw = JSON.parse(
+      (await this.readArtifact(backupId, entry.pointsArtifact)).toString("utf-8")
+    );
+
+    if (Array.isArray(raw)) {
+      return raw;
+    }
+
+    if (Array.isArray(raw?.points)) {
+      return raw.points;
+    }
+
+    return [];
+  }
+
+  private async recreateQdrantCollection(
+    client: any,
+    entry: { name: string; info?: Record<string, any> }
+  ): Promise<void> {
+    const name = entry.name;
+    const config = entry.info?.config as Record<string, any> | undefined;
+
+    if (!config?.params?.vectors) {
+      throw new Error(`Missing collection configuration for ${name}`);
+    }
+
+    try {
+      await client.deleteCollection(name);
+    } catch (error) {
+      if (!this.isQdrantNotFoundError(error)) {
+        throw error;
+      }
+    }
+
+    const createPayload: Record<string, unknown> = {
+      ...config.params,
+    };
+
+    if (config.hnsw_config) {
+      createPayload.hnsw_config = config.hnsw_config;
+    }
+    if (config.optimizer_config) {
+      createPayload.optimizer_config = config.optimizer_config;
+    }
+    if (config.wal_config) {
+      createPayload.wal_config = config.wal_config;
+    }
+    if (config.quantization_config) {
+      createPayload.quantization_config = config.quantization_config;
+    }
+    if (config.strict_mode_config) {
+      createPayload.strict_mode_config = config.strict_mode_config;
+    }
+
+    await client.createCollection(name, createPayload);
+
+    const payloadSchema = entry.info?.payload_schema ?? {};
+    for (const [fieldName, fieldSchema] of Object.entries(payloadSchema)) {
+      if (!fieldSchema) continue;
+      try {
+        await client.createPayloadIndex(name, {
+          field_name: fieldName,
+          field_schema: fieldSchema,
+          wait: true,
+        });
+      } catch (error) {
+        this.logError("restore", "Failed to recreate Qdrant payload index", {
+          collection: name,
+          field: fieldName,
+          error: error instanceof Error ? error.message : error,
+        });
+      }
+    }
+  }
+
+  private async upsertQdrantPoints(
+    client: any,
+    collectionName: string,
+    points: any[]
+  ): Promise<void> {
+    if (!points.length) {
+      return;
+    }
+
+    const chunkSize = 200;
+    for (let index = 0; index < points.length; index += chunkSize) {
+      const chunk = points.slice(index, index + chunkSize);
+      await client.upsert(collectionName, {
+        points: chunk,
+        wait: true,
+      });
+    }
+  }
+
+  private isQdrantNotFoundError(error: unknown): boolean {
+    const status = (error as any)?.status ?? (error as any)?.response?.status;
+    if (status === 404) {
+      return true;
+    }
+    const code = (error as any)?.code;
+    if (code === 404) {
+      return true;
+    }
+    const message = (error as any)?.message;
+    if (typeof message === "string") {
+      return message.toLowerCase().includes("not found");
+    }
+    return false;
+  }
+
+  private async prepareStorageContext(
+    options: { destination?: string; storageProviderId?: string } = {}
+  ): Promise<void> {
+    if (options.storageProviderId) {
+      const provider = this.storageRegistry.get(options.storageProviderId);
+      if (!provider) {
+        throw new MaintenanceOperationError(
+          `Unknown storage provider: ${options.storageProviderId}`,
+          {
+            code: "STORAGE_PROVIDER_UNKNOWN",
+            statusCode: 400,
+          }
+        );
+      }
+      this.storageProvider = provider;
+    } else if (options.destination) {
+      this.backupDir = options.destination;
+      const localProvider = new LocalFilesystemStorageProvider({
+        basePath: this.backupDir,
+      });
+      this.storageProvider = localProvider;
+      this.storageRegistry.register(localProvider.id, localProvider);
+    } else {
+      this.storageProvider = this.storageRegistry.getDefault();
+    }
+
+    await this.storageProvider.ensureReady();
+  }
+
+  private buildArtifactPath(backupId: string, fileName: string): string {
+    if (fileName.startsWith(backupId)) {
+      return fileName.replace(/\\/g, "/");
+    }
+    return path.posix.join(backupId, fileName);
+  }
+
+  private async writeArtifact(
+    backupId: string,
+    fileName: string,
+    data: string | Buffer
+  ): Promise<void> {
+    await this.storageProvider.writeFile(
+      this.buildArtifactPath(backupId, fileName),
+      data
+    );
+  }
+
+  private async readArtifact(
+    backupId: string,
+    fileName: string
+  ): Promise<Buffer> {
+    return this.storageProvider.readFile(
+      this.buildArtifactPath(backupId, fileName)
+    );
+  }
+
+  private async artifactExists(
+    backupId: string,
+    fileName: string
+  ): Promise<boolean> {
+    return this.storageProvider.exists(
+      this.buildArtifactPath(backupId, fileName)
+    );
+  }
+
+  private computeBufferChecksum(buffer: Buffer): string {
+    return crypto.createHash("sha256").update(buffer).digest("hex");
+  }
+
+  private purgeExpiredRestoreTokens(): void {
+    const now = Date.now();
+    for (const [token, record] of this.restoreTokens.entries()) {
+      if (record.expiresAt.getTime() <= now) {
+        this.restoreTokens.delete(token);
+      }
+    }
+  }
+
+  private issueRestoreToken(params: {
+    backupId: string;
+    storageProviderId: string;
+    destination?: string | null;
+    requestedBy?: string;
+    requiresApproval: boolean;
+    metadata: Record<string, unknown>;
+  }): RestorePreviewToken {
+    this.purgeExpiredRestoreTokens();
+
+    const token = crypto.randomUUID();
+    const issuedAt = new Date();
+    const expiresAt = new Date(issuedAt.getTime() + this.restorePolicy.tokenTtlMs);
+
+    const record: RestorePreviewToken = {
+      token,
+      backupId: params.backupId,
+      issuedAt,
+      expiresAt,
+      requestedBy: params.requestedBy,
+      requiresApproval: params.requiresApproval,
+      metadata: {
+        ...params.metadata,
+        storageProviderId: params.storageProviderId,
+        destination: params.destination,
+      },
+    };
+
+    this.restoreTokens.set(token, record);
+    return record;
+  }
+
+  private async fetchFalkorCounts(): Promise<
+    { nodes: number; relationships: number } | null
+  > {
+    try {
+      const falkorService = this.dbService.getFalkorDBService();
+      const nodesResult = await falkorService.query(
+        "MATCH (n) RETURN count(n) AS count"
+      );
+      const relationshipsResult = await falkorService.query(
+        "MATCH ()-[r]->() RETURN count(r) AS count"
+      );
+
+      const extractCount = (result: any): number => {
+        if (!result) return 0;
+        if (Array.isArray(result)) {
+          const first = result[0];
+          if (!first) return 0;
+          if (typeof first.count === "number") return first.count;
+          if (Array.isArray(first)) return Number(first[0]) || 0;
+        }
+        if (result?.data && Array.isArray(result.data)) {
+          const first = result.data[0];
+          if (first && typeof first.count === "number") return first.count;
+        }
+        return Number(result?.count ?? 0) || 0;
+      };
+
+      return {
+        nodes: extractCount(nodesResult),
+        relationships: extractCount(relationshipsResult),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async fetchQdrantCollectionNames(): Promise<string[] | null> {
+    try {
+      const qdrantClient = this.dbService.getQdrantService().getClient();
+      const collections = await qdrantClient.getCollections();
+      if (!collections?.collections) {
+        return [];
+      }
+      return collections.collections.map((item: any) => item.name).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  private async fetchPostgresTableNames(): Promise<string[] | null> {
+    try {
+      const postgresService = this.dbService.getPostgreSQLService();
+      const result = await postgresService.query(
+        `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
+      );
+      const rows = result.rows || result;
+      if (!rows) return [];
+      return rows.map((row: any) => row.tablename || row.table_name).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  private async validateFalkorBackup(
+    backupId: string
+  ): Promise<ComponentValidation> {
+    const artifact = `${backupId}_falkordb.dump`;
+    const exists = await this.artifactExists(backupId, artifact);
+    if (!exists) {
+      return {
+        component: "falkordb",
+        action: "validate",
+        status: "missing",
+        details: "Graph snapshot artifact not found",
+      };
+    }
+
+    try {
+      const buffer = await this.readArtifact(backupId, artifact);
+      const parsed = JSON.parse(buffer.toString("utf-8"));
+      const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes.length : 0;
+      const relationships = Array.isArray(parsed?.relationships)
+        ? parsed.relationships.length
+        : 0;
+      const liveCounts = await this.fetchFalkorCounts();
+      const checksum = this.computeBufferChecksum(buffer);
+
+      const status: ComponentValidation["status"] =
+        nodes === 0 || relationships === 0 ? "warning" : "valid";
+
+      return {
+        component: "falkordb",
+        action: "validate",
+        status,
+        details:
+          status === "valid"
+            ? "Graph snapshot parsed successfully"
+            : "Graph snapshot parsed but contains no nodes or relationships",
+        metadata: {
+          nodes,
+          relationships,
+          checksum,
+          liveNodes: liveCounts?.nodes,
+          liveRelationships: liveCounts?.relationships,
+        },
+      };
+    } catch (error) {
+      return {
+        component: "falkordb",
+        action: "validate",
+        status: "invalid",
+        details: "Failed to parse Falkor snapshot",
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  private async validateQdrantBackup(
+    backupId: string
+  ): Promise<ComponentValidation> {
+    const metadataArtifact = `${backupId}_qdrant_collections.json`;
+    const exists = await this.artifactExists(backupId, metadataArtifact);
+    if (!exists) {
+      return {
+        component: "qdrant",
+        action: "validate",
+        status: "missing",
+        details: "Qdrant collections manifest not found",
+      };
+    }
+
+    try {
+      const manifest = JSON.parse(
+        (await this.readArtifact(backupId, metadataArtifact)).toString("utf-8")
+      );
+      const collectionEntries = Array.isArray(manifest?.collections)
+        ? manifest.collections.filter((item: any) => typeof item?.name === "string")
+        : [];
+
+      const missingArtifacts: string[] = [];
+      for (const entry of collectionEntries) {
+        const artifact = entry?.pointsArtifact;
+        if (typeof artifact !== "string") {
+          missingArtifacts.push(entry.name);
+          continue;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        const hasArtifact = await this.artifactExists(backupId, artifact);
+        if (!hasArtifact) {
+          missingArtifacts.push(entry.name);
+        }
+      }
+
+      const liveCollections = await this.fetchQdrantCollectionNames();
+
+      const status: ComponentValidation["status"] =
+        missingArtifacts.length > 0 ? "warning" : "valid";
+
+      return {
+        component: "qdrant",
+        action: "validate",
+        status,
+        details:
+          status === "valid"
+            ? "Qdrant collection data captured"
+            : `${missingArtifacts.length} collection backups missing point data artifacts`,
+        metadata: {
+          collections: collectionEntries.map((entry: any) => ({
+            name: entry.name,
+            pointsArtifact: entry.pointsArtifact,
+            pointCount: entry.pointCount,
+            error: entry.error,
+          })),
+          liveCollections,
+          missingArtifacts,
+        },
+      };
+    } catch (error) {
+      return {
+        component: "qdrant",
+        action: "validate",
+        status: "invalid",
+        details: "Failed to parse Qdrant collections manifest",
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  private async validatePostgresBackup(
+    backupId: string
+  ): Promise<ComponentValidation> {
+    const artifact = `${backupId}_postgres.sql`;
+    const exists = await this.artifactExists(backupId, artifact);
+    if (!exists) {
+      return {
+        component: "postgres",
+        action: "validate",
+        status: "missing",
+        details: "PostgreSQL dump not found",
+      };
+    }
+
+    try {
+      const dump = (await this.readArtifact(backupId, artifact)).toString(
+        "utf-8"
+      );
+      const tableMatches = dump.match(/CREATE TABLE IF NOT EXISTS\s+([a-zA-Z0-9_]+)/g);
+      const backupTables = tableMatches ? tableMatches.length : 0;
+      const liveTables = await this.fetchPostgresTableNames();
+
+      const status: ComponentValidation["status"] =
+        backupTables === 0 ? "warning" : "valid";
+
+      return {
+        component: "postgres",
+        action: "validate",
+        status,
+        details:
+          status === "valid"
+            ? "PostgreSQL dump contains table definitions"
+            : "PostgreSQL dump parsed but no table definitions found",
+        metadata: {
+          backupTables,
+          liveTables,
+          checksum: this.computeBufferChecksum(Buffer.from(dump)),
+        },
+      };
+    } catch (error) {
+      return {
+        component: "postgres",
+        action: "validate",
+        status: "invalid",
+        details: "Failed to parse PostgreSQL dump",
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  private async validateConfigBackup(
+    backupId: string
+  ): Promise<ComponentValidation> {
+    const artifact = `${backupId}_config.json`;
+    const exists = await this.artifactExists(backupId, artifact);
+    if (!exists) {
+      return {
+        component: "config",
+        action: "validate",
+        status: "missing",
+        details: "Configuration snapshot not found",
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(
+        (await this.readArtifact(backupId, artifact)).toString("utf-8")
+      );
+      const keys = Object.keys(parsed ?? {});
+      const status: ComponentValidation["status"] = keys.length === 0 ? "warning" : "valid";
+
+      return {
+        component: "config",
+        action: "validate",
+        status,
+        details:
+          status === "valid"
+            ? "Configuration snapshot parsed successfully"
+            : "Configuration snapshot parsed but contains no entries",
+        metadata: {
+          keys,
+        },
+      };
+    } catch (error) {
+      return {
+        component: "config",
+        action: "validate",
+        status: "invalid",
+        details: "Failed to parse configuration snapshot",
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
   }
 
   private async backupFalkorDB(
-    backupDir: string,
     backupId: string,
     options: { silent?: boolean } = {}
   ): Promise<void> {
-    // `silent` lets direct unit tests exercise fallback behavior without throwing.
     const { silent = true } = options;
-
-    const dumpPath = path.join(backupDir, `${backupId}_falkordb.rdb`);
+    const artifactName = `${backupId}_falkordb.dump`;
 
     try {
-      
-      // Export graph data using Cypher queries
       const falkorService = this.dbService.getFalkorDBService();
 
-      // Get all nodes with their properties
       const nodesResult = await falkorService.query(`
         MATCH (n)
         RETURN labels(n) as labels, properties(n) as props, ID(n) as id
       `);
 
-      // Get all relationships with their properties
       const relsResult = await falkorService.query(`
         MATCH (a)-[r]->(b)
         RETURN ID(a) as startId, ID(b) as endId, type(r) as type, properties(r) as props
@@ -307,79 +1755,139 @@ export class BackupService {
         },
       };
 
-      await fs.writeFile(dumpPath, JSON.stringify(backupData, null, 2));
-      console.log(`✅ FalkorDB backup created: ${dumpPath}`);
+      await this.writeArtifact(
+        backupId,
+        artifactName,
+        JSON.stringify(backupData, null, 2)
+      );
+
+      this.logInfo("backup", "FalkorDB backup created", {
+        backupId,
+        artifact: artifactName,
+      });
     } catch (error) {
-      console.error("❌ FalkorDB backup failed:", error);
+      this.logError("backup", "FalkorDB backup failed", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
       if (!silent) {
-        throw new Error(
-          `FalkorDB backup failed: ${
-            error instanceof Error ? error.message : "Unknown error"
-          }`
+        throw new MaintenanceOperationError(
+          error instanceof Error ? error.message : "FalkorDB backup failed",
+          {
+            code: "BACKUP_FALKORDB_FAILED",
+            component: "falkordb",
+            stage: "backup",
+            cause: error,
+          }
         );
       }
     }
   }
 
   private async backupQdrant(
-    backupDir: string,
     backupId: string,
     options: { silent?: boolean } = {}
   ): Promise<void> {
-    // `silent` lets direct unit tests exercise fallback behavior without throwing.
     const { silent = true } = options;
 
     try {
       const qdrantClient = this.dbService.getQdrantService().getClient();
-      const collections = await qdrantClient.getCollections();
-      const collectionsPath = path.join(
-        backupDir,
-        `${backupId}_qdrant_collections.json`
-      );
+      const collectionsResponse = await qdrantClient.getCollections();
+      const collections = Array.isArray(collectionsResponse?.collections)
+        ? collectionsResponse.collections
+        : [];
 
-      // Save collections metadata
-      await fs.writeFile(collectionsPath, JSON.stringify(collections, null, 2));
+      const manifest: {
+        timestamp: string;
+        collections: Array<{
+          name: string;
+          info?: Record<string, unknown>;
+          pointsArtifact?: string;
+          pointCount?: number;
+          error?: string;
+        }>;
+      } = {
+        timestamp: new Date().toISOString(),
+        collections: [],
+      };
 
-      // Create snapshots for each collection
-      for (const collection of collections.collections) {
-        try {
-          const snapshot = await qdrantClient.createSnapshot(collection.name);
-          const snapshotPath = path.join(
-            backupDir,
-            `${backupId}_qdrant_${collection.name}_snapshot.json`
-          );
-          await fs.writeFile(snapshotPath, JSON.stringify(snapshot, null, 2));
-        } catch (error) {
-          console.warn(
-            `⚠️ Failed to create snapshot for collection ${collection.name}:`,
-            error
-          );
+      for (const collection of collections) {
+        const name = collection?.name;
+        if (typeof name !== "string" || name.length === 0) {
+          continue;
         }
+
+        const entry: {
+          name: string;
+          info?: Record<string, unknown>;
+          pointsArtifact?: string;
+          pointCount?: number;
+          error?: string;
+        } = { name };
+
+        try {
+          const info = await qdrantClient.getCollection(name);
+          entry.info = info ? JSON.parse(JSON.stringify(info)) : undefined;
+
+          const points = await this.exportQdrantCollectionPoints(qdrantClient, name);
+          entry.pointCount = points.length;
+
+          const pointsArtifact = path.posix.join("qdrant", `${name}_points.json`);
+          entry.pointsArtifact = pointsArtifact;
+          await this.writeArtifact(
+            backupId,
+            pointsArtifact,
+            JSON.stringify({ points }, null, 2)
+          );
+        } catch (error) {
+          entry.error = error instanceof Error ? error.message : String(error);
+          this.logError("backup", "Qdrant collection backup failed", {
+            backupId,
+            collection: name,
+            error: entry.error,
+          });
+          if (!silent) {
+            throw error;
+          }
+        }
+
+        manifest.collections.push(entry);
       }
 
-      console.log(
-        `✅ Qdrant backup created for ${collections.collections.length} collections`
+      const manifestArtifact = `${backupId}_qdrant_collections.json`;
+      await this.writeArtifact(
+        backupId,
+        manifestArtifact,
+        JSON.stringify(manifest, null, 2)
       );
+
+      this.logInfo("backup", "Qdrant backup completed", {
+        backupId,
+        collections: manifest.collections.length,
+      });
     } catch (error) {
-      console.error("❌ Qdrant backup failed:", error);
+      this.logError("backup", "Qdrant backup failed", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
       if (!silent) {
-        throw new Error(
-          `Qdrant backup failed: ${
-            error instanceof Error ? error.message : "Unknown error"
-          }`
+        throw new MaintenanceOperationError(
+          error instanceof Error ? error.message : "Qdrant backup failed",
+          {
+            code: "BACKUP_QDRANT_FAILED",
+            component: "qdrant",
+            stage: "backup",
+            cause: error,
+          }
         );
       }
     }
   }
 
-  private async backupPostgreSQL(
-    backupDir: string,
-    backupId: string
-  ): Promise<void> {
+  private async backupPostgreSQL(backupId: string): Promise<void> {
     try {
-      const dumpPath = path.join(backupDir, `${backupId}_postgres.sql`);
+      const artifactName = `${backupId}_postgres.sql`;
 
-      // Get all table data and schema
       const postgresService = this.dbService.getPostgreSQLService();
       const tablesQuery = `
         SELECT tablename FROM pg_tables
@@ -389,10 +1897,10 @@ export class BackupService {
 
       const tablesResult = await postgresService.query(tablesQuery);
       const tables = tablesResult.rows || tablesResult;
-      console.log(
-        `Found ${tables.length} tables to backup:`,
-        tables.map((t: any) => t.tablename || t).join(", ")
-      );
+      this.logInfo("backup", "PostgreSQL tables enumerated", {
+        backupId,
+        tableCount: tables.length,
+      });
 
       let dumpContent = `-- PostgreSQL dump created by Memento Backup Service\n`;
       dumpContent += `-- Created: ${new Date().toISOString()}\n\n`;
@@ -453,26 +1961,32 @@ export class BackupService {
         }
       }
 
-      await fs.writeFile(dumpPath, dumpContent);
-      console.log(
-        `✅ PostgreSQL backup created: ${dumpPath} (${dumpContent.length} bytes)`
-      );
+      await this.writeArtifact(backupId, artifactName, dumpContent);
+
+      this.logInfo("backup", "PostgreSQL backup created", {
+        backupId,
+        bytes: dumpContent.length,
+      });
     } catch (error) {
-      console.error("❌ PostgreSQL backup failed:", error);
-      throw new Error(
-        `PostgreSQL backup failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
+      this.logError("backup", "PostgreSQL backup failed", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
+      throw new MaintenanceOperationError(
+        error instanceof Error ? error.message : "PostgreSQL backup failed",
+        {
+          code: "BACKUP_POSTGRES_FAILED",
+          component: "postgres",
+          stage: "backup",
+          cause: error,
+        }
       );
     }
   }
 
-  private async backupConfig(
-    backupDir: string,
-    backupId: string
-  ): Promise<void> {
+  private async backupConfig(backupId: string): Promise<void> {
     try {
-      const configPath = path.join(backupDir, `${backupId}_config.json`);
+      const configArtifact = `${backupId}_config.json`;
 
       // Sanitize config to remove sensitive data
       const sanitizedConfig = {
@@ -483,213 +1997,327 @@ export class BackupService {
         },
       };
 
-      await fs.writeFile(configPath, JSON.stringify(sanitizedConfig, null, 2));
-      console.log(`✅ Configuration backup created: ${configPath}`);
+      await this.writeArtifact(
+        backupId,
+        configArtifact,
+        JSON.stringify(sanitizedConfig, null, 2)
+      );
+      this.logInfo("backup", "Configuration backup created", {
+        backupId,
+      });
     } catch (error) {
-      console.error("❌ Configuration backup failed:", error);
-      throw new Error(
-        `Configuration backup failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
+      this.logError("backup", "Configuration backup failed", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
+      throw new MaintenanceOperationError(
+        error instanceof Error ? error.message : "Configuration backup failed",
+        {
+          code: "BACKUP_CONFIG_FAILED",
+          component: "config",
+          stage: "backup",
+          cause: error,
+        }
       );
     }
   }
 
-  private async compressBackup(
-    backupDir: string,
-    backupId: string
-  ): Promise<void> {
-    try {
-      const archivePath = path.join(backupDir, `${backupId}.tar.gz`);
-      const output = createWriteStream(archivePath);
-      const archive = archiver("tar", { gzip: true });
+  private async compressBackup(backupId: string): Promise<void> {
+    if (
+      !this.storageProvider.supportsStreaming ||
+      !this.storageProvider.createReadStream ||
+      !this.storageProvider.createWriteStream
+    ) {
+      this.logInfo("backup", "Skipping compression for storage provider", {
+        backupId,
+        storageProvider: this.storageProvider.id,
+      });
+      return;
+    }
 
+    const archiveName = `${backupId}.tar.gz`;
+    const archivePath = this.buildArtifactPath(backupId, archiveName);
+
+    try {
+      const files = await this.storageProvider.list();
+      const backupFiles = files.filter(
+        (file) => file.startsWith(backupId) && !file.endsWith(".tar.gz")
+      );
+
+      const archive = archiver("tar", { gzip: true });
+      const output = this.storageProvider.createWriteStream(archivePath);
       archive.pipe(output);
 
-      // Add all backup files to archive
-      const files = await fs.readdir(backupDir);
-      const backupFiles = files.filter((file) => file.startsWith(backupId));
-
       for (const file of backupFiles) {
-        const filePath = path.join(backupDir, file);
-        archive.file(filePath, { name: file });
+        const stream = this.storageProvider.createReadStream!(file);
+        archive.append(stream, { name: path.posix.basename(file) });
       }
 
       await archive.finalize();
-
-      // Keep uncompressed files to allow simple restoration logic in tests
-      // (Restoration reads the plain SQL/JSON artifacts directly.)
-
-      console.log(`✅ Backup compressed: ${archivePath}`);
+      this.logInfo("backup", "Backup compressed", {
+        backupId,
+        archive: archiveName,
+      });
     } catch (error) {
-      console.error("❌ Backup compression failed:", error);
-      throw new Error(
-        `Backup compression failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
+      this.logError("backup", "Backup compression failed", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
+      throw new MaintenanceOperationError(
+        error instanceof Error ? error.message : "Backup compression failed",
+        {
+          code: "BACKUP_COMPRESSION_FAILED",
+          component: "backup",
+          stage: "compression",
+          cause: error,
+        }
       );
     }
   }
 
-  private async calculateBackupSize(
-    backupDir: string,
-    backupId: string
-  ): Promise<number> {
+  private async calculateBackupSize(backupId: string): Promise<number> {
     try {
-      const files = await fs.readdir(backupDir);
+      const files = await this.storageProvider.list();
       const backupFiles = files.filter((file) => file.startsWith(backupId));
 
       let totalSize = 0;
       for (const file of backupFiles) {
-        const stats = await fs.stat(path.join(backupDir, file));
-        totalSize += stats.size;
+        const stat = await this.storageProvider.stat(file);
+        if (stat) {
+          totalSize += stat.size;
+        }
       }
 
       return totalSize;
     } catch (error) {
-      console.warn("⚠️ Failed to calculate backup size:", error);
+      this.logError("backup", "Failed to calculate backup size", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
       return 0;
     }
   }
 
-  private async calculateChecksum(
-    backupDir: string,
-    backupId: string
-  ): Promise<string> {
+  private async calculateChecksum(backupId: string): Promise<string> {
     try {
-      const files = await fs.readdir(backupDir);
-      // Exclude metadata file from checksum calculation to avoid false positives
+      const files = await this.storageProvider.list();
       const backupFiles = files
         .filter((file) => file.startsWith(backupId))
-        .filter((file) => !file.endsWith("_metadata.json"));
+        .filter((file) => !file.endsWith(".tar.gz"));
 
       const hash = crypto.createHash("sha256");
 
       for (const file of backupFiles.sort()) {
-        const filePath = path.join(backupDir, file);
-        const content = await fs.readFile(filePath);
+        const content = await this.storageProvider.readFile(file);
         hash.update(content);
       }
 
       return hash.digest("hex");
     } catch (error) {
-      console.warn("⚠️ Failed to calculate backup checksum:", error);
+      this.logError("backup", "Failed to calculate backup checksum", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
       return "";
     }
   }
 
-  private async storeBackupMetadata(metadata: BackupMetadata): Promise<void> {
+  private async storeBackupMetadata(
+    metadata: BackupMetadata,
+    context: {
+      storageProviderId: string;
+      destination?: string;
+      labels?: string[];
+      error?: unknown;
+    }
+  ): Promise<void> {
     try {
-      const metadataPath = path.join(
-        this.backupDir,
-        `${metadata.id}_metadata.json`
-      );
-      await fs.mkdir(this.backupDir, { recursive: true });
-      // Store metadata with timestamp as ISO string for proper serialization
+      const pg = this.dbService.getPostgreSQLService();
       const serializableMetadata = {
         ...metadata,
         timestamp: metadata.timestamp.toISOString(),
       };
-      await fs.writeFile(
-        metadataPath,
-        JSON.stringify(serializableMetadata, null, 2)
+
+      await pg.query(
+        `INSERT INTO maintenance_backups (
+            id,
+            type,
+            recorded_at,
+            size_bytes,
+            checksum,
+            status,
+            components,
+            storage_provider,
+            destination,
+            labels,
+            metadata,
+            error,
+            created_at,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+          ON CONFLICT (id)
+          DO UPDATE SET
+            type = EXCLUDED.type,
+            recorded_at = EXCLUDED.recorded_at,
+            size_bytes = EXCLUDED.size_bytes,
+            checksum = EXCLUDED.checksum,
+            status = EXCLUDED.status,
+            components = EXCLUDED.components,
+            storage_provider = EXCLUDED.storage_provider,
+            destination = EXCLUDED.destination,
+            labels = EXCLUDED.labels,
+            metadata = EXCLUDED.metadata,
+            error = EXCLUDED.error,
+            updated_at = NOW()
+        `,
+        [
+          metadata.id,
+          metadata.type,
+          metadata.timestamp,
+          metadata.size,
+          metadata.checksum,
+          metadata.status,
+          JSON.stringify(metadata.components),
+          context.storageProviderId,
+          context.destination ?? null,
+          context.labels ?? [],
+          JSON.stringify(serializableMetadata),
+          context.error
+            ? typeof context.error === "string"
+              ? context.error
+              : JSON.stringify(context.error)
+            : null,
+        ]
       );
     } catch (error) {
-      console.warn("⚠️ Failed to store backup metadata:", error);
+      this.logError("backup", "Failed to persist backup metadata", {
+        backupId: metadata.id,
+        error: error instanceof Error ? error.message : error,
+      });
     }
   }
 
   private async getBackupMetadata(
     backupId: string
   ): Promise<BackupMetadata | null> {
-    try {
-      const metadataPath = path.join(
-        this.backupDir,
-        `${backupId}_metadata.json`
-      );
-      const content = await fs.readFile(metadataPath, "utf-8");
-      const parsed = JSON.parse(content);
-      // Convert timestamp back to Date object
-      if (parsed.timestamp) {
-        parsed.timestamp = new Date(parsed.timestamp);
+    const record = await this.getBackupRecord(backupId);
+    return record?.metadata ?? null;
+  }
+
+  private async getBackupRecord(
+    backupId: string
+  ): Promise<
+    | {
+        metadata: BackupMetadata;
+        storageProviderId: string;
+        destination?: string | null;
+        labels?: string[] | null;
+        status: string;
       }
-      return parsed;
+    | null
+  > {
+    try {
+      const pg = this.dbService.getPostgreSQLService();
+      const result = await pg.query(
+        `SELECT metadata, storage_provider, destination, labels, status
+         FROM maintenance_backups
+         WHERE id = $1
+         LIMIT 1`,
+        [backupId]
+      );
+
+      if (!result.rows || result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      const raw = row.metadata || row.metadata_json;
+      if (!raw) {
+        return null;
+      }
+
+      const parsed =
+        typeof raw === "string"
+          ? (JSON.parse(raw) as BackupMetadata)
+          : (raw as BackupMetadata);
+
+      if (parsed.timestamp && !(parsed.timestamp instanceof Date)) {
+        parsed.timestamp = new Date(parsed.timestamp as unknown as string);
+      }
+
+      return {
+        metadata: parsed,
+        storageProviderId: row.storage_provider,
+        destination: row.destination,
+        labels: row.labels,
+        status: row.status,
+      };
     } catch (error) {
+      this.logError("backup", "Failed to load backup metadata", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
       return null;
     }
   }
 
-  private async validateBackup(
-    backupId: string
-  ): Promise<Array<{ component: string; action: string; status: string }>> {
+  private async validateBackup(backupId: string): Promise<ComponentValidation[]> {
     const metadata = await this.getBackupMetadata(backupId);
     if (!metadata) {
-      throw new Error(`Backup metadata not found for ${backupId}`);
+      throw new MaintenanceOperationError(
+        `Backup metadata not found for ${backupId}`,
+        {
+          code: "BACKUP_METADATA_NOT_FOUND",
+          statusCode: 404,
+          component: "backup",
+          stage: "validation",
+        }
+      );
     }
 
-    const changes: Array<{ component: string; action: string; status: string }> = [];
+    const validations: ComponentValidation[] = [];
 
-    // Validate each component
     if (metadata.components.falkordb) {
-      changes.push({
-        component: "falkordb",
-        action: "validate",
-        status: "valid",
-      });
+      validations.push(await this.validateFalkorBackup(backupId));
     }
 
     if (metadata.components.qdrant) {
-      changes.push({
-        component: "qdrant",
-        action: "validate",
-        status: "valid",
-      });
+      validations.push(await this.validateQdrantBackup(backupId));
     }
 
     if (metadata.components.postgres) {
-      changes.push({
-        component: "postgres",
-        action: "validate",
-        status: "valid",
-      });
+      validations.push(await this.validatePostgresBackup(backupId));
     }
 
     if (metadata.components.config) {
-      changes.push({
-        component: "config",
-        action: "validate",
-        status: "valid",
-      });
+      validations.push(await this.validateConfigBackup(backupId));
     }
 
-    return changes;
+    return validations;
   }
 
   private async restoreFalkorDB(backupId: string): Promise<void> {
-    console.log(`🔄 Restoring FalkorDB from backup ${backupId}`);
+    const artifact = `${backupId}_falkordb.dump`;
+    this.logInfo("restore", "Restoring FalkorDB", { backupId });
 
     try {
-      const dumpPath = path.join(this.backupDir, `${backupId}_falkordb.dump`);
-
-      // Check if dump file exists
-      try {
-        await fs.access(dumpPath);
-      } catch (error) {
-        console.warn(
-          `⚠️ FalkorDB dump file not found: ${dumpPath}. Skipping FalkorDB restoration.`
-        );
+      const exists = await this.artifactExists(backupId, artifact);
+      if (!exists) {
+        this.logInfo("restore", "FalkorDB snapshot not found; skipping", {
+          backupId,
+          artifact,
+        });
         return;
       }
 
-      const content = await fs.readFile(dumpPath, "utf-8");
-      const backupData = JSON.parse(content);
+      const backupData = JSON.parse(
+        (await this.readArtifact(backupId, artifact)).toString("utf-8")
+      );
 
       const falkorService = this.dbService.getFalkorDBService();
-
-      // Clear existing data first
       await falkorService.query(`MATCH (n) DETACH DELETE n`);
 
-      // Helper function to sanitize properties for FalkorDB
       const sanitizeProperties = (props: any): any => {
         if (!props || typeof props !== "object") return {};
 
@@ -762,112 +2390,114 @@ export class BackupService {
         }
       }
 
-      console.log(`✅ FalkorDB restored from backup ${backupId}`);
+      this.logInfo("restore", "FalkorDB restored", { backupId });
     } catch (error) {
-      // Do not fail whole restore if FalkorDB restore encounters non-critical errors
-      console.warn(
-        `⚠️ FalkorDB restore encountered errors for backup ${backupId}:`,
-        error
-      );
-      // Continue without throwing to allow other components to restore
+      this.logError("restore", "FalkorDB restore encountered errors", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
     }
   }
 
   private async restoreQdrant(backupId: string): Promise<void> {
-    console.log(`🔄 Restoring Qdrant from backup ${backupId}`);
+    this.logInfo("restore", "Restoring Qdrant", { backupId });
 
     try {
       const qdrantClient = this.dbService.getQdrantService().getClient();
-      const collectionsPath = path.join(
-        this.backupDir,
-        `${backupId}_qdrant_collections.json`
-      );
+      const manifestArtifact = `${backupId}_qdrant_collections.json`;
+      const manifestExists = await this.artifactExists(backupId, manifestArtifact);
 
-      // Check if collections backup exists
-      try {
-        const collectionsContent = await fs.readFile(collectionsPath, "utf-8");
-        const collectionsData = JSON.parse(collectionsContent);
-
-        // Restore each collection
-        if (collectionsData.collections) {
-          for (const collection of collectionsData.collections) {
-            const snapshotPath = path.join(
-              this.backupDir,
-              `${backupId}_qdrant_${collection.name}_snapshot.json`
-            );
-
-            try {
-              const snapshotContent = await fs.readFile(snapshotPath, "utf-8");
-              // Note: Actual restore would depend on Qdrant's restore API
-              console.log(`  - Restored collection: ${collection.name}`);
-            } catch (error) {
-              console.warn(
-                `  - Failed to restore collection ${collection.name}:`,
-                error
-              );
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`⚠️ No Qdrant collections backup found for ${backupId}`);
+      if (!manifestExists) {
+        this.logInfo("restore", "No Qdrant collections manifest found; skipping", {
+          backupId,
+        });
+        return;
       }
 
-      console.log(`✅ Qdrant restored from backup ${backupId}`);
-    } catch (error) {
-      console.error(
-        `❌ Failed to restore Qdrant from backup ${backupId}:`,
-        error
+      const manifest = JSON.parse(
+        (await this.readArtifact(backupId, manifestArtifact)).toString("utf-8")
       );
+
+      const collectionEntries: Array<{ name: string; info?: Record<string, any>; pointsArtifact?: string; points?: any[] }> =
+        Array.isArray(manifest?.collections)
+          ? manifest.collections.filter((item: any) => typeof item?.name === "string")
+          : [];
+
+      for (const entry of collectionEntries) {
+        const name = entry.name;
+        if (entry?.error) {
+          this.logError("restore", "Skipping Qdrant collection due to backup error", {
+            backupId,
+            collection: name,
+            error: entry.error,
+          });
+          continue;
+        }
+        try {
+          await this.recreateQdrantCollection(qdrantClient, entry);
+          const points = await this.loadQdrantPoints(backupId, entry);
+          await this.upsertQdrantPoints(qdrantClient, name, points);
+
+          this.logInfo("restore", "Qdrant collection restored", {
+            backupId,
+            collection: name,
+            pointsRestored: points.length,
+          });
+        } catch (error) {
+          this.logError("restore", "Failed to restore Qdrant collection", {
+            backupId,
+            collection: name,
+            error: error instanceof Error ? error.message : error,
+          });
+          throw error;
+        }
+      }
+
+      this.logInfo("restore", "Qdrant restore completed", {
+        backupId,
+        collections: collectionEntries.length,
+      });
+    } catch (error) {
+      this.logError("restore", "Failed to restore Qdrant", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
       throw error;
     }
   }
 
   private async restorePostgreSQL(backupId: string): Promise<void> {
-    console.log(`🔄 Restoring PostgreSQL from backup ${backupId}`);
+    this.logInfo("restore", "Restoring PostgreSQL", { backupId });
 
     try {
-      let dumpPath = path.join(this.backupDir, `${backupId}_postgres.sql`);
-      let dumpContent: string;
-
-      // Try to read uncompressed backup first
-      try {
-        dumpContent = await fs.readFile(dumpPath, "utf-8");
-        console.log(
-          `✅ Found PostgreSQL backup file: ${dumpPath} (${dumpContent.length} bytes)`
-        );
-      } catch {
-        // Try compressed backup
-        const compressedPath = path.join(
-          this.backupDir,
-          `${backupId}_postgres.tar.gz`
-        );
-        try {
-          await fs.access(compressedPath);
-          console.log(`📦 Found compressed backup: ${compressedPath}`);
-          // For compressed backups, we need to extract first
-          // This is a simplified implementation - in production you'd use proper extraction
-          throw new Error(
-            `Compressed backup found but extraction not implemented: ${compressedPath}`
-          );
-        } catch {
-          console.warn(
-            `⚠️ PostgreSQL backup file not found: ${dumpPath}. Skipping PostgreSQL restoration.`
-          );
-          return; // Skip PostgreSQL restoration if no backup file exists
-        }
+      const artifact = `${backupId}_postgres.sql`;
+      const exists = await this.artifactExists(backupId, artifact);
+      if (!exists) {
+        this.logInfo("restore", "PostgreSQL dump not found; skipping", {
+          backupId,
+        });
+        return;
       }
 
+      const dumpContent = (await this.readArtifact(backupId, artifact)).toString(
+        "utf-8"
+      );
       const postgresService = this.dbService.getPostgreSQLService();
 
-      // Fast path: try applying the entire dump as a single multi-statement query
       try {
         await postgresService.query(dumpContent);
-        console.log(`✅ PostgreSQL restored from backup ${backupId}`);
+        this.logInfo("restore", "PostgreSQL restored using fast-path", {
+          backupId,
+        });
         return;
       } catch (multiErr: any) {
-        console.warn(
-          "⚠️ Multi-statement restore failed, falling back to parsed execution:",
-          multiErr?.message || multiErr
+        this.logError(
+          "restore",
+          "Multi-statement restore failed; attempting granular replay",
+          {
+            backupId,
+            error: multiErr?.message ?? multiErr,
+          }
         );
       }
 
@@ -1016,49 +2646,54 @@ export class BackupService {
         }
       }
 
-      console.log(`✅ PostgreSQL restored from backup ${backupId}`);
+      this.logInfo("restore", "PostgreSQL restored", { backupId });
     } catch (error) {
-      console.error(
-        `❌ Failed to restore PostgreSQL from backup ${backupId}:`,
-        error
-      );
+      this.logError("restore", "Failed to restore PostgreSQL", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
       throw error;
     }
   }
 
   private async restoreConfig(backupId: string): Promise<void> {
-    console.log(`🔄 Restoring configuration from backup ${backupId}`);
+    this.logInfo("restore", "Restoring configuration", { backupId });
 
     try {
-      const configPath = path.join(this.backupDir, `${backupId}_config.json`);
-      const configContent = await fs.readFile(configPath, "utf-8");
+      const artifact = `${backupId}_config.json`;
+      const exists = await this.artifactExists(backupId, artifact);
+      if (!exists) {
+        this.logInfo("restore", "Configuration snapshot not found; skipping", {
+          backupId,
+        });
+        return;
+      }
+
+      const configContent = (await this.readArtifact(backupId, artifact)).toString(
+        "utf-8"
+      );
       const restoredConfig = JSON.parse(configContent);
 
-      // Note: In a real implementation, we would update the actual config
-      // For now, we just log the restoration
-      console.log(`  - Configuration loaded from backup`);
-      console.log(`✅ Configuration restored from backup ${backupId}`);
+      this.logInfo("restore", "Configuration snapshot loaded", {
+        backupId,
+        keys: Object.keys(restoredConfig ?? {}),
+      });
     } catch (error) {
-      console.error(
-        `❌ Failed to restore configuration from backup ${backupId}:`,
-        error
-      );
+      this.logError("restore", "Failed to restore configuration", {
+        backupId,
+        error: error instanceof Error ? error.message : error,
+      });
       throw error;
     }
   }
 
   async verifyBackupIntegrity(
     backupId: string,
-    options?: { destination?: string }
+    options?: { destination?: string; storageProviderId?: string }
   ): Promise<BackupIntegrityResult> {
     try {
-      // Set backup directory if provided
-      if (options?.destination) {
-        this.backupDir = options.destination;
-      }
-
-      const metadata = await this.getBackupMetadata(backupId);
-      if (!metadata) {
+      const record = await this.getBackupRecord(backupId);
+      if (!record) {
         return {
           passed: false,
           isValid: false,
@@ -1066,13 +2701,16 @@ export class BackupService {
         };
       }
 
-      // Verify checksum
-      const currentChecksum = await this.calculateChecksum(
-        this.backupDir,
-        backupId
-      );
+      await this.prepareStorageContext({
+        destination: options?.destination ?? (record.destination ?? undefined),
+        storageProviderId:
+          options?.storageProviderId ?? record.storageProviderId ?? undefined,
+      });
+
+      const metadata = record.metadata;
+
+      const currentChecksum = await this.calculateChecksum(backupId);
       if (currentChecksum !== metadata.checksum) {
-        console.error(`❌ Checksum mismatch for backup ${backupId}`);
         return {
           passed: false,
           isValid: false,
@@ -1087,47 +2725,28 @@ export class BackupService {
         };
       }
 
-      // Verify all backup files exist
-      const backupFiles: string[] = [];
-      const missingFiles: string[] = [];
+      const expectedArtifacts: string[] = [];
 
       if (metadata.components.falkordb) {
-        backupFiles.push(
-          path.join(this.backupDir, `${backupId}_falkordb.dump`)
-        );
+        expectedArtifacts.push(`${backupId}_falkordb.dump`);
       }
       if (metadata.components.qdrant) {
-        // Check for the main collections file
-        const qdrantFile = path.join(
-          this.backupDir,
-          `${backupId}_qdrant_collections.json`
-        );
-        // Also accept legacy format for backwards compatibility
-        const qdrantFileLegacy = path.join(
-          this.backupDir,
-          `${backupId}_qdrant.json`
-        );
-        try {
-          await fs.access(qdrantFile);
-          backupFiles.push(qdrantFile);
-        } catch {
-          // Try legacy format
-          backupFiles.push(qdrantFileLegacy);
-        }
+        expectedArtifacts.push(`${backupId}_qdrant_collections.json`);
+        const qdrantArtifacts = await this.collectQdrantPointArtifacts(backupId);
+        expectedArtifacts.push(...qdrantArtifacts);
       }
       if (metadata.components.postgres) {
-        backupFiles.push(path.join(this.backupDir, `${backupId}_postgres.sql`));
+        expectedArtifacts.push(`${backupId}_postgres.sql`);
       }
       if (metadata.components.config) {
-        backupFiles.push(path.join(this.backupDir, `${backupId}_config.json`));
+        expectedArtifacts.push(`${backupId}_config.json`);
       }
 
-      for (const file of backupFiles) {
-        try {
-          await fs.access(file);
-        } catch {
-          console.error(`❌ Missing backup file: ${file}`);
-          missingFiles.push(path.basename(file));
+      const missingFiles: string[] = [];
+      for (const artifact of expectedArtifacts) {
+        const exists = await this.artifactExists(backupId, artifact);
+        if (!exists) {
+          missingFiles.push(artifact);
         }
       }
 
@@ -1142,17 +2761,16 @@ export class BackupService {
         };
       }
 
-      console.log(`✅ Backup ${backupId} integrity verified`);
       return {
         passed: true,
         isValid: true,
         details: "All backup files present and checksums match",
         metadata: {
           missingFiles: [],
+          storageProvider: this.storageProvider.id,
         },
       };
     } catch (error) {
-      console.error("❌ Backup integrity verification failed:", error);
       return {
         passed: false,
         isValid: false,
@@ -1170,79 +2788,38 @@ export class BackupService {
     destination?: string;
   }): Promise<BackupMetadata[]> {
     try {
-      // Set backup directory if provided
-      const searchDir = options?.destination || this.backupDir;
+      const pg = this.dbService.getPostgreSQLService();
+      const params: any[] = [];
+      let whereClause = "";
 
-      await fs.mkdir(searchDir, { recursive: true });
-
-      // Also check subdirectories for backups
-      const allBackups: BackupMetadata[] = [];
-
-      // Check main directory
-      const files = await fs.readdir(searchDir);
-      const metadataFiles = files.filter((f) => f.endsWith("_metadata.json"));
-
-      for (const file of metadataFiles) {
-        try {
-          const content = await fs.readFile(
-            path.join(searchDir, file),
-            "utf-8"
-          );
-          const parsed = JSON.parse(content);
-          // Convert timestamp back to Date object
-          if (parsed.timestamp) {
-            parsed.timestamp = new Date(parsed.timestamp);
-          }
-          allBackups.push(parsed);
-        } catch (error) {
-          console.warn(`⚠️ Failed to read backup metadata ${file}:`, error);
-        }
+      if (options?.destination) {
+        params.push(options.destination);
+        whereClause = "WHERE destination = $1";
       }
 
-      // Also check subdirectories (e.g., list_0, list_1, etc.)
-      for (const item of files) {
-        const itemPath = path.join(searchDir, item);
-        try {
-          const stats = await fs.stat(itemPath);
-          if (stats.isDirectory()) {
-            const subFiles = await fs.readdir(itemPath);
-            const subMetadataFiles = subFiles.filter((f) =>
-              f.endsWith("_metadata.json")
-            );
-            for (const subFile of subMetadataFiles) {
-              try {
-                const content = await fs.readFile(
-                  path.join(itemPath, subFile),
-                  "utf-8"
-                );
-                const parsed = JSON.parse(content);
-                // Convert timestamp back to Date object
-                if (parsed.timestamp) {
-                  parsed.timestamp = new Date(parsed.timestamp);
-                }
-                allBackups.push(parsed);
-              } catch (error) {
-                console.warn(
-                  `⚠️ Failed to read backup metadata ${subFile}:`,
-                  error
-                );
-              }
-            }
-          }
-        } catch (error) {
-          // Not a directory or inaccessible, skip
-        }
-      }
-
-      // Sort by timestamp (newest first)
-      allBackups.sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      const result = await pg.query(
+        `SELECT metadata FROM maintenance_backups ${whereClause} ORDER BY recorded_at DESC`,
+        params
       );
 
-      return allBackups;
+      return (result.rows || [])
+        .map((row: any) => {
+          const raw = row.metadata || row.metadata_json;
+          if (!raw) return null;
+          const parsed =
+            typeof raw === "string"
+              ? (JSON.parse(raw) as BackupMetadata)
+              : (raw as BackupMetadata);
+          if (parsed.timestamp && !(parsed.timestamp instanceof Date)) {
+            parsed.timestamp = new Date(parsed.timestamp as unknown as string);
+          }
+          return parsed;
+        })
+        .filter((item): item is BackupMetadata => Boolean(item));
     } catch (error) {
-      console.error("❌ Failed to list backups:", error);
+      this.logError("backup", "Failed to list backups", {
+        error: error instanceof Error ? error.message : error,
+      });
       return [];
     }
   }

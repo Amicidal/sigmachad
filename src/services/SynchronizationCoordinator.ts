@@ -10,6 +10,10 @@ import { DatabaseService } from "./DatabaseService.js";
 import { FileChange } from "./FileWatcher.js";
 import { GraphRelationship, RelationshipType } from "../models/relationships.js";
 import { GitService } from "./GitService.js";
+import {
+  ConflictResolution as ConflictResolutionService,
+  Conflict,
+} from "./ConflictResolution.js";
 
 export interface SyncOperation {
   id: string;
@@ -25,7 +29,7 @@ export interface SyncOperation {
   relationshipsUpdated: number;
   relationshipsDeleted: number;
   errors: SyncError[];
-  conflicts: SyncConflict[];
+  conflicts: Conflict[];
   rollbackPoint?: string;
 }
 
@@ -37,13 +41,7 @@ export interface SyncError {
   recoverable: boolean;
 }
 
-export interface SyncConflict {
-  entityId: string;
-  type: "version_conflict" | "deletion_conflict" | "relationship_conflict";
-  description: string;
-  resolution?: "overwrite" | "merge" | "skip";
-  timestamp: Date;
-}
+export type SyncConflict = Conflict;
 
 export interface SyncOptions {
   force?: boolean;
@@ -93,7 +91,8 @@ export class SynchronizationCoordinator extends EventEmitter {
   constructor(
     private kgService: KnowledgeGraphService,
     private astParser: ASTParser,
-    private dbService: DatabaseService
+    private dbService: DatabaseService,
+    private conflictResolution: ConflictResolutionService
   ) {
     super();
     this.setupEventHandlers();
@@ -136,6 +135,13 @@ export class SynchronizationCoordinator extends EventEmitter {
     }
   }
 
+  private ensureDatabaseReady(): void {
+    const hasChecker = typeof (this.dbService as any)?.isInitialized === 'function';
+    if (!hasChecker || !this.dbService.isInitialized()) {
+      throw new Error("Database not initialized");
+    }
+  }
+
   // Convenience methods used by integration tests
   async startSync(): Promise<string> {
     return this.startFullSynchronization({});
@@ -175,6 +181,7 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   async startFullSynchronization(options: SyncOptions = {}): Promise<string> {
+    this.ensureDatabaseReady();
     // Default: do not include embeddings during full sync; generate them in background later
     if (options.includeEmbeddings === undefined) {
       options.includeEmbeddings = false;
@@ -229,6 +236,7 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   async synchronizeFileChanges(changes: FileChange[]): Promise<string> {
+    this.ensureDatabaseReady();
     const operation: SyncOperation = {
       id: this.nextOperationId("incremental_sync"),
       type: "incremental",
@@ -244,6 +252,8 @@ export class SynchronizationCoordinator extends EventEmitter {
       errors: [],
       conflicts: [],
     };
+
+    const syncOptions = ((operation as any).options || {}) as SyncOptions;
 
     // Store changes for processing
     (operation as any).changes = changes;
@@ -279,6 +289,7 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   async synchronizePartial(updates: PartialUpdate[]): Promise<string> {
+    this.ensureDatabaseReady();
     const operation: SyncOperation = {
       id: this.nextOperationId("partial_sync"),
       type: "partial",
@@ -478,17 +489,11 @@ export class SynchronizationCoordinator extends EventEmitter {
             try {
               const conflicts = await this.detectConflicts(
                 result.entities,
-                result.relationships
+                result.relationships,
+                opts
               );
               if (conflicts.length > 0) {
-                operation.conflicts.push(...conflicts);
-                this.emit("conflictsDetected", operation, conflicts);
-
-                // Auto-resolve conflicts if configured
-                // For now, we'll just log them
-                console.warn(
-                  `⚠️ ${conflicts.length} conflicts detected in ${file}`
-                );
+                this.logConflicts(conflicts, operation, file, opts);
               }
             } catch (conflictError) {
               operation.errors.push({
@@ -721,6 +726,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Get changes from operation
     const changes = ((operation as any).changes as FileChange[]) || [];
+    const syncOptions = ((operation as any).options || {}) as SyncOptions;
 
     if (changes.length === 0) {
       this.emit("syncProgress", operation, {
@@ -824,14 +830,12 @@ export class SynchronizationCoordinator extends EventEmitter {
             ) {
               const conflicts = await this.detectConflicts(
                 parseResult.entities,
-                parseResult.relationships
+                parseResult.relationships,
+                syncOptions
               );
 
               if (conflicts.length > 0) {
-                operation.conflicts.push(...conflicts);
-                console.warn(
-                  `⚠️ ${conflicts.length} conflicts detected in ${change.path}`
-                );
+                this.logConflicts(conflicts, operation, change.path, syncOptions);
               }
             }
 
@@ -1481,14 +1485,66 @@ export class SynchronizationCoordinator extends EventEmitter {
     }
   }
 
+  private logConflicts(
+    conflicts: Conflict[],
+    operation: SyncOperation,
+    source: string,
+    options?: SyncOptions
+  ): void {
+    operation.conflicts.push(...conflicts);
+
+    const unresolved = conflicts.filter((conflict) => !conflict.resolved);
+    const resolvedCount = conflicts.length - unresolved.length;
+    const resolutionMode = options?.conflictResolution ?? "manual";
+
+    if (unresolved.length > 0) {
+      console.warn(
+        `⚠️ ${unresolved.length}/${conflicts.length} conflicts detected in ${source} (${resolutionMode} mode)`
+      );
+    } else {
+      console.info(
+        `✅ ${resolvedCount} conflicts auto-resolved for ${source} (${resolutionMode} mode)`
+      );
+    }
+
+    for (const conflict of conflicts) {
+      this.emit("conflictDetected", conflict);
+    }
+  }
+
   private async detectConflicts(
     entities: any[],
-    relationships: any[]
-  ): Promise<SyncConflict[]> {
-    // Placeholder for conflict detection
-    // In a full implementation, this would check for version conflicts,
-    // concurrent modifications, etc.
-    return [];
+    relationships: any[],
+    options?: SyncOptions
+  ): Promise<Conflict[]> {
+    if (entities.length === 0 && relationships.length === 0) {
+      return [];
+    }
+
+    const conflicts = await this.conflictResolution.detectConflicts(
+      entities,
+      relationships
+    );
+
+    if (conflicts.length === 0) {
+      return conflicts;
+    }
+
+    const resolutionMode = options?.conflictResolution;
+    if (resolutionMode && resolutionMode !== "manual") {
+      const results = await this.conflictResolution.resolveConflictsAuto(
+        conflicts
+      );
+
+      const unresolved = conflicts.filter((conflict) => !conflict.resolved);
+      if (results.length !== conflicts.length || unresolved.length > 0) {
+        console.warn(
+          `⚠️ Auto-resolution (${resolutionMode}) handled ${results.length}/${conflicts.length} conflicts; ${unresolved.length} remain unresolved.`
+        );
+      }
+    }
+
+    return conflicts;
   }
 
   async rollbackOperation(operationId: string): Promise<boolean> {
@@ -1726,9 +1782,15 @@ export class SynchronizationCoordinator extends EventEmitter {
     }
   }
 
-  private handleConflictDetected(conflict: SyncConflict): void {
-    console.warn(`⚠️ Sync conflict detected:`, conflict);
-    // Could implement conflict resolution logic here
+  private handleConflictDetected(conflict: Conflict): void {
+    console.warn(`⚠️ Sync conflict detected:`, {
+      id: conflict.id,
+      type: conflict.type,
+      entityId: conflict.entityId,
+      relationshipId: conflict.relationshipId,
+      resolved: conflict.resolved,
+      strategy: conflict.resolutionStrategy,
+    });
   }
 
   // Attempt to resolve and create deferred relationships

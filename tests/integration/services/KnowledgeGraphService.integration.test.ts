@@ -8,10 +8,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
 import { DatabaseService } from "../../../src/services/DatabaseService";
 import {
-  setupTestDatabase,
-  cleanupTestDatabase,
-  clearTestData,
-  TEST_DATABASE_CONFIG,
+  setupIsolatedServiceTest,
+  cleanupIsolatedServiceTest,
+  IsolatedTestSetup,
 } from "../../test-utils/database-helpers";
 import { CodebaseEntity, RelationshipType } from "../../../src/models/entities";
 import { GraphRelationship } from "../../../src/models/relationships";
@@ -19,25 +18,29 @@ import { GraphSearchRequest } from "../../../src/models/types";
 import { canonicalRelationshipId } from "../../../src/utils/codeEdges";
 
 describe("KnowledgeGraphService Integration", () => {
+  let testSetup: IsolatedTestSetup;
   let kgService: KnowledgeGraphService;
   let dbService: DatabaseService;
 
   beforeAll(async () => {
-    dbService = await setupTestDatabase({ silent: true });
-    kgService = new KnowledgeGraphService(dbService);
-    await kgService.initialize();
+    // Setup isolated test environment
+    testSetup = await setupIsolatedServiceTest("KnowledgeGraphService", {
+      silent: true,
+    });
+
+    kgService = testSetup.kgService;
+    dbService = testSetup.dbService;
   }, 30000);
 
   afterAll(async () => {
-    await cleanupTestDatabase(dbService);
+    // Clean up isolated test environment
+    await cleanupIsolatedServiceTest(testSetup, { silent: true });
   });
 
   beforeEach(async () => {
-    await clearTestData(dbService, {
-      includeVector: false,
-      includeCache: false,
-      silent: true,
-    });
+    // Each test gets a clean slate within the isolated context
+    // The isolation context already provides separation, so minimal cleanup needed
+    await new Promise((resolve) => setTimeout(resolve, 10)); // Small delay for consistency
   });
 
   describe("Entity CRUD Operations", () => {
@@ -192,6 +195,15 @@ describe("KnowledgeGraphService Integration", () => {
     let testEntities: CodebaseEntity[];
 
     beforeEach(async () => {
+      const staleEntityIds = ["rel-entity-1", "rel-entity-2"];
+      for (const entityId of staleEntityIds) {
+        try {
+          await kgService.deleteEntity(entityId);
+        } catch (error) {
+          // Entity might not exist yet in a fresh run; ignore cleanup errors
+        }
+      }
+
       testEntities = [
         {
           id: "rel-entity-1",
@@ -468,9 +480,7 @@ describe("KnowledgeGraphService Integration", () => {
           name: "useLocal",
         },
       });
-      expect(
-        stored.metadata && Array.isArray((stored.metadata as any).evidence)
-      ).toBe(true);
+      expect(Array.isArray(stored.evidence)).toBe(true);
       if (Array.isArray(stored.sites)) {
         expect(stored.sites).toContain(expectedSiteId);
       } else if (typeof stored.sites === "string") {

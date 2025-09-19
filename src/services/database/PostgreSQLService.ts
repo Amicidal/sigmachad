@@ -391,6 +391,23 @@ export class PostgreSQLService implements IPostgreSQLService {
       `ALTER TABLE flaky_test_analyses ALTER COLUMN failure_rate TYPE DECIMAL(6,4)`,
       `ALTER TABLE flaky_test_analyses ALTER COLUMN success_rate TYPE DECIMAL(6,4)`,
 
+      `CREATE TABLE IF NOT EXISTS maintenance_backups (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        recorded_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        size_bytes BIGINT DEFAULT 0,
+        checksum TEXT,
+        status TEXT NOT NULL,
+        components JSONB NOT NULL,
+        storage_provider TEXT,
+        destination TEXT,
+        labels TEXT[] DEFAULT ARRAY[]::TEXT[],
+        metadata JSONB NOT NULL,
+        error TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
+
       // Changes table (depends on sessions)
       `CREATE TABLE IF NOT EXISTS changes (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

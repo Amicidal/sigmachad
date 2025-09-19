@@ -7,6 +7,7 @@ describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRe
   let astParser: any;
   let dbService: any;
   let coord: any;
+  let conflictResolution: any;
 
   beforeEach(() => {
     kgService = {
@@ -18,7 +19,16 @@ describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRe
     };
     astParser = {};
     dbService = {};
-    coord = new SynchronizationCoordinator(kgService, astParser, dbService) as any;
+    conflictResolution = {
+      detectConflicts: vi.fn(async () => []),
+      resolveConflictsAuto: vi.fn(async () => []),
+    };
+    coord = new SynchronizationCoordinator(
+      kgService,
+      astParser,
+      dbService,
+      conflictResolution
+    ) as any;
   });
 
   it('returns id directly when toRef.kind=entity', async () => {
@@ -85,4 +95,3 @@ describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRe
     expect(result.resolutionPath).toBe('external-name');
   });
 });
-

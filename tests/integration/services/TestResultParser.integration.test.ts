@@ -125,8 +125,9 @@ describe('TestResultParser Integration', () => {
         expect.objectContaining({ framework: 'junit', totalTests: expect.any(Number), results: expect.any(Array) })
       );
       expect(result.totalTests).toBe(2);
-      expect(result.failedTests).toBe(0); // Errors are counted as failed in our implementation
+      expect(result.failedTests).toBe(0); // Errors are tracked separately
       expect(result.skippedTests).toBe(1);
+      expect(result.errorTests).toBe(1);
 
       const errorTest = result.results.find(test => test.errorMessage?.includes('timeout'));
       expect(errorTest).toEqual(
@@ -570,6 +571,8 @@ describe('TestResultParser Integration', () => {
       // Should still return a result, even if empty
       expect(result).toEqual(expect.any(Object));
       expect(result.results).toEqual(expect.any(Array));
+      expect(result.failedTests).toBe(0);
+      expect(result.errorTests).toBe(0);
     });
   });
 

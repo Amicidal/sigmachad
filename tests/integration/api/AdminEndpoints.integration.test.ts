@@ -11,6 +11,8 @@ import { DatabaseService } from '../../../src/services/DatabaseService.js';
 import { FileWatcher } from '../../../src/services/FileWatcher.js';
 import { SynchronizationCoordinator } from '../../../src/services/SynchronizationCoordinator.js';
 import { SynchronizationMonitoring } from '../../../src/services/SynchronizationMonitoring.js';
+import { ASTParser } from '../../../src/services/ASTParser.js';
+import { ConflictResolution } from '../../../src/services/ConflictResolution.js';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -27,6 +29,8 @@ describe('Admin API Endpoints Integration', () => {
   let syncMonitor: SynchronizationMonitoring;
   let apiGateway: APIGateway;
   let app: FastifyInstance;
+  let astParser: ASTParser;
+  let conflictResolver: ConflictResolution;
 
   beforeAll(async () => {
     // Setup test database
@@ -39,7 +43,14 @@ describe('Admin API Endpoints Integration', () => {
     // Create services
     kgService = new KnowledgeGraphService(dbService);
     fileWatcher = new FileWatcher(kgService, dbService);
-    syncCoordinator = new SynchronizationCoordinator(kgService, dbService);
+    astParser = new ASTParser();
+    conflictResolver = new ConflictResolution(kgService);
+    syncCoordinator = new SynchronizationCoordinator(
+      kgService,
+      astParser,
+      dbService,
+      conflictResolver
+    );
     syncMonitor = new SynchronizationMonitoring(kgService, dbService);
 
     // Create API Gateway with sync services

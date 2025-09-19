@@ -257,66 +257,61 @@ export class FalkorDBService implements IFalkorDBService {
       throw new Error("FalkorDB not initialized");
     }
 
+    const graphKey = this.config.graphKey || "memento";
+
     try {
-      // Create graph if it doesn't exist
       await this.command(
         "GRAPH.QUERY",
-        this.config.graphKey || "memento",
+        graphKey,
         "MATCH (n) RETURN count(n) LIMIT 1"
       );
-
-      console.log("📊 Setting up FalkorDB graph indexes...");
-
-      // Create indexes for better query performance
-      // Index on node ID for fast lookups
-      await this.command(
-        "GRAPH.QUERY",
-        this.config.graphKey || "memento",
-        "CREATE INDEX FOR (n:Entity) ON (n.id)"
-      );
-
-      // Index on node type for filtering
-      await this.command(
-        "GRAPH.QUERY",
-        this.config.graphKey || "memento",
-        "CREATE INDEX FOR (n:Entity) ON (n.type)"
-      );
-
-      // Index on node path for file-based queries
-      await this.command(
-        "GRAPH.QUERY",
-        this.config.graphKey || "memento",
-        "CREATE INDEX FOR (n:Entity) ON (n.path)"
-      );
-
-      // Index on node language for language-specific queries
-      await this.command(
-        "GRAPH.QUERY",
-        this.config.graphKey || "memento",
-        "CREATE INDEX FOR (n:Entity) ON (n.language)"
-      );
-
-      // Index on lastModified for temporal queries
-      await this.command(
-        "GRAPH.QUERY",
-        this.config.graphKey || "memento",
-        "CREATE INDEX FOR (n:Entity) ON (n.lastModified)"
-      );
-
-      // Composite index for common query patterns
-      await this.command(
-        "GRAPH.QUERY",
-        this.config.graphKey || "memento",
-        "CREATE INDEX FOR (n:Entity) ON (n.type, n.path)"
-      );
-
-      console.log("✅ FalkorDB graph indexes created");
     } catch (error) {
-      // Graph doesn't exist, it will be created on first write
-      console.log(
-        "📊 FalkorDB graph will be created on first write operation with indexes"
-      );
+      if (this.isGraphMissingError(error)) {
+        console.log(
+          "📊 FalkorDB graph will be created on first write operation; index creation deferred"
+        );
+        return;
+      }
+
+      console.error("FalkorDB graph warmup failed:", error);
+      return;
     }
+
+    console.log("📊 Setting up FalkorDB graph indexes...");
+
+    const indexQueries = [
+      "CREATE INDEX FOR (n:Entity) ON (n.id)",
+      "CREATE INDEX FOR (n:Entity) ON (n.type)",
+      "CREATE INDEX FOR (n:Entity) ON (n.path)",
+      "CREATE INDEX FOR (n:Entity) ON (n.language)",
+      "CREATE INDEX FOR (n:Entity) ON (n.lastModified)",
+      "CREATE INDEX FOR (n:Entity) ON (n.type, n.path)",
+    ];
+
+    for (const query of indexQueries) {
+      try {
+        await this.command("GRAPH.QUERY", graphKey, query);
+      } catch (error) {
+        if (this.isIndexAlreadyExistsError(error)) {
+          continue;
+        }
+
+        if (this.isGraphMissingError(error)) {
+          console.log(
+            "📊 FalkorDB graph not present; remaining indexes will be created after first write"
+          );
+          return;
+        }
+
+        console.error(
+          `FalkorDB index creation failed for query "${query}":`,
+          error
+        );
+        return;
+      }
+    }
+
+    console.log("✅ FalkorDB graph indexes created");
   }
 
   async healthCheck(): Promise<boolean> {
@@ -381,12 +376,22 @@ export class FalkorDBService implements IFalkorDBService {
     }
 
     if (Array.isArray(value)) {
-      const elements = value.map((item) => this.parameterToCypherString(item));
+      const childKey = key
+        ? key.endsWith("s")
+          ? key.slice(0, -1)
+          : key
+        : undefined;
+      const elements = value.map((item) =>
+        this.parameterToCypherString(item, childKey, queryForContext)
+      );
       return `[${elements.join(", ")}]`;
     }
 
     if (typeof value === "object") {
-      if (this.shouldTreatObjectAsMap(key, queryForContext)) {
+      if (
+        this.shouldTreatObjectAsMap(key, queryForContext) ||
+        (!key && this.shouldTreatObjectAsMap("row", queryForContext))
+      ) {
         return this.objectToCypherProperties(value as Record<string, any>);
       }
 
@@ -410,9 +415,18 @@ export class FalkorDBService implements IFalkorDBService {
     const normalized = key.toLowerCase();
     if (
       normalized === "props" ||
+      normalized === "row" ||
+      normalized === "rows" ||
       normalized.endsWith("props") ||
       normalized.endsWith("properties") ||
       normalized.endsWith("map")
+    ) {
+      return true;
+    }
+
+    if (
+      queryForContext &&
+      new RegExp(`UNWIND\\s+\\$${key}\\s+AS\\s+`, "i").test(queryForContext)
     ) {
       return true;
     }
@@ -458,14 +472,54 @@ export class FalkorDBService implements IFalkorDBService {
         } else if (typeof value === "boolean" || typeof value === "number") {
           return `${key}: ${value}`;
         } else {
-          // For other types (including objects), store JSON string
-          const json = JSON.stringify(value);
-          const escaped = json.replace(/'/g, "\\'");
-          return `${key}: '${escaped}'`;
+          // Treat nested objects as maps so callers can pass structured props
+          return `${key}: ${this.objectToCypherProperties(
+            value as Record<string, any>
+          )}`;
         }
       })
       .join(", ");
     return `{${props}}`;
+  }
+
+  private normalizeErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message.toLowerCase();
+    }
+
+    if (typeof error === "string") {
+      return error.toLowerCase();
+    }
+
+    if (error && typeof error === "object") {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === "string") {
+        return message.toLowerCase();
+      }
+    }
+
+    return String(error ?? "").toLowerCase();
+  }
+
+  private isIndexAlreadyExistsError(error: unknown): boolean {
+    const message = this.normalizeErrorMessage(error);
+    return (
+      message.includes("already indexed") ||
+      message.includes("already exists")
+    );
+  }
+
+  private isGraphMissingError(error: unknown): boolean {
+    const message = this.normalizeErrorMessage(error);
+    if (!message) {
+      return false;
+    }
+
+    return (
+      (message.includes("graph") && message.includes("does not exist")) ||
+      message.includes("unknown graph") ||
+      message.includes("graph not found")
+    );
   }
 
   private async buildProcessedQuery(

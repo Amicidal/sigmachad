@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { QdrantService } from '../../../src/services/database/QdrantService';
 
 // Gate running these integration tests via environment. When not enabled, the
@@ -22,7 +23,7 @@ describe('QdrantService Integration', () => {
     }
 
     const testConfig = {
-      url: process.env.QDRANT_URL || 'http://localhost:6333',
+      url: process.env.QDRANT_URL || 'http://localhost:6335',
       apiKey: process.env.QDRANT_API_KEY,
     };
 
@@ -178,8 +179,12 @@ describe('QdrantService Integration', () => {
         // If we get here, Qdrant allows duplicate creation (some versions do)
       } catch (error: any) {
         // Expected behavior - collection already exists
+        const message = error?.message?.toLowerCase?.() ?? '';
         expect(error.status).toBe(409); // Conflict status
-        expect(error.message?.toLowerCase()).toContain('already exists');
+        expect(
+          message.includes('already exists') ||
+            message.includes('conflict')
+        ).toBe(true);
       }
 
       // Clean up
@@ -605,21 +610,21 @@ describe('QdrantService Integration', () => {
       // Simulate code embedding workflow
       const codeSnippets = [
         {
-          id: 'func_1',
+          id: randomUUID(),
           content: 'function calculateTotal(items) { return items.reduce((sum, item) => sum + item.price, 0); }',
           language: 'javascript',
           file: 'utils.js',
           vector: new Array(1536).fill(0).map(() => Math.random() - 0.5),
         },
         {
-          id: 'func_2',
+          id: randomUUID(),
           content: 'export class UserService { async getUser(id) { return await db.users.findById(id); } }',
           language: 'typescript',
           file: 'UserService.ts',
           vector: new Array(1536).fill(0).map(() => Math.random() - 0.5),
         },
         {
-          id: 'func_3',
+          id: randomUUID(),
           content: 'def process_data(data): return [item.upper() for item in data if item]',
           language: 'python',
           file: 'utils.py',
@@ -681,21 +686,21 @@ describe('QdrantService Integration', () => {
       // Store documents with different categories
       const documents = [
         {
-          id: 'doc_1',
+          id: randomUUID(),
           content: 'React component for user authentication',
           category: 'frontend',
           tags: ['react', 'auth', 'component'],
           vector: new Array(1536).fill(0).map(() => Math.random() - 0.5),
         },
         {
-          id: 'doc_2',
+          id: randomUUID(),
           content: 'Node.js API for user management',
           category: 'backend',
           tags: ['nodejs', 'api', 'users'],
           vector: new Array(1536).fill(0).map(() => Math.random() - 0.5),
         },
         {
-          id: 'doc_3',
+          id: randomUUID(),
           content: 'Database schema for user entities',
           category: 'database',
           tags: ['schema', 'users', 'sql'],

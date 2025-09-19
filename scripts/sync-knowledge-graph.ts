@@ -5,6 +5,7 @@ import { DatabaseService, createDatabaseConfig } from '../src/services/DatabaseS
 import { KnowledgeGraphService } from '../src/services/KnowledgeGraphService.js';
 import { ASTParser } from '../src/services/ASTParser.js';
 import { SynchronizationCoordinator } from '../src/services/SynchronizationCoordinator.js';
+import { ConflictResolution } from '../src/services/ConflictResolution.js';
 
 async function waitForCompletion(
   coordinator: SynchronizationCoordinator,
@@ -54,7 +55,13 @@ async function main() {
     await (astParser as any).initialize();
   }
 
-  const coordinator = new SynchronizationCoordinator(kgService, astParser, dbService);
+  const conflictResolver = new ConflictResolution(kgService);
+  const coordinator = new SynchronizationCoordinator(
+    kgService,
+    astParser,
+    dbService,
+    conflictResolver
+  );
   const operationId = await coordinator.startFullSynchronization({ includeEmbeddings: false });
   console.log(`🚀 Full synchronization started (operation: ${operationId})`);
 

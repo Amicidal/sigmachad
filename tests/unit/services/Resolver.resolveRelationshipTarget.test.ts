@@ -35,7 +35,11 @@ describe("resolveRelationshipTarget (toRef fileSymbol)", () => {
     const coord = new SynchronizationCoordinator(
       kg,
       new ASTMock() as any,
-      new DBMock() as any
+      new DBMock() as any,
+      {
+        detectConflicts: async () => [],
+        resolveConflictsAuto: async () => [],
+      } as any
     );
     const rel: any = {
       fromEntityId: "sym:caller",

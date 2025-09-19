@@ -5,6 +5,8 @@ import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
 import { DatabaseService } from '../../services/DatabaseService.js';
 import { ASTParser } from '../../services/ASTParser.js';
 import { FileWatcher } from '../../services/FileWatcher.js';
+import type { AuthContext } from '../middleware/authentication.js';
+import { scopesSatisfyRequirement } from '../middleware/authentication.js';
 
 // tRPC context type shared across router and routes
 export type TRPCContext = {
@@ -13,6 +15,7 @@ export type TRPCContext = {
   astParser: ASTParser;
   fileWatcher: FileWatcher;
   authToken?: string;
+  authContext?: AuthContext;
 };
 
 // Shared tRPC base used by router and route modules to avoid circular imports
@@ -33,13 +36,13 @@ export const t = initTRPC.context<TRPCContext>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 export const adminProcedure = t.procedure.use(async ({ ctx, next }) => {
-  const required = (process.env.ADMIN_API_TOKEN || '').trim();
-  if (!required) {
-    return next(); // no auth required in development
+  const required = ['admin'];
+  const context = ctx.authContext;
+  if (!context) {
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Authentication is required' });
   }
-  const provided = (ctx.authToken || '').trim();
-  if (provided !== required) {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid or missing API token' });
+  if (!scopesSatisfyRequirement(context.scopes, required)) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Admin scope is required' });
   }
   return next();
 });
@@ -56,4 +59,3 @@ export const createTestContext = (opts: Partial<TRPCContext> = {}): TRPCContext 
   };
   return defaultContext;
 };
-

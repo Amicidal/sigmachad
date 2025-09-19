@@ -1141,7 +1141,13 @@ describe("MCP Tool Integration", () => {
 
         expect(Array.isArray(body.result.directImpact)).toBe(true);
         expect(Array.isArray(body.result.cascadingImpact)).toBe(true);
-        expect(Array.isArray(body.result.documentationImpact)).toBe(true);
+        expect(body.result.documentationImpact).toEqual(
+          expect.objectContaining({
+            staleDocs: expect.any(Array),
+            missingDocs: expect.any(Array),
+            requiredUpdates: expect.any(Array),
+          })
+        );
         expect(body.result.testImpact).toEqual(expect.any(Object));
         expect(Array.isArray(body.result.recommendations)).toBe(true);
         expect(body.result.summary).toEqual(

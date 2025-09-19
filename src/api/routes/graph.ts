@@ -7,6 +7,27 @@ import { FastifyInstance } from "fastify";
 import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
 import { DatabaseService } from "../../services/DatabaseService.js";
 
+const GRAPH_ENTITY_TYPE_LOOKUP: Record<string, string> = {
+  change: "change",
+  directory: "directory",
+  file: "file",
+  module: "module",
+  spec: "spec",
+  symbol: "symbol",
+  test: "test",
+};
+
+const GRAPH_SYMBOL_KIND_LOOKUP: Record<string, string> = {
+  class: "class",
+  function: "function",
+  interface: "interface",
+  method: "method",
+  property: "property",
+  typealias: "typeAlias",
+  unknown: "unknown",
+  variable: "variable",
+};
+
 interface GraphSearchRequest {
   query: string;
   entityTypes?: ("function" | "class" | "interface" | "file" | "module")[];
@@ -687,9 +708,28 @@ export async function registerGraphRoutes(
           ? query.tags.split(",").map((t) => t.trim())
           : undefined;
 
+        const typeParam = query.type?.trim();
+        let entityTypeFilter: string | undefined;
+        let symbolKindFilter: string | undefined;
+
+        if (typeParam) {
+          const lowerType = typeParam.toLowerCase();
+          if (GRAPH_ENTITY_TYPE_LOOKUP[lowerType]) {
+            entityTypeFilter = GRAPH_ENTITY_TYPE_LOOKUP[lowerType];
+          } else if (GRAPH_SYMBOL_KIND_LOOKUP[lowerType]) {
+            entityTypeFilter = "symbol";
+            symbolKindFilter = GRAPH_SYMBOL_KIND_LOOKUP[lowerType];
+          } else {
+            // Fall back to treating unknown types as symbol kinds for forward compatibility
+            entityTypeFilter = "symbol";
+            symbolKindFilter = typeParam;
+          }
+        }
+
         // Query entities from knowledge graph
         const { entities, total } = await kgService.listEntities({
-          type: query.type,
+          type: entityTypeFilter,
+          kind: symbolKindFilter,
           language: query.language,
           path: query.path,
           tags,

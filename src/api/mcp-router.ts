@@ -30,7 +30,12 @@ import {
   TestPlanningService,
   TestPlanningValidationError,
 } from "../services/TestPlanningService.js";
-import type { TestPlanRequest } from "../models/types.js";
+import type {
+  TestPlanRequest,
+  TestPlanResponse,
+  TestSpec,
+} from "../models/types.js";
+import type { CoverageMetrics, Spec } from "../models/entities.js";
 import { SpecService } from "../services/SpecService.js";
 
 // MCP Tool definitions
@@ -939,6 +944,10 @@ export class MCPRouter {
           args
         );
 
+        if (error instanceof McpError) {
+          throw error;
+        }
+
         throw new McpError(
           ErrorCode.InternalError,
           `Tool execution failed: ${errorMessage}`
@@ -1073,12 +1082,15 @@ export class MCPRouter {
         const emptyExamples = { usageExamples: [], testExamples: [] };
         return {
           entityId: params.entityId,
-          examples: emptyExamples,
           signature: "",
+          usageExamples: [],
+          testExamples: [],
           relatedPatterns: [],
           totalExamples: 0,
+          totalUsageExamples: 0,
           totalTestExamples: 0,
           message: `Entity ${params.entityId} not found`,
+          examples: emptyExamples,
         };
       }
       const normalizedExamples = {
@@ -1090,14 +1102,23 @@ export class MCPRouter {
           : [],
       };
 
+      const totalUsage = normalizedExamples.usageExamples.length;
+      const totalTests = normalizedExamples.testExamples.length;
+
       return {
         entityId: examples.entityId ?? params.entityId,
         signature: examples.signature || "",
-        examples: normalizedExamples,
-        relatedPatterns: examples.relatedPatterns || [],
-        totalExamples: normalizedExamples.usageExamples.length,
-        totalTestExamples: normalizedExamples.testExamples.length,
+        usageExamples: normalizedExamples.usageExamples,
+        testExamples: normalizedExamples.testExamples,
+        relatedPatterns: Array.isArray(examples.relatedPatterns)
+          ? examples.relatedPatterns
+          : [],
+        totalExamples: totalUsage + totalTests,
+        totalUsageExamples: totalUsage,
+        totalTestExamples: totalTests,
         message: `Retrieved examples for entity ${params.entityId}`,
+        // Preserve legacy nested shape for backward compatibility
+        examples: normalizedExamples,
       };
     } catch (error) {
       console.error("Error in handleGetExamples:", error);
@@ -1106,13 +1127,16 @@ export class MCPRouter {
       return {
         entityId: params.entityId,
         signature: "",
-        examples: failureExamples,
+        usageExamples: [],
+        testExamples: [],
         relatedPatterns: [],
         totalExamples: 0,
+        totalUsageExamples: 0,
         totalTestExamples: 0,
         message: `Error retrieving examples: ${
           error instanceof Error ? error.message : "Unknown error"
         }`,
+        examples: failureExamples,
       };
     }
   }
@@ -1465,7 +1489,7 @@ export class MCPRouter {
       };
     } catch (error) {
       if (error instanceof TestPlanningValidationError) {
-        throw new McpError(ErrorCode.InvalidRequest, error.message, {
+        throw new McpError(ErrorCode.InvalidParams, error.message, {
           code: error.code,
         });
       }
@@ -1497,116 +1521,239 @@ export class MCPRouter {
 
   private async generateFallbackTestPlan(
     request: TestPlanRequest
-  ): Promise<
-    | {
-        specId: string;
-        testPlan: Record<string, any>;
-        estimatedCoverage: Record<string, number>;
-        changedFiles: string[];
-        message: string;
+  ): Promise<{
+    specId: string;
+    testPlan: {
+      unitTests: TestPlanResponse["testPlan"]["unitTests"];
+      integrationTests: TestPlanResponse["testPlan"]["integrationTests"];
+      e2eTests: TestPlanResponse["testPlan"]["e2eTests"];
+      performanceTests: TestPlanResponse["testPlan"]["performanceTests"];
+    };
+    estimatedCoverage: CoverageMetrics;
+    changedFiles: string[];
+    message: string;
+  }> {
+    const specId = request.specId && String(request.specId).trim();
+    const safeSpecId = specId && specId.length > 0 ? specId : "unknown-spec";
+
+    let rows: Array<Record<string, any>> = [];
+    if (safeSpecId !== "unknown-spec" && this.isValidUuid(safeSpecId)) {
+      try {
+        const queryResult = await this.dbService.postgresQuery(
+          `SELECT content FROM documents WHERE id = $1::uuid AND type = $2 LIMIT 1`,
+          [safeSpecId, "spec"]
+        );
+        rows = this.extractQueryRows(queryResult);
+      } catch (error) {
+        console.warn(
+          `PostgreSQL lookup for specification ${safeSpecId} failed, continuing with fallback plan`,
+          error
+        );
       }
-    | null
-  > {
-    const specId = request.specId;
-    if (!specId) {
-      return null;
     }
 
-    const rows = this.extractQueryRows(
-      await this.dbService.postgresQuery(
-        `SELECT content FROM documents WHERE id = $1 AND type = $2 LIMIT 1`,
-        [specId, "spec"]
-      )
-    );
-
-    if (rows.length === 0) {
-      return null;
-    }
-
-    const rawContent = rows[0]?.content ?? rows[0];
-    let parsed: any;
-    try {
-      parsed =
-        typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
-    } catch (parseError) {
-      console.warn(
-        `Failed to parse specification ${specId} from database:`,
-        parseError
-      );
-      return null;
+    let parsed: any = null;
+    if (rows.length > 0) {
+      const rawContent = rows[0]?.content ?? rows[0];
+      try {
+        parsed =
+          typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
+      } catch (parseError) {
+        console.warn(
+          `Failed to parse specification ${safeSpecId} from database:`,
+          parseError
+        );
+      }
     }
 
     const normalizedSpec = {
-      id: String(parsed?.id ?? specId),
-      title: String(parsed?.title ?? ""),
-      description: String(parsed?.description ?? ""),
+      id: String(parsed?.id ?? safeSpecId),
+      title:
+        typeof parsed?.title === "string" && parsed.title.trim().length > 0
+          ? parsed.title.trim()
+          : this.humanizeSpecId(safeSpecId),
+      description:
+        typeof parsed?.description === "string"
+          ? parsed.description
+          : "",
       acceptanceCriteria: Array.isArray(parsed?.acceptanceCriteria)
-        ? parsed.acceptanceCriteria.map((criterion: any) => String(criterion))
+        ? parsed.acceptanceCriteria
+            .map((criterion: unknown) =>
+              typeof criterion === "string"
+                ? criterion.trim()
+                : JSON.stringify(criterion)
+            )
+            .filter((criterion: string) => criterion.length > 0)
         : [],
       priority:
         typeof parsed?.priority === "string"
-          ? parsed.priority
-          : ("medium" as const),
-    };
+          ? (parsed.priority as Spec["priority"])
+          : ("medium" as Spec["priority"]),
+    } satisfies Pick<Spec, "id" | "title" | "description" | "acceptanceCriteria" | "priority">;
 
-    const criteria =
-      normalizedSpec.acceptanceCriteria.length > 0
-        ? normalizedSpec.acceptanceCriteria
-        : [normalizedSpec.description || normalizedSpec.title || "Core behaviour"];
-
-    const unitTests = criteria.map((criterion, index) => ({
-      id: `${normalizedSpec.id}-unit-${index + 1}`,
-      name: `Unit test ${index + 1}`,
-      objective: criterion,
-      coverageFocus: "logic",
-    }));
-
-    const integrationTests = [
-      {
-        id: `${normalizedSpec.id}-integration-1`,
-        name: "End-to-end flow validation",
-        objective:
-          normalizedSpec.description ||
-          `Validate integrated behaviour for ${normalizedSpec.title}`,
-        relatedCriteria: criteria.map((_, index) => index),
-      },
-    ];
+    const requestedTypes = new Set<"unit" | "integration" | "e2e">(
+      Array.isArray(request.testTypes) && request.testTypes.length > 0
+        ? request.testTypes.filter((type): type is "unit" | "integration" | "e2e" =>
+            type === "unit" || type === "integration" || type === "e2e"
+          )
+        : ["unit", "integration", "e2e"]
+    );
 
     const includePerformance =
       request.includePerformanceTests === true ||
       normalizedSpec.priority === "high" ||
       normalizedSpec.priority === "critical";
 
-    const performanceTests = includePerformance
+    const criteria =
+      normalizedSpec.acceptanceCriteria.length > 0
+        ? normalizedSpec.acceptanceCriteria
+        : [
+            normalizedSpec.description ||
+              `Core behaviour for ${normalizedSpec.title}`,
+          ];
+
+    const baseTestSpec = (
+      type: "unit" | "integration" | "e2e" | "performance",
+      name: string,
+      description: string,
+      extra?: Partial<TestSpec>
+    ): TestSpec => ({
+      name,
+      description,
+      type,
+      assertions: [
+        `Validate ${description.toLowerCase()}`,
+        ...(extra?.assertions ?? []),
+      ],
+      ...(extra?.targetFunction
+        ? { targetFunction: extra.targetFunction }
+        : {}),
+      ...(extra?.dataRequirements
+        ? { dataRequirements: extra.dataRequirements }
+        : {}),
+    });
+
+    const unitTests = requestedTypes.has("unit")
+      ? criteria.map((criterion, index) =>
+          baseTestSpec(
+            "unit",
+            `Unit • AC${index + 1}`,
+            criterion,
+            {
+              assertions: [
+                `Should satisfy acceptance criterion #${index + 1}`,
+                `Handles error and edge cases for: ${criterion}`,
+              ],
+            }
+          )
+        )
+      : [];
+
+    const integrationTests = requestedTypes.has("integration")
       ? [
-          {
-            id: `${normalizedSpec.id}-performance-1`,
-            name: "Performance baseline assessment",
-            objective: "Measure response time under expected load",
-            thresholdMs: 500,
-          },
+          baseTestSpec(
+            "integration",
+            "Integration • Primary workflow",
+            `Ensure core collaborators for ${normalizedSpec.title}`,
+            {
+              assertions: [
+                "All dependent services respond successfully",
+                "Business rules remain consistent end-to-end",
+              ],
+              dataRequirements: [
+                "Representative dataset seeded via fixtures or factories",
+              ],
+            }
+          ),
         ]
       : [];
 
-    const estimatedCoverage = {
-      lines: Math.min(0.9, 0.55 + unitTests.length * 0.05),
-      branches: Math.min(0.85, 0.45 + unitTests.length * 0.04),
-      functions: Math.min(0.88, 0.5 + unitTests.length * 0.04),
-      statements: Math.min(0.9, 0.52 + unitTests.length * 0.05),
+    const e2eTests = requestedTypes.has("e2e")
+      ? [
+          baseTestSpec(
+            "e2e",
+            "E2E • Critical user journey",
+            `Simulate a user journey covering ${normalizedSpec.title}`,
+            {
+              assertions: [
+                "User-facing behaviour remains stable",
+                "Telemetry and logging capture outcomes",
+              ],
+            }
+          ),
+        ]
+      : [];
+
+    const performanceTests = includePerformance
+      ? [
+          baseTestSpec(
+            "performance",
+            "Performance • Baseline throughput",
+            `Measure performance characteristics for ${normalizedSpec.title}`,
+            {
+              assertions: [
+                "Throughput meets baseline service level objective",
+                "Degradation alerts fire if threshold breached",
+              ],
+              dataRequirements: [
+                "Load profile mirroring production scale",
+              ],
+            }
+          ),
+        ]
+      : [];
+
+    const coverageBoost =
+      unitTests.length * 4 +
+      integrationTests.length * 6 +
+      e2eTests.length * 8 +
+      performanceTests.length * 5;
+
+    const requestedCoverage = request.coverage ?? {};
+    const estimatedCoverage: CoverageMetrics = {
+      lines: Math.min(
+        95,
+        Math.max(requestedCoverage.minLines ?? 0, 70 + coverageBoost)
+      ),
+      branches: Math.min(
+        92,
+        Math.max(requestedCoverage.minBranches ?? 0, 60 + coverageBoost)
+      ),
+      functions: Math.min(
+        94,
+        Math.max(requestedCoverage.minFunctions ?? 0, 65 + coverageBoost)
+      ),
+      statements: Math.min(95, 68 + coverageBoost),
     };
 
     return {
-      specId,
+      specId: normalizedSpec.id,
       testPlan: {
         unitTests,
         integrationTests,
+        e2eTests,
         performanceTests,
-        generatedBy: "mcp-fallback",
       },
       estimatedCoverage,
       changedFiles: [],
-      message: `Generated heuristic test plan for specification ${specId}`,
+      message: rows.length > 0
+        ? `Generated heuristic test plan for specification ${normalizedSpec.id}`
+        : `Generated heuristic test plan for missing specification ${normalizedSpec.id}`,
     };
+  }
+
+  private humanizeSpecId(specId: string): string {
+    const cleaned = specId
+      .replace(/[-_]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (cleaned.length === 0) {
+      return "Untitled Specification";
+    }
+    return cleaned
+      .split(" ")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
   }
 
   private extractQueryRows(result: any): Array<Record<string, any>> {
@@ -1620,6 +1767,15 @@ export class MCPRouter {
       return result.rows as Array<Record<string, any>>;
     }
     return [];
+  }
+
+  private isValidUuid(value: string): boolean {
+    if (typeof value !== "string") {
+      return false;
+    }
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value
+    );
   }
 
   private normalizeErrorMessage(message: string): string {
@@ -2390,7 +2546,9 @@ export class MCPRouter {
       },
       handler: async (request, reply) => {
         try {
-          if ((request as any).validationError) {
+          const body = request.body as any;
+
+          if (!Array.isArray(body) && (request as any).validationError) {
             const validationError = (request as any).validationError;
             const message =
               validationError?.message ||
@@ -2409,7 +2567,6 @@ export class MCPRouter {
             });
           }
 
-          const body = request.body as any;
           if (Array.isArray(body)) {
             const responses = await Promise.all(
               body.map(async (entry) => {
@@ -3290,7 +3447,10 @@ export class MCPRouter {
         `Tool '${toolName}' not found`,
         args
       );
-      throw new Error(`Tool '${toolName}' not found`);
+      throw new McpError(
+        ErrorCode.MethodNotFound,
+        `Tool '${toolName}' not found`
+      );
     }
 
     // Basic parameter validation
@@ -3300,15 +3460,16 @@ export class MCPRouter {
         (key: string) => !(args && key in args)
       );
       if (missing.length > 0) {
+        const message = `Missing required parameters: ${missing.join(", ")}`;
         this.recordExecution(
           toolName,
           startTime,
           new Date(),
           false,
-          `Missing required parameters: ${missing.join(", ")}`,
+          message,
           args
         );
-        throw new Error(`Missing required parameters: ${missing.join(", ")}`);
+        throw new McpError(ErrorCode.InvalidParams, message);
       }
     }
 
@@ -3331,17 +3492,16 @@ export class MCPRouter {
       }
 
       if (validationErrors.length > 0) {
+        const message = `Parameter validation errors: ${validationErrors.join(", ")}`;
         this.recordExecution(
           toolName,
           startTime,
           new Date(),
           false,
-          `Parameter validation errors: ${validationErrors.join(", ")}`,
+          message,
           args
         );
-        throw new Error(
-          `Parameter validation errors: ${validationErrors.join(", ")}`
-        );
+        throw new McpError(ErrorCode.InvalidParams, message);
       }
     }
 
@@ -3579,20 +3739,11 @@ export class MCPRouter {
             result: { tools },
           };
 
-        case "tools/call":
+        case "tools/call": {
           const toolParams = params || {};
           const { name, arguments: args } = toolParams as any;
-          const tool = this.tools.get(name);
-          if (!tool) {
-            const startTime = new Date();
-            this.recordExecution(
-              name,
-              startTime,
-              new Date(),
-              false,
-              `Tool '${name}' not found`,
-              args
-            );
+
+          if (typeof name !== "string" || name.trim().length === 0) {
             if (isJsonRpcNotification) {
               return null;
             }
@@ -3600,41 +3751,35 @@ export class MCPRouter {
               jsonrpc: "2.0",
               id,
               error: {
-                code: -32601,
-                message: `Tool '${name}' not found`,
+                code: ErrorCode.InvalidParams,
+                message: "Tool name is required",
               },
             };
           }
 
-          // Basic parameter validation against declared schema
-          const schema = (tool as any).inputSchema;
-          const missing = (schema?.required || []).filter(
-            (key: string) => !(args && key in args)
-          );
-          if (missing.length > 0) {
-            console.warn(
-              `MCP tool '${name}' invoked with missing required params: ${missing.join(
-                ", "
-              )}`
-            );
-          }
-
-          const startTime = new Date();
           try {
-            const result = await tool.handler(args || {});
-            const endTime = new Date();
-            this.recordExecution(
-              name,
-              startTime,
-              endTime,
-              true,
-              undefined,
-              args
-            );
+            const simpleResult = await this.handleSimpleToolCall({
+              toolName: name,
+              arguments: args || {},
+            });
 
             if (isJsonRpcNotification) {
               return null;
             }
+
+            const payload =
+              simpleResult &&
+              typeof simpleResult === "object" &&
+              !Array.isArray(simpleResult) &&
+              "result" in simpleResult
+                ? (simpleResult as any).result
+                : simpleResult;
+
+            const contentText =
+              typeof payload === "string"
+                ? payload
+                : JSON.stringify(payload, null, 2);
+
             return {
               jsonrpc: "2.0",
               id,
@@ -3642,35 +3787,22 @@ export class MCPRouter {
                 content: [
                   {
                     type: "text",
-                    text:
-                      typeof result === "string"
-                        ? result
-                        : JSON.stringify(result, null, 2),
+                    text: contentText,
                   },
                 ],
               },
             };
           } catch (toolError) {
-            const endTime = new Date();
-            const errorMessage =
-              toolError instanceof Error
-                ? toolError.message
-                : String(toolError);
-            this.recordExecution(
-              name,
-              startTime,
-              endTime,
-              false,
-              errorMessage,
-              args
-            );
-
             if (isJsonRpcNotification) {
               return null;
             }
+
             let code: number = ErrorCode.InternalError;
             let message = "Tool execution failed";
-            let data: any = errorMessage;
+            let data: any =
+              toolError instanceof Error
+                ? toolError.message
+                : String(toolError);
 
             if (toolError instanceof McpError) {
               code =
@@ -3684,6 +3816,22 @@ export class MCPRouter {
               !Number.isNaN((toolError as any).code)
             ) {
               code = (toolError as any).code;
+            } else if (toolError instanceof Error) {
+              const normalized = toolError.message || "";
+              if (
+                normalized.includes("Missing required parameters") ||
+                normalized.includes("Parameter validation errors")
+              ) {
+                code = ErrorCode.InvalidParams;
+                message = normalized;
+              }
+              if (
+                normalized.includes("Tool '") &&
+                normalized.includes("not found")
+              ) {
+                code = ErrorCode.MethodNotFound;
+                message = "Method not found";
+              }
             }
 
             return {
@@ -3696,6 +3844,7 @@ export class MCPRouter {
               },
             };
           }
+        }
 
         default:
           this.recordExecution(

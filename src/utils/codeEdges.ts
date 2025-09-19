@@ -443,8 +443,11 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
   }
   rel.evidence = sanitizedEvidence;
 
-  const sanitizedLocations = sanitizeLocationList(rel.locations);
-  if (sanitizedLocations.length > 0) rel.locations = sanitizedLocations;
+  const combinedLocations = sanitizeLocationList([
+    ...(Array.isArray(rel.locations) ? rel.locations : []),
+    ...(Array.isArray((md as any).locations) ? (md as any).locations : []),
+  ]);
+  if (combinedLocations.length > 0) rel.locations = combinedLocations;
   else delete rel.locations;
 
   // Carry toRef/fromRef into metadata for persistence/audit if not stored elsewhere

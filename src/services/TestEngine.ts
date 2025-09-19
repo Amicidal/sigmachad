@@ -43,6 +43,7 @@ export interface TestSuiteResult {
   totalTests: number;
   passedTests: number;
   failedTests: number;
+  errorTests?: number;
   skippedTests: number;
   duration: number;
   coverage?: CoverageMetrics;
@@ -130,6 +131,10 @@ export class TestEngine {
         }
       }
 
+      if (results.length === 0) {
+        throw new Error("Test suite must include at least one test result");
+      }
+
       if (!suiteResult.coverage) {
         suiteResult.coverage = this.aggregateCoverage(
           results
@@ -140,11 +145,6 @@ export class TestEngine {
 
       // Persist the raw suite result so downstream consumers receive the exact payload
       await this.dbService.storeTestSuiteResult(suiteResult as any);
-
-      // Nothing else to do when there are no individual results
-      if (results.length === 0) {
-        return;
-      }
 
       // Process individual test results
       for (const result of results) {
@@ -631,43 +631,69 @@ export class TestEngine {
     });
 
     const coverages: CoverageMetrics[] = [];
-    const breakdownBuckets: Record<'unit' | 'integration' | 'e2e', CoverageMetrics[]> = {
+    const breakdownBuckets: Record<"unit" | "integration" | "e2e", CoverageMetrics[]> = {
       unit: [],
       integration: [],
       e2e: [],
     };
-    const testCases: TestCoverageAnalysis['testCases'] = [];
+    const testCases: TestCoverageAnalysis["testCases"] = [];
+    const processedSources = new Set<string>();
 
-    for (const rel of coverageRels) {
-      if (!rel?.fromEntityId) {
-        continue;
+    const pushCoverage = (
+      sourceId: string,
+      coverage: CoverageMetrics | undefined,
+      testType: Test["testType"],
+      testName: string,
+      covers: string[]
+    ) => {
+      if (processedSources.has(sourceId)) {
+        return;
       }
+      processedSources.add(sourceId);
 
-      const relCoverage = (rel as any)?.metadata?.coverage as CoverageMetrics | undefined;
-      const test = (await this.kgService.getEntity(rel.fromEntityId)) as Test | null;
-
-      if (!test && !relCoverage) {
-        continue;
-      }
-
-      const coverage = test?.coverage ?? relCoverage ?? {
+      const normalized: CoverageMetrics = coverage ?? {
         lines: 0,
         branches: 0,
         functions: 0,
         statements: 0,
       };
 
-      coverages.push(coverage);
+      coverages.push(normalized);
+      breakdownBuckets[testType].push(normalized);
+      testCases.push({ testId: sourceId, testName, covers });
+    };
 
-      if (test) {
-        breakdownBuckets[test.testType].push(coverage);
+    // Always include the test entity's own coverage metrics
+    pushCoverage(
+      entityId,
+      testEntity.coverage,
+      testEntity.testType,
+      testEntity.targetSymbol ?? entityId,
+      testEntity.targetSymbol ? [testEntity.targetSymbol] : [entityId]
+    );
+
+    for (const rel of coverageRels) {
+      if (!rel?.fromEntityId) {
+        continue;
       }
 
-      testCases.push({
-        testId: rel.fromEntityId,
-        testName: test?.targetSymbol ?? test?.id ?? rel.fromEntityId,
-        covers: [entityId],
-      });
+      const relCoverage =
+        (rel as any)?.metadata?.coverage as CoverageMetrics | undefined;
+      const relatedTest = (await this.kgService.getEntity(rel.fromEntityId)) as
+        | Test
+        | null;
+
+      const relationshipTestType = relatedTest?.testType ?? "unit";
+      const relationshipTestName =
+        relatedTest?.targetSymbol ?? relatedTest?.id ?? rel.fromEntityId;
+
+      pushCoverage(
+        rel.fromEntityId,
+        relatedTest?.coverage ?? relCoverage,
+        relationshipTestType,
+        relationshipTestName,
+        [entityId]
+      );
     }
 
     const overallCoverage = this.aggregateCoverage(coverages);
@@ -737,7 +763,10 @@ export class TestEngine {
     }
 
     const suiteNameMatch = content.match(/<testsuite[^>]*name="([^"]+)"/i);
-    const suiteName = suiteNameMatch?.[1] ?? "JUnit Test Suite";
+    const rawSuiteName = suiteNameMatch?.[1]?.trim() ?? "JUnit Test Suite";
+    const suiteName = rawSuiteName.toLowerCase().includes("junit")
+      ? rawSuiteName
+      : `JUnit: ${rawSuiteName}`;
 
     const results: TestResult[] = [];
     const testCaseRegex = /<testcase\b([^>]*)>([\s\S]*?<\/testcase>)?|<testcase\b([^>]*)\/>/gi;
@@ -1209,28 +1238,63 @@ export class TestEngine {
         return;
       }
 
+      const targetEntity = await this.kgService.getEntity(
+        testEntity.targetSymbol
+      );
+      if (!targetEntity) {
+        console.log(
+          `⚠️ Target entity ${testEntity.targetSymbol} not found for test ${testEntity.id}`
+        );
+        return;
+      }
+
       console.log(
         `✅ Creating coverage relationship: ${testEntity.id} -> ${testEntity.targetSymbol}`
       );
 
-      // Create a test relationship and include coverage in metadata
-      await this.kgService.createRelationship({
-        id: `${testEntity.id}_tests_${testEntity.targetSymbol}`,
-        fromEntityId: testEntity.id,
-        toEntityId: testEntity.targetSymbol,
-        type: RelationshipType.TESTS,
-        created: new Date(),
-        lastModified: new Date(),
-        version: 1,
-        metadata: {
-          coverage: {
-            lines: testEntity.coverage?.lines,
-            branches: testEntity.coverage?.branches,
-            functions: testEntity.coverage?.functions,
-          },
-          testType: testEntity.testType,
+      const coverageMetadata = {
+        coverage: {
+          lines: testEntity.coverage?.lines,
+          branches: testEntity.coverage?.branches,
+          functions: testEntity.coverage?.functions,
+          statements: testEntity.coverage?.statements,
         },
-      } as any);
+        testType: testEntity.testType,
+      };
+
+      // Create explicit coverage edge for analytics to consume
+      await this.kgService.createRelationship(
+        {
+          id: `${testEntity.id}_covers_${testEntity.targetSymbol}`,
+          fromEntityId: testEntity.id,
+          toEntityId: testEntity.targetSymbol,
+          type: RelationshipType.COVERAGE_PROVIDES,
+          created: new Date(),
+          lastModified: new Date(),
+          version: 1,
+          metadata: coverageMetadata,
+        } as any,
+        undefined,
+        undefined,
+        { validate: false }
+      );
+
+      // Maintain TESTS edge for legacy consumers while sharing the same metadata shape
+      await this.kgService.createRelationship(
+        {
+          id: `${testEntity.id}_tests_${testEntity.targetSymbol}`,
+          fromEntityId: testEntity.id,
+          toEntityId: testEntity.targetSymbol,
+          type: RelationshipType.TESTS,
+          created: new Date(),
+          lastModified: new Date(),
+          version: 1,
+          metadata: coverageMetadata,
+        } as any,
+        undefined,
+        undefined,
+        { validate: false }
+      );
     } catch (error) {
       // If we can't create the relationship, just skip it
       console.warn(

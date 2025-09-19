@@ -1,0 +1,14 @@
+{
+  "id": "backup_1758165163769",
+  "type": "full",
+  "timestamp": "2025-09-18T03:12:43.769Z",
+  "size": 11014,
+  "checksum": "5c6fde37fb3ad6be7d8b8701d62c8fc23c4e014908d994f3e44d50a393abb9c3",
+  "components": {
+    "falkordb": true,
+    "qdrant": true,
+    "postgres": true,
+    "config": true
+  },
+  "status": "completed"
+}

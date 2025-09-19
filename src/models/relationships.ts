@@ -79,6 +79,7 @@ export enum RelationshipType {
   // Performance relationships
   PERFORMANCE_IMPACT = 'PERFORMANCE_IMPACT',
   PERFORMANCE_REGRESSION = 'PERFORMANCE_REGRESSION',
+  COVERAGE_PROVIDES = 'COVERAGE_PROVIDES',
 
   // Session-based temporal relationships
   SESSION_MODIFIED = 'SESSION_MODIFIED',

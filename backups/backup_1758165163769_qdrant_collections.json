@@ -1,0 +1,13 @@
+{
+  "collections": [
+    {
+      "name": "code_embeddings"
+    },
+    {
+      "name": "documentation_embeddings"
+    },
+    {
+      "name": "integration_test"
+    }
+  ]
+}

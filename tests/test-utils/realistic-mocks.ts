@@ -268,7 +268,14 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
 export class RealisticQdrantMock implements IQdrantService {
   private initialized = false;
   private config: MockConfig;
-  private collections: Map<string, any[]> = new Map();
+  private collections: Map<
+    string,
+    {
+      config: Record<string, any>;
+      payloadSchema: Record<string, any>;
+      points: Array<{ id: string | number; payload?: any; vector?: any }>;
+    }
+  > = new Map();
   private rngState: number;
 
   private rng(): number {
@@ -343,17 +350,32 @@ export class RealisticQdrantMock implements IQdrantService {
 
         await this.simulateLatency();
 
-        if (!this.collections.has(collection)) {
-          this.collections.set(collection, []);
+        const record = this.ensureCollection(collection);
+        const points = Array.isArray(data?.points) ? data.points : [];
+        for (const point of points) {
+          const id = point.id ?? `pt-${record.points.length + 1}`;
+          const existingIndex = record.points.findIndex((item) => item.id === id);
+          const payload = point.payload ? JSON.parse(JSON.stringify(point.payload)) : undefined;
+          const vector = point.vector ? JSON.parse(JSON.stringify(point.vector)) : undefined;
+          const vectors = point.vectors ? JSON.parse(JSON.stringify(point.vectors)) : undefined;
+          const stored = { id, payload, vector, vectors };
+          if (existingIndex >= 0) {
+            record.points[existingIndex] = stored;
+          } else {
+            record.points.push(stored);
+          }
         }
-        this.collections.get(collection)!.push(data);
 
-        return { status: "completed" };
+        return { status: "completed", pointsCount: record.points.length };
       },
 
       createCollection: async (name: string, config: any) => {
         await this.simulateLatency();
-        this.collections.set(name, []);
+        this.collections.set(name, {
+          config: JSON.parse(JSON.stringify(this.buildCollectionConfig(config))),
+          payloadSchema: {},
+          points: [],
+        });
         return { status: "created" };
       },
 
@@ -366,10 +388,41 @@ export class RealisticQdrantMock implements IQdrantService {
       getCollections: async () => {
         await this.simulateLatency();
         return {
-          collections: Array.from(this.collections.keys()).map((name) => ({
+          collections: Array.from(this.collections.entries()).map(([name, record]) => ({
             name,
+            points_count: record.points.length,
           })),
         };
+      },
+
+      getCollection: async (name: string) => {
+        await this.simulateLatency();
+        const record = this.collections.get(name);
+        if (!record) {
+          throw Object.assign(new Error(`Collection ${name} not found`), { status: 404 });
+        }
+        return {
+          status: "green",
+          optimizer_status: "ok",
+          points_count: record.points.length,
+          vectors_count: record.points.length,
+          segments_count: 1,
+          config: record.config,
+          payload_schema: record.payloadSchema,
+        };
+      },
+
+      createPayloadIndex: async (collection: string, args: any) => {
+        await this.simulateLatency();
+        const record = this.ensureCollection(collection);
+        const fieldName = args?.field_name;
+        if (typeof fieldName !== "string") {
+          throw new Error("field_name is required");
+        }
+        record.payloadSchema[fieldName] = JSON.parse(
+          JSON.stringify(args?.field_schema ?? { data_type: "keyword" })
+        );
+        return { status: "indexed" };
       },
 
       createSnapshot: async (collectionName: string) => {
@@ -378,15 +431,77 @@ export class RealisticQdrantMock implements IQdrantService {
           name: `${collectionName}_snapshot_${Date.now()}`,
           collection: collectionName,
           created_at: new Date().toISOString(),
+          location: `file:///snapshots/${collectionName}.snapshot`,
         };
       },
 
       scroll: async (collection: string, params: any) => {
         await this.simulateLatency();
-        const data = this.collections.get(collection) || [];
-        return { points: data.slice(0, params?.limit || 10) };
+        const record = this.ensureCollection(collection);
+        const limit = typeof params?.limit === "number" ? params.limit : 10;
+        const offsetRaw = params?.offset;
+        let startIndex = 0;
+
+        if (typeof offsetRaw === "number") {
+          startIndex = offsetRaw;
+        } else if (typeof offsetRaw === "string") {
+          const parsed = Number(offsetRaw);
+          if (!Number.isNaN(parsed)) {
+            startIndex = parsed;
+          }
+        }
+
+        const slice = record.points.slice(startIndex, startIndex + limit);
+        const nextIndex = startIndex + slice.length;
+        const next_page_offset = nextIndex < record.points.length ? nextIndex : undefined;
+
+        return {
+          points: slice.map((point) => ({
+            id: point.id,
+            payload: point.payload,
+            vector: point.vector,
+            vectors: point.vectors,
+          })),
+          next_page_offset,
+        };
       },
     };
+  }
+
+  private ensureCollection(name: string) {
+    if (!this.collections.has(name)) {
+      this.collections.set(name, {
+        config: {
+          params: {
+            vectors: { size: 1536, distance: "Cosine" },
+          },
+          hnsw_config: {},
+          optimizer_config: {},
+          payload_schema: {},
+        },
+        payloadSchema: {},
+        points: [],
+      });
+    }
+    return this.collections.get(name)!;
+  }
+
+  private buildCollectionConfig(config: any) {
+    if (!config) {
+      return {
+        params: { vectors: { size: 1536, distance: "Cosine" } },
+        hnsw_config: {},
+        optimizer_config: {},
+      };
+    }
+    const clone = JSON.parse(JSON.stringify(config));
+    if (!clone.params) {
+      clone.params = {};
+    }
+    if (!clone.params.vectors) {
+      clone.params.vectors = { size: 1536, distance: "Cosine" };
+    }
+    return clone;
   }
 
   async setupCollections(): Promise<void> {
@@ -422,6 +537,7 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
   private transactionCount = 0;
   private queryLog: string[] = [];
   private rngState: number;
+  private maintenanceBackups = new Map<string, any>();
 
   private rng(): number {
     this.rngState = (1664525 * this.rngState + 1013904223) >>> 0;
@@ -489,6 +605,87 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 
     await this.simulateLatency();
     this.queryLog.push(query);
+
+    const normalizedQuery = query.toLowerCase();
+
+    if (normalizedQuery.includes('maintenance_backups')) {
+      if (normalizedQuery.includes('insert into maintenance_backups')) {
+        const [
+          id,
+          type,
+          recordedAt,
+          size,
+          checksum,
+          status,
+          components,
+          storageProvider,
+          destination,
+          labels,
+          metadata,
+          error,
+        ] = params ?? [];
+
+        this.maintenanceBackups.set(id, {
+          id,
+          type,
+          recorded_at: recordedAt,
+          size_bytes: size,
+          checksum,
+          status,
+          components:
+            typeof components === 'string'
+              ? JSON.parse(components)
+              : components,
+          storage_provider: storageProvider,
+          destination,
+          labels,
+          metadata:
+            typeof metadata === 'string'
+              ? JSON.parse(metadata)
+              : metadata,
+          error,
+        });
+
+        return { rowCount: 1 };
+      }
+
+      if (normalizedQuery.includes('select metadata') && normalizedQuery.includes('from maintenance_backups')) {
+        if (params && params.length > 0) {
+          const record = this.maintenanceBackups.get(params[0]);
+          return {
+            rows: record
+              ? [
+                  {
+                    metadata: record.metadata,
+                    storage_provider: record.storage_provider,
+                    destination: record.destination,
+                    labels: record.labels,
+                    status: record.status,
+                  },
+                ]
+              : [],
+          };
+        }
+
+        return {
+          rows: Array.from(this.maintenanceBackups.values()).map((record) => ({
+            metadata: record.metadata,
+            storage_provider: record.storage_provider,
+            destination: record.destination,
+            labels: record.labels,
+            status: record.status,
+          })),
+        };
+      }
+
+      if (normalizedQuery.includes('delete from maintenance_backups')) {
+        const ids = Array.isArray(params?.[0]) ? params[0] : [];
+        for (const id of ids) {
+          this.maintenanceBackups.delete(id as string);
+        }
+        return { rowCount: ids.length };
+      }
+    }
 
     if (this.shouldFail()) {
       const errors = [

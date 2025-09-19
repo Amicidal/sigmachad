@@ -13,9 +13,36 @@ import {
   createTestDatabaseConfig,
 } from "../../../src/services/DatabaseService";
 import { SynchronizationCoordinator } from "../../../src/services/SynchronizationCoordinator";
+import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
+import { ASTParser } from "../../../src/services/ASTParser";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";
+
+const stubKgService = {
+  getEntity: async () => null,
+  getRelationshipById: async () => null,
+  updateEntity: async () => {},
+  createEntity: async () => {},
+  upsertRelationship: async () => {},
+  createRelationship: async () => {},
+} as unknown as KnowledgeGraphService;
+
+const stubAstParser = {
+  parseFile: async () => ({ entities: [], relationships: [], errors: [] }),
+  parseFileIncremental: async () => ({
+    entities: [],
+    relationships: [],
+    errors: [],
+    isIncremental: true,
+    updatedEntities: [],
+  }),
+} as unknown as ASTParser;
+
+const stubConflictResolution = {
+  detectConflicts: async () => [],
+  resolveConflictsAuto: async () => [],
+} as any;
 
 describe("ConfigurationService Integration", () => {
   let dbService: DatabaseService;
@@ -32,8 +59,13 @@ describe("ConfigurationService Integration", () => {
     dbService = new DatabaseService(createTestDatabaseConfig());
     await dbService.initialize();
 
-    // Initialize sync coordinator
-    syncCoordinator = new SynchronizationCoordinator(dbService);
+    // Initialize sync coordinator with lightweight stubs
+    syncCoordinator = new SynchronizationCoordinator(
+      stubKgService,
+      stubAstParser,
+      dbService,
+      stubConflictResolution
+    );
 
     // Initialize configuration service
     configService = new ConfigurationService(dbService, syncCoordinator);

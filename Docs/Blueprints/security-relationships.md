@@ -8,10 +8,9 @@ Security relationships (`HAS_SECURITY_ISSUE`, `DEPENDS_ON_VULNERABLE`, `SECURITY
 - Canonical IDs collapse distinct findings affecting the same target, leading to data loss when multiple CVEs apply.
 - No lifecycle tracking (open/fixed/accepted) exists; history stubs cannot capture remediation timelines.
 - Query interfaces cannot filter by severity, status, or specific vulnerability identifiers, limiting dashboards and automation.
-- Integration coverage shows the dependency advisory lookup returns GitHub Security Advisories (e.g., `GHSA-4xc9-xhrj-v574`) while tests expect normalized CVE IDs (`CVE-2021-23337`)—see `Security Scan Execution > should detect dependency vulnerabilities`. Add a normalization layer so the blueprint promises canonical identifiers.
-- Remediation guidance is empty in the generated report (`immediate` + `planned` counts are zero), causing `Vulnerability Reporting > should provide remediation recommendations` to fail. Capture at least one recommendation per vulnerability before the blueprint can claim coverage.
-- Security audit metadata currently stores ISO timestamps as strings; `Security Audit Functionality > should perform full security audit` expects `Date` objects. Decide on the canonical representation and update the contract accordingly.
 - Dependency scanning routines require outbound calls to OSV during unit tests; lack of a mockable client makes offline runs noisy and potentially flaky. Introduce an injectable advisory provider with deterministic fixtures before claiming hermetic coverage.
+- FalkorDB bootstrap still issues legacy `CREATE CONSTRAINT` Cypher and logs "use the GRAPH.CONSTRAINT command" during integration runs; migrate schema initialization to the supported command set to avoid noisy warnings and future compatibility issues.
+- OSV batch responses only include `id`/`modified`, forcing the scanner to re-query individual advisories for full metadata. The new fallback restores CVE normalization but doubles external calls per dependency; design caching or mirror strategy before scaling to larger dependency graphs.
 
 ## 3. Desired Capabilities
 1. Persist vulnerability metadata (severity, status, CVSS, advisory ID, exploitability, CWE) with evidence and remediation references.

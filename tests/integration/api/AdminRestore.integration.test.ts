@@ -102,6 +102,11 @@ describe('Admin Restore Endpoint', () => {
     expect(body.success).toBe(true);
     expect(body.data).toEqual(expect.any(Object));
     expect(body.data.success).toBe(false);
-    expect(String(body.data.error || '')).toContain('not found');
+    expect(body.data.error).toEqual(
+      expect.objectContaining({
+        message: expect.stringContaining('not found'),
+        code: 'NOT_FOUND',
+      })
+    );
   });
 });

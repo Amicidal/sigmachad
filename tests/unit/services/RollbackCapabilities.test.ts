@@ -141,6 +141,17 @@ describe('RollbackCapabilities', () => {
         const allPoints = rollbackCapabilities.getAllRollbackPoints();
         expect(allPoints.length).toBeLessThanOrEqual(50); // maxRollbackPoints
       });
+
+      it('should throw when database service is not initialized', async () => {
+        const uninitializedDbService = {
+          isInitialized: () => false,
+        } as unknown as DatabaseService;
+        const service = new RollbackCapabilities(kg as any, uninitializedDbService);
+
+        await expect(
+          service.createRollbackPoint('uninitialized-db', 'Should fail')
+        ).rejects.toThrow('Database service not initialized');
+      });
     });
 
     describe('getRollbackPoint', () => {

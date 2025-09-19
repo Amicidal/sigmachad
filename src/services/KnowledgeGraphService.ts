@@ -122,6 +122,70 @@ class SimpleCache<T> {
   }
 }
 
+type LocationEntry = { path?: string; line?: number; column?: number };
+
+function collapseLocationsToEarliest(
+  locations: LocationEntry[] = [],
+  limit = 20
+): LocationEntry[] {
+  if (!Array.isArray(locations) || locations.length === 0) {
+    return [];
+  }
+
+  const byPath = new Map<string, { location: LocationEntry; index: number }>();
+
+  locations.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const key = entry.path ?? "";
+    const existing = byPath.get(key);
+    if (!existing) {
+      byPath.set(key, { location: entry, index });
+      return;
+    }
+
+    const existingLine =
+      typeof existing.location.line === "number"
+        ? existing.location.line
+        : Number.POSITIVE_INFINITY;
+    const incomingLine =
+      typeof entry.line === "number" ? entry.line : Number.POSITIVE_INFINITY;
+    if (incomingLine < existingLine) {
+      byPath.set(key, { location: entry, index });
+      return;
+    }
+    if (incomingLine > existingLine) {
+      return;
+    }
+
+    const existingColumn =
+      typeof existing.location.column === "number"
+        ? existing.location.column
+        : Number.POSITIVE_INFINITY;
+    const incomingColumn =
+      typeof entry.column === "number"
+        ? entry.column
+        : Number.POSITIVE_INFINITY;
+
+    if (incomingColumn < existingColumn) {
+      byPath.set(key, { location: entry, index });
+      return;
+    }
+    if (incomingColumn > existingColumn) {
+      return;
+    }
+
+    // Tie-breaker: retain earlier occurrence in the original list
+    if (index < existing.index) {
+      byPath.set(key, { location: entry, index });
+    }
+  });
+
+  return Array.from(byPath.values())
+    .sort((a, b) => a.index - b.index)
+    .slice(0, limit)
+    .map((entry) => entry.location);
+}
+
 const IMPACT_CODE_RELATIONSHIP_TYPES: RelationshipType[] = [
   RelationshipType.CALLS,
   RelationshipType.REFERENCES,
@@ -2474,8 +2538,11 @@ export class KnowledgeGraphService extends EventEmitter {
     }
 
     // Choose merge key: prefer (type,path) for codebase entities, otherwise id
+    const entityType = (properties as any).type as string | undefined;
     const usePathKey =
-      this.hasCodebaseProperties(entity) && (properties as any).path;
+      this.hasCodebaseProperties(entity) &&
+      (properties as any).path &&
+      entityType?.toLowerCase() !== "test";
 
     const shouldEarlyEmit =
       process.env.NODE_ENV === "test" || process.env.RUN_INTEGRATION === "1";
@@ -3177,8 +3244,16 @@ export class KnowledgeGraphService extends EventEmitter {
       if (mergedEvidence || evIn.length > 0) {
         md.evidence = mergedEvidence || evIn;
       }
-      if (mergedLocations || locIn.length > 0) {
-        md.locations = mergedLocations || locIn;
+      if ((mergedLocations && mergedLocations.length > 0) || locIn.length > 0) {
+        const candidateLocations =
+          mergedLocations && mergedLocations.length > 0
+            ? mergedLocations
+            : locIn;
+        const collapsed = collapseLocationsToEarliest(candidateLocations, 20);
+        if (collapsed.length > 0) {
+          md.locations = collapsed;
+          (relationshipObj as any).locations = collapsed;
+        }
       }
       relationshipObj.metadata = md;
     } catch {}
@@ -3709,6 +3784,16 @@ export class KnowledgeGraphService extends EventEmitter {
       toEntityId: relationshipObj.toEntityId,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  async upsertRelationship(relationship: GraphRelationship): Promise<void> {
+    const normalized: any = { ...(relationship as any) };
+    normalized.fromEntityId =
+      normalized.fromEntityId ?? (normalized.sourceId as string | undefined);
+    normalized.toEntityId =
+      normalized.toEntityId ?? (normalized.targetId as string | undefined);
+
+    await this.createRelationship(normalized as GraphRelationship);
   }
 
   /**
@@ -5276,6 +5361,11 @@ export class KnowledgeGraphService extends EventEmitter {
           prev.confidence = Math.max(prev.confidence ?? 0, row.confidence);
         if (!prev.dataFlowId && row.dataFlowId)
           prev.dataFlowId = row.dataFlowId;
+        if (row.resolved === true) {
+          prev.resolved = true;
+        } else if (prev.resolved == null && row.resolved != null) {
+          prev.resolved = row.resolved;
+        }
         // Combine candidate count
         if (typeof row.candidateCount === "number") {
           const a = prev.candidateCount ?? 0;
@@ -7837,7 +7927,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
   // Helper methods
   private getEntityLabels(entity: Entity): string[] {
-    const labels = [entity.type];
+    const labels = ["Entity", entity.type];
 
     // Add specific labels based on entity type
     if (entity.type === "file") {
@@ -7883,6 +7973,75 @@ export class KnowledgeGraphService extends EventEmitter {
     }
 
     return props;
+  }
+
+  private hydrateEntityProperties(properties: Record<string, any>): Entity {
+    if (!properties || typeof properties !== "object") {
+      return properties as Entity;
+    }
+
+    const dateFields = [
+      "lastModified",
+      "created",
+      "lastIndexed",
+      "lastAnalyzed",
+      "lastValidated",
+      "snapshotCreated",
+      "snapshotTakenAt",
+      "updated",
+      "updatedAt",
+      "firstSeenAt",
+      "lastSeenAt",
+    ];
+    for (const field of dateFields) {
+      const value = (properties as any)[field];
+      if (typeof value === "string") {
+        const parsedDate = new Date(value);
+        if (!Number.isNaN(parsedDate.valueOf())) {
+          (properties as any)[field] = parsedDate;
+        }
+      }
+    }
+
+    const jsonFields = [
+      "metadata",
+      "dependencies",
+      "businessDomains",
+      "stakeholders",
+      "technologies",
+      "memberEntities",
+      "extractedFrom",
+      "keyProcesses",
+    ];
+    for (const field of jsonFields) {
+      const value = (properties as any)[field];
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (
+          (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+          (trimmed.startsWith("[") && trimmed.endsWith("]"))
+        ) {
+          try {
+            (properties as any)[field] = JSON.parse(trimmed);
+          } catch {
+            // Keep original string if parsing fails
+          }
+        }
+      }
+    }
+
+    const numericFields = ["size", "lines", "version"];
+    for (const field of numericFields) {
+      const value = (properties as any)[field];
+      if (typeof value === "string") {
+        const parsed = Number(value);
+        if (!Number.isNaN(parsed)) {
+          (properties as any)[field] = parsed;
+        }
+      }
+    }
+
+    return properties as Entity;
   }
 
   private parseEntityFromGraph(graphNode: any): Entity {
@@ -7933,114 +8092,19 @@ export class KnowledgeGraphService extends EventEmitter {
       const properties = toPropsFromPairs(graphNode.n);
 
       // Convert date strings back to Date objects
-      if (
-        properties.lastModified &&
-        typeof properties.lastModified === "string"
-      ) {
-        properties.lastModified = new Date(properties.lastModified);
-      }
-      if (properties.created && typeof properties.created === "string") {
-        properties.created = new Date(properties.created);
-      }
-
-      // Parse JSON strings back to their original types
-      const jsonFields = ["metadata", "dependencies"];
-      for (const field of jsonFields) {
-        if (properties[field] && typeof properties[field] === "string") {
-          try {
-            properties[field] = JSON.parse(properties[field]);
-          } catch (e) {
-            // If parsing fails, keep as string
-          }
-        }
-      }
-
-      // Convert numeric fields from strings back to numbers
-      const numericFields = ["size", "lines", "version"];
-      for (const field of numericFields) {
-        if (properties[field] && typeof properties[field] === "string") {
-          const parsed = parseFloat(properties[field]);
-          if (!isNaN(parsed)) {
-            properties[field] = parsed;
-          }
-        }
-      }
-
-      return properties as Entity;
+      return this.hydrateEntityProperties(properties);
     }
 
     // Case 2: explicit 'connected' alias
     if (graphNode && graphNode.connected && isPairArray(graphNode.connected)) {
       const properties = toPropsFromPairs(graphNode.connected);
-
-      if (
-        properties.lastModified &&
-        typeof properties.lastModified === "string"
-      ) {
-        properties.lastModified = new Date(properties.lastModified);
-      }
-      if (properties.created && typeof properties.created === "string") {
-        properties.created = new Date(properties.created);
-      }
-
-      const jsonFields = ["metadata", "dependencies"];
-      for (const field of jsonFields) {
-        if (properties[field] && typeof properties[field] === "string") {
-          try {
-            properties[field] = JSON.parse(properties[field]);
-          } catch {}
-        }
-      }
-
-      // Convert numeric fields from strings back to numbers
-      const numericFields = ["size", "lines", "version"];
-      for (const field of numericFields) {
-        if (properties[field] && typeof properties[field] === "string") {
-          const parsed = parseFloat(properties[field]);
-          if (!isNaN(parsed)) {
-            properties[field] = parsed;
-          }
-        }
-      }
-
-      return properties as Entity;
+      return this.hydrateEntityProperties(properties);
     }
 
     // Case 3: node returned directly as array-of-pairs
     if (isPairArray(graphNode)) {
       const properties = toPropsFromPairs(graphNode);
-
-      if (
-        properties.lastModified &&
-        typeof properties.lastModified === "string"
-      ) {
-        properties.lastModified = new Date(properties.lastModified);
-      }
-      if (properties.created && typeof properties.created === "string") {
-        properties.created = new Date(properties.created);
-      }
-
-      const jsonFields = ["metadata", "dependencies"];
-      for (const field of jsonFields) {
-        if (properties[field] && typeof properties[field] === "string") {
-          try {
-            properties[field] = JSON.parse(properties[field]);
-          } catch {}
-        }
-      }
-
-      // Convert numeric fields from strings back to numbers
-      const numericFields = ["size", "lines", "version"];
-      for (const field of numericFields) {
-        if (properties[field] && typeof properties[field] === "string") {
-          const parsed = parseFloat(properties[field]);
-          if (!isNaN(parsed)) {
-            properties[field] = parsed;
-          }
-        }
-      }
-
-      return properties as Entity;
+      return this.hydrateEntityProperties(properties);
     }
 
     // Case 4: already an object with id
@@ -8049,11 +8113,11 @@ export class KnowledgeGraphService extends EventEmitter {
       typeof graphNode === "object" &&
       typeof graphNode.id === "string"
     ) {
-      return graphNode as Entity;
+      return this.hydrateEntityProperties({ ...(graphNode as any) });
     }
 
     // Fallback for other formats
-    return graphNode as Entity;
+    return this.hydrateEntityProperties(graphNode as Record<string, any>);
   }
 
   private parseRelationshipFromGraph(graphResult: any): GraphRelationship {
@@ -8209,6 +8273,7 @@ export class KnowledgeGraphService extends EventEmitter {
   async listEntities(
     options: {
       type?: string;
+      kind?: string;
       language?: string;
       path?: string;
       tags?: string[];
@@ -8216,16 +8281,29 @@ export class KnowledgeGraphService extends EventEmitter {
       offset?: number;
     } = {}
   ): Promise<{ entities: Entity[]; total: number }> {
-    const { type, language, path, tags, limit = 50, offset = 0 } = options;
+    const {
+      type,
+      kind,
+      language,
+      path,
+      tags,
+      limit = 50,
+      offset = 0,
+    } = options;
 
     let query = "MATCH (n)";
     const whereClause: string[] = [];
-    const params: any = {};
+    const params: Record<string, unknown> = {};
 
     // Add type filter
     if (type) {
       whereClause.push("n.type = $type");
       params.type = type;
+    }
+
+    if (kind) {
+      whereClause.push("n.kind = $kind");
+      params.kind = kind;
     }
 
     // Add language filter

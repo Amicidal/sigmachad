@@ -10,6 +10,10 @@ import { ASTParser } from '../../services/ASTParser.js';
 import { FileWatcher } from '../../services/FileWatcher.js';
 import { router, publicProcedure, TRPCContext } from './base.js';
 import type { FastifyRequest } from 'fastify';
+import {
+  authenticateRequest,
+  authenticateHeaders,
+} from '../middleware/authentication.js';
 
 // Create tRPC context
 export const createTRPCContext = async (opts: {
@@ -19,21 +23,26 @@ export const createTRPCContext = async (opts: {
   fileWatcher: FileWatcher;
   req?: FastifyRequest;
 }): Promise<TRPCContext> => {
-  // Extract auth token from headers if available
+  // Derive authentication context from the inbound request headers
   let authToken: string | undefined;
+  let authContext = undefined;
   try {
-    const hdrs = (opts.req as any)?.headers || {};
-    const headerKey = (hdrs['x-api-key'] as string | undefined) || '';
-    const authz = (hdrs['authorization'] as string | undefined) || '';
-    const bearer = authz.toLowerCase().startsWith('bearer ') ? authz.slice(7) : authz;
-    authToken = headerKey || bearer || undefined;
+    if (opts.req) {
+      authContext = authenticateRequest(opts.req);
+    } else {
+      const hdrs = (opts as any)?.req?.headers || {};
+      authContext = authenticateHeaders(hdrs);
+    }
+    authToken = authContext?.rawToken;
   } catch {
     authToken = undefined;
   }
+
   const { req, ...rest } = opts as any;
   return {
     ...rest,
     authToken,
+    authContext,
   } as TRPCContext;
 };
 

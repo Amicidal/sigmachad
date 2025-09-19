@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { registerAdminRoutes } from '../../../../src/api/routes/admin.js';
+import { MaintenanceMetrics } from '../../../../src/services/metrics/MaintenanceMetrics.js';
 import {
   createMockRequest,
   createMockReply,
@@ -166,6 +167,8 @@ describe('Admin Routes', () => {
       expect(mockApp.post).toHaveBeenCalledWith('/backup', expect.any(Object), expect.any(Function));
       expect(mockApp.post).toHaveBeenCalledWith('/restore', expect.any(Object), expect.any(Function));
       expect(mockApp.get).toHaveBeenCalledWith('/logs', expect.any(Object), expect.any(Function));
+      expect(mockApp.get).toHaveBeenCalledWith('/maintenance/metrics', expect.any(Function));
+      expect(mockApp.get).toHaveBeenCalledWith('/maintenance/metrics/prometheus', expect.any(Function));
       expect(mockApp.post).toHaveBeenCalledWith('/maintenance', expect.any(Object), expect.any(Function));
       expect(mockApp.get).toHaveBeenCalledWith('/config', expect.any(Function));
       expect(mockApp.put).toHaveBeenCalledWith('/config', expect.any(Object), expect.any(Function));
@@ -181,7 +184,9 @@ describe('Admin Routes', () => {
       );
 
       // Routes should still be registered (some may return 503 if service unavailable)
-      expect(mockApp.get).toHaveBeenCalledTimes(5); // health, sync-status, analytics, logs, config
+      expect(mockApp.get).toHaveBeenCalledWith('/maintenance/metrics', expect.any(Function));
+      expect(mockApp.get).toHaveBeenCalledWith('/maintenance/metrics/prometheus', expect.any(Function));
+      expect(mockApp.get).toHaveBeenCalledTimes(7); // health, sync-status, analytics, logs, config, maintenance metrics (2)
       expect(mockApp.post).toHaveBeenCalledTimes(4); // sync, backup, restore, maintenance
       expect(mockApp.put).toHaveBeenCalledTimes(1); // config update
     });
@@ -337,6 +342,52 @@ describe('Admin Routes', () => {
       await handlerWithWatcher(mockRequest, mockReply);
 
       // Should be marked as healthy when file watcher exists
+    });
+  });
+
+  describe('GET /maintenance/metrics', () => {
+    let maintenanceMetricsHandler: Function;
+    let prometheusMetricsHandler: Function;
+
+    beforeEach(async () => {
+      await registerAdminRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockFileWatcher,
+        mockSyncCoordinator,
+        mockSyncMonitor
+      );
+
+      maintenanceMetricsHandler = getHandler('get', '/maintenance/metrics');
+      prometheusMetricsHandler = getHandler('get', '/maintenance/metrics/prometheus');
+    });
+
+    it('should return maintenance metrics summary', async () => {
+      const summary = { backups: { total: 3 }, restores: { apply: { total: 1 } } };
+      const instance = MaintenanceMetrics.getInstance();
+      const summarySpy = vi.spyOn(instance, 'getSummary').mockReturnValue(summary as any);
+
+      await maintenanceMetricsHandler(mockRequest, mockReply);
+
+      expect(summarySpy).toHaveBeenCalled();
+      expect(mockReply.send).toHaveBeenCalledWith({ success: true, data: summary });
+
+      summarySpy.mockRestore();
+    });
+
+    it('should return prometheus formatted metrics', async () => {
+      const textMetrics = '# HELP maintenance_test_counter Test counter\n# TYPE maintenance_test_counter counter\nmaintenance_test_counter 1';
+      const instance = MaintenanceMetrics.getInstance();
+      const promSpy = vi.spyOn(instance, 'toPrometheus').mockReturnValue(textMetrics);
+
+      await prometheusMetricsHandler(mockRequest, mockReply);
+
+      expect(promSpy).toHaveBeenCalled();
+      expect(mockReply.header).toHaveBeenCalledWith('Content-Type', 'text/plain; version=0.0.4');
+      expect(mockReply.send).toHaveBeenCalledWith(textMetrics);
+
+      promSpy.mockRestore();
     });
   });
 

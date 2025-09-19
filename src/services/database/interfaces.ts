@@ -7,6 +7,28 @@ export interface HealthComponentStatus {
   details?: any;
 }
 
+export interface BackupProviderDefinition {
+  type: "local" | "s3" | "gcs" | string;
+  options?: Record<string, unknown>;
+}
+
+export interface BackupRetentionPolicyConfig {
+  maxAgeDays?: number;
+  maxEntries?: number;
+  maxTotalSizeBytes?: number;
+  deleteArtifacts?: boolean;
+}
+
+export interface BackupConfiguration {
+  defaultProvider?: string;
+  local?: {
+    basePath?: string;
+    allowCreate?: boolean;
+  };
+  providers?: Record<string, BackupProviderDefinition>;
+  retention?: BackupRetentionPolicyConfig;
+}
+
 export interface DatabaseConfig {
   falkordb: {
     url: string;
@@ -25,6 +47,7 @@ export interface DatabaseConfig {
   redis?: {
     url: string;
   };
+  backups?: BackupConfiguration;
 }
 
 export interface IFalkorDBService {

@@ -383,8 +383,8 @@ describe('MaintenanceService Integration', () => {
       // Wait for completion
       await cleanupPromise;
 
-      // Check final status
-      const finalTaskStatus = maintenanceService.getTaskStatus(taskId);
+      // Check final status using completed task registry
+      const finalTaskStatus = maintenanceService.getCompletedTask(taskId);
       expect(finalTaskStatus?.status).toBe('completed');
     });
   });
@@ -400,14 +400,9 @@ describe('MaintenanceService Integration', () => {
       // Create maintenance service with uninitialized database
       const invalidMaintenanceService = new MaintenanceService({} as DatabaseService, kgService);
 
-      // This should either fail gracefully or handle the error
-      try {
-        await invalidMaintenanceService.runMaintenanceTask('cleanup');
-        // If it succeeds, that's also acceptable as it means the service handles errors well
-      } catch (error) {
-        // Expected to fail with database issues
-        expect(error).toBeInstanceOf(Error);
-      }
+      await expect(
+        invalidMaintenanceService.runMaintenanceTask('cleanup')
+      ).rejects.toThrow(/Database service/);
     });
 
     it('should handle concurrent maintenance tasks', async () => {

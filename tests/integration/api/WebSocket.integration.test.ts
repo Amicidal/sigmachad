@@ -109,10 +109,15 @@ describe("WebSocket Router Integration", () => {
           connections.push(ws);
 
           ws.on("open", () => {
+            expect(ws.readyState).toBe(WebSocket.OPEN);
             connectedCount++;
             if (connectedCount === connectionCount) {
+              connections.forEach((conn) => {
+                expect(conn.readyState).toBe(WebSocket.OPEN);
+              });
               // All connections established
-              connections.forEach((ws) => ws.close());
+              expect(connectedCount).toBe(connectionCount);
+              connections.forEach((conn) => conn.close());
               resolve();
             }
           });
@@ -503,7 +508,17 @@ describe("WebSocket Router Integration", () => {
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
         const subscriptions = ["entity_created", "file_change", "sync_status"];
+        const expectedSubscriptions = new Set(subscriptions);
         let ackCount = 0;
+        let requestedList = false;
+        const timeoutId = setTimeout(() => {
+          ws.close();
+          reject(
+            new Error(
+              `Did not receive all subscription data. Acks ${ackCount}/${subscriptions.length}, requestedList=${requestedList}`
+            )
+          );
+        }, 10000); // Increased timeout to 10 seconds for better reliability
 
         ws.on("open", () => {
           console.log(
@@ -538,32 +553,42 @@ describe("WebSocket Router Integration", () => {
             });
 
             if (message.type === "subscribed") {
+              const ackEvent =
+                message.data?.event ??
+                (message as any).event ??
+                message.data?.channel ??
+                (message as any).channel;
+              expect(ackEvent).toBeDefined();
+              expect(expectedSubscriptions.has(ackEvent as string)).toBe(true);
               ackCount++;
               console.log(
                 `Subscription ack received. Count: ${ackCount}/${subscriptions.length}`
               );
 
-              if (ackCount >= subscriptions.length) {
-                console.log(
-                  "All subscription acknowledgments received, closing connection"
+              if (ackCount === subscriptions.length && !requestedList) {
+                requestedList = true;
+                ws.send(
+                  JSON.stringify({
+                    type: "list_subscriptions",
+                    id: "list-subscriptions-check",
+                  })
                 );
-                ws.close();
-                resolve();
               }
+            } else if (message.type === "subscriptions") {
+              expect(Array.isArray(message.data)).toBe(true);
+              expect(message.data).toEqual(
+                expect.arrayContaining(subscriptions)
+              );
+              expect(message.data.length).toBe(subscriptions.length);
+              clearTimeout(timeoutId);
+              console.log("Subscriptions list received, closing connection");
+              ws.close();
+              resolve();
             } else if (message.type === "error") {
               console.error("Received error message:", message);
-              ackCount++;
-              console.log(
-                `Error ack received. Count: ${ackCount}/${subscriptions.length}`
-              );
-
-              if (ackCount >= subscriptions.length) {
-                console.log(
-                  "All subscription acknowledgments received (including errors), closing connection"
-                );
-                ws.close();
-                resolve();
-              }
+              clearTimeout(timeoutId);
+              ws.close();
+              reject(new Error(`Received error response: ${JSON.stringify(message)}`));
             }
           } catch (error) {
             console.error("Failed to parse WebSocket message:", error);
@@ -572,19 +597,9 @@ describe("WebSocket Router Integration", () => {
         });
 
         ws.on("error", (error) => {
+          clearTimeout(timeoutId);
           reject(error);
         });
-
-        setTimeout(() => {
-          ws.close();
-          if (ackCount < subscriptions.length) {
-            reject(
-              new Error(
-                `Did not receive all subscription acks. Got ${ackCount}/${subscriptions.length}`
-              )
-            );
-          }
-        }, 10000); // Increased timeout to 10 seconds for better reliability
       });
     });
 
@@ -594,6 +609,10 @@ describe("WebSocket Router Integration", () => {
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
+        const timeoutId = setTimeout(() => {
+          ws.close();
+          reject(new Error("Did not receive unsubscribe ack"));
+        }, 3000);
 
         ws.on("open", () => {
           // Subscribe first
@@ -617,6 +636,14 @@ describe("WebSocket Router Integration", () => {
           try {
             const message = JSON.parse(data.toString());
             if (message.type === "unsubscribed") {
+              const eventName =
+                message.data?.event ??
+                (message as any).event ??
+                message.data?.channel ??
+                (message as any).channel;
+              expect(eventName).toBe("test-channel");
+              expect(message.data?.totalSubscriptions ?? 0).toBe(0);
+              clearTimeout(timeoutId);
               ws.close();
               resolve();
             }
@@ -626,13 +653,9 @@ describe("WebSocket Router Integration", () => {
         });
 
         ws.on("error", (error) => {
+          clearTimeout(timeoutId);
           reject(error);
         });
-
-        setTimeout(() => {
-          ws.close();
-          reject(new Error("Did not receive unsubscribe ack"));
-        }, 3000);
       });
     });
 
@@ -684,61 +707,123 @@ describe("WebSocket Router Integration", () => {
       const port = apiGateway.getConfig().port;
       const wsUrl = `ws://localhost:${port}/ws`;
       const clientCount = 3;
-      const clients: WebSocket[] = [];
-      const receivedMessages: number[] = new Array(clientCount).fill(0);
 
       await new Promise<void>((resolve, reject) => {
-        let connectedCount = 0;
+        const clients: WebSocket[] = [];
+        const ackedClients = new Set<number>();
+        const receivedClients = new Set<number>();
+        let broadcastTriggered = false;
+        const entityId = `ws-broadcast-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2)}`;
+        let settled = false;
+
+        const cleanup = () => {
+          clients.forEach((client) => {
+            try {
+              client.close();
+            } catch {
+              // ignore cleanup errors
+            }
+          });
+        };
+
+        const finishSuccess = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          cleanup();
+          resolve();
+        };
+
+        const finishFailure = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          cleanup();
+          reject(error);
+        };
+
+        const timeoutId = setTimeout(() => {
+          finishFailure(new Error("Timed out waiting for broadcast event"));
+        }, 8000);
+
+        const triggerBroadcast = async () => {
+          if (broadcastTriggered || ackedClients.size !== clientCount) {
+            return;
+          }
+          broadcastTriggered = true;
+          try {
+            await kgService.createEntity({
+              id: entityId,
+              type: "function",
+              name: "WebSocketBroadcastTest",
+              path: "/tests/websocket-broadcast.ts",
+              language: "typescript",
+              lastModified: new Date(),
+              created: new Date(),
+              hash: entityId,
+            } as any);
+          } catch (error) {
+            finishFailure(
+              error instanceof Error ? error : new Error(String(error))
+            );
+          }
+        };
 
         for (let i = 0; i < clientCount; i++) {
+          const clientIndex = i;
           const ws = new WebSocket(wsUrl);
           clients.push(ws);
 
           ws.on("open", () => {
-            connectedCount++;
-            if (connectedCount === clientCount) {
-              // All clients connected, subscribe them
-              clients.forEach((client, index) => {
-                const subscribeMessage = {
-                  type: "subscribe",
-                  data: { channel: "broadcast-test" },
-                };
-                client.send(JSON.stringify(subscribeMessage));
-              });
-
-              // Send broadcast message after subscriptions
-              setTimeout(() => {
-                // Note: In a real implementation, you'd have an admin endpoint to trigger broadcasts
-                // For this test, we just verify the subscription mechanism works
-                clients.forEach((client) => client.close());
-                resolve();
-              }, 1000);
-            }
+            ws.send(
+              JSON.stringify({
+                type: "subscribe",
+                data: { event: "entity_created" },
+                id: `broadcast-sub-${clientIndex}`,
+              })
+            );
           });
 
           ws.on("message", (data) => {
             try {
               const message = JSON.parse(data.toString());
-              if (message.type === "broadcast") {
-                const clientIndex = clients.indexOf(ws);
-                if (clientIndex !== -1) {
-                  receivedMessages[clientIndex]++;
+              if (message.type === "subscribed") {
+                const ackEvent =
+                  message.data?.event ??
+                  (message as any).event ??
+                  message.data?.channel ??
+                  (message as any).channel;
+                expect(ackEvent).toBe("entity_created");
+                ackedClients.add(clientIndex);
+                void triggerBroadcast();
+              } else if (
+                message.type === "event" &&
+                message.data?.type === "entity_created"
+              ) {
+                expect(message.data.type).toBe("entity_created");
+                const payloadId: string | undefined =
+                  message.data?.data?.id ?? message.data?.id;
+                expect(payloadId).toBeDefined();
+                if (payloadId === entityId) {
+                  receivedClients.add(clientIndex);
+                  if (receivedClients.size === clientCount) {
+                    finishSuccess();
+                  }
                 }
               }
             } catch (error) {
-              // Ignore parsing errors
+              finishFailure(
+                error instanceof Error ? error : new Error(String(error))
+              );
             }
           });
 
           ws.on("error", (error) => {
-            reject(error);
+            finishFailure(error instanceof Error ? error : new Error(String(error)));
           });
         }
-
-        setTimeout(() => {
-          clients.forEach((client) => client.close());
-          resolve(); // Test passes as long as connections work
-        }, 5000);
       });
     });
   });

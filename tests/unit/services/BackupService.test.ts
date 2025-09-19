@@ -751,6 +751,8 @@ describe("BackupService", () => {
           .toEqual(expect.any(Object));
         expect(result.changes.find((c) => c.component === "config"))
           .toEqual(expect.any(Object));
+        expect(result.token).toEqual(expect.any(String));
+        expect(result.requiresApproval).toBe(false);
       });
 
       it("should throw error when backup not found", async () => {
@@ -758,9 +760,10 @@ describe("BackupService", () => {
 
         (fs.readFile as any).mockRejectedValue(new Error("File not found"));
 
-        await expect(
-          backupService.restoreBackup(backupId, { dryRun: true })
-        ).rejects.toThrow("Backup nonexistent-backup not found");
+        const result = await backupService.restoreBackup(backupId, { dryRun: true });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.code).toBe("NOT_FOUND");
       });
     });
 
@@ -784,14 +787,47 @@ describe("BackupService", () => {
 
         (fs.readFile as any).mockResolvedValue(JSON.stringify(metadata));
 
+        const preview = await backupService.restoreBackup(backupId, {
+          dryRun: true,
+        });
+
+        expect(preview.token).toBeDefined();
+
         const result = await backupService.restoreBackup(backupId, {
           dryRun: false,
+          restoreToken: preview.token,
         });
 
         expect(result.backupId).toBe(backupId);
         expect(result.status).toBe("completed");
         expect(result.changes).toHaveLength(4);
         expect(result.changes.every((c) => c.action === "restored")).toBe(true);
+      });
+
+      it("should require a restore token for apply step", async () => {
+        const backupId = "token-test-backup";
+        const metadata: BackupMetadata = {
+          id: backupId,
+          type: "full",
+          timestamp: new Date(),
+          size: 256,
+          checksum: "token-checksum",
+          components: {
+            falkordb: true,
+            qdrant: false,
+            postgres: false,
+            config: false,
+          },
+          status: "completed",
+        };
+
+        (fs.readFile as any).mockResolvedValue(JSON.stringify(metadata));
+
+        await backupService.restoreBackup(backupId, { dryRun: true });
+
+        await expect(
+          backupService.restoreBackup(backupId, { dryRun: false })
+        ).rejects.toThrow("Restore token is required");
       });
 
       it("should skip components not included in backup", async () => {
@@ -813,13 +849,99 @@ describe("BackupService", () => {
 
         (fs.readFile as any).mockResolvedValue(JSON.stringify(metadata));
 
+        const preview = await backupService.restoreBackup(backupId, {
+          dryRun: true,
+        });
+
         const result = await backupService.restoreBackup(backupId, {
           dryRun: false,
+          restoreToken: preview.token!,
         });
 
         expect(result.changes).toHaveLength(1);
         expect(result.changes[0].component).toBe("qdrant");
         expect(result.changes[0].action).toBe("restored");
+      });
+
+      it("should enforce secondary approval when required", async () => {
+        const backupId = "approval-backup";
+        const metadata: BackupMetadata = {
+          id: backupId,
+          type: "full",
+          timestamp: new Date(),
+          size: 2048,
+          checksum: "approval-checksum",
+          components: {
+            falkordb: false,
+            qdrant: true,
+            postgres: false,
+            config: false,
+          },
+          status: "completed",
+        };
+
+        const serviceWithApproval = new BackupService(mockDbService, testConfig, {
+          restorePolicy: { requireSecondApproval: true },
+        });
+
+        (fs.readFile as any).mockResolvedValue(JSON.stringify(metadata));
+
+        const preview = await serviceWithApproval.restoreBackup(backupId, {
+          dryRun: true,
+          requestedBy: "builder",
+        });
+
+        expect(preview.requiresApproval).toBe(true);
+
+        await expect(
+          serviceWithApproval.restoreBackup(backupId, {
+            dryRun: false,
+            restoreToken: preview.token!,
+          })
+        ).rejects.toThrow("Restore requires secondary approval before execution");
+
+        serviceWithApproval.approveRestore({
+          token: preview.token!,
+          approvedBy: "reviewer",
+          reason: "Scheduled maintenance window",
+        });
+
+        (fs.readFile as any).mockResolvedValue(JSON.stringify(metadata));
+
+        const applied = await serviceWithApproval.restoreBackup(backupId, {
+          dryRun: false,
+          restoreToken: preview.token!,
+        });
+
+        expect(applied.success).toBe(true);
+        expect(applied.requiresApproval).toBe(true);
+      });
+
+      it("should prune old backups according to retention policy", async () => {
+        const serviceWithRetention = new BackupService(mockDbService, {
+          ...testConfig,
+          backups: {
+            retention: {
+              maxEntries: 1,
+              deleteArtifacts: false,
+            },
+          },
+        });
+
+        const baseOptions: BackupOptions = {
+          type: "full",
+          includeData: false,
+          includeConfig: false,
+          compression: false,
+        };
+
+        const firstBackup = await serviceWithRetention.createBackup(baseOptions);
+        const secondBackup = await serviceWithRetention.createBackup(baseOptions);
+
+        const storedBackups = (mockPostgres as any).maintenanceBackups as Map<string, any>;
+        expect(storedBackups.size).toBe(1);
+        expect(storedBackups.has(secondBackup.id)).toBe(true);
+        expect(storedBackups.has(firstBackup.id)).toBe(false);
       });
 
       it("should handle restore failures gracefully", async () => {
@@ -857,8 +979,15 @@ describe("BackupService", () => {
 
         (fs.readFile as any).mockResolvedValue(JSON.stringify(metadata));
 
+        const preview = await backupService.restoreBackup(backupId, {
+          dryRun: true,
+        });
+
         await expect(
-          backupService.restoreBackup(backupId, { dryRun: false })
+          backupService.restoreBackup(backupId, {
+            dryRun: false,
+            restoreToken: preview.token!,
+          })
         ).rejects.toThrow(); // Should propagate the error
       });
     });

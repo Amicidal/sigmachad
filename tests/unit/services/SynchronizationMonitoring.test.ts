@@ -60,10 +60,16 @@ function createMockSyncError(overrides: Partial<SyncError> = {}): SyncError {
 // Helper to create mock SyncConflict
 function createMockSyncConflict(overrides: Partial<SyncConflict> = {}): SyncConflict {
   return {
+    id: 'sync-conflict-1',
+    type: 'entity_version',
     entityId: 'entity-1',
-    type: 'version_conflict',
     description: 'Version conflict detected',
+    conflictingValues: {
+      current: { version: 1 },
+      incoming: { version: 2 },
+    },
     timestamp: mockDate,
+    resolved: false,
     ...overrides
   };
 }

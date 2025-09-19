@@ -57,7 +57,12 @@ async function main() {
     const syncMonitor = new SynchronizationMonitoring();
     const conflictResolver = new ConflictResolution(kgService);
     const rollbackCapabilities = new RollbackCapabilities(kgService, dbService);
-    const syncCoordinator = new SynchronizationCoordinator(kgService, astParser, dbService);
+    const syncCoordinator = new SynchronizationCoordinator(
+      kgService,
+      astParser,
+      dbService,
+      conflictResolver
+    );
 
     // Wire up event handlers for monitoring
     syncCoordinator.on('operationStarted', (operation) => {
@@ -72,6 +77,9 @@ async function main() {
     // Track progress/phase updates
     syncCoordinator.on('syncProgress', (operation: any, payload: { phase: string; progress?: number }) => {
       try { syncMonitor.recordProgress(operation, payload); } catch {}
+    });
+    syncCoordinator.on('conflictDetected', (conflict) => {
+      syncMonitor.recordConflict(conflict as any);
     });
 
     conflictResolver.addConflictListener((conflict) => {
