@@ -6,7 +6,6 @@
 import crypto from "crypto";
 import { Entity } from "../models/entities.js";
 import { GraphRelationship } from "../models/relationships.js";
-import { canonicalRelationshipId } from "../utils/codeEdges.js";
 import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
 
 export interface Conflict {
@@ -778,8 +777,8 @@ export class ConflictResolution {
     delete rel.sourceId;
     delete rel.targetId;
 
-    if (!rel.id && rel.fromEntityId && rel.toEntityId && rel.type) {
-      rel.id = canonicalRelationshipId(rel.fromEntityId, rel as GraphRelationship);
+    if (rel.fromEntityId && rel.toEntityId && rel.type) {
+      return this.kgService.canonicalizeRelationship(rel as GraphRelationship);
     }
 
     return rel as GraphRelationship;

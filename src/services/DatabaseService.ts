@@ -12,6 +12,11 @@ import {
   IRedisService,
   IDatabaseHealthCheck,
 } from "./database/index.js";
+import type {
+  PerformanceHistoryOptions,
+  PerformanceHistoryRecord,
+} from "../models/types.js";
+import type { PerformanceRelationship } from "../models/relationships.js";
 import { FalkorDBService } from "./database/FalkorDBService.js";
 import { QdrantService } from "./database/QdrantService.js";
 import { PostgreSQLService } from "./database/PostgreSQLService.js";
@@ -359,12 +364,13 @@ export class DatabaseService {
   // FalkorDB operations
   async falkordbQuery(
     query: string,
-    params: Record<string, any> = {}
+    params: Record<string, any> = {},
+    options: { graph?: string } = {}
   ): Promise<any> {
     if (!this.initialized) {
       throw new Error("Database not initialized");
     }
-    return this.falkorDBService.query(query, params);
+    return this.falkorDBService.query(query, params, options.graph);
   }
 
   async falkordbCommand(...args: any[]): Promise<FalkorDBQueryResult> {
@@ -559,12 +565,24 @@ export class DatabaseService {
    */
   async getPerformanceMetricsHistory(
     entityId: string,
-    days: number = 30
-  ): Promise<any[]> {
+    options?: number | PerformanceHistoryOptions
+  ): Promise<PerformanceHistoryRecord[]> {
     if (!this.initialized) {
       throw new Error("Database service not initialized");
     }
-    return this.postgresqlService.getPerformanceMetricsHistory(entityId, days);
+    return this.postgresqlService.getPerformanceMetricsHistory(
+      entityId,
+      options
+    );
+  }
+
+  async recordPerformanceMetricSnapshot(
+    snapshot: PerformanceRelationship
+  ): Promise<void> {
+    if (!this.initialized) {
+      throw new Error("Database service not initialized");
+    }
+    await this.postgresqlService.recordPerformanceMetricSnapshot(snapshot);
   }
 
   /**

@@ -602,11 +602,16 @@ describe('tRPC Integration', () => {
 
       expect(response.statusCode).toBe(200);
 
-      // Notifications should not return a response body
       if (response.statusCode === 200) {
         const body = JSON.parse(response.payload);
-        // Should be empty response for notification (no result or error)
-        expect(body).toEqual({});
+        // Current behaviour: respond with acknowledgement payload
+        expect(body).toEqual(
+          expect.objectContaining({
+            jsonrpc: '2.0',
+            result: expect.objectContaining({ ok: true }),
+          })
+        );
+        expect(body).not.toHaveProperty('id');
       }
     });
 

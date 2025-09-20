@@ -716,8 +716,11 @@ describe('Entity Types and Interfaces', () => {
           {
             timestamp: testDate,
             executionTime: 145,
+            averageExecutionTime: 145,
+            p95ExecutionTime: 190,
             successRate: 0.95,
             coveragePercentage: 88,
+            runId: 'run-entity-1',
           },
         ],
       };

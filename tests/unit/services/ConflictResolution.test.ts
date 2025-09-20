@@ -10,10 +10,19 @@ import {
 } from "../../../src/services/ConflictResolution";
 import { Entity } from "../../../src/models/entities";
 import { GraphRelationship, RelationshipType } from "../../../src/models/relationships";
+import { canonicalRelationshipId } from "../../../src/utils/codeEdges";
 
 class MockKnowledgeGraphService {
   entities = new Map<string, Entity>();
   relationships = new Map<string, GraphRelationship>();
+  private readonly namespacePrefix = "ns:";
+
+  private applyPrefix(id: string): string {
+    if (!id) return id;
+    return id.startsWith(this.namespacePrefix)
+      ? id
+      : `${this.namespacePrefix}${id}`;
+  }
 
   async getEntity(entityId: string): Promise<Entity | null> {
     return this.entities.get(entityId) ?? null;
@@ -27,11 +36,17 @@ class MockKnowledgeGraphService {
   async getRelationshipById(
     relationshipId: string
   ): Promise<GraphRelationship | null> {
-    return this.relationships.get(relationshipId) ?? null;
+    const prefixed = this.applyPrefix(relationshipId);
+    return (
+      this.relationships.get(prefixed) ??
+      this.relationships.get(relationshipId) ??
+      null
+    );
   }
 
   async upsertRelationship(relationship: GraphRelationship): Promise<void> {
-    this.relationships.set(relationship.id, { ...relationship });
+    const canonical = this.canonicalizeRelationship(relationship);
+    this.relationships.set(canonical.id, { ...canonical });
   }
 
   setEntity(entity: Entity): void {
@@ -39,7 +54,29 @@ class MockKnowledgeGraphService {
   }
 
   setRelationship(relationship: GraphRelationship): void {
-    this.relationships.set(relationship.id, relationship);
+    const canonical = this.canonicalizeRelationship(relationship);
+    this.relationships.set(canonical.id, canonical);
+  }
+
+  canonicalizeRelationship(relationship: GraphRelationship): GraphRelationship {
+    const normalized = { ...(relationship as any) } as GraphRelationship;
+
+    if (normalized.fromEntityId) {
+      normalized.fromEntityId = this.applyPrefix(normalized.fromEntityId);
+    }
+    if (normalized.toEntityId) {
+      normalized.toEntityId = this.applyPrefix(normalized.toEntityId);
+    }
+
+    if (normalized.fromEntityId && normalized.toEntityId && normalized.type) {
+      const baseId = canonicalRelationshipId(
+        normalized.fromEntityId,
+        normalized
+      );
+      normalized.id = this.applyPrefix(baseId);
+    }
+
+    return normalized;
   }
 }
 
@@ -161,6 +198,10 @@ describe("ConflictResolution", () => {
       expect(conflicts).toHaveLength(1);
       const conflict = conflicts[0];
       expect(conflict.type).toBe("relationship_conflict");
+      const canonicalIncoming = kgService.canonicalizeRelationship(
+        incoming as GraphRelationship
+      );
+      expect(conflict.relationshipId).toBe(canonicalIncoming.id);
       expect(conflict.diff).toHaveProperty("metadata.strength");
     });
   });
@@ -210,6 +251,9 @@ describe("ConflictResolution", () => {
         version: 1,
       } as any;
 
+      const canonicalBaseline = kgService.canonicalizeRelationship(
+        baseline as GraphRelationship
+      );
       kgService.setRelationship(baseline);
 
       const incoming: GraphRelationship = {
@@ -236,7 +280,7 @@ describe("ConflictResolution", () => {
       );
       expect(result).toBe(true);
 
-      const stored = await kgService.getRelationshipById(baseline.id);
+      const stored = await kgService.getRelationshipById(canonicalBaseline.id);
       expect(stored?.metadata).toMatchObject({ strength: 0.7 });
     });
   });

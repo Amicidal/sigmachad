@@ -10,8 +10,15 @@ import {
   SecurityIssue,
   Vulnerability,
   CoverageMetrics,
+  Change,
 } from "./entities.js";
-import { GraphRelationship, RelationshipType } from "./relationships.js";
+import {
+  GraphRelationship,
+  RelationshipType,
+  type PerformanceMetricSample,
+  type PerformanceSeverity,
+  type PerformanceTrend,
+} from "./relationships.js";
 
 // Base API response types
 export interface APIResponse<T = any> {
@@ -78,6 +85,137 @@ export interface TemporalGraphQuery {
   since?: Date;
   until?: Date;
   maxDepth?: number;
+}
+
+export interface EntityTimelineEntry {
+  versionId: string;
+  timestamp: Date;
+  hash?: string;
+  path?: string;
+  language?: string;
+  changeSetId?: string;
+  previousVersionId?: string | null;
+  changes: Array<{
+    changeId: string;
+    type: RelationshipType;
+    metadata?: Record<string, any>;
+    change?: Change;
+  }>;
+  metadata?: Record<string, any>;
+}
+
+export interface EntityTimelineResult {
+  entityId: string;
+  versions: EntityTimelineEntry[];
+  relationships?: RelationshipTimeline[];
+}
+
+export interface RelationshipTimelineSegment {
+  segmentId: string;
+  openedAt: Date;
+  closedAt?: Date | null;
+  changeSetId?: string;
+}
+
+export interface RelationshipTimeline {
+  relationshipId: string;
+  type: RelationshipType | string;
+  fromEntityId: string;
+  toEntityId: string;
+  active: boolean;
+  current?: RelationshipTimelineSegment;
+  segments: RelationshipTimelineSegment[];
+  lastModified?: Date;
+  temporal?: Record<string, any>;
+}
+
+export interface StructuralNavigationEntry {
+  entity: Entity;
+  relationship: GraphRelationship;
+}
+
+export interface ModuleChildrenResult {
+  modulePath: string;
+  parentId?: string;
+  children: StructuralNavigationEntry[];
+}
+
+export interface ModuleHistoryOptions {
+  includeInactive?: boolean;
+  limit?: number;
+  versionLimit?: number;
+}
+
+export interface ModuleHistoryEntitySummary {
+  id: string;
+  type?: string;
+  name?: string;
+  path?: string;
+  language?: string;
+}
+
+export interface ModuleHistoryRelationship {
+  relationshipId: string;
+  type: RelationshipType | string;
+  direction: "outgoing" | "incoming";
+  from: ModuleHistoryEntitySummary;
+  to: ModuleHistoryEntitySummary;
+  active: boolean;
+  current?: RelationshipTimelineSegment;
+  segments: RelationshipTimelineSegment[];
+  firstSeenAt?: Date | null;
+  lastSeenAt?: Date | null;
+  confidence?: number | null;
+  scope?: string | null;
+  metadata?: Record<string, any>;
+  temporal?: Record<string, any>;
+  lastModified?: Date;
+}
+
+export interface ModuleHistoryResult {
+  moduleId?: string | null;
+  modulePath: string;
+  moduleType?: string;
+  generatedAt: Date;
+  versions: EntityTimelineEntry[];
+  relationships: ModuleHistoryRelationship[];
+}
+
+export interface ImportEntry {
+  relationship: GraphRelationship;
+  target?: Entity | null;
+}
+
+export interface ListImportsResult {
+  entityId: string;
+  imports: ImportEntry[];
+}
+
+export interface DefinitionLookupResult {
+  symbolId: string;
+  relationship?: GraphRelationship | null;
+  source?: Entity | null;
+}
+
+export interface SessionChangeSummary {
+  change: Change;
+  relationships: Array<{
+    relationshipId: string;
+    type: RelationshipType;
+    entityId: string;
+    direction: "incoming" | "outgoing";
+  }>;
+  versions: Array<{
+    versionId: string;
+    entityId: string;
+    relationshipType: RelationshipType;
+  }>;
+}
+
+export interface SessionChangesResult {
+  sessionId: string;
+  total: number;
+  changes: SessionChangeSummary[];
 }
 
 // Design & Specification Management Types
@@ -188,8 +326,45 @@ export interface PerformanceMetrics {
   historicalData: {
     timestamp: Date;
     executionTime: number;
+    averageExecutionTime: number;
+    p95ExecutionTime: number;
     successRate: number;
+    coveragePercentage?: number;
+    runId?: string;
   }[];
+}
+
+export interface PerformanceHistoryOptions {
+  days?: number;
+  metricId?: string;
+  environment?: string;
+  severity?: PerformanceSeverity;
+  limit?: number;
+}
+
+export interface PerformanceHistoryRecord {
+  id?: string;
+  testId?: string;
+  targetId?: string;
+  metricId: string;
+  scenario?: string;
+  environment?: string;
+  severity?: PerformanceSeverity;
+  trend?: PerformanceTrend;
+  unit?: string;
+  baselineValue?: number | null;
+  currentValue?: number | null;
+  delta?: number | null;
+  percentChange?: number | null;
+  sampleSize?: number | null;
+  riskScore?: number | null;
+  runId?: string;
+  detectedAt?: Date | null;
+  resolvedAt?: Date | null;
+  metricsHistory?: PerformanceMetricSample[] | null;
+  metadata?: Record<string, any> | null;
+  createdAt?: Date | null;
+  source?: "snapshot";
 }
 
 export interface TestCoverage {

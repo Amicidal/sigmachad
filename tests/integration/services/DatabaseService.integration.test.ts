@@ -2263,30 +2263,27 @@ describe("DatabaseService Integration", () => {
         // First create some performance metrics data
         const entityId = randomUUID();
 
-        // Insert test performance data
-        await dbService.postgresQuery(
-          `
-          INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
-          VALUES ($1, $2, $3, $4)
-        `,
-          [
-            entityId,
-            "response_time",
-            150.5,
-            new Date(Date.now() - 86400000), // 1 day ago
-          ]
-        );
+        const now = new Date();
 
+        // Insert test performance snapshot data
         await dbService.postgresQuery(
           `
-          INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
-          VALUES ($1, $2, $3, $4)
+          INSERT INTO performance_metric_snapshots (
+            test_id,
+            target_id,
+            metric_id,
+            current_value,
+            detected_at,
+            created_at
+          )
+          VALUES
+            ($1, $1, 'response_time', 150.5, $2, $2),
+            ($1, $1, 'response_time', 120.3, $3, $3)
         `,
           [
             entityId,
-            "response_time",
-            120.3,
-            new Date(), // now
+            new Date(now.getTime() - 86400000),
+            now,
           ]
         );
 
@@ -2301,14 +2298,14 @@ describe("DatabaseService Integration", () => {
 
         // Verify structure
         const firstMetric = history[0];
-        expect(firstMetric).toHaveProperty("entity_id");
-        expect(firstMetric).toHaveProperty("metric_type");
-        expect(firstMetric).toHaveProperty("value");
-        expect(firstMetric).toHaveProperty("timestamp");
+        expect(firstMetric).toHaveProperty("metricId", "response_time");
+        expect(firstMetric).toHaveProperty("currentValue");
+        expect(firstMetric).toHaveProperty("detectedAt");
+        expect(firstMetric?.source).toBe("snapshot");
 
         // Cleanup
         await dbService.postgresQuery(
-          "DELETE FROM performance_metrics WHERE entity_id = $1",
+          "DELETE FROM performance_metric_snapshots WHERE test_id = $1",
           [entityId]
         );
       });

@@ -168,7 +168,7 @@ describe('canonicalRelationshipId', () => {
 
   it('falls back to raw ids for non-code relationships', () => {
     const rel = makeRelationship({ type: RelationshipType.CONTAINS, toEntityId: 'file:src/a.ts' });
-    expect(canonicalRelationshipId('from1', rel)).toMatch(/^rel_[0-9a-f]{40}$/);
+    expect(canonicalRelationshipId('from1', rel)).toMatch(/^time-rel_[0-9a-f]{40}$/);
   });
 });
 

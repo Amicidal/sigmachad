@@ -1,4 +1,9 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
+import type {
+  PerformanceHistoryOptions,
+  PerformanceHistoryRecord,
+} from '../../models/types.js';
+import type { PerformanceRelationship } from '../../models/relationships.js';
 
 export type HealthStatus = 'healthy' | 'unhealthy' | 'unknown';
 
@@ -55,7 +60,11 @@ export interface IFalkorDBService {
   close(): Promise<void>;
   isInitialized(): boolean;
   getClient(): any;
-  query(query: string, params?: Record<string, any>): Promise<any>;
+  query(
+    query: string,
+    params?: Record<string, any>,
+    graphKey?: string
+  ): Promise<any>;
   command(...args: any[]): Promise<any>;
   setupGraph(): Promise<void>;
   healthCheck(): Promise<boolean>;
@@ -89,7 +98,13 @@ export interface IPostgreSQLService {
   storeTestSuiteResult(suiteResult: any): Promise<void>;
   storeFlakyTestAnalyses(analyses: any[]): Promise<void>;
   getTestExecutionHistory(entityId: string, limit?: number): Promise<any[]>;
-  getPerformanceMetricsHistory(entityId: string, days?: number): Promise<any[]>;
+  getPerformanceMetricsHistory(
+    entityId: string,
+    options?: number | PerformanceHistoryOptions
+  ): Promise<PerformanceHistoryRecord[]>;
+  recordPerformanceMetricSnapshot(
+    snapshot: PerformanceRelationship
+  ): Promise<void>;
   getCoverageHistory(entityId: string, days?: number): Promise<any[]>;
 }
 

@@ -346,6 +346,127 @@ Calculates the impact surface for a single entity, returning full graph analysis
 }
 ```
 
+## Graph Navigation
+
+### GET `/api/graph/modules/children`
+Lists the structural children (directories, files, and symbols) for a module or directory while preserving relationship metadata. Useful for editor navigation panes and tree views.
+
+**Query Parameters**
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `modulePath` | string | ✅ | Normalized module path or entity id (`file:src/app.ts:module`). |
+| `includeFiles` | boolean | ❌ | Defaults to `true`. When `false`, file nodes are omitted. |
+| `includeSymbols` | boolean | ❌ | Defaults to `true`. When `false`, symbol children are omitted. |
+| `language` | string &#124; string[] | ❌ | Case-insensitive match on relationship or child language. Accepts comma-separated values. |
+| `symbolKind` | string &#124; string[] | ❌ | Filters symbol children by `kind` (e.g., `class`, `function`). |
+| `modulePathPrefix` | string | ❌ | Restricts children whose `modulePath`/`path` starts with the prefix. |
+| `limit` | number | ❌ | 1-500 (defaults to 50). |
+
+**Sample Response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "modulePath": "src/app.ts",
+    "parentId": "file:src/app.ts:module",
+    "children": [
+      {
+        "entity": {
+          "id": "sym:src/app.ts#Component@abcd1234",
+          "type": "symbol",
+          "kind": "class",
+          "name": "Component",
+          "language": "typescript",
+          "path": "src/app.ts:Component"
+        },
+        "relationship": {
+          "id": "time-rel_child",
+          "type": "CONTAINS",
+          "language": "typescript",
+          "modulePath": "src/app.ts",
+          "symbolKind": "class",
+          "lastSeenAt": "2024-08-01T12:00:00.000Z"
+        }
+      }
+    ]
+  }
+}
+```
+
+### GET `/api/graph/entity/{entityId}/imports`
+Returns the structural import edges for a file or module, including resolved targets and structural metadata. Mirrors the MCP `graph.list_imports` tool.
+
+**Query Parameters**
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `resolvedOnly` | boolean | ❌ | Filters unresolved imports when `true`. |
+| `language` | string &#124; string[] | ❌ | Case-insensitive language filter on the relationship or target entity. |
+| `symbolKind` | string &#124; string[] | ❌ | Restricts results to specific target symbol kinds. |
+| `importAlias` | string &#124; string[] | ❌ | Exact match on import alias. |
+| `importType` | string &#124; string[] | ❌ | One of `default`, `named`, `namespace`, `wildcard`, `side-effect`. |
+| `isNamespace` | boolean | ❌ | Matches namespace (`import * as`) relationships. |
+| `modulePath` | string &#124; string[] | ❌ | Exact match on normalized module path. |
+| `modulePathPrefix` | string | ❌ | Prefix filter for `modulePath`. |
+| `limit` | number | ❌ | 1-1000 (defaults to 200). |
+
+**Sample Response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "entityId": "file:src/app.ts:module",
+    "imports": [
+      {
+        "relationship": {
+          "id": "time-rel_import",
+          "type": "IMPORTS",
+          "importAlias": "Utils",
+          "importType": "namespace",
+          "isNamespace": true,
+          "modulePath": "../lib/utils/index.js",
+          "language": "typescript",
+          "confidence": 0.92
+        },
+        "target": {
+          "id": "sym:src/utils.ts#Helper@123",
+          "type": "symbol",
+          "kind": "function",
+          "name": "Helper",
+          "language": "typescript"
+        }
+      }
+    ]
+  }
+}
+```
+
+### GET `/api/graph/symbol/{symbolId}/definition`
+Resolves the defining entity for a symbol and returns the `DEFINES` relationship metadata.
+
+```json
+{
+  "success": true,
+  "data": {
+    "symbolId": "sym:src/utils.ts#Helper@123",
+    "relationship": {
+      "id": "time-rel_def",
+      "type": "DEFINES",
+      "confidence": 0.97,
+      "language": "typescript"
+    },
+    "source": {
+      "id": "file:src/utils.ts:module",
+      "type": "file",
+      "path": "src/utils.ts"
+    }
+  }
+}
+```
+
 ## Test Management
 
 ### POST `/api/tests/plan-and-generate`

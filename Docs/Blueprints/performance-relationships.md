@@ -4,16 +4,11 @@
 Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) capture how code changes affect benchmarks, latency budgets, and resource usage. They serve incident analysis, regression prevention, and optimization prioritization.
 
 ## 2. Current Gaps
-- No end-to-end ingestion path exists; any emitted metadata (planned by perf monitors) would be reduced to base identifiers.
-- Canonical IDs lack metric-specific disambiguation, so multiple benchmarks against the same entity would collide.
-- Query APIs cannot filter by metrics or thresholds; no infrastructure for storing trends or run history.
-- Temporal history is absent, hindering regression tracking and resolution workflows.
-- Integration load tests for `DatabaseService` (`Performance and Load Testing > should handle large dataset operations`) highlight that our seeded bulk dataset tops out at 40 rows, so the suite expecting 50 rows from a `LIMIT 50` query currently fails. We need additional fixture seeding (or paging support) before the performance blueprint can claim coverage of larger batches.
-- Postgres JSON/JSONB fields are returned as parsed objects in both test and integration modes; we still need to document this contract (and offer opt-in raw string handling) so API consumers do not double-parse payloads that now arrive as objects.
-- `PostgreSQLService.bulkQuery` now performs real batched writes (integration suite confirmed), but lacks instrumentation and chunking strategies for very large payloads; track follow-up work to add metrics, backpressure, and configurable batch sizing so performance runs remain predictable beyond the current 50-row ceiling.
-- History/analytics queries currently trip foreign key constraints because test suites aren't seeded alongside `test_results`; add fixture management or relax FK expectations before timeline/coverage reporting can be validated.
-- Maintenance workflows still lack negative-path handling: `MaintenanceService Integration > Error Handling and Edge Cases > should handle database connection failures gracefully` exits without assertions because the service never surfaces simulated failures. Blueprint coverage should include deterministic failure injection so maintenance tasks can exercise and record recovery paths.
-- The public `/api/v1/tests/performance/:entityId` endpoint never surfaces data after recording executions; newly created specs still return HTTP 404 because no performance metrics are persisted or projected back to the graph. End-to-end workflows expecting a nominal response (even with empty metrics) fail until the ingestion + persistence loop writes default performance summaries for recorded runs.
+- **Instrumentation depth**: Relationship ingestion, canonical IDs, metrics history, and the `/api/tests/performance/:entityId` endpoint are wired end-to-end, but we still lack operational insight (batch timings, queue pressure, failure telemetry) when large performance batches arrive. Extend `PostgreSQLService.bulkQuery` instrumentation and expose request-level logging so regression hunts remain debuggable under load.
+- **Backpressure & sizing**: The current snapshot writer happily accepts 50-row batches, yet we have no adaptive throttling once runs cross that threshold. Add configuration knobs (max batch size, retry budget, queue length) and document the policy to prevent runaway ingestion loops.
+- **Data lifecycle**: Temporal edges now persist with provenance, but we still need archival/retention guidance for high-volume metrics. Define rotation or downsampling strategies before perf dashboards grow beyond manageable storage size.
+- **JSON/JSONB contracts**: API responses now surface parsed JSON objects for `metadata` and `metricsHistory`. Document how callers can opt into raw strings (if required) and keep the contract in sync across unit/integration suites.
+- **Fixtures & load coverage**: Integration datasets should seed at least 50 snapshot rows so `DatabaseService` load tests reflect real ingestion behaviour. Track follow-up scenarios where higher-volume fixtures or pagination exercises the same code paths.
 
 ## 3. Desired Capabilities
 1. Define a robust ingestion contract representing benchmarks, scenarios, and statistical metrics.
@@ -50,7 +45,7 @@ Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) captu
    - Require `metricId` and sanitize to lowercase with `/` separators; limit length.
    - Validate numeric fields; convert string numbers; clamp to sensible ranges.
    - Compute `delta`, `percentChange`, and `trend` if not provided.
-   - Map severity using policy thresholds (config-driven). Optionally store `policyId` referencing threshold config.
+   - Map severity using policy thresholds (config-driven) while forcing improvements/negative deltas to settle at `low` severity so resolved trends no longer surface as regressions. Optionally store `policyId` referencing threshold config.
    - Promote `environment`, `unit`, `sampleSize`, `confidenceInterval`, `runId`, `metrics` array.
    - Merge evidence entries referencing benchmark artifacts.
 2. Validate that `baselineValue` is non-zero before computing percent change; handle zero baseline gracefully.
@@ -67,17 +62,14 @@ Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) captu
 5. **Indexes**: `(metricId)`, `(type, severity)`, `(environment)`, `(trend)`, optionally `(type, metricId, environment)` composite.
 
 ## 8. Query & API Surface
-1. `getRelationships` should accept filters for `metricId`, `environment`, `severity`, `trend`, `percentChangeMin/Max`, `detectedBefore/After`, `resolved`.
-2. Helper APIs:
-   - `getPerformanceRegressions({ severityMin, limit, environment })` sorted by risk score.
-   - `getMetricHistory(metricId, { environment, limit })` returning timeline of values.
-   - `getEntityPerformanceSummary(entityId)` aggregating metrics, statuses, and suggestions.
-3. Provide ready-to-use payloads for dashboards (e.g., top regressions, improvements, resolved items).
+1. `getRelationships` now accepts `metricId`, `environment`, `severity`, `trend`, `detectedAfter`, `detectedBefore`, and resolution filters. Document combined usage patterns (e.g., “critical regressions in staging last 7 days”).
+2. REST + MCP `tests.performance` endpoints return aggregate metrics **and** a `history` array of `performance_metric_snapshots` (see §8). Extend blueprints with concrete payloads so dashboard builders can align on shapes.
+3. Follow-up helpers remain desirable: `getPerformanceRegressions`, `getMetricHistory`, and `getEntityPerformanceSummary` should reuse the snapshot storage once prioritised.
 
 ## 9. Temporal & Auditing
 1. Integrate with history pipeline: open edges when regression detected, close when resolved; maintain `validFrom/validTo` reflecting active regression periods.
 2. Store `metricsHistory` or project to version nodes for deeper timeline analytics.
-3. Provide timeline queries to show metric performance over time for specific entities or metrics.
+3. Provide timeline queries to show metric performance over time for specific entities or metrics; leverage the persisted `metricsHistory` arrays as the compact historical trace.
 
 ## 10. Migration & Backfill Plan
 1. Develop ingestion spec and update instrumentation to emit performance edges; ensure compatibility with new schema.

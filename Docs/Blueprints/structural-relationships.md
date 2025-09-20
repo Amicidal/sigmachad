@@ -10,12 +10,12 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
 - Multi-language support is limited; metadata is TypeScript-centric and not normalized for other languages.
 - Integration tests (`FalkorDBService.integration`) now pass after hardening `FalkorDBService.setupGraph` for missing graphs and duplicate index DDL. We still need an explicit bootstrap path (or first-write hook) that guarantees index creation without relying on retries once data exists.
 - Parameter handling for nested objects fails with "Property values can only be of primitive types or arrays of primitive types" when inserting JSON metadata into nodes; we need a safe serialization strategy (likely JSON string storage + decode in `decodeGraphValue`) that still supports `SET n += $props` flows.
-- Falkor index DDL emitted by `KnowledgeGraphService.ensureIndices` uses `CREATE INDEX ... IF NOT EXISTS`, which RedisGraph rejects. Integration runs log repeated errors and rely on indexes already existing; update the DDL to an idiom the engine supports (or detect availability before issuing the statement).
+- Falkor index bootstrap now issues guarded `CREATE INDEX` statements (without `IF NOT EXISTS`) and tolerates existing definitions; monitor for additional composite index coverage as query workloads evolve.
 - Relationship normalization still stores code edges with raw `USES` types and missing `resolved` flags; `canonicalRelationshipId` is also diverging from the expected `time-rel-*` style IDs. The normalization layer needs to map inferred types (`TYPE_USES`, etc.) and ensure canonical IDs/timestamps align with blueprint contracts (`KnowledgeGraphService Integration > Relationship Operations > normalizes code edges...`).
 - Bulk creation previously failed (`KnowledgeGraphService Integration > Relationship Operations > bulk merges code edges when using createRelationshipsBulk`) because serialized payloads dropped metadata (e.g., `resolved`, secondary locations). Merge pipeline now shares the single-edge normalization path and preserves evidence/locations, but we must keep this guard to avoid future regressions when adjusting bulk ingestion.
 - The MCP `graph.dependencies.analyze` tool currently returns an empty entity list even after recording specs and source files. Dependency edges are not persisted or indexed in a way that the analyzer can traverse, so integration tests expecting at least one dependent entity fail. We need to persist dependency relationships (and expose them via the MCP tool) before claiming graph analysis coverage.
 - The vector search API (`POST /api/v1/vdb/search`) is missing entirely; the handler returns HTTP 404, so semantic search scenarios (type filtering, metadata queries, concurrency) all short-circuit. We need to surface the vector-store client through this route (or provide a meaningful stub) before integration tests can validate search behaviour.
-- Confidence metadata for dependency edges now differentiates local (0.9), file-resolved (0.6), and unresolved external (0.4) references at parse time, but the persistence layer still ignores these fields and downstream analyses cannot consume them. Capture and expose confidence/`scope` in storage and consider whether the lowered default `MIN_INFERRED_CONFIDENCE` (0.4) warrants additional filtering in analytics.
+- Confidence metadata for dependency edges now differentiates local (0.9), file-resolved (0.6), and unresolved external (0.4) references at parse time, and the persistence layer hoists both `confidence` and `scope` for structural edges; analytics consumers should continue to respect the configurable minimum confidence thresholds when interpreting outcomes.
 - Entity listing previously ignored symbol-kind filters (e.g., `type=function`); the latest integration fix maps REST `type` parameters onto graph symbol kinds, but we still need a canonical taxonomy shared between Fastify schemas and graph queries so future clients and tooling stay aligned.
 
 ## 3. Desired Capabilities
@@ -32,14 +32,14 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
 | Field | Type | Notes |
 | --- | --- | --- |
 | `importAlias` | string | Alias used in import/export; optional.
-| `importType` | enum (`default`, `named`, `namespace`, `wildcard`, `side-effect`) | Normalized value.
+| `importType` | enum (`default`, `named`, `namespace`, `wildcard`, `side-effect`) | Normalized enum persisted as a first-class relationship property.
 | `importDepth` | integer | (Existing field) number of hops for resolved import; maintain for parity.
 | `isReExport` | boolean | For exports re-exporting from another module.
 | `reExportTarget` | string | Path/name of re-exported symbol.
 | `isNamespace` | boolean | Indicates namespace import.
 | `language` | string | Language of source file (TS, JS, Python, etc.).
 | `symbolKind` | enum (`class`, `function`, `interface`, `module`, etc.) | For `DEFINES` edges.
-| `modulePath` | string | Canonical module path normalized across languages.
+| `modulePath` | string | Canonical module path normalized across languages; used for prefix filters.
 | `metadata.languageSpecific` | object | Namespaced details (e.g., `ts.typeOnly`).
 
 ## 6. Normalization Strategy
@@ -53,7 +53,7 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
 
 ## 7. Persistence & Merge Mechanics
 1. Keep canonical ID `from|to|type` (structural edges are unique by definition), but ensure metadata updates merge without losing previous information.
-2. Extend Cypher queries to persist new fields: `importAlias`, `importType`, `isReExport`, `reExportTarget`, `isNamespace`, `language`, `symbolKind`, `modulePath`, plus existing location data.
+2. Extend Cypher queries to persist new fields: `importAlias`, `importType`, `isReExport`, `reExportTarget`, `isNamespace`, `language`, `symbolKind`, `modulePath`, plus existing location data. Persist the structured properties alongside a stringified `metadata` blob so query filters can operate on primitives without losing richer language-specific context.
 3. When edges change (e.g., alias updated), update metadata while preserving history (set `lastSeenAt`, reuse `openEdge`/`closeEdge` logic).
 4. For unresolved imports generating placeholders, maintain `resolutionState` metadata to track unresolved vs resolved state.
 5. Index `(type, importAlias)`, `(type, modulePath)`, `(language, type)` for navigation queries.
@@ -66,11 +66,26 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
    - `listExports(fileId)` with alias/re-export info.
    - `findDefinition(symbolId)` retrieving `DEFINES` edge metadata.
 3. Update documentation and API design references to reflect new capabilities for code navigation.
+4. When adding tests, seed structural fixtures via `tests/test-utils/realistic-kg.ts` (unit) or `tests/integration/services/KnowledgeGraphService.integration.test.ts` (integration) so filter behaviour stays covered.
+
+## 9. Backfill & Operations
+- Use `pnpm structural:backfill` to promote legacy structural relationships (where metadata lived solely in `r.metadata`) to the first-class properties described above. The command defaults to a dry run; pass `--apply` to persist updates once the preview matches expectations.
+- The backfill normalizes aliases, import types, namespace flags, language/symbol kind casing, and module paths before writing them to Falkor properties. It also rewrites the metadata JSON with the normalized values so ingestion and read paths stay consistent.
+- Schedule the migration after deploying parser or normalization changes so existing edges immediately benefit from the richer query filters (`importAlias`, `modulePath`, `symbolKind`, etc.).
 
 ## 9. Temporal & History Integration
 1. Use history pipeline to track structural changes: when symbol moves, close old `DEFINES` edge and open new one with `validFrom/validTo`.
 2. For `IMPORTS`, mark edges inactive when dependency removed; track `lastSeenAt` from parser scans.
 3. Provide timeline queries for module evolution (e.g., `getModuleHistory(modulePath)`).
+
+### Module History Helper
+- `KnowledgeGraphService.getModuleHistory(modulePath, options?)` now returns a full `ModuleHistoryResult` object that includes:
+  - `moduleId`, `moduleType`, and `generatedAt` snapshot metadata.
+  - Recent version records (`EntityTimelineEntry[]`) with associated change relationships.
+  - `relationships`: structural edges touching the module (incoming and outgoing) enriched with `confidence`, `scope`, temporal segments (`openedAt`/`closedAt`), and resolved entity summaries for both endpoints.
+- Segment timelines reflect moves/removals by closing the previous edge and opening a new one; consumers can detect refactors by inspecting `segments` and `direction`.
+- The helper accepts `{ includeInactive?: boolean, limit?: number, versionLimit?: number }` so callers can scope the response for dashboards versus deep dives.
+- Structural relationship persistence hoists `confidence`/`scope` and keeps `firstSeenAt`/`lastSeenAt` updated, ensuring timeline queries, analytics, and downstream tooling consume consistent metadata.
 
 ## 10. Migration & Backfill Plan
 1. Expand schema to include new fields and indexes; ensure safe defaults for existing edges.

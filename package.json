@@ -37,6 +37,8 @@
     "db:clear:all": "pnpm kg:clear && pnpm db:clear:qdrant && pnpm db:clear:pg",
     "sync": "tsx scripts/sync-knowledge-graph.ts",
     "health": "tsx scripts/health-check.ts",
+    "history:backfill": "tsx scripts/backfill-temporal-history.ts",
+    "structural:backfill": "tsx scripts/backfill-structural-metadata.ts",
     "assets:webgl": "tsx scripts/fetch-webgl-assets.ts",
     "smoke": "tsx scripts/smoke-test.ts",
     "web:dev": "pnpm --dir web/graph-viewer dev",

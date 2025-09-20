@@ -8,7 +8,10 @@ import {
   CodeRelationship,
   CODE_RELATIONSHIP_TYPES,
   isDocumentationRelationshipType,
+  isPerformanceRelationshipType,
+  isStructuralRelationshipType,
 } from "../models/relationships.js";
+import { sanitizeEnvironment } from "./environment.js";
 
 const CODE_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
   CODE_RELATIONSHIP_TYPES
@@ -607,6 +610,32 @@ export function canonicalRelationshipId(
   fromId: string,
   rel: GraphRelationship
 ): string {
+  if (isStructuralRelationshipType(rel.type)) {
+    const baseTarget = canonicalTargetKeyFor(rel);
+    const base = `${fromId}|${baseTarget}|${rel.type}`;
+    return "time-rel_" + crypto.createHash("sha1").update(base).digest("hex");
+  }
+
+  if (isPerformanceRelationshipType(rel.type)) {
+    const anyRel: any = rel as any;
+    const md =
+      anyRel.metadata && typeof anyRel.metadata === "object"
+        ? anyRel.metadata
+        : {};
+    const metricId = normalizeMetricIdForId(
+      anyRel.metricId ?? md.metricId ?? rel.toEntityId ?? "unknown"
+    );
+    const environment = sanitizeEnvironment(
+      anyRel.environment ?? md.environment ?? "unknown"
+    );
+    const scenario = normalizeScenarioForId(anyRel.scenario ?? md.scenario);
+    const target = String(rel.toEntityId || "");
+    const base = `${fromId}|${target}|${rel.type}|${metricId}|${environment}|${scenario}`;
+    return (
+      "rel_perf_" + crypto.createHash("sha1").update(base).digest("hex")
+    );
+  }
+
   const baseTarget = isCodeRelationship(rel.type)
     ? canonicalTargetKeyFor(rel)
     : isDocumentationRelationshipType(rel.type)
@@ -614,6 +643,37 @@ export function canonicalRelationshipId(
     : String(rel.toEntityId || "");
   const base = `${fromId}|${baseTarget}|${rel.type}`;
   return "rel_" + crypto.createHash("sha1").update(base).digest("hex");
+}
+
+// Produce the legacy structural relationship id (rel_*) for migration purposes
+export function legacyStructuralRelationshipId(
+  canonicalId: string,
+  rel: GraphRelationship
+): string | null {
+  if (!isStructuralRelationshipType(rel.type)) return null;
+  if (canonicalId.startsWith("time-rel_")) {
+    return "rel_" + canonicalId.slice("time-rel_".length);
+  }
+  if (canonicalId.startsWith("rel_")) return canonicalId;
+  return null;
+}
+
+export function normalizeMetricIdForId(value: any): string {
+  if (!value) return "unknown";
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9/_\-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/\/+/g, "/")
+    .replace(/\/+$/g, "")
+    .replace(/^\/+/, "")
+    .slice(0, 256) || "unknown";
+}
+
+function normalizeScenarioForId(value: any): string {
+  if (!value) return "";
+  return normalizeStringForId(value).toLowerCase();
 }
 
 function canonicalDocumentationTargetKey(rel: GraphRelationship): string {

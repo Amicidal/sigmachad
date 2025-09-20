@@ -32,7 +32,7 @@ export async function setupIsolatedServiceTest(
     silent: options.silent,
   });
 
-  const kgService = new KnowledgeGraphService(dbService);
+  const kgService = new KnowledgeGraphService(dbService, testContext);
   await kgService.initialize();
 
   return { dbService, testContext, kgService };
@@ -70,7 +70,7 @@ const DEFAULT_POSTGRES_TABLES = [
   "changes",
   "sessions",
   "documents",
-  "performance_metrics",
+  "performance_metric_snapshots",
   "coverage_history",
 ];
 
@@ -779,22 +779,58 @@ export const TEST_FIXTURES = {
     },
   ],
 
-  testPerformance: [
-    {
-      test_id: "test_1",
-      memory_usage: 1024000,
-      cpu_usage: 15,
-      network_requests: 2,
-      timestamp: new Date().toISOString(),
+  testPerformance: Array.from({ length: 60 }, (_, index) => ({
+    test_id: `test_perf_${Math.floor(index / 3)}`,
+    memory_usage: 1024000 + index * 2048,
+    cpu_usage: 10 + (index % 6) * 5,
+    network_requests: index % 7,
+    timestamp: new Date(Date.now() - index * 60000).toISOString(),
+  })),
+
+  performanceSnapshots: Array.from({ length: 60 }, (_, index) => ({
+    test_id: `perf_snapshot_test_${Math.floor(index / 4)}`,
+    target_id: `entity_fixture_${index % 10}`,
+    metric_id: index % 2 === 0 ? "fixtures/latency/p95" : "fixtures/latency/avg",
+    scenario: index % 2 === 0 ? "load-test" : "regression-suite",
+    environment: index % 3 === 0 ? "staging" : index % 3 === 1 ? "prod" : "dev",
+    severity:
+      index % 4 === 0
+        ? "high"
+        : index % 4 === 1
+        ? "medium"
+        : index % 4 === 2
+        ? "low"
+        : "critical",
+    trend: index % 5 === 0 ? "regression" : index % 5 === 1 ? "improvement" : "neutral",
+    unit: "ms",
+    baseline_value: 100 + (index % 5) * 10,
+    current_value: 130 + (index % 7) * 12,
+    delta: 20 + (index % 6) * 3,
+    percent_change: 10 + (index % 5) * 2,
+    sample_size: 5 + (index % 8),
+    risk_score: 0.5 + (index % 5) * 0.25,
+    run_id: `snapshot-run-${index}`,
+    detected_at: new Date(Date.now() - index * 3600000).toISOString(),
+    resolved_at: index % 6 === 0 ? new Date(Date.now() - (index - 1) * 3600000).toISOString() : null,
+    metadata: {
+      source: "fixture",
+      index,
     },
-    {
-      test_id: "test_2",
-      memory_usage: 2048000,
-      cpu_usage: 25,
-      network_requests: 5,
-      timestamp: new Date().toISOString(),
-    },
-  ],
+    metrics_history: [
+      {
+        value: 95 + index,
+        timestamp: new Date(Date.now() - index * 3600000).toISOString(),
+        environment: "staging",
+        unit: "ms",
+      },
+      {
+        value: 125 + index,
+        timestamp: new Date(Date.now() - (index - 0.5) * 3600000).toISOString(),
+        environment: "prod",
+        unit: "ms",
+      },
+    ],
+  })),
 
   flakyAnalyses: [
     {
@@ -997,6 +1033,56 @@ export async function insertTestFixtures(
           Number(perf.cpu_usage || 0),
           Number(perf.network_requests || 0),
           perf.timestamp || new Date().toISOString(),
+        ]
+      );
+    }
+
+    for (const snapshot of TEST_FIXTURES.performanceSnapshots) {
+      await client.query(
+        `
+        INSERT INTO performance_metric_snapshots (
+          test_id,
+          target_id,
+          metric_id,
+          scenario,
+          environment,
+          severity,
+          trend,
+          unit,
+          baseline_value,
+          current_value,
+          delta,
+          percent_change,
+          sample_size,
+          risk_score,
+          run_id,
+          detected_at,
+          resolved_at,
+          metadata,
+          metrics_history
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      `,
+        [
+          snapshot.test_id,
+          snapshot.target_id,
+          snapshot.metric_id,
+          snapshot.scenario,
+          snapshot.environment,
+          snapshot.severity,
+          snapshot.trend,
+          snapshot.unit,
+          snapshot.baseline_value,
+          snapshot.current_value,
+          snapshot.delta,
+          snapshot.percent_change,
+          snapshot.sample_size,
+          snapshot.risk_score,
+          snapshot.run_id,
+          snapshot.detected_at ? new Date(snapshot.detected_at) : null,
+          snapshot.resolved_at ? new Date(snapshot.resolved_at) : null,
+          JSON.stringify(snapshot.metadata ?? {}),
+          JSON.stringify(snapshot.metrics_history ?? []),
         ]
       );
     }

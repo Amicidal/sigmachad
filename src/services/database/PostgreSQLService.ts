@@ -1,5 +1,15 @@
 import type { Pool as PgPool } from "pg";
 import { IPostgreSQLService } from "./interfaces.js";
+import type {
+  PerformanceHistoryOptions,
+  PerformanceHistoryRecord,
+} from "../../models/types.js";
+import type {
+  PerformanceMetricSample,
+  PerformanceRelationship,
+} from "../../models/relationships.js";
+import { normalizeMetricIdForId } from "../../utils/codeEdges.js";
+import { sanitizeEnvironment } from "../../utils/environment.js";
 
 export class PostgreSQLService implements IPostgreSQLService {
   private postgresPool!: PgPool;
@@ -425,12 +435,28 @@ export class PostgreSQLService implements IPostgreSQLService {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`,
 
-      // Compatibility tables for integration tests
-      `CREATE TABLE IF NOT EXISTS performance_metrics (
-        entity_id UUID NOT NULL,
-        metric_type VARCHAR(64) NOT NULL,
-        value DOUBLE PRECISION NOT NULL,
-        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      `CREATE TABLE IF NOT EXISTS performance_metric_snapshots (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        test_id TEXT NOT NULL,
+        target_id TEXT,
+        metric_id TEXT NOT NULL,
+        scenario TEXT,
+        environment TEXT,
+        severity TEXT,
+        trend TEXT,
+        unit TEXT,
+        baseline_value DOUBLE PRECISION,
+        current_value DOUBLE PRECISION,
+        delta DOUBLE PRECISION,
+        percent_change DOUBLE PRECISION,
+        sample_size INTEGER,
+        risk_score DOUBLE PRECISION,
+        run_id TEXT,
+        detected_at TIMESTAMP WITH TIME ZONE,
+        resolved_at TIMESTAMP WITH TIME ZONE,
+        metadata JSONB,
+        metrics_history JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`,
 
       `CREATE TABLE IF NOT EXISTS coverage_history (
@@ -507,8 +533,13 @@ export class PostgreSQLService implements IPostgreSQLService {
       "CREATE INDEX IF NOT EXISTS idx_test_performance_suite_id ON test_performance(suite_id)",
       "CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_test_id ON flaky_test_analyses(test_id)",
       "CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_flaky_score ON flaky_test_analyses(flaky_score)",
-      "CREATE INDEX IF NOT EXISTS idx_performance_metrics_entity_id ON performance_metrics(entity_id)",
-      "CREATE INDEX IF NOT EXISTS idx_performance_metrics_timestamp ON performance_metrics(timestamp)",
+      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_test_id ON performance_metric_snapshots(test_id)",
+      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_metric_id ON performance_metric_snapshots(metric_id)",
+      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_environment ON performance_metric_snapshots(environment)",
+      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_severity ON performance_metric_snapshots(severity)",
+      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_trend ON performance_metric_snapshots(trend)",
+      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_metric_env ON performance_metric_snapshots(metric_id, environment)",
+      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_detected ON performance_metric_snapshots(detected_at)",
       "CREATE INDEX IF NOT EXISTS idx_coverage_history_entity_id ON coverage_history(entity_id)",
       "CREATE INDEX IF NOT EXISTS idx_coverage_history_timestamp ON coverage_history(timestamp)",
     ];
@@ -746,6 +777,94 @@ export class PostgreSQLService implements IPostgreSQLService {
     return result;
   }
 
+  async recordPerformanceMetricSnapshot(
+    snapshot: PerformanceRelationship
+  ): Promise<void> {
+    if (!this.initialized) {
+      throw new Error("PostgreSQL service not initialized");
+    }
+
+    const client = await this.postgresPool.connect();
+    try {
+      const sanitizeNumber = (value: unknown): number | null => {
+        if (value === null || value === undefined) return null;
+        const num = Number(value);
+        return Number.isFinite(num) ? num : null;
+      };
+
+      const sanitizeInt = (value: unknown): number | null => {
+        const num = sanitizeNumber(value);
+        if (num === null) return null;
+        return Math.round(num);
+      };
+
+      const metricsHistory = Array.isArray(snapshot.metricsHistory)
+        ? snapshot.metricsHistory
+            .slice(-50)
+            .map((entry) => ({
+              ...entry,
+              timestamp: entry.timestamp
+                ? new Date(entry.timestamp as Date).toISOString()
+                : undefined,
+            }))
+        : null;
+
+      const metadata = {
+        ...(snapshot.metadata || {}),
+        evidence: snapshot.evidence,
+      };
+
+      const query = `
+        INSERT INTO performance_metric_snapshots (
+          test_id,
+          target_id,
+          metric_id,
+          scenario,
+          environment,
+          severity,
+          trend,
+          unit,
+          baseline_value,
+          current_value,
+          delta,
+          percent_change,
+          sample_size,
+          risk_score,
+          run_id,
+          detected_at,
+          resolved_at,
+          metadata,
+          metrics_history
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      `;
+
+      await client.query(query, [
+        snapshot.fromEntityId,
+        snapshot.toEntityId ?? null,
+        snapshot.metricId,
+        snapshot.scenario ?? null,
+        snapshot.environment ?? null,
+        snapshot.severity ?? null,
+        snapshot.trend ?? null,
+        snapshot.unit ?? null,
+        sanitizeNumber(snapshot.baselineValue),
+        sanitizeNumber(snapshot.currentValue),
+        sanitizeNumber(snapshot.delta),
+        sanitizeNumber(snapshot.percentChange),
+        sanitizeInt(snapshot.sampleSize),
+        sanitizeNumber(snapshot.riskScore),
+        snapshot.runId ?? null,
+        snapshot.detectedAt ? new Date(snapshot.detectedAt as Date) : null,
+        snapshot.resolvedAt ? new Date(snapshot.resolvedAt as Date) : null,
+        metadata ? JSON.stringify(metadata) : null,
+        metricsHistory ? JSON.stringify(metricsHistory) : null,
+      ]);
+    } finally {
+      client.release();
+    }
+  }
+
   async getTestExecutionHistory(
     entityId: string,
     limit: number = 50
@@ -791,24 +910,188 @@ export class PostgreSQLService implements IPostgreSQLService {
 
   async getPerformanceMetricsHistory(
     entityId: string,
-    days: number = 30
-  ): Promise<any[]> {
+    options: number | PerformanceHistoryOptions = {}
+  ): Promise<PerformanceHistoryRecord[]> {
     if (!this.initialized) {
       throw new Error("PostgreSQL service not initialized");
     }
 
+    const normalizedOptions: PerformanceHistoryOptions =
+      typeof options === "number"
+        ? { days: options }
+        : options ?? {};
+
+    const {
+      days = 30,
+      metricId,
+      environment,
+      severity,
+      limit = 100,
+    } = normalizedOptions;
+
+    const sanitizedMetricId =
+      typeof metricId === "string" && metricId.trim().length > 0
+        ? normalizeMetricIdForId(metricId)
+        : undefined;
+    const sanitizedEnvironment =
+      typeof environment === "string" && environment.trim().length > 0
+        ? sanitizeEnvironment(environment)
+        : undefined;
+    const sanitizedSeverity = (() => {
+      if (typeof severity !== "string") return undefined;
+      const normalized = severity.trim().toLowerCase();
+      switch (normalized) {
+        case "critical":
+        case "high":
+        case "medium":
+        case "low":
+          return normalized;
+        default:
+          return undefined;
+      }
+    })();
+    const safeLimit = Number.isFinite(limit)
+      ? Math.min(500, Math.max(1, Math.floor(limit)))
+      : 100;
+    const safeDays =
+      typeof days === "number" && Number.isFinite(days)
+        ? Math.min(365, Math.max(1, Math.floor(days)))
+        : undefined;
+
     const client = await this.postgresPool.connect();
     try {
-      // Use a simpler query to avoid parameter binding issues
-      const query = `
-        SELECT pm.*
-        FROM performance_metrics pm
-        WHERE pm.entity_id = $1::uuid
-        AND (pm.timestamp IS NULL OR pm.timestamp >= NOW() - INTERVAL '${days} days')
-        ORDER BY COALESCE(pm.timestamp, NOW()) DESC
+      const conditions: string[] = ["(pm.test_id = $1 OR pm.target_id = $1)"];
+      const params: any[] = [entityId];
+      let paramIndex = 2;
+
+      if (sanitizedMetricId) {
+        conditions.push(`pm.metric_id = $${paramIndex}`);
+        params.push(sanitizedMetricId);
+        paramIndex += 1;
+      }
+
+      if (sanitizedEnvironment) {
+        conditions.push(`pm.environment = $${paramIndex}`);
+        params.push(sanitizedEnvironment);
+        paramIndex += 1;
+      }
+
+      if (sanitizedSeverity) {
+        conditions.push(`pm.severity = $${paramIndex}`);
+        params.push(sanitizedSeverity);
+        paramIndex += 1;
+      }
+
+      if (typeof safeDays === "number") {
+        conditions.push(
+          `(pm.detected_at IS NULL OR pm.detected_at >= NOW() - $${paramIndex} * INTERVAL '1 day')`
+        );
+        params.push(safeDays);
+        paramIndex += 1;
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      params.push(safeLimit);
+      const snapshotQuery = `
+        SELECT
+          pm.id,
+          pm.test_id,
+          pm.target_id,
+          pm.metric_id,
+          pm.scenario,
+          pm.environment,
+          pm.severity,
+          pm.trend,
+          pm.unit,
+          pm.baseline_value,
+          pm.current_value,
+          pm.delta,
+          pm.percent_change,
+          pm.sample_size,
+          pm.risk_score,
+          pm.run_id,
+          pm.detected_at,
+          pm.resolved_at,
+          pm.metadata,
+          pm.metrics_history,
+          pm.created_at
+        FROM performance_metric_snapshots pm
+        ${whereClause}
+        ORDER BY COALESCE(pm.detected_at, pm.created_at) DESC
+        LIMIT $${paramIndex}
       `;
-      const result = await client.query(query, [entityId]);
-      return result.rows;
+
+      const snapshotResult = await client.query(snapshotQuery, params);
+
+      const parseJson = (value: unknown): any => {
+        if (value == null) return null;
+        if (typeof value === "object") return value;
+        if (typeof value === "string" && value.trim().length > 0) {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return null;
+          }
+        }
+        return null;
+      };
+
+      const toDateOrNull = (value: unknown): Date | null => {
+        if (!value) return null;
+        const date = new Date(value as any);
+        return Number.isNaN(date.getTime()) ? null : date;
+      };
+
+      const normalizeSnapshot = (row: any): PerformanceHistoryRecord => {
+        const metadata = parseJson(row.metadata) ?? undefined;
+        const historyRaw = parseJson(row.metrics_history);
+        const metricsHistory = Array.isArray(historyRaw)
+          ? historyRaw
+              .map((entry: any) => {
+                if (!entry || typeof entry !== "object") return null;
+                const normalized = { ...entry };
+                if (normalized.timestamp) {
+                  const ts = toDateOrNull(normalized.timestamp);
+                  normalized.timestamp = ts ?? undefined;
+                }
+                return normalized;
+              })
+              .filter(Boolean) as PerformanceMetricSample[]
+          : undefined;
+
+        return {
+          id: row.id ?? undefined,
+          testId: row.test_id ?? undefined,
+          targetId: row.target_id ?? undefined,
+          metricId: row.metric_id,
+          scenario: row.scenario ?? undefined,
+          environment: row.environment ?? undefined,
+          severity: row.severity ?? undefined,
+          trend: row.trend ?? undefined,
+          unit: row.unit ?? undefined,
+          baselineValue:
+            row.baseline_value !== null ? Number(row.baseline_value) : null,
+          currentValue:
+            row.current_value !== null ? Number(row.current_value) : null,
+          delta: row.delta !== null ? Number(row.delta) : null,
+          percentChange:
+            row.percent_change !== null ? Number(row.percent_change) : null,
+          sampleSize: row.sample_size !== null ? Number(row.sample_size) : null,
+          riskScore: row.risk_score !== null ? Number(row.risk_score) : null,
+          runId: row.run_id ?? undefined,
+          detectedAt: toDateOrNull(row.detected_at),
+          resolvedAt: toDateOrNull(row.resolved_at),
+          metricsHistory: metricsHistory ?? undefined,
+          metadata,
+          createdAt: toDateOrNull(row.created_at),
+          source: "snapshot",
+        };
+      };
+
+      const snapshots = snapshotResult.rows.map(normalizeSnapshot);
+
+      return snapshots;
     } finally {
       client.release();
     }

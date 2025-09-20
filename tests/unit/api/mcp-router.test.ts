@@ -75,7 +75,8 @@ describe('MCPRouter', () => {
     mockKgService = makeRealisticKgService();
 
     mockDbService = {
-      postgresQuery: vi.fn().mockResolvedValue([])
+      postgresQuery: vi.fn().mockResolvedValue([]),
+      getPerformanceMetricsHistory: vi.fn().mockResolvedValue([])
     } as any;
 
     mockAstParser = {
@@ -344,8 +345,12 @@ describe('MCPRouter', () => {
         const result = JSON.parse(response.result.content[0].text);
         expect(result.entityId).toBe(params.entityId);
         expect(result.examples).toEqual(mockExamples);
-        expect(result.totalExamples).toBe(1);
-        expect(result.totalTestExamples).toBe(1);
+        expect(result.totalExamples).toBe(
+          mockExamples.usageExamples.length + mockExamples.testExamples.length
+        );
+        expect(result.totalTestExamples).toBe(
+          mockExamples.testExamples.length
+        );
       });
     });
 
@@ -448,8 +453,124 @@ describe('MCPRouter', () => {
           }
         });
 
-        expect(response.error.code).toBe(-32603);
-        expect(response.error.message).toContain('Tool execution failed');
+        expect(response.error).toBeUndefined();
+        const result = JSON.parse(response.result.content[0].text);
+        expect(result.message).toMatch(/heuristic test plan/i);
+        expect(result.testPlan).toBeDefined();
+      });
+    });
+
+    describe('tests.get_performance', () => {
+      it('should normalize environment argument before querying history', async () => {
+        mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue({
+          averageExecutionTime: 180,
+          successRate: 0.9,
+        }) as any;
+
+        mockDbService.getPerformanceMetricsHistory = vi.fn().mockResolvedValue([]);
+
+        const response = await mcpRouter.processMCPRequest({
+          jsonrpc: '2.0',
+          id: 'perf-1',
+          method: 'tools/call',
+          params: {
+            name: 'tests.get_performance',
+            arguments: {
+              testId: 'test-runner-123',
+              environment: 'Production',
+            },
+          },
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+          'test-runner-123',
+          expect.objectContaining({ environment: 'prod' })
+        );
+      });
+
+      it('should normalize metricId argument before querying history', async () => {
+        mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue({
+          averageExecutionTime: 190,
+          successRate: 0.88,
+        }) as any;
+
+        mockDbService.getPerformanceMetricsHistory = vi.fn().mockResolvedValue([]);
+
+        const response = await mcpRouter.processMCPRequest({
+          jsonrpc: '2.0',
+          id: 'perf-2',
+          method: 'tools/call',
+          params: {
+            name: 'tests.get_performance',
+            arguments: {
+              testId: 'test-runner-456',
+              metricId: 'Benchmark/API/Login-Latency',
+            },
+          },
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+          'test-runner-456',
+          expect.objectContaining({ metricId: 'benchmark/api/login-latency' })
+        );
+      });
+
+      it('should ignore invalid limit value when querying history', async () => {
+        mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue({
+          averageExecutionTime: 175,
+          successRate: 0.93,
+        }) as any;
+
+        mockDbService.getPerformanceMetricsHistory = vi.fn().mockResolvedValue([]);
+
+        const response = await mcpRouter.processMCPRequest({
+          jsonrpc: '2.0',
+          id: 'perf-3',
+          method: 'tools/call',
+          params: {
+            name: 'tests.get_performance',
+            arguments: {
+              testId: 'test-runner-789',
+              limit: 'nan',
+            },
+          },
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+          'test-runner-789',
+          expect.objectContaining({ limit: undefined })
+        );
+      });
+
+      it('should clamp limit argument to maximum supported value', async () => {
+        mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue({
+          averageExecutionTime: 200,
+          successRate: 0.85,
+        }) as any;
+
+        mockDbService.getPerformanceMetricsHistory = vi.fn().mockResolvedValue([]);
+
+        const response = await mcpRouter.processMCPRequest({
+          jsonrpc: '2.0',
+          id: 'perf-4',
+          method: 'tools/call',
+          params: {
+            name: 'tests.get_performance',
+            arguments: {
+              testId: 'test-runner-999',
+              limit: 9999,
+            },
+          },
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+          'test-runner-999',
+          expect.objectContaining({ limit: 500 })
+        );
       });
     });
   });
@@ -789,9 +910,8 @@ describe('MCPRouter', () => {
         }
       });
 
-      // Should still process but might have validation errors in the tool handler
-      expect(response.result).toBeDefined();
-      expect(response.error).toBeUndefined();
+      expect(response.error).toBeDefined();
+      expect(response.error.code).toBe(-32602);
     });
   });
 

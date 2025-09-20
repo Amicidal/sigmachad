@@ -992,28 +992,28 @@ describe("PostgreSQLService Integration", () => {
         [testEntityId, 85, 100, 85.5, new Date()]
       );
 
+      const now = new Date();
       await pgService.query(
         `
-        INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO performance_metric_snapshots (
+          test_id,
+          target_id,
+          metric_id,
+          current_value,
+          detected_at,
+          created_at
+        )
+        VALUES
+          ($1, $1, 'memory_usage', 1024000, $2, $2),
+          ($1, $1, 'cpu_usage', 15.2, $3, $3),
+          ($1, $1, 'network_requests', 2, $4, $4)
       `,
-        [testEntityId, "memory_usage", 1024000, new Date()]
-      );
-
-      await pgService.query(
-        `
-        INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
-        VALUES ($1, $2, $3, $4)
-      `,
-        [testEntityId, "cpu_usage", 15.2, new Date()]
-      );
-
-      await pgService.query(
-        `
-        INSERT INTO performance_metrics (entity_id, metric_type, value, timestamp)
-        VALUES ($1, $2, $3, $4)
-      `,
-        [testEntityId, "network_requests", 2, new Date()]
+        [
+          testEntityId,
+          new Date(now.getTime() - 3600_000),
+          new Date(now.getTime() - 7200_000),
+          now,
+        ]
       );
     });
 
@@ -1035,15 +1035,16 @@ describe("PostgreSQLService Integration", () => {
       const testEntityId = global.testEntityId;
       const metrics = await pgService.getPerformanceMetricsHistory(
         testEntityId,
-        30
+        { days: 30 }
       );
 
       expect(metrics).toHaveLength(3); // We inserted 3 metrics
-      expect(metrics[0].entity_id).toBe(testEntityId);
-      expect(new Date(metrics[0].timestamp).toString()).not.toBe('Invalid Date');
+      expect(metrics[0].metricId).toBeDefined();
+      expect(metrics[0].source).toBe("snapshot");
+      expect(metrics[0].detectedAt === null || metrics[0].detectedAt instanceof Date).toBe(true);
 
       // Check that all 3 metric types are present
-      const metricTypes = metrics.map((m) => m.metric_type);
+      const metricTypes = metrics.map((m) => m.metricId);
       expect(metricTypes).toContain("memory_usage");
       expect(metricTypes).toContain("cpu_usage");
       expect(metricTypes).toContain("network_requests");
@@ -1071,7 +1072,7 @@ describe("PostgreSQLService Integration", () => {
 
       const metrics = await pgService.getPerformanceMetricsHistory(
         nonExistentEntityId,
-        30
+        { days: 30 }
       );
       expect(metrics).toEqual([]);
 

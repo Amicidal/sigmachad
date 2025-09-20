@@ -44,6 +44,7 @@ export interface ParsedTestResult {
     cpuUsage?: number;
     networkRequests?: number;
   };
+  environment?: string;
 }
 
 export class TestResultParser {

@@ -147,7 +147,10 @@ describe("ConflictResolution Integration", () => {
       expect(conflicts).toHaveLength(1);
       const conflict = conflicts[0];
       expect(conflict.type).toBe("relationship_conflict");
-      expect(conflict.relationshipId).toBe(incomingRelationship.id);
+      const canonicalIncoming = kgService.canonicalizeRelationship(
+        incomingRelationship as GraphRelationship
+      );
+      expect(conflict.relationshipId).toBe(canonicalIncoming.id);
       expect(conflict.diff).toMatchObject({
         "metadata.strength": { current: 0.4, incoming: 0.9 },
       });

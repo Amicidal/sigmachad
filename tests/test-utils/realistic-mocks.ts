@@ -11,6 +11,11 @@ import type {
   IPostgreSQLService,
   IRedisService,
 } from "../../src/services/database/interfaces";
+import type {
+  PerformanceHistoryOptions,
+  PerformanceHistoryRecord,
+} from "../../src/models/types.js";
+import type { PerformanceRelationship } from "../../src/models/relationships.js";
 
 interface MockConfig {
   failureRate?: number; // 0-100 percentage
@@ -73,7 +78,21 @@ export function createLightweightDatabaseMocks(): LightweightDatabaseMocks {
     query: vi.fn().mockResolvedValue([]),
     bulkQuery: vi.fn().mockResolvedValue([]),
     getPool: vi.fn().mockReturnValue({}),
+    transaction: vi.fn().mockImplementation(async (callback) => {
+      return callback({
+        query: vi.fn().mockResolvedValue([]),
+      });
+    }),
+    setupSchema: vi.fn().mockResolvedValue(undefined),
     healthCheck: vi.fn().mockResolvedValue(true),
+    storeTestSuiteResult: vi.fn().mockResolvedValue(undefined),
+    storeFlakyTestAnalyses: vi.fn().mockResolvedValue(undefined),
+    getTestExecutionHistory: vi.fn().mockResolvedValue([]),
+    getPerformanceMetricsHistory: vi.fn().mockResolvedValue([]),
+    recordPerformanceMetricSnapshot: vi
+      .fn()
+      .mockResolvedValue(undefined),
+    getCoverageHistory: vi.fn().mockResolvedValue([]),
   } satisfies IPostgreSQLService;
 
   const redis = {
@@ -538,6 +557,7 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
   private queryLog: string[] = [];
   private rngState: number;
   private maintenanceBackups = new Map<string, any>();
+  private performanceSnapshots = new Map<string, PerformanceHistoryRecord[]>();
 
   private rng(): number {
     this.rngState = (1664525 * this.rngState + 1013904223) >>> 0;
@@ -822,23 +842,61 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 
   async getPerformanceMetricsHistory(
     entityId: string,
-    days?: number
-  ): Promise<any[]> {
+    options?: number | PerformanceHistoryOptions
+  ): Promise<PerformanceHistoryRecord[]> {
     await this.simulateLatency();
 
-    const metrics = [];
-    const count = days || 7;
+    const normalizedOptions: PerformanceHistoryOptions =
+      typeof options === "number"
+        ? { days: options }
+        : options ?? {};
 
-    for (let i = 0; i < count; i++) {
-      metrics.push({
-        entity_id: entityId,
-        metric_type: "response_time",
-        value: 50 + this.rng() * 200,
-        timestamp: new Date(Date.now() - i * 86400000),
+    const {
+      limit = 100,
+      metricId,
+      environment,
+      severity,
+      days,
+    } = normalizedOptions;
+
+    const cutoffMs = typeof days === "number" && days > 0 ? Date.now() - days * 86400000 : undefined;
+    const stored = [...(this.performanceSnapshots.get(entityId) ?? [])]
+      .filter((record) => {
+        if (metricId && record.metricId !== metricId) return false;
+        if (environment && record.environment !== environment) return false;
+        if (severity && record.severity !== severity) return false;
+        if (cutoffMs && record.detectedAt) {
+          const detected = new Date(record.detectedAt).getTime();
+          if (Number.isFinite(detected) && detected < cutoffMs) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = a.detectedAt ? new Date(a.detectedAt).getTime() : 0;
+        const bTime = b.detectedAt ? new Date(b.detectedAt).getTime() : 0;
+        return bTime - aTime;
+      })
+      .slice(0, Math.max(1, limit));
+
+    if (stored.length > 0) {
+      return stored;
+    }
+
+    const fallbackCount = Math.max(1, normalizedOptions.limit ?? normalizedOptions.days ?? 7);
+    const history: PerformanceHistoryRecord[] = [];
+
+    for (let i = 0; i < fallbackCount; i++) {
+      history.push({
+        metricId: metricId ?? "response_time",
+        environment: environment ?? "prod",
+        currentValue: 50 + this.rng() * 200,
+        detectedAt: new Date(Date.now() - i * 86400000),
+        testId: entityId,
+        source: "snapshot",
       });
     }
 
-    return metrics;
+    return history;
   }
 
   async getCoverageHistory(entityId: string, days?: number): Promise<any[]> {
@@ -870,6 +928,63 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 
   getQueryLog(): string[] {
     return this.queryLog;
+  }
+
+  async recordPerformanceMetricSnapshot(
+    snapshot: PerformanceRelationship
+  ): Promise<void> {
+    if (!this.initialized) {
+      throw new Error("PostgreSQL not initialized");
+    }
+    await this.simulateLatency();
+
+    const baseRecord: PerformanceHistoryRecord = {
+      id:
+        snapshot.id ||
+        `mock-snapshot-${Date.now()}-${Math.floor(this.rng() * 1_000_000)}`,
+      testId: snapshot.fromEntityId,
+      targetId: snapshot.toEntityId,
+      metricId: snapshot.metricId,
+      scenario: snapshot.scenario,
+      environment: snapshot.environment,
+      severity: snapshot.severity,
+      trend: snapshot.trend,
+      unit: snapshot.unit,
+      baselineValue: snapshot.baselineValue ?? null,
+      currentValue: snapshot.currentValue ?? null,
+      delta: snapshot.delta ?? null,
+      percentChange: snapshot.percentChange ?? null,
+      sampleSize: snapshot.sampleSize ?? null,
+      riskScore: snapshot.riskScore ?? null,
+      runId: snapshot.runId,
+      detectedAt: snapshot.detectedAt ?? new Date(),
+      resolvedAt: snapshot.resolvedAt ?? null,
+      metricsHistory: snapshot.metricsHistory ?? null,
+      metadata: snapshot.metadata ?? null,
+      source: "snapshot",
+    };
+
+    const entities = new Set<string>();
+    if (snapshot.fromEntityId) entities.add(snapshot.fromEntityId);
+    if (snapshot.toEntityId) entities.add(snapshot.toEntityId);
+    if (entities.size === 0) {
+      entities.add("performance-mock");
+    }
+
+    for (const entityKey of entities) {
+      const existing = [...(this.performanceSnapshots.get(entityKey) ?? [])];
+      const recordForKey = { ...baseRecord };
+      existing.push(recordForKey);
+      existing.sort((a, b) => {
+        const aTime = a.detectedAt ? new Date(a.detectedAt).getTime() : 0;
+        const bTime = b.detectedAt ? new Date(b.detectedAt).getTime() : 0;
+        return bTime - aTime;
+      });
+      if (existing.length > 200) {
+        existing.length = 200;
+      }
+      this.performanceSnapshots.set(entityKey, existing);
+    }
   }
 
   private async simulateLatency(): Promise<void> {

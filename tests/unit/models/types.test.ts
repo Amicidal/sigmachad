@@ -806,12 +806,20 @@ describe('API Types and Interfaces', () => {
             {
               timestamp: new Date('2024-01-01'),
               executionTime: 140,
+              averageExecutionTime: 140,
+              p95ExecutionTime: 180,
               successRate: 0.96,
+              coveragePercentage: 0,
+              runId: 'run-1',
             },
             {
               timestamp: new Date('2024-01-02'),
               executionTime: 150,
+              averageExecutionTime: 150,
+              p95ExecutionTime: 190,
               successRate: 0.94,
+              coveragePercentage: 0,
+              runId: 'run-2',
             },
           ],
         };

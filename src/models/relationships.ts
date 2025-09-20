@@ -94,9 +94,66 @@ export enum RelationshipType {
 }
 
 // Specific relationship interfaces with additional properties
+export type StructuralImportType =
+  | "default"
+  | "named"
+  | "namespace"
+  | "wildcard"
+  | "side-effect";
+
 export interface StructuralRelationship extends Relationship {
-  type: RelationshipType.CONTAINS | RelationshipType.DEFINES | RelationshipType.EXPORTS | RelationshipType.IMPORTS;
+  type:
+    | RelationshipType.CONTAINS
+    | RelationshipType.DEFINES
+    | RelationshipType.EXPORTS
+    | RelationshipType.IMPORTS;
+  importType?: StructuralImportType;
+  importAlias?: string;
+  importDepth?: number;
+  isNamespace?: boolean;
+  isReExport?: boolean;
+  reExportTarget?: string | null;
+  language?: string;
+  symbolKind?: string;
+  modulePath?: string;
+  resolutionState?: "resolved" | "unresolved" | "partial";
+  metadata?: Record<string, any> & {
+    languageSpecific?: Record<string, any>;
+  };
+  confidence?: number;
+  scope?: CodeScope;
+  firstSeenAt?: Date;
+  lastSeenAt?: Date;
 }
+
+const STRUCTURAL_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>([
+  RelationshipType.CONTAINS,
+  RelationshipType.DEFINES,
+  RelationshipType.EXPORTS,
+  RelationshipType.IMPORTS,
+]);
+
+export const isStructuralRelationshipType = (
+  type: RelationshipType
+): type is StructuralRelationship["type"] =>
+  STRUCTURAL_RELATIONSHIP_TYPE_SET.has(type);
+
+export const PERFORMANCE_RELATIONSHIP_TYPES = [
+  RelationshipType.PERFORMANCE_IMPACT,
+  RelationshipType.PERFORMANCE_REGRESSION,
+] as const;
+
+const PERFORMANCE_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
+  PERFORMANCE_RELATIONSHIP_TYPES
+);
+
+export type PerformanceRelationshipType =
+  (typeof PERFORMANCE_RELATIONSHIP_TYPES)[number];
+
+export const isPerformanceRelationshipType = (
+  type: RelationshipType
+): type is PerformanceRelationshipType =>
+  PERFORMANCE_RELATIONSHIP_TYPE_SET.has(type);
 
 // Normalized code-edge source and kind enums (string unions)
 // Tightened to a known set to avoid downstream drift; map producer-specific tags to these centrally.
@@ -342,12 +399,51 @@ export interface SecurityRelationship extends Relationship {
   cvssScore?: number;
 }
 
+export type PerformanceTrend = "regression" | "improvement" | "neutral";
+
+export type PerformanceSeverity =
+  | "critical"
+  | "high"
+  | "medium"
+  | "low";
+
+export interface PerformanceConfidenceInterval {
+  lower?: number;
+  upper?: number;
+}
+
+export interface PerformanceMetricSample {
+  timestamp?: Date;
+  value: number;
+  runId?: string;
+  environment?: string;
+  unit?: string;
+}
+
 export interface PerformanceRelationship extends Relationship {
-  type: RelationshipType.PERFORMANCE_IMPACT | RelationshipType.PERFORMANCE_REGRESSION;
-  executionTime?: number; // in milliseconds
-  memoryUsage?: number; // in bytes
-  coveragePercentage?: number;
-  benchmarkValue?: number;
+  type: PerformanceRelationshipType;
+  metricId: string;
+  scenario?: string;
+  environment?: string;
+  baselineValue?: number;
+  currentValue?: number;
+  unit?: string;
+  delta?: number;
+  percentChange?: number;
+  sampleSize?: number;
+  confidenceInterval?: PerformanceConfidenceInterval | null;
+  trend?: PerformanceTrend;
+  severity?: PerformanceSeverity;
+  riskScore?: number;
+  runId?: string;
+  policyId?: string;
+  detectedAt?: Date;
+  resolvedAt?: Date | null;
+  metricsHistory?: PerformanceMetricSample[];
+  evidence?: EdgeEvidence[];
+  metadata?: Record<string, any> & {
+    metrics?: Array<Record<string, any>>;
+  };
 }
 
 export interface SessionRelationship extends Relationship {
@@ -428,6 +524,14 @@ export interface RelationshipQuery {
   tag?: string | string[];
   lastValidatedAfter?: Date;
   lastValidatedBefore?: Date;
+  metricId?: string | string[];
+  environment?: string | string[];
+  severity?: PerformanceSeverity | PerformanceSeverity[];
+  trend?: PerformanceTrend | PerformanceTrend[];
+  detectedAfter?: Date;
+  detectedBefore?: Date;
+  resolvedAfter?: Date;
+  resolvedBefore?: Date;
   // Extended filters for code edges (optional)
   kind?: CodeEdgeKind | CodeEdgeKind[];
   source?: CodeEdgeSource | CodeEdgeSource[];
@@ -463,6 +567,13 @@ export interface RelationshipQuery {
   callee?: string;
   importDepthMin?: number;
   importDepthMax?: number;
+  importAlias?: string | string[];
+  importType?: StructuralImportType | StructuralImportType[];
+  isNamespace?: boolean;
+  language?: string | string[];
+  symbolKind?: string | string[];
+  modulePath?: string | string[];
+  modulePathPrefix?: string;
 }
 
 export interface RelationshipFilter {

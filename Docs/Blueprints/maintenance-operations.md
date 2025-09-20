@@ -4,7 +4,8 @@
 Admin maintenance endpoints (backup, restore, housekeeping) now coordinate FalkorDB, Qdrant, PostgreSQL, and pluggable storage providers via a centralized control plane. Backups store structured metadata in PostgreSQL, emit audit events through the shared logging service, and drive a two-step restore workflow (preview token → confirmation) that enforces dry-run validation and optional secondary approval before destructive changes are applied.
 
 ## 2. Current Gaps
-- Automated tests have not yet been updated for the preview/confirm flow, storage-provider abstraction, or approval hooks. Legacy suites still assume a single-step restore and filesystem metadata, so we lack regression coverage for the new behaviour.
+- Unit coverage now exercises the preview/confirm flow, in-memory storage providers, retention pruning, and approval gating (see 2025-09-19 refresh), but we still lack end-to-end integration runs against real Docker services and remote storage adapters.
+- Retention policy logic is only asserted via stubbed PostgreSQL responses; we still need an integration test that verifies pruning against a live `maintenance_backups` table and artifact cleanup.
 - Only the local filesystem storage provider ships today. Remote providers (S3/GCS) and streaming restore remain TODO, limiting scalability for large datasets.
 - Restore execution still stubs parts of the workflow (e.g., Qdrant snapshot replay merely verifies presence). We need real vendor API integrations to guarantee fidelity.
 - Structured logging is in place, but there is no out-of-the-box metrics/alerting pipeline. SREs still have to wire dashboards and alerts manually.
@@ -36,5 +37,6 @@ Admin maintenance endpoints (backup, restore, housekeeping) now coordinate Falko
 ## 5. Decisions & Open Questions
 - **Backup metadata store**: centralized in PostgreSQL (`maintenance_backups`) with transactional updates and queryable history.
 - **Destructive restore guardrails**: enforced through RBAC scopes plus the two-step (preview + confirm) workflow; optional dual-approval is controlled via service policy.
+- **Structured PostgreSQL artifacts**: backups now emit `*_postgres.json` alongside the schema-only `*_postgres.sql`. The JSON payload captures ordered column metadata, primary keys, and sanitized row data so restores can replay via parameterised inserts rather than brittle SQL strings. Legacy `.sql` dumps are still honoured as a fallback for older artifacts.
 - **Legacy migration**: not required yet—the code has not produced production backups. Future schema/storage changes can skip migration of historical payloads.
 - **Observability backend**: Standardise on Prometheus for maintenance KPIs (with optional OTLP fan-out downstream). Retention/expiration policies on `maintenance_backups` remain under evaluation as backup cadence scales.

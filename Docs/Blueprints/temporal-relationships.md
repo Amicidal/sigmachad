@@ -4,13 +4,18 @@
 Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFIED_IN`, `REMOVED_IN`, `OF`) provide the timeline backbone of the knowledge graph. They link entities to versions, sessions, and change records, enabling historical reconstruction, auditing, and rollback support.
 
 ## 2. Current Gaps
-- `appendVersion`, `openEdge`, and `closeEdge` are stubs that log actions but do not persist temporal edges.
-- Version nodes are partially generated but lack transactional guarantees (race conditions, missing `PREVIOUS_VERSION` chains).
-- No standardized way to record change provenance (`MODIFIED_BY`, `MODIFIED_IN`); synchronization pipelines omit them.
-- Query APIs lack timeline retrieval features, forcing consumers to approximate history from `lastModified` fields.
-- Synchronization coordination tests reveal lifecycle operations remain stuck in `pending` when inputs are invalid, and the coordinator still depends on real database connectivity during failure modes. We need deterministic error handling/cleanup so temporal edges can transition to terminal states (`completed`/`failed`).
-- Rollback integration still lacks failure-path coverage: `RollbackCapabilities Integration > Error Handling and Edge Cases > should handle database connection failures during rollback point creation` registers zero assertions because the service swallows simulated connection failures. Temporal safety depends on surfacing these errors so rollback checkpoints can be invalidated.
-- The coordinator hooks time out while waiting for `clearTestData`, indicating the temporal pipelines need lightweight fixtures or mockable storage to avoid blocking integration suites.
+- Synchronization coordination tests still surface pending-state leaks during certain rollback paths; failure propagation work remains outstanding.
+- Rollback integration lacks comprehensive assertions for FalkorDB outages and will stay on the backlog until coordinator hardening lands.
+- Lightweight fixtures for `clearTestData` are still desirable so history suites can run faster.
+
+## 2.1 Status Snapshot (2025-09-19)
+- ✅ `appendVersion`, `openEdge`, and `closeEdge` persist temporal metadata, create change nodes, and link provenance edges when `changeSetId` is provided.
+- ✅ Timeline helpers (`getEntityTimeline`, `getRelationshipTimeline`, `getChangesForSession`) are implemented and wired into `src/api/routes/history.ts`; unit coverage exercises the new flows.
+- ✅ Temporal writes flow through `runTemporalTransaction`, which now serializes `MULTI/EXEC` usage on the shared Falkor connection to prevent interleaving; the validator job auto-repairs missing `PREVIOUS_VERSION` links.
+- ⏳ SynchronizationCoordinator + rollback paths require failure-mode hardening and tests to surface database errors and clear pending states.
+- ✅ Blueprint/API documentation now includes transactional guidance, `scripts/backfill-temporal-history.ts` provides a backfill/repair entry point, and integration suites cover the history timelines surface.
+
+> See TODO item “### 10. Operationalize Temporal Relationship Lifecycle & Timelines” for the authoritative task checklist.
 
 ## 3. Desired Capabilities
 1. Implement transactional versioning and temporal edge lifecycle to accurately reflect when entities/relationships change.
@@ -67,7 +72,19 @@ Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFI
 1. **Baseline Snapshot**: For existing edges, set `validFrom = firstSeenAt` (or `created` fallback) and `validTo = null`. For inactive edges, set `validTo = lastSeenAt`.
 2. **Version Nodes**: Create initial version node per entity with current hash; link to entity via `OF`.
 3. **Change Sets**: Optionally parse SCM history to populate `change` nodes for recent commits (can be phased).
-4. **Idempotency**: Provide scripts that can be rerun without duplicating nodes (use `MERGE`).
+4. **Idempotency**: Use the `history:backfill` script (below) to re-run safely; helper mutations rely on `MERGE` semantics.
+
+### 9.1 Backfill / Validation Runbook
+1. Dry-run validation:
+   - `pnpm history:backfill --dry-run`
+   - Confirms graph readiness, emits issue summaries without mutating data.
+2. Auto-repair missing `PREVIOUS_VERSION` links:
+   - `pnpm history:backfill --repair`
+   - Enables transactional repairs via `TemporalHistoryValidator` (delegates to `KnowledgeGraphService.repairPreviousVersionLink`).
+3. Scope tuning:
+   - `--batch-size`, `--timeline-limit`, and `--max-entities` throttle long-running audits for huge graphs.
+4. Automation note:
+   - Schedule the dry-run command as a health check post-sync; pair with `--repair` in maintenance windows to keep gaps closed.
 
 ## 10. Risks & Mitigations
 | Risk | Mitigation |

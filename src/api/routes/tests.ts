@@ -14,7 +14,9 @@ import type {
   TestPlanRequest,
   TestPlanResponse,
   TestExecutionResult,
+  PerformanceHistoryOptions,
 } from "../../models/types.js";
+import { resolvePerformanceHistoryOptions } from "../../utils/performanceFilters.js";
 
 const createEmptyPerformanceMetrics = (): TestPerformanceMetrics => ({
   averageExecutionTime: 0,
@@ -25,7 +27,7 @@ const createEmptyPerformanceMetrics = (): TestPerformanceMetrics => ({
   historicalData: [],
 });
 
-const aggregatePerformanceMetrics = (
+export const aggregatePerformanceMetrics = (
   metrics: TestPerformanceMetrics[]
 ): TestPerformanceMetrics => {
   if (metrics.length === 0) {
@@ -63,21 +65,59 @@ const aggregatePerformanceMetrics = (
     }
   );
 
-  const dominantTrend = sum.trend.degrading
-    ? "degrading"
-    : sum.trend.improving
-    ? "improving"
-    : "stable";
+  const trendPriority: Record<TestPerformanceMetrics["trend"], number> = {
+    degrading: 0,
+    improving: 1,
+    stable: 2,
+  };
+  const dominantTrend = (Object.entries(sum.trend) as Array<
+    [TestPerformanceMetrics["trend"], number]
+  >).reduce(
+    (best, [trend, count]) => {
+      if (count > best.count) {
+        return { trend, count };
+      }
+      if (count === best.count && trendPriority[trend] < trendPriority[best.trend]) {
+        return { trend, count };
+      }
+      return best;
+    },
+    { trend: "stable" as TestPerformanceMetrics["trend"], count: -1 }
+  ).trend;
 
   // Limit historical data to the most recent entries to avoid large payloads
   const historicalData = sum.historicalData
-    .map((entry) => ({
-      ...entry,
-      timestamp:
-        entry.timestamp instanceof Date
-          ? entry.timestamp
-          : new Date(entry.timestamp),
-    }))
+    .map((entry) => {
+      const timestamp = (() => {
+        if (entry.timestamp instanceof Date && !Number.isNaN(entry.timestamp.getTime())) {
+          return entry.timestamp;
+        }
+        const parsed = new Date((entry as any).timestamp);
+        return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+      })();
+
+      const averageExecutionTime = typeof entry.averageExecutionTime === "number"
+        ? entry.averageExecutionTime
+        : typeof entry.executionTime === "number"
+        ? entry.executionTime
+        : 0;
+
+      const p95ExecutionTime = typeof entry.p95ExecutionTime === "number"
+        ? entry.p95ExecutionTime
+        : averageExecutionTime;
+
+      const executionTime = typeof entry.executionTime === "number"
+        ? entry.executionTime
+        : averageExecutionTime;
+
+      return {
+        ...entry,
+        timestamp,
+        averageExecutionTime,
+        p95ExecutionTime,
+        executionTime,
+      };
+    })
     .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
     .slice(-100);
 
@@ -478,6 +518,19 @@ export async function registerTestRoutes(
           },
           required: ["entityId"],
         },
+        querystring: {
+          type: "object",
+          properties: {
+            metricId: { type: "string" },
+            environment: { type: "string" },
+            severity: {
+              type: "string",
+              enum: ["critical", "high", "medium", "low"],
+            },
+            limit: { type: "integer", minimum: 1, maximum: 500 },
+            days: { type: "integer", minimum: 1, maximum: 365 },
+          },
+        },
       },
     },
     async (request, reply) => {
@@ -494,8 +547,12 @@ export async function registerTestRoutes(
             });
         }
 
+        const queryParams = (request.query || {}) as Record<string, any>;
+        const historyOptions = resolvePerformanceHistoryOptions(queryParams);
+
         const entityType = (entity as any)?.type;
         if (entityType === "test") {
+
           let metrics = (entity as any)?.performanceMetrics as
             | TestPerformanceMetrics
             | undefined;
@@ -507,9 +564,15 @@ export async function registerTestRoutes(
             }
           }
 
+          const history = await dbService.getPerformanceMetricsHistory(
+            entityId,
+            historyOptions
+          );
+
           reply.send({
             success: true,
             data: metrics ?? createEmptyPerformanceMetrics(),
+            history,
           });
           return;
         }
@@ -649,9 +712,38 @@ export async function registerTestRoutes(
           });
         }
 
+        const historyLimit = historyOptions.limit;
+        const perTestLimit =
+          historyLimit && relatedTestIds.size > 0
+            ? Math.max(1, Math.ceil(historyLimit / relatedTestIds.size))
+            : historyLimit;
+
+        const historyBatches = await Promise.all(
+          Array.from(relatedTestIds).map((testId) =>
+            dbService
+              .getPerformanceMetricsHistory(
+                testId,
+                perTestLimit !== undefined
+                  ? { ...historyOptions, limit: perTestLimit }
+                  : historyOptions
+              )
+              .catch(() => [])
+          )
+        );
+
+        const combinedHistory = historyBatches
+          .flat()
+          .sort((a, b) => {
+            const aTime = a.detectedAt?.getTime?.() ?? 0;
+            const bTime = b.detectedAt?.getTime?.() ?? 0;
+            return bTime - aTime;
+          })
+          .slice(0, historyLimit ?? 100);
+
         reply.send({
           success: true,
           data: aggregatePerformanceMetrics(aggregatedMetrics),
+          history: combinedHistory,
         });
       } catch (error) {
         reply.status(500).send({

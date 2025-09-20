@@ -37,6 +37,7 @@ import type {
 } from "../models/types.js";
 import type { CoverageMetrics, Spec } from "../models/entities.js";
 import { SpecService } from "../services/SpecService.js";
+import { resolvePerformanceHistoryOptions } from "../utils/performanceFilters.js";
 
 // MCP Tool definitions
 interface MCPToolDefinition {
@@ -200,6 +201,161 @@ export class MCPRouter {
         required: ["query"],
       },
       handler: this.handleGraphSearch.bind(this),
+    });
+
+    this.registerTool({
+      name: "graph.list_module_children",
+      description:
+        "List structural children for a module or directory with optional filters",
+      inputSchema: {
+        type: "object",
+        properties: {
+          modulePath: {
+            type: "string",
+            description: "Module path or entity id (e.g., file:src/app.ts:module)",
+          },
+          includeFiles: {
+            type: "boolean",
+            description: "Include file children (default true)",
+          },
+          includeSymbols: {
+            type: "boolean",
+            description: "Include symbol children (default true)",
+          },
+          language: {
+            anyOf: [
+              { type: "string" },
+              { type: "array", items: { type: "string" } },
+            ],
+            description: "Language filter (case-insensitive)",
+          },
+          symbolKind: {
+            anyOf: [
+              { type: "string" },
+              { type: "array", items: { type: "string" } },
+            ],
+            description: "Symbol kind filter (e.g., class, function)",
+          },
+          modulePathPrefix: {
+            type: "string",
+            description: "Restrict children to modulePath/path starting with prefix",
+          },
+          limit: {
+            type: "number",
+            minimum: 1,
+            maximum: 500,
+            description: "Maximum number of children to return (default 50)",
+          },
+        },
+        required: ["modulePath"],
+      },
+      handler: this.handleListModuleChildren.bind(this),
+    });
+
+    this.registerTool({
+      name: "graph.list_imports",
+      description: "List structural import edges for a file or module",
+      inputSchema: {
+        type: "object",
+        properties: {
+          entityId: {
+            type: "string",
+            description: "Entity id to inspect (e.g., file:src/app.ts:module)",
+          },
+          resolvedOnly: {
+            type: "boolean",
+            description: "Only include resolved imports",
+          },
+          language: {
+            anyOf: [
+              { type: "string" },
+              { type: "array", items: { type: "string" } },
+            ],
+            description: "Language filter (case-insensitive)",
+          },
+          symbolKind: {
+            anyOf: [
+              { type: "string" },
+              { type: "array", items: { type: "string" } },
+            ],
+            description: "Target symbol kind filter",
+          },
+          importAlias: {
+            anyOf: [
+              { type: "string" },
+              { type: "array", items: { type: "string" } },
+            ],
+            description: "Alias filter (exact match)",
+          },
+          importType: {
+            anyOf: [
+              {
+                type: "string",
+                enum: [
+                  "default",
+                  "named",
+                  "namespace",
+                  "wildcard",
+                  "side-effect",
+                ],
+              },
+              {
+                type: "array",
+                items: {
+                  type: "string",
+                  enum: [
+                    "default",
+                    "named",
+                    "namespace",
+                    "wildcard",
+                    "side-effect",
+                  ],
+                },
+              },
+            ],
+            description: "Import kind filter",
+          },
+          isNamespace: {
+            type: "boolean",
+            description: "Filter namespace imports only",
+          },
+          modulePath: {
+            anyOf: [
+              { type: "string" },
+              { type: "array", items: { type: "string" } },
+            ],
+            description: "Exact module path filter",
+          },
+          modulePathPrefix: {
+            type: "string",
+            description: "Prefix filter for module paths",
+          },
+          limit: {
+            type: "number",
+            minimum: 1,
+            maximum: 1000,
+            description: "Maximum number of imports to return (default 200)",
+          },
+        },
+        required: ["entityId"],
+      },
+      handler: this.handleListImports.bind(this),
+    });
+
+    this.registerTool({
+      name: "graph.find_definition",
+      description: "Find the defining entity for a symbol",
+      inputSchema: {
+        type: "object",
+        properties: {
+          symbolId: {
+            type: "string",
+            description: "Symbol id to resolve",
+          },
+        },
+        required: ["symbolId"],
+      },
+      handler: this.handleFindDefinition.bind(this),
     });
 
     // AST-Grep search tool: structure-aware code queries
@@ -1068,6 +1224,229 @@ export class MCPRouter {
       console.error("Error in handleGraphSearch:", error);
       throw error;
     }
+  }
+
+  private async handleListModuleChildren(params: any): Promise<any> {
+    console.log("MCP Tool called: graph.list_module_children", params);
+
+    try {
+      const modulePath =
+        typeof params?.modulePath === "string"
+          ? params.modulePath.trim()
+          : "";
+      if (!modulePath) {
+        throw new Error("modulePath is required");
+      }
+
+      const includeFiles = this.parseBooleanFlag(params?.includeFiles);
+      const includeSymbols = this.parseBooleanFlag(params?.includeSymbols);
+      const languages = this.parseStringArrayFlag(params?.language);
+      const symbolKinds = this.parseStringArrayFlag(params?.symbolKind);
+      const modulePathPrefix =
+        typeof params?.modulePathPrefix === "string"
+          ? params.modulePathPrefix.trim()
+          : undefined;
+      const limit = this.parseNumericLimit(params?.limit);
+
+      const options: Parameters<KnowledgeGraphService["listModuleChildren"]>[1] =
+        {};
+      if (typeof includeFiles === "boolean") options.includeFiles = includeFiles;
+      if (typeof includeSymbols === "boolean")
+        options.includeSymbols = includeSymbols;
+      if (languages.length === 1) {
+        options.language = languages[0];
+      } else if (languages.length > 1) {
+        options.language = languages;
+      }
+      if (symbolKinds.length === 1) {
+        options.symbolKind = symbolKinds[0];
+      } else if (symbolKinds.length > 1) {
+        options.symbolKind = symbolKinds;
+      }
+      if (modulePathPrefix && modulePathPrefix.length > 0) {
+        options.modulePathPrefix = modulePathPrefix;
+      }
+      if (typeof limit === "number") {
+        options.limit = limit;
+      }
+
+      const result = await this.kgService.listModuleChildren(modulePath, options);
+      const childCount = Array.isArray(result.children)
+        ? result.children.length
+        : 0;
+
+      return {
+        ...result,
+        childCount,
+        message: `Found ${childCount} children under ${result.modulePath}`,
+      };
+    } catch (error) {
+      console.error("Error in handleListModuleChildren:", error);
+      throw new McpError(
+        ErrorCode.InternalError,
+        "Tool execution failed",
+        `Failed to list module children: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  private async handleListImports(params: any): Promise<any> {
+    console.log("MCP Tool called: graph.list_imports", params);
+
+    try {
+      const entityId =
+        typeof params?.entityId === "string" ? params.entityId.trim() : "";
+      if (!entityId) {
+        throw new Error("entityId is required");
+      }
+
+      const resolvedOnly = this.parseBooleanFlag(params?.resolvedOnly);
+      const languages = this.parseStringArrayFlag(params?.language).map((value) =>
+        value.toLowerCase()
+      );
+      const symbolKinds = this.parseStringArrayFlag(params?.symbolKind).map(
+        (value) => value.toLowerCase()
+      );
+      const importAliases = this.parseStringArrayFlag(params?.importAlias);
+      const importTypes = this.parseStringArrayFlag(params?.importType).map(
+        (value) => value.toLowerCase()
+      );
+      const isNamespace = this.parseBooleanFlag(params?.isNamespace);
+      const modulePaths = this.parseStringArrayFlag(params?.modulePath);
+      const modulePathPrefix =
+        typeof params?.modulePathPrefix === "string"
+          ? params.modulePathPrefix.trim()
+          : undefined;
+      const limit = this.parseNumericLimit(params?.limit);
+
+      const options: Parameters<KnowledgeGraphService["listImports"]>[1] = {};
+      if (typeof resolvedOnly === "boolean") options.resolvedOnly = resolvedOnly;
+      if (languages.length === 1) {
+        options.language = languages[0];
+      } else if (languages.length > 1) {
+        options.language = languages;
+      }
+      if (symbolKinds.length === 1) {
+        options.symbolKind = symbolKinds[0];
+      } else if (symbolKinds.length > 1) {
+        options.symbolKind = symbolKinds;
+      }
+      if (importAliases.length === 1) {
+        options.importAlias = importAliases[0];
+      } else if (importAliases.length > 1) {
+        options.importAlias = importAliases;
+      }
+      if (importTypes.length === 1) {
+        options.importType = importTypes[0] as any;
+      } else if (importTypes.length > 1) {
+        options.importType = importTypes as any;
+      }
+      if (typeof isNamespace === "boolean") {
+        options.isNamespace = isNamespace;
+      }
+      if (modulePaths.length === 1) {
+        options.modulePath = modulePaths[0];
+      } else if (modulePaths.length > 1) {
+        options.modulePath = modulePaths;
+      }
+      if (modulePathPrefix && modulePathPrefix.length > 0) {
+        options.modulePathPrefix = modulePathPrefix;
+      }
+      if (typeof limit === "number") {
+        options.limit = limit;
+      }
+
+      const result = await this.kgService.listImports(entityId, options);
+      const importCount = Array.isArray(result.imports) ? result.imports.length : 0;
+
+      return {
+        ...result,
+        importCount,
+        message: `Found ${importCount} imports for ${result.entityId}`,
+      };
+    } catch (error) {
+      console.error("Error in handleListImports:", error);
+      throw new McpError(
+        ErrorCode.InternalError,
+        "Tool execution failed",
+        `Failed to list imports: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  private async handleFindDefinition(params: any): Promise<any> {
+    console.log("MCP Tool called: graph.find_definition", params);
+
+    try {
+      const symbolId =
+        typeof params?.symbolId === "string" ? params.symbolId.trim() : "";
+      if (!symbolId) {
+        throw new Error("symbolId is required");
+      }
+
+      const result = await this.kgService.findDefinition(symbolId);
+
+      return {
+        ...result,
+        message: result.source
+          ? `Definition resolved to ${result.source.id}`
+          : "Definition not found",
+      };
+    } catch (error) {
+      console.error("Error in handleFindDefinition:", error);
+      throw new McpError(
+        ErrorCode.InternalError,
+        "Tool execution failed",
+        `Failed to find definition: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  private parseBooleanFlag(value: unknown): boolean | undefined {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true") return true;
+      if (normalized === "false") return false;
+    }
+    return undefined;
+  }
+
+  private parseStringArrayFlag(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value
+        .flatMap((entry) =>
+          typeof entry === "string" ? entry.split(",") : []
+        )
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    }
+    if (typeof value === "string") {
+      return value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    }
+    return [];
+  }
+
+  private parseNumericLimit(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value.trim());
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return undefined;
   }
 
   private async handleGetExamples(params: any): Promise<any> {
@@ -4060,20 +4439,28 @@ export class MCPRouter {
     console.log("MCP Tool called: tests.get_performance", params);
 
     try {
-      const { testId, days = 30 } = params;
+      const { testId, days, metricId, environment, severity, limit } = params;
+
+      const historyOptions = resolvePerformanceHistoryOptions({
+        days,
+        metricId,
+        environment,
+        severity,
+        limit,
+      });
 
       const metrics = await this.testEngine.getPerformanceMetrics(testId);
-      const historicalData = await this.dbService.getPerformanceMetricsHistory(
+      const history = await this.dbService.getPerformanceMetricsHistory(
         testId,
-        days
+        historyOptions
       );
 
       return {
         metrics,
-        historicalData,
+        history,
         message: `Performance metrics for test ${testId}: avg ${
           metrics.averageExecutionTime
-        }ms, ${metrics.successRate * 100}% success rate`,
+        }ms, ${Math.round(metrics.successRate * 100)}% success rate`,
       };
     } catch (error) {
       console.error("Error in handleGetPerformance:", error);

@@ -14,8 +14,15 @@ import {
   CoverageMetrics,
   TestHistoricalData,
 } from "../models/entities.js";
-import { RelationshipType } from "../models/relationships.js";
+import {
+  PerformanceRelationship,
+  PerformanceMetricSample,
+  PerformanceTrend,
+  RelationshipType,
+} from "../models/relationships.js";
 import { noiseConfig } from "../config/noise.js";
+import { sanitizeEnvironment } from "../utils/environment.js";
+import { normalizeMetricIdForId } from "../utils/codeEdges.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -33,6 +40,7 @@ export interface TestResult {
     cpuUsage?: number;
     networkRequests?: number;
   };
+  environment?: string;
 }
 
 export interface TestSuiteResult {
@@ -80,6 +88,15 @@ export interface FlakyTestAnalysis {
     duration?: string;
   };
   recommendations: string[];
+}
+
+interface PerformanceRelationshipOptions {
+  reason: string;
+  severity?: "critical" | "high" | "medium" | "low";
+  scenario?: string;
+  environment?: string;
+  trend?: "regression" | "improvement" | "neutral";
+  resolvedAt?: Date | null;
 }
 
 export class TestEngine {
@@ -168,16 +185,7 @@ export class TestEngine {
       }
 
       // Flush any batched performance relationships
-      if (this.perfRelBuffer.length > 0 &&
-        typeof this.kgService.createRelationshipsBulk === "function") {
-        try {
-          await this.kgService.createRelationshipsBulk(this.perfRelBuffer, { validate: false });
-        } finally {
-          this.perfRelBuffer = [];
-        }
-      } else {
-        this.perfRelBuffer = [];
-      }
+      await this.flushPerformanceRelationships();
     } catch (error) {
       console.error("Failed to record test results:", error);
       throw new Error(
@@ -185,6 +193,27 @@ export class TestEngine {
           error instanceof Error ? error.message : "Unknown error"
         }`
       );
+    }
+  }
+
+  private async flushPerformanceRelationships(): Promise<void> {
+    const relationshipsToFlush = this.perfRelBuffer;
+    if (!relationshipsToFlush.length) {
+      return;
+    }
+
+    const bulkCreate = this.kgService?.createRelationshipsBulk;
+    this.perfRelBuffer = [];
+
+    if (typeof bulkCreate !== "function") {
+      return;
+    }
+
+    try {
+      await bulkCreate(relationshipsToFlush, { validate: false });
+    } catch (error) {
+      this.perfRelBuffer = relationshipsToFlush.concat(this.perfRelBuffer);
+      throw error;
     }
   }
 
@@ -267,6 +296,8 @@ export class TestEngine {
     }
 
     // Create test execution record
+    const executionEnvironment = this.buildExecutionEnvironment(result, timestamp);
+
     const execution: TestExecution = {
       id: `${result.testId}_${timestamp.getTime()}`,
       timestamp,
@@ -276,10 +307,7 @@ export class TestEngine {
       stackTrace: result.stackTrace,
       coverage: result.coverage,
       performance: result.performance,
-      environment: {
-        framework: result.testSuite,
-        timestamp: timestamp.toISOString(),
-      },
+      environment: executionEnvironment,
     };
 
     // Add execution to test history (avoid duplicates)
@@ -377,6 +405,24 @@ export class TestEngine {
     }
   }
 
+  private buildExecutionEnvironment(
+    result: TestResult,
+    timestamp: Date
+  ): Record<string, any> {
+    const normalized =
+      this.normalizeEnvironmentCandidate(result.environment) ??
+      this.defaultEnvironment();
+
+    return {
+      name: normalized,
+      raw: result.environment ?? null,
+      framework: this.inferFramework(result.testSuite),
+      suite: result.testSuite,
+      recordedAt: timestamp.toISOString(),
+      nodeEnv: process.env.NODE_ENV ?? undefined,
+    };
+  }
+
   /**
    * Create new test entity from test result
    */
@@ -423,6 +469,108 @@ export class TestEngine {
     };
 
     return testEntity;
+  }
+
+  private resolveEnvironmentForTest(testEntity: Test): string {
+    const history = Array.isArray(testEntity.executionHistory)
+      ? testEntity.executionHistory
+      : [];
+
+    for (let idx = history.length - 1; idx >= 0; idx -= 1) {
+      const execution = history[idx];
+      const normalized = this.extractEnvironmentFromExecution(
+        execution?.environment
+      );
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return this.defaultEnvironment();
+  }
+
+  private extractEnvironmentFromExecution(env: unknown): string | undefined {
+    if (!env) return undefined;
+    if (typeof env === "string") {
+      return this.normalizeEnvironmentCandidate(env);
+    }
+
+    if (typeof env === "object") {
+      const candidateKeys = [
+        "environment",
+        "env",
+        "name",
+        "target",
+        "stage",
+        "nodeEnv",
+      ];
+
+      for (const key of candidateKeys) {
+        const candidate = (env as Record<string, any>)[key];
+        if (typeof candidate === "string") {
+          const normalized = this.normalizeEnvironmentCandidate(candidate);
+          if (normalized) return normalized;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private normalizeEnvironmentCandidate(value: unknown): string | undefined {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return undefined;
+    }
+
+    const normalized = sanitizeEnvironment(value);
+    if (!normalized) return undefined;
+    return normalized === "unknown" ? undefined : normalized;
+  }
+
+  private defaultEnvironment(): string {
+    const candidates = [
+      process.env.TEST_RUN_ENVIRONMENT,
+      process.env.MEMENTO_ENVIRONMENT,
+      process.env.NODE_ENV,
+      "test",
+    ];
+
+    for (const candidate of candidates) {
+      const normalized = this.normalizeEnvironmentCandidate(candidate);
+      if (normalized) return normalized;
+    }
+
+    return "test";
+  }
+
+  private mapPerformanceTrendToRelationship(
+    trend: TestPerformanceMetrics["trend"] | undefined
+  ): PerformanceTrend {
+    switch (trend) {
+      case "improving":
+        return "improvement";
+      case "degrading":
+        return "regression";
+      default:
+        return "neutral";
+    }
+  }
+
+  private hasRecoveredFromPerformanceIncident(testEntity: Test): boolean {
+    if (testEntity.performanceMetrics.trend === "improving") {
+      return true;
+    }
+
+    const avgOk =
+      typeof testEntity.performanceMetrics.averageExecutionTime === "number" &&
+      testEntity.performanceMetrics.averageExecutionTime <
+        noiseConfig.PERF_IMPACT_AVG_MS;
+    const p95Ok =
+      typeof testEntity.performanceMetrics.p95ExecutionTime === "number" &&
+      testEntity.performanceMetrics.p95ExecutionTime <
+        noiseConfig.PERF_IMPACT_P95_MS;
+
+    return avgOk && p95Ok;
   }
 
   /**
@@ -642,7 +790,7 @@ export class TestEngine {
     const pushCoverage = (
       sourceId: string,
       coverage: CoverageMetrics | undefined,
-      testType: Test["testType"],
+      testType: Test["testType"] | undefined,
       testName: string,
       covers: string[]
     ) => {
@@ -659,18 +807,26 @@ export class TestEngine {
       };
 
       coverages.push(normalized);
-      breakdownBuckets[testType].push(normalized);
+      const bucketKey: Test["testType"] = testType ?? "unit";
+      breakdownBuckets[bucketKey].push(normalized);
       testCases.push({ testId: sourceId, testName, covers });
     };
 
-    // Always include the test entity's own coverage metrics
-    pushCoverage(
-      entityId,
-      testEntity.coverage,
-      testEntity.testType,
-      testEntity.targetSymbol ?? entityId,
-      testEntity.targetSymbol ? [testEntity.targetSymbol] : [entityId]
-    );
+    // Include the test entity's own coverage metrics when applicable
+    if (testEntity) {
+      const baselineTarget = testEntity.targetSymbol ?? testEntity.id ?? entityId;
+      const coverageTargets = testEntity.targetSymbol
+        ? [testEntity.targetSymbol]
+        : [entityId];
+
+      pushCoverage(
+        entityId,
+        testEntity.coverage,
+        testEntity.testType ?? "unit",
+        baselineTarget,
+        coverageTargets
+      );
+    }
 
     for (const rel of coverageRels) {
       if (!rel?.fromEntityId) {
@@ -1134,28 +1290,56 @@ export class TestEngine {
     const history = testEntity.executionHistory;
     if (history.length === 0) return;
 
+    const environment = this.resolveEnvironmentForTest(testEntity);
     const successfulRuns = history.filter((h) => h.status === "passed");
-    const executionTimes = successfulRuns.map((h) => h.duration);
+    const successfulDurations = successfulRuns
+      .map((h) => Number(h.duration))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+    const allDurations = history
+      .map((h) => Number(h.duration))
+      .filter((value) => Number.isFinite(value) && value >= 0);
 
-    testEntity.performanceMetrics.averageExecutionTime =
-      executionTimes.reduce((a, b) => a + b, 0) / executionTimes.length;
+    const durationSamples =
+      successfulDurations.length > 0 ? successfulDurations : allDurations;
+
+    if (durationSamples.length > 0) {
+      testEntity.performanceMetrics.averageExecutionTime =
+        durationSamples.reduce((sum, value) => sum + value, 0) /
+        durationSamples.length;
+
+      // Calculate P95 using the same sample set (avoid NaN when no passes)
+      const sorted = [...durationSamples].sort((a, b) => a - b);
+      const p95Index = Math.floor(sorted.length * 0.95);
+      testEntity.performanceMetrics.p95ExecutionTime =
+        sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0;
+    } else {
+      testEntity.performanceMetrics.averageExecutionTime = 0;
+      testEntity.performanceMetrics.p95ExecutionTime = 0;
+    }
+
     testEntity.performanceMetrics.successRate =
       successfulRuns.length / history.length;
 
-    // Calculate P95
-    const sorted = [...executionTimes].sort((a, b) => a - b);
-    const p95Index = Math.floor(sorted.length * 0.95);
-    testEntity.performanceMetrics.p95ExecutionTime = sorted[p95Index] || 0;
-
-    // Calculate trend
+    // Calculate trend using execution-time deltas first, falling back to pass/fail history
     testEntity.performanceMetrics.trend = this.calculateTrend(history);
 
     // Update historical data
+    const latestExecution = history[history.length - 1];
+    const latestTimestamp = latestExecution?.timestamp
+      ? new Date(latestExecution.timestamp)
+      : new Date();
+    const latestRunId = latestExecution?.id;
+    const averageSample = testEntity.performanceMetrics.averageExecutionTime;
+    const p95Sample = testEntity.performanceMetrics.p95ExecutionTime;
+
     const latestData: TestHistoricalData = {
-      timestamp: new Date(),
-      executionTime: testEntity.performanceMetrics.averageExecutionTime,
+      timestamp: latestTimestamp,
+      executionTime: averageSample,
+      averageExecutionTime: averageSample,
+      p95ExecutionTime: p95Sample,
       successRate: testEntity.performanceMetrics.successRate,
-      coveragePercentage: testEntity.coverage.lines,
+      coveragePercentage: testEntity.coverage?.lines ?? 0,
+      runId: latestRunId,
     };
 
     testEntity.performanceMetrics.historicalData.push(latestData);
@@ -1166,6 +1350,31 @@ export class TestEngine {
         testEntity.performanceMetrics.historicalData.slice(-100);
     }
 
+    try {
+      const snapshotRelationship = this.buildPerformanceRelationship(
+        testEntity,
+        testEntity.targetSymbol ?? testEntity.id,
+        RelationshipType.PERFORMANCE_IMPACT,
+        {
+          reason: "Performance metrics snapshot",
+          severity: "low",
+          scenario: "test-latency-observation",
+          environment,
+          trend: this.mapPerformanceTrendToRelationship(
+            testEntity.performanceMetrics.trend
+          ),
+        }
+      );
+
+      if (snapshotRelationship) {
+        await this.dbService
+          .recordPerformanceMetricSnapshot(snapshotRelationship)
+          .catch(() => {});
+      }
+    } catch {
+      // Snapshot persistence shouldn't block test metric updates
+    }
+
     // Queue performance relationships when we can associate a target symbol (batched)
     try {
       if (testEntity.targetSymbol) {
@@ -1174,11 +1383,37 @@ export class TestEngine {
           const hist = Array.isArray(testEntity.performanceMetrics.historicalData)
             ? testEntity.performanceMetrics.historicalData
             : [];
-          const historyOk = hist.length >= noiseConfig.PERF_MIN_HISTORY;
-          const lastN = hist.slice(-Math.max(1, noiseConfig.PERF_TREND_MIN_RUNS));
-          const lastExecs = lastN.map((h) => h.executionTime);
-          const monotonicIncrease = lastExecs.every((v, i, arr) => i === 0 || v >= arr[i - 1]);
-          const increaseDelta = lastExecs.length >= 2 ? (lastExecs[lastExecs.length - 1] - lastExecs[0]) : 0;
+          const validHistorySamples = hist.filter((entry) =>
+            Number.isFinite(
+              Number(
+                entry?.p95ExecutionTime ??
+                  entry?.executionTime ??
+                  entry?.averageExecutionTime
+              )
+            )
+          );
+          const historyOk =
+            validHistorySamples.length >= noiseConfig.PERF_MIN_HISTORY;
+          const lastN = validHistorySamples.slice(
+            -Math.max(1, noiseConfig.PERF_TREND_MIN_RUNS)
+          );
+          const lastExecs = lastN
+            .map((h) =>
+              Number(
+                h.p95ExecutionTime ??
+                  h.executionTime ??
+                  h.averageExecutionTime ??
+                  0
+              )
+            )
+            .filter((value) => Number.isFinite(value));
+          const monotonicIncrease = lastExecs.every(
+            (v, i, arr) => i === 0 || v >= arr[i - 1]
+          );
+          const increaseDelta =
+            lastExecs.length >= 2
+              ? lastExecs[lastExecs.length - 1] - lastExecs[0]
+              : 0;
           const degradingOk =
             testEntity.performanceMetrics.trend === "degrading" &&
             historyOk &&
@@ -1187,19 +1422,23 @@ export class TestEngine {
 
           // Regression if degrading meets sustained and delta thresholds
           if (degradingOk) {
-            this.perfRelBuffer.push({
-              id: `${testEntity.id}_perf_regression_${testEntity.targetSymbol}`,
-              fromEntityId: testEntity.id,
-              toEntityId: testEntity.targetSymbol,
-              type: RelationshipType.PERFORMANCE_REGRESSION,
-              created: new Date(),
-              lastModified: new Date(),
-              version: 1,
-              metadata: {
-                avgMs: testEntity.performanceMetrics.averageExecutionTime,
-                p95Ms: testEntity.performanceMetrics.p95ExecutionTime,
-              },
-            } as any);
+            const regressionRel = this.buildPerformanceRelationship(
+              testEntity,
+              testEntity.targetSymbol,
+              RelationshipType.PERFORMANCE_REGRESSION,
+              {
+                reason: "Sustained regression detected via historical trend",
+                severity: "high",
+                scenario: "test-latency-regression",
+                environment,
+              }
+            );
+            if (regressionRel) {
+              this.perfRelBuffer.push(regressionRel);
+              await this.dbService
+                .recordPerformanceMetricSnapshot(regressionRel)
+                .catch(() => {});
+            }
             this.perfIncidentSeeds.add(testEntity.id);
           } else if (
             // Performance impact if latency is above configurable high-water marks
@@ -1208,26 +1447,239 @@ export class TestEngine {
               testEntity.performanceMetrics.averageExecutionTime >= noiseConfig.PERF_IMPACT_AVG_MS
             )
           ) {
-            this.perfRelBuffer.push({
-              id: `${testEntity.id}_perf_impact_${testEntity.targetSymbol}`,
-              fromEntityId: testEntity.id,
-              toEntityId: testEntity.targetSymbol,
-              type: RelationshipType.PERFORMANCE_IMPACT,
-              created: new Date(),
-              lastModified: new Date(),
-              version: 1,
-              metadata: {
-                avgMs: testEntity.performanceMetrics.averageExecutionTime,
-                p95Ms: testEntity.performanceMetrics.p95ExecutionTime,
-              },
-            } as any);
+            const impactRel = this.buildPerformanceRelationship(
+              testEntity,
+              testEntity.targetSymbol,
+              RelationshipType.PERFORMANCE_IMPACT,
+              {
+                reason: "Latency threshold breached in latest run",
+                severity: "medium",
+                scenario: "test-latency-threshold",
+                environment,
+              }
+            );
+            if (impactRel) {
+              this.perfRelBuffer.push(impactRel);
+              await this.dbService
+                .recordPerformanceMetricSnapshot(impactRel)
+                .catch(() => {});
+            }
             this.perfIncidentSeeds.add(testEntity.id);
+          } else if (
+            this.perfIncidentSeeds.has(testEntity.id) &&
+            historyOk &&
+            this.hasRecoveredFromPerformanceIncident(testEntity)
+          ) {
+            const resolvedRel = this.buildPerformanceRelationship(
+              testEntity,
+              testEntity.targetSymbol,
+              RelationshipType.PERFORMANCE_REGRESSION,
+              {
+                reason: "Performance metrics returned to baseline",
+                severity: "low",
+                scenario: "test-latency-regression",
+                environment,
+                trend: "improvement",
+                resolvedAt: testEntity.lastRunAt ?? new Date(),
+              }
+            );
+            if (resolvedRel) {
+              this.perfRelBuffer.push(resolvedRel);
+              await this.dbService
+                .recordPerformanceMetricSnapshot(resolvedRel)
+                .catch(() => {});
+            }
+            this.perfIncidentSeeds.delete(testEntity.id);
           }
         }
       }
     } catch {
       // Non-fatal; continue
     }
+  }
+
+  private buildPerformanceRelationship(
+    testEntity: Test,
+    targetEntityId: string,
+    type: RelationshipType,
+    opts: PerformanceRelationshipOptions
+  ): PerformanceRelationship | null {
+    if (!targetEntityId) return null;
+    if (
+      type !== RelationshipType.PERFORMANCE_IMPACT &&
+      type !== RelationshipType.PERFORMANCE_REGRESSION
+    ) {
+      return null;
+    }
+
+    const metrics = testEntity.performanceMetrics;
+    if (!metrics) return null;
+
+    const normalizedEnvironment =
+      this.normalizeEnvironmentCandidate(opts.environment) ??
+      this.defaultEnvironment();
+
+    const history = Array.isArray(metrics.historicalData)
+      ? metrics.historicalData
+      : [];
+
+    const historySamples = history
+      .map((entry) => {
+        if (!entry) return null;
+        const timestamp =
+          entry.timestamp instanceof Date
+            ? entry.timestamp
+            : new Date(entry.timestamp);
+        const p95 = Number(
+          entry.p95ExecutionTime ??
+            entry.executionTime ??
+            entry.averageExecutionTime
+        );
+        if (!Number.isFinite(p95)) return null;
+        return {
+          value: p95,
+          timestamp: Number.isNaN(timestamp.valueOf()) ? undefined : timestamp,
+          runId: entry.runId,
+        };
+      })
+      .filter(Boolean) as Array<{
+        value: number;
+        timestamp?: Date;
+        runId?: string;
+      }>;
+
+    const metricsHistory = historySamples.map((sample) => ({
+      value: sample.value,
+      timestamp: sample.timestamp,
+      runId: sample.runId,
+      environment: normalizedEnvironment,
+      unit: "ms",
+    })) as PerformanceMetricSample[];
+
+    const firstSample = historySamples[0];
+    const lastSample =
+      historySamples.length > 0
+        ? historySamples[historySamples.length - 1]
+        : undefined;
+
+    const baselineCandidate =
+      firstSample?.value ??
+      (metrics.benchmarkComparisons &&
+      metrics.benchmarkComparisons.length > 0
+        ? metrics.benchmarkComparisons[0].threshold
+        : metrics.p95ExecutionTime ?? metrics.averageExecutionTime);
+    const currentCandidate =
+      lastSample?.value ?? metrics.p95ExecutionTime ?? baselineCandidate;
+
+    const baseline = Number.isFinite(baselineCandidate)
+      ? Number(baselineCandidate)
+      : undefined;
+    const current = Number.isFinite(currentCandidate)
+      ? Number(currentCandidate)
+      : undefined;
+    const delta =
+      baseline !== undefined && current !== undefined
+        ? current - baseline
+        : undefined;
+    const percentChange =
+      baseline !== undefined && baseline !== 0 && delta !== undefined
+        ? (delta / baseline) * 100
+        : undefined;
+
+    const detectedAt = testEntity.lastRunAt ?? new Date();
+    const runId =
+      testEntity.executionHistory.length > 0
+        ? testEntity.executionHistory[testEntity.executionHistory.length - 1].id
+        : undefined;
+
+    const rawMetricId = `test/${testEntity.id}/latency/p95`;
+    const metricId = normalizeMetricIdForId(rawMetricId);
+    const severity =
+      opts.severity ??
+      (type === RelationshipType.PERFORMANCE_REGRESSION ? "high" : "medium");
+    const trend = opts.trend ?? "regression";
+    const resolvedAtValue =
+      opts.resolvedAt !== undefined && opts.resolvedAt !== null
+        ? new Date(opts.resolvedAt)
+        : undefined;
+
+      const successRatePercent =
+        typeof metrics.successRate === "number"
+          ? Math.round(metrics.successRate * 10000) / 100
+          : undefined;
+
+      const metadata = {
+        reason: opts.reason,
+        testId: testEntity.id,
+        testSuite: testEntity.path,
+        framework: testEntity.framework,
+        trend,
+        environment: normalizedEnvironment,
+        avgMs: metrics.averageExecutionTime,
+        p95Ms: metrics.p95ExecutionTime,
+        successRate: metrics.successRate,
+        benchmarkComparisons: (metrics.benchmarkComparisons || []).slice(0, 5),
+        status: resolvedAtValue ? "resolved" : "active",
+        resolvedAt: resolvedAtValue ? resolvedAtValue.toISOString() : undefined,
+        metrics: [
+          {
+            id: "averageExecutionTime",
+            name: "Average execution time",
+            value: metrics.averageExecutionTime,
+            unit: "ms",
+          },
+          {
+            id: "p95ExecutionTime",
+            name: "P95 execution time",
+            value: metrics.p95ExecutionTime,
+            unit: "ms",
+          },
+          {
+            id: "successRate",
+            name: "Success rate",
+            value: successRatePercent ?? null,
+            unit: "percent",
+          },
+        ],
+      };
+
+    const relationship: PerformanceRelationship = {
+      id: "",
+      fromEntityId: testEntity.id,
+      toEntityId: targetEntityId,
+      type,
+      created: detectedAt,
+      lastModified: detectedAt,
+      version: 1,
+      metricId,
+      scenario: opts.scenario ?? "test-suite",
+      environment: normalizedEnvironment,
+      baselineValue: baseline,
+      currentValue: current,
+      delta,
+      percentChange,
+      unit: "ms",
+      sampleSize:
+        metricsHistory.length > 0 ? metricsHistory.length : undefined,
+      metricsHistory,
+      trend,
+      severity,
+      runId,
+      detectedAt,
+      metadata,
+      evidence: [
+        {
+          source: "heuristic",
+          note: opts.reason,
+        },
+      ],
+    };
+
+    if (resolvedAtValue) {
+      relationship.resolvedAt = resolvedAtValue;
+    }
+
+    return relationship;
   }
 
   private async updateCoverageRelationships(testEntity: Test): Promise<void> {
@@ -1496,10 +1948,51 @@ export class TestEngine {
   private calculateTrend(
     history: TestExecution[]
   ): "improving" | "stable" | "degrading" {
+    if (!Array.isArray(history) || history.length === 0) {
+      return "stable";
+    }
+
+    const windowSize = Math.max(noiseConfig.PERF_TREND_MIN_RUNS ?? 3, 3);
+
+    const durations = history
+      .map((entry) => Number(entry?.duration))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+
+    if (durations.length >= Math.max(2, windowSize)) {
+      const recent = durations.slice(-windowSize);
+      const previous = durations.slice(-windowSize * 2, -windowSize);
+
+      const average = (values: number[]): number =>
+        values.reduce((sum, value) => sum + value, 0) / values.length;
+
+      const recentAverage = recent.length > 0 ? average(recent) : 0;
+      const previousAverage =
+        previous.length > 0 ? average(previous) : recentAverage;
+      const delta = recentAverage - previousAverage;
+      const percentChange =
+        previousAverage > 0 ? (delta / previousAverage) * 100 : delta > 0 ? Infinity : delta < 0 ? -Infinity : 0;
+
+      if (
+        delta >= noiseConfig.PERF_DEGRADING_MIN_DELTA_MS ||
+        percentChange >= 5
+      ) {
+        return "degrading";
+      }
+
+      if (
+        delta <= -noiseConfig.PERF_DEGRADING_MIN_DELTA_MS ||
+        percentChange <= -5
+      ) {
+        return "improving";
+      }
+    }
+
     if (history.length < 5) return "stable";
 
     const recent = history.slice(-5);
     const older = history.slice(-10, -5);
+
+    if (recent.length === 0 || older.length === 0) return "stable";
 
     const recentSuccessRate =
       recent.filter((h) => h.status === "passed").length / recent.length;

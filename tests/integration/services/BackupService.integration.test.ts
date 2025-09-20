@@ -23,6 +23,48 @@ describe("BackupService Integration", () => {
   let testBackupDir: string;
   let testDir: string;
 
+  const listBackupArtifacts = async (baseDir: string): Promise<string[]> => {
+    const entries = await fs.readdir(baseDir, { withFileTypes: true });
+    const files: string[] = [];
+
+    for (const entry of entries) {
+      const fullPath = path.join(baseDir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...(await listBackupArtifacts(fullPath)));
+      } else {
+        files.push(fullPath);
+      }
+    }
+
+    return files;
+  };
+
+  const computeDirectorySize = async (baseDir: string): Promise<number> => {
+    const entries = await fs.readdir(baseDir, { withFileTypes: true });
+    let size = 0;
+
+    for (const entry of entries) {
+      const fullPath = path.join(baseDir, entry.name);
+      if (entry.isDirectory()) {
+        size += await computeDirectorySize(fullPath);
+      } else {
+        const stats = await fs.stat(fullPath);
+        size += stats.size;
+      }
+    }
+
+    return size;
+  };
+
+  const pickBackupArtifact = async (filter?: (filePath: string) => boolean): Promise<string> => {
+    const files = await listBackupArtifacts(testBackupDir);
+    expect(files.length).toBeGreaterThan(0);
+
+    const match = filter ? files.find(filter) : files[0];
+    expect(match, "Expected at least one backup artifact to manipulate").toBeDefined();
+    return match as string;
+  };
+
   beforeAll(async () => {
     // Create test directories
     testDir = path.join(tmpdir(), "backup-service-integration-tests");
@@ -52,9 +94,11 @@ describe("BackupService Integration", () => {
   beforeEach(async () => {
     // Clean up backup directory before each test
     try {
-      const files = await fs.readdir(testBackupDir);
+      const entries = await fs.readdir(testBackupDir);
       await Promise.all(
-        files.map((file) => fs.unlink(path.join(testBackupDir, file)))
+        entries.map((entry) =>
+          fs.rm(path.join(testBackupDir, entry), { recursive: true, force: true })
+        )
       );
     } catch (error) {
       // Directory might be empty, that's okay
@@ -103,7 +147,7 @@ describe("BackupService Integration", () => {
       expect(metadata.checksum.length).toBeGreaterThan(0);
 
       // Check that backup files were created
-      const backupFiles = await fs.readdir(testBackupDir);
+      const backupFiles = await listBackupArtifacts(testBackupDir);
       expect(backupFiles.length).toBeGreaterThan(0);
 
       // Verify backup contains expected components
@@ -140,7 +184,9 @@ describe("BackupService Integration", () => {
       expect(metadata.status).toBe("completed");
 
       // Incremental backup should still contain data
-      const backupFiles = await fs.readdir(testBackupDir);
+      const backupFiles = (await listBackupArtifacts(testBackupDir)).map((file) =>
+        path.basename(file)
+      );
       expect(backupFiles.length).toBeGreaterThan(0);
     });
 
@@ -161,7 +207,9 @@ describe("BackupService Integration", () => {
       );
 
       // Check for config files in backup
-      const backupFiles = await fs.readdir(testBackupDir);
+      const backupFiles = (await listBackupArtifacts(testBackupDir)).map((file) =>
+        path.basename(file)
+      );
       const hasConfigFile = backupFiles.some(
         (file) => file.includes("config") || file.includes("package.json")
       );
@@ -185,7 +233,9 @@ describe("BackupService Integration", () => {
       expect(metadata).toEqual(expect.objectContaining({ status: 'completed' }));
 
       // Check for compressed files
-      const backupFiles = await fs.readdir(testBackupDir);
+      const backupFiles = (await listBackupArtifacts(testBackupDir)).map((file) =>
+        path.basename(file)
+      );
       const hasCompressedFile = backupFiles.some(
         (file) =>
           file.endsWith(".zip") ||
@@ -214,7 +264,9 @@ describe("BackupService Integration", () => {
       );
 
       // When both data and config are disabled, no DB or config artifacts should be written
-      const backupFiles = await fs.readdir(testBackupDir);
+      const backupFiles = (await listBackupArtifacts(testBackupDir)).map((file) =>
+        path.basename(file)
+      );
       const hasDbArtifacts = backupFiles.some(
         (file) => file.includes("postgres") || file.includes("falkordb") || file.includes("qdrant")
       );
@@ -249,7 +301,9 @@ describe("BackupService Integration", () => {
       expect(metadata.checksum.length).toBeGreaterThan(0);
 
       // Checksum should be consistent (run backup again with same data)
-      const backupFiles = await fs.readdir(testBackupDir);
+      const backupFiles = (await listBackupArtifacts(testBackupDir)).map((file) =>
+        path.basename(file)
+      );
       if (backupFiles.length > 0) {
         // Checksum should be a valid hash format (hex or base64)
         expect(
@@ -299,14 +353,7 @@ describe("BackupService Integration", () => {
       expect(metadata.size).toBeGreaterThanOrEqual(0);
 
       // Calculate actual size of backup files
-      const backupFiles = await fs.readdir(testBackupDir);
-      let totalSize = 0;
-
-      for (const file of backupFiles) {
-        const filePath = path.join(testBackupDir, file);
-        const stats = await fs.stat(filePath);
-        totalSize += stats.size;
-      }
+      const totalSize = await computeDirectorySize(testBackupDir);
 
       // Metadata size should match actual size (approximately)
       expect(Math.abs(metadata.size - totalSize)).toBeLessThan(1000); // Allow 1KB tolerance
@@ -358,11 +405,26 @@ describe("BackupService Integration", () => {
       // Add a small delay to ensure deletion is committed
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Restore from backup
+      // Preview restore to obtain token (two-step restore flow)
+      const previewResult = await backupService.restoreBackup(
+        testBackupMetadata.id,
+        {
+          destination: testBackupDir,
+          dryRun: true,
+          validateIntegrity: true,
+        }
+      );
+
+      expect(previewResult.success).toBe(true);
+      expect(previewResult.token).toBeDefined();
+      const restoreToken = previewResult.token as string;
+
+      // Execute restore using issued token
       const restoreResult = await backupService.restoreBackup(
         testBackupMetadata.id,
         {
           destination: testBackupDir,
+          restoreToken,
         }
       );
 
@@ -398,10 +460,23 @@ describe("BackupService Integration", () => {
         "DELETE FROM documents WHERE type = 'backup_test'"
       );
 
+      const previewResult = await backupService.restoreBackup(
+        compressedMetadata.id,
+        {
+          destination: testBackupDir,
+          dryRun: true,
+        }
+      );
+
+      expect(previewResult.success).toBe(true);
+      expect(previewResult.token).toBeDefined();
+      const restoreToken = previewResult.token as string;
+
       const restoreResult = await backupService.restoreBackup(
         compressedMetadata.id,
         {
           destination: testBackupDir,
+          restoreToken,
         }
       );
 
@@ -415,17 +490,31 @@ describe("BackupService Integration", () => {
     });
 
     it("should validate backup integrity during restoration", async () => {
+      const previewResult = await backupService.restoreBackup(
+        testBackupMetadata.id,
+        {
+          destination: testBackupDir,
+          dryRun: true,
+          validateIntegrity: true,
+        }
+      );
+
+      expect(previewResult.success).toBe(true);
+      expect(previewResult.integrityCheck).toBeDefined();
+      expect(previewResult.token).toBeDefined();
+      const restoreToken = previewResult.token as string;
+
       const restoreResult = await backupService.restoreBackup(
         testBackupMetadata.id,
         {
           destination: testBackupDir,
+          restoreToken,
           validateIntegrity: true,
         }
       );
 
       expect(restoreResult).toEqual(expect.objectContaining({ success: true }));
 
-      // Should include integrity check results
       if (restoreResult.integrityCheck) {
         expect(typeof restoreResult.integrityCheck.passed).toBe("boolean");
         expect(restoreResult.integrityCheck.details).toEqual(expect.any(Object));
@@ -502,21 +591,31 @@ describe("BackupService Integration", () => {
 
       const metadata = await backupService.createBackup(options);
 
-      // Corrupt a backup file
-      const backupFiles = await fs.readdir(testBackupDir);
-      if (backupFiles.length > 0) {
-        const filePath = path.join(testBackupDir, backupFiles[0]);
-        await fs.appendFile(filePath, "CORRUPTED_DATA_APPENDED");
+      // Corrupt a backup artifact
+      const filePath = await pickBackupArtifact((artifact) =>
+        /\.(sql|dump|json|tar\.gz)$/.test(artifact)
+      );
+      await fs.appendFile(filePath, "CORRUPTED_DATA_APPENDED");
 
-        // Try to restore corrupted backup
-        const restoreResult = await backupService.restoreBackup(metadata.id, {
-          destination: testBackupDir,
-        });
+      // Preview restore to surface corruption details
+      const previewResult = await backupService.restoreBackup(metadata.id, {
+        destination: testBackupDir,
+        dryRun: true,
+        validateIntegrity: true,
+      });
 
-        // Should handle corruption gracefully
-        expect(restoreResult).toEqual(expect.any(Object));
-        // May succeed or fail depending on corruption severity
-        expect(typeof restoreResult.success).toBe("boolean");
+      expect(previewResult).toEqual(expect.any(Object));
+      expect(typeof previewResult.success).toBe("boolean");
+
+      const restoreToken = previewResult.token;
+      if (previewResult.success && restoreToken) {
+        await expect(
+          backupService.restoreBackup(metadata.id, {
+            destination: testBackupDir,
+            restoreToken,
+            validateIntegrity: true,
+          })
+        ).rejects.toThrow();
       }
     });
 
@@ -725,25 +824,22 @@ describe("BackupService Integration", () => {
       const metadata = await backupService.createBackup(options);
 
       // Corrupt the backup
-      const backupFiles = await fs.readdir(testBackupDir);
-      if (backupFiles.length > 0) {
-        const filePath = path.join(testBackupDir, backupFiles[0]);
-        const originalContent = await fs.readFile(filePath);
-        const corruptedContent = originalContent.slice(0, -10); // Remove last 10 bytes
-        await fs.writeFile(filePath, corruptedContent);
+      const filePath = await pickBackupArtifact();
+      const originalContent = await fs.readFile(filePath);
+      const corruptedContent = originalContent.slice(0, -10); // Remove last 10 bytes
+      await fs.writeFile(filePath, corruptedContent);
 
-        // Verify integrity should detect corruption
-        const integrityResult = await backupService.verifyBackupIntegrity(
-          metadata.id,
-          {
-            destination: testBackupDir,
-          }
-        );
+      // Verify integrity should detect corruption
+      const integrityResult = await backupService.verifyBackupIntegrity(
+        metadata.id,
+        {
+          destination: testBackupDir,
+        }
+      );
 
-        // Should detect the corruption
-        expect(integrityResult.isValid).toBe(false);
-        expect(integrityResult.details).toContain("corrupt");
-      }
+      // Should detect the corruption
+      expect(integrityResult.isValid).toBe(false);
+      expect(integrityResult.details.toLowerCase()).toContain("corrupt");
     });
 
     it("should handle backup listing and management", async () => {

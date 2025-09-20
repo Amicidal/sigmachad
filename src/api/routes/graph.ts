@@ -28,6 +28,34 @@ const GRAPH_SYMBOL_KIND_LOOKUP: Record<string, string> = {
   variable: "variable",
 };
 
+const parseBooleanParam = (value: unknown): boolean | undefined => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return undefined;
+};
+
+const parseStringArrayParam = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((entry) =>
+        typeof entry === "string" ? entry.split(",") : []
+      )
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
+  return [];
+};
+
 const buildErrorResponse = (
   request: { id?: string } | null | undefined,
   error: { code: string; message: string; details?: string }
@@ -173,7 +201,29 @@ export async function registerGraphRoutes(
         method: "GET",
         url: `/graph/entity/${encodeURIComponent(params.entityId)}`,
       });
-      reply.status(res.statusCode).send(res.body ?? res.payload);
+      const headers = res.headers ?? {};
+      const contentTypeHeader = headers["content-type"];
+
+      Object.entries(headers).forEach(([key, value]) => {
+        if (key.toLowerCase() === "content-length" || typeof value === "undefined") {
+          return;
+        }
+
+        reply.header(key, value as any);
+      });
+
+      let payload: unknown = res.body ?? res.payload;
+      const isJsonResponse = typeof contentTypeHeader === "string" && contentTypeHeader.includes("application/json");
+
+      if (isJsonResponse && typeof payload === "string") {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          // fall back to sending raw payload if parsing fails
+        }
+      }
+
+      reply.status(res.statusCode).send(payload);
     }
   );
 
@@ -216,6 +266,292 @@ export async function registerGraphRoutes(
           buildErrorResponse(request, {
             code: "RELATIONSHIP_FETCH_FAILED",
             message: "Failed to fetch relationship",
+            details,
+          })
+        );
+      }
+    }
+  );
+
+  app.get(
+    "/graph/modules/children",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            modulePath: { type: "string" },
+            includeFiles: {
+              anyOf: [
+                { type: "boolean" },
+                { type: "string" },
+              ],
+            },
+            includeSymbols: {
+              anyOf: [
+                { type: "boolean" },
+                { type: "string" },
+              ],
+            },
+            language: {
+              anyOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            symbolKind: {
+              anyOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            modulePathPrefix: { type: "string" },
+            limit: { type: "integer", minimum: 1, maximum: 500 },
+          },
+          required: ["modulePath"],
+        },
+      },
+    },
+    async (request, reply) => {
+      const query = request.query as {
+        modulePath: string;
+        includeFiles?: boolean | string;
+        includeSymbols?: boolean | string;
+        language?: string | string[];
+        symbolKind?: string | string[];
+        modulePathPrefix?: string;
+        limit?: number | string;
+      };
+
+      try {
+        const includeFiles = parseBooleanParam(query.includeFiles);
+        const includeSymbols = parseBooleanParam(query.includeSymbols);
+        const languages = parseStringArrayParam(query.language);
+        const symbolKinds = parseStringArrayParam(query.symbolKind);
+        const modulePathPrefix =
+          typeof query.modulePathPrefix === "string"
+            ? query.modulePathPrefix.trim()
+            : undefined;
+        const limit =
+          typeof query.limit === "number"
+            ? query.limit
+            : typeof query.limit === "string" && query.limit.trim().length > 0
+            ? Number(query.limit)
+            : undefined;
+
+        const options: Parameters<KnowledgeGraphService["listModuleChildren"]>[1] =
+          {};
+        if (typeof includeFiles === "boolean") options.includeFiles = includeFiles;
+        if (typeof includeSymbols === "boolean")
+          options.includeSymbols = includeSymbols;
+        if (languages.length === 1) {
+          options.language = languages[0];
+        } else if (languages.length > 1) {
+          options.language = languages;
+        }
+        if (symbolKinds.length === 1) {
+          options.symbolKind = symbolKinds[0];
+        } else if (symbolKinds.length > 1) {
+          options.symbolKind = symbolKinds;
+        }
+        if (modulePathPrefix && modulePathPrefix.length > 0) {
+          options.modulePathPrefix = modulePathPrefix;
+        }
+        if (typeof limit === "number" && !Number.isNaN(limit)) {
+          options.limit = limit;
+        }
+
+        const result = await kgService.listModuleChildren(query.modulePath, options);
+        reply.send({ success: true, data: result });
+      } catch (error) {
+        const details =
+          error instanceof Error ? error.message : "Failed to list module children";
+        reply.status(500).send(
+          buildErrorResponse(request, {
+            code: "MODULE_CHILDREN_FAILED",
+            message: "Failed to list module children",
+            details,
+          })
+        );
+      }
+    }
+  );
+
+  app.get(
+    "/graph/entity/:entityId/imports",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: { entityId: { type: "string" } },
+          required: ["entityId"],
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            resolvedOnly: { type: "boolean" },
+            language: {
+              anyOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            symbolKind: {
+              anyOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            importAlias: {
+              anyOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            importType: {
+              anyOf: [
+                {
+                  type: "string",
+                  enum: ["default", "named", "namespace", "wildcard", "side-effect"],
+                },
+                {
+                  type: "array",
+                  items: {
+                    type: "string",
+                    enum: ["default", "named", "namespace", "wildcard", "side-effect"],
+                  },
+                },
+              ],
+            },
+            isNamespace: { type: "boolean" },
+            modulePath: {
+              anyOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            modulePathPrefix: { type: "string" },
+            limit: { type: "integer", minimum: 1, maximum: 1000 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = request.params as { entityId: string };
+      const query = request.query as {
+        resolvedOnly?: boolean | string;
+        language?: string | string[];
+        symbolKind?: string | string[];
+        importAlias?: string | string[];
+        importType?: string | string[];
+        isNamespace?: boolean | string;
+        modulePath?: string | string[];
+        modulePathPrefix?: string;
+        limit?: number | string;
+      };
+
+      try {
+        const resolvedOnly = parseBooleanParam(query.resolvedOnly);
+        const languages = parseStringArrayParam(query.language).map((value) =>
+          value.toLowerCase()
+        );
+        const symbolKinds = parseStringArrayParam(query.symbolKind).map((value) =>
+          value.toLowerCase()
+        );
+        const importAliases = parseStringArrayParam(query.importAlias);
+        const importTypes = parseStringArrayParam(query.importType).map((value) =>
+          value.toLowerCase()
+        );
+        const isNamespace = parseBooleanParam(query.isNamespace);
+        const modulePaths = parseStringArrayParam(query.modulePath);
+        const modulePathPrefix =
+          typeof query.modulePathPrefix === "string"
+            ? query.modulePathPrefix.trim()
+            : undefined;
+        const limit =
+          typeof query.limit === "number"
+            ? query.limit
+            : typeof query.limit === "string" && query.limit.trim().length > 0
+            ? Number(query.limit)
+            : undefined;
+
+        const options: Parameters<KnowledgeGraphService["listImports"]>[1] = {};
+        if (typeof resolvedOnly === "boolean") options.resolvedOnly = resolvedOnly;
+        if (languages.length === 1) {
+          options.language = languages[0];
+        } else if (languages.length > 1) {
+          options.language = languages;
+        }
+        if (symbolKinds.length === 1) {
+          options.symbolKind = symbolKinds[0];
+        } else if (symbolKinds.length > 1) {
+          options.symbolKind = symbolKinds;
+        }
+        if (importAliases.length === 1) {
+          options.importAlias = importAliases[0];
+        } else if (importAliases.length > 1) {
+          options.importAlias = importAliases;
+        }
+        if (importTypes.length === 1) {
+          options.importType = importTypes[0] as any;
+        } else if (importTypes.length > 1) {
+          options.importType = importTypes as any;
+        }
+        if (typeof isNamespace === "boolean") {
+          options.isNamespace = isNamespace;
+        }
+        if (modulePaths.length === 1) {
+          options.modulePath = modulePaths[0];
+        } else if (modulePaths.length > 1) {
+          options.modulePath = modulePaths;
+        }
+        if (modulePathPrefix && modulePathPrefix.length > 0) {
+          options.modulePathPrefix = modulePathPrefix;
+        }
+        if (typeof limit === "number" && !Number.isNaN(limit)) {
+          options.limit = limit;
+        }
+
+        const result = await kgService.listImports(params.entityId, options);
+        reply.send({ success: true, data: result });
+      } catch (error) {
+        const details =
+          error instanceof Error ? error.message : "Failed to list imports";
+        reply.status(500).send(
+          buildErrorResponse(request, {
+            code: "LIST_IMPORTS_FAILED",
+            message: "Failed to list imports",
+            details,
+          })
+        );
+      }
+    }
+  );
+
+  app.get(
+    "/graph/symbol/:symbolId/definition",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: { symbolId: { type: "string" } },
+          required: ["symbolId"],
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = request.params as { symbolId: string };
+
+      try {
+        const result = await kgService.findDefinition(params.symbolId);
+        reply.send({ success: true, data: result });
+      } catch (error) {
+        const details =
+          error instanceof Error ? error.message : "Failed to resolve definition";
+        reply.status(500).send(
+          buildErrorResponse(request, {
+            code: "FIND_DEFINITION_FAILED",
+            message: "Failed to find symbol definition",
             details,
           })
         );

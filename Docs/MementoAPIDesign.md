@@ -338,11 +338,17 @@ async function recordTestExecution(results: TestExecutionResult[]): Promise<void
 **Endpoint:** `GET /api/tests/performance/{entityId}`
 **MCP Tool:** `tests.get_performance`
 
-Retrieves performance metrics for a specific entity.
+Retrieves aggregate performance metrics for a specific entity and the persisted snapshot history that backs the calculation.
+
+**Query Parameters**
+- `metricId` (optional) — narrow history to a particular metric key (e.g. `test/foo-latency/p95`).
+- `environment` (optional) — sanitized automatically (`Production` → `prod`, etc.).
+- `severity` (optional) — `critical | high | medium | low`.
+- `limit` (optional) — max history rows per entity (default `100`).
+- `days` (optional) — only include snapshots detected within the last N days.
 
 ```typescript
 interface PerformanceMetrics {
-  entityId: string;
   averageExecutionTime: number;
   p95ExecutionTime: number;
   successRate: number;
@@ -351,15 +357,101 @@ interface PerformanceMetrics {
     benchmark: string;
     value: number;
     status: 'above' | 'below' | 'at';
+    threshold: number;
   }[];
   historicalData: {
     timestamp: Date;
     executionTime: number;
     successRate: number;
+    coveragePercentage: number;
   }[];
 }
 
-async function getPerformanceMetrics(entityId: string): Promise<PerformanceMetrics>
+interface PerformanceSnapshot {
+  metricId: string;
+  scenario?: string;
+  environment?: string;
+  severity?: 'critical' | 'high' | 'medium' | 'low';
+  trend?: 'regression' | 'improvement' | 'neutral';
+  unit?: string;
+  baselineValue?: number | null;
+  currentValue?: number | null;
+  delta?: number | null;
+  percentChange?: number | null;
+  sampleSize?: number | null;
+  riskScore?: number | null;
+  runId?: string;
+  detectedAt?: Date | null;
+  resolvedAt?: Date | null;
+  metricsHistory?: {
+    value: number;
+    timestamp?: Date;
+    runId?: string;
+    environment?: string;
+    unit?: string;
+  }[];
+  metadata?: Record<string, any> | null;
+  source: 'snapshot' | 'legacy';
+}
+
+async function getPerformanceMetrics(
+  entityId: string,
+  opts?: {
+    metricId?: string;
+    environment?: string;
+    severity?: 'critical' | 'high' | 'medium' | 'low';
+    limit?: number;
+    days?: number;
+  }
+): Promise<{ data: PerformanceMetrics; history: PerformanceSnapshot[] }>
+```
+
+**Response Example**
+
+```json
+{
+  "success": true,
+  "data": {
+    "averageExecutionTime": 245.5,
+    "p95ExecutionTime": 320,
+    "successRate": 0.92,
+    "trend": "improving",
+    "benchmarkComparisons": [
+      { "benchmark": "team-baseline", "value": 280, "status": "below", "threshold": 300 }
+    ],
+    "historicalData": [
+      { "timestamp": "2024-08-01T00:00:00.000Z", "executionTime": 260, "successRate": 0.88, "coveragePercentage": 82 },
+      { "timestamp": "2024-08-05T00:00:00.000Z", "executionTime": 240, "successRate": 0.94, "coveragePercentage": 85 }
+    ]
+  },
+  "history": [
+    {
+      "metricId": "test/auth-login/latency/p95",
+      "environment": "test",
+      "severity": "medium",
+      "trend": "regression",
+      "unit": "ms",
+      "baselineValue": 180,
+      "currentValue": 215,
+      "delta": 35,
+      "percentChange": 19.44,
+      "sampleSize": 12,
+      "riskScore": 1.07,
+      "runId": "run-123",
+      "detectedAt": "2024-08-05T00:00:00.000Z",
+      "metricsHistory": [
+        { "value": 180, "timestamp": "2024-07-25T00:00:00.000Z", "environment": "test", "unit": "ms" },
+        { "value": 215, "timestamp": "2024-08-05T00:00:00.000Z", "environment": "test", "unit": "ms" }
+      ],
+      "metadata": {
+        "reason": "Latency threshold breached in latest run",
+        "testId": "auth-login",
+        "framework": "vitest"
+      },
+      "source": "snapshot"
+    }
+  ]
+}
 ```
 
 ### 2.4 Get Test Coverage
@@ -489,6 +581,89 @@ interface DependencyAnalysis {
 
 async function getEntityDependencies(entityId: string): Promise<DependencyAnalysis>
 ```
+
+### 3.4 List Module Children
+**Endpoint:** `GET /api/graph/modules/children`
+**MCP Tool:** `graph.list_module_children`
+
+Returns the structural children (directories, files, and symbols) beneath a module or directory, preserving structural metadata so clients do not need to rehydrate nodes manually. Results are ordered by entity type and then name.
+
+**Query Parameters**
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `modulePath` | string | ✅ | Accepts a normalized path or entity id (`file:src/app.ts:module`). |
+| `includeFiles` | boolean | ❌ | Defaults to `true`. When `false`, only non-file children are returned. |
+| `includeSymbols` | boolean | ❌ | Defaults to `true`. When `false`, symbol children are omitted. |
+| `language` | string &#124; string[] | ❌ | Case-insensitive match on relationship or child language. Comma separated or array input supported. |
+| `symbolKind` | string &#124; string[] | ❌ | Filters symbol children by `kind` (e.g., `class`, `function`). |
+| `modulePathPrefix` | string | ❌ | Restricts children whose `modulePath`/`path` starts with the prefix. |
+| `limit` | number | ❌ | Page size (1-500). Defaults to 50. |
+
+**Response**
+
+```typescript
+interface ModuleChildrenResult {
+  modulePath: string;
+  parentId: string;
+  children: Array<{
+    entity: Entity;
+    relationship: GraphRelationship;
+  }>;
+}
+```
+
+`relationship` objects include structural metadata (`language`, `symbolKind`, `modulePath`, `importAlias`, etc.) when present so the client can render navigation context without additional lookups.
+
+### 3.5 List Imports
+**Endpoint:** `GET /api/graph/entity/{entityId}/imports`
+**MCP Tool:** `graph.list_imports`
+
+Returns the incoming/outgoing structural import edges for a file or module along with resolved targets. The response mirrors the MCP tool payload.
+
+**Query Parameters**
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `resolvedOnly` | boolean | ❌ | When `true`, filters out unresolved imports. |
+| `language` | string &#124; string[] | ❌ | Case-insensitive language filter on the relationship or target entity. |
+| `symbolKind` | string &#124; string[] | ❌ | Restricts results to specific target symbol kinds. |
+| `importAlias` | string &#124; string[] | ❌ | Exact match on alias used in the import (`as AliasName`). |
+| `importType` | string &#124; string[] | ❌ | Accepts `default`, `named`, `namespace`, `wildcard`, `side-effect`. |
+| `isNamespace` | boolean | ❌ | Matches namespace (`import * as`) relationships. |
+| `modulePath` | string &#124; string[] | ❌ | Exact match on the normalized module path. |
+| `modulePathPrefix` | string | ❌ | Prefix filter for `modulePath`. |
+| `limit` | number | ❌ | Page size (1-1000). Defaults to 200. |
+
+**Response**
+
+```typescript
+interface ListImportsResult {
+  entityId: string;
+  imports: Array<{
+    relationship: GraphRelationship;
+    target?: Entity | null;
+  }>;
+}
+```
+
+Each relationship carries structural metadata (`importAlias`, `importType`, `language`, `modulePath`, `isNamespace`, timestamps, confidence) so clients can display import details without extra queries. When available, `target` is the resolved entity for the import.
+
+### 3.6 Find Symbol Definition
+**Endpoint:** `GET /api/graph/symbol/{symbolId}/definition`
+**MCP Tool:** `graph.find_definition`
+
+Resolves the defining entity for a symbol and returns the corresponding `DEFINES` relationship metadata. Useful for jumping to implementation while still surfacing graph confidence and provenance.
+
+```typescript
+interface DefinitionLookupResult {
+  symbolId: string;
+  relationship: GraphRelationship | null;
+  source: Entity | null;
+}
+```
+
+`relationship` is `null` when the symbol has not been linked to a defining entity.
 
 ---
 

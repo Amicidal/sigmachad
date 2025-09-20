@@ -170,9 +170,21 @@ export interface TestBenchmark {
 
 export interface TestHistoricalData {
   timestamp: Date;
+  /**
+   * Historical average execution time (kept for backward compatibility with legacy consumers).
+   */
   executionTime: number;
+  /**
+   * Explicit average execution time sample captured for this run.
+   */
+  averageExecutionTime: number;
+  /**
+   * P95 execution time sample captured for this run.
+   */
+  p95ExecutionTime: number;
   successRate: number;
   coveragePercentage: number;
+  runId?: string;
 }
 
 export interface Spec extends CodebaseEntity {

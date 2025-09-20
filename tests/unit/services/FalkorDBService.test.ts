@@ -370,6 +370,20 @@ describe("FalkorDBService", () => {
         "Invalid parameter name"
       );
     });
+
+    it("escapes single quotes within string parameters", async () => {
+      const sendSpy = vi.spyOn(mockClient as any, "sendCommand");
+      const query = "MATCH (n {alias: $alias}) RETURN n";
+
+      await falkorService.query(query, { alias: "O'Reilly" });
+
+      const callArgs = sendSpy.mock.calls.at(-1)?.[0] as string[] | undefined;
+      expect(callArgs).toBeDefined();
+      const processed = callArgs?.[2] ?? "";
+      expect(processed).toContain("alias: 'O\\'Reilly'");
+      expect(processed).not.toContain("alias: 'O''Reilly'");
+      expect(processed).not.toContain("alias: 'O\\\\\\'Reilly'");
+    });
   });
 
   describe("Parameter Processing", () => {
@@ -439,6 +453,26 @@ describe("FalkorDBService", () => {
       const result = await falkorService.query(query, params);
       expect(result).toEqual(expect.anything());
       // The dangerous characters should be escaped
+    });
+
+    it("preserves quotes in nested property maps without double escaping", async () => {
+      const sendSpy = vi.spyOn(mockClient as any, "sendCommand");
+      const query = "CREATE (n:Test $properties)";
+
+      await falkorService.query(query, {
+        properties: {
+          description: "it's fine",
+          path: "..\\widgets\\index.ts",
+        },
+      });
+
+      const callArgs = sendSpy.mock.calls.at(-1)?.[0] as string[] | undefined;
+      expect(callArgs).toBeDefined();
+      const processed = callArgs?.[2] ?? "";
+
+      expect(processed).toContain("description: 'it\\'s fine'");
+      expect(processed).not.toContain("it\\\\\\'s fine");
+      expect(processed).toContain("path: '..\\\\widgets\\\\index.ts'");
     });
 
     it("should handle complex nested objects", async () => {

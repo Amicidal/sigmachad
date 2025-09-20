@@ -14,6 +14,7 @@ import {
   ConflictResolution as ConflictResolutionService,
   Conflict,
 } from "./ConflictResolution.js";
+import { RollbackCapabilities } from "./RollbackCapabilities.js";
 
 export interface SyncOperation {
   id: string;
@@ -35,7 +36,7 @@ export interface SyncOperation {
 
 export interface SyncError {
   file: string;
-  type: "parse" | "database" | "conflict" | "unknown";
+  type: "parse" | "database" | "conflict" | "unknown" | "rollback" | "cancelled" | "capability";
   message: string;
   timestamp: Date;
   recoverable: boolean;
@@ -92,7 +93,8 @@ export class SynchronizationCoordinator extends EventEmitter {
     private kgService: KnowledgeGraphService,
     private astParser: ASTParser,
     private dbService: DatabaseService,
-    private conflictResolution: ConflictResolutionService
+    private conflictResolution: ConflictResolutionService,
+    private rollbackCapabilities?: RollbackCapabilities
   ) {
     super();
     this.setupEventHandlers();
@@ -200,12 +202,56 @@ export class SynchronizationCoordinator extends EventEmitter {
       relationshipsDeleted: 0,
       errors: [],
       conflicts: [],
+      rollbackPoint: undefined,
     };
 
     // Attach options to the operation so workers can consult them
     ;(operation as any).options = options;
 
     this.activeOperations.set(operation.id, operation);
+
+    if (options.rollbackOnError) {
+      if (!this.rollbackCapabilities) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "rollback",
+          message:
+            "Rollback requested but rollback capabilities are not configured",
+          timestamp: new Date(),
+          recoverable: false,
+        });
+        this.activeOperations.delete(operation.id);
+        this.completedOperations.set(operation.id, operation);
+        this.emit("operationFailed", operation);
+        return operation.id;
+      }
+      try {
+        const rollbackId = await this.rollbackCapabilities.createRollbackPoint(
+          operation.id,
+          `Full synchronization rollback snapshot for ${operation.id}`
+        );
+        operation.rollbackPoint = rollbackId;
+      } catch (error) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "rollback",
+          message: `Failed to create rollback point: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+          timestamp: new Date(),
+          recoverable: false,
+        });
+        this.activeOperations.delete(operation.id);
+        this.completedOperations.set(operation.id, operation);
+        this.emit("operationFailed", operation);
+        return operation.id;
+      }
+    }
+
     this.operationQueue.push(operation);
 
     this.emit("operationStarted", operation);
@@ -235,7 +281,10 @@ export class SynchronizationCoordinator extends EventEmitter {
     return operation.id;
   }
 
-  async synchronizeFileChanges(changes: FileChange[]): Promise<string> {
+  async synchronizeFileChanges(
+    changes: FileChange[],
+    options: SyncOptions = {}
+  ): Promise<string> {
     this.ensureDatabaseReady();
     const operation: SyncOperation = {
       id: this.nextOperationId("incremental_sync"),
@@ -251,14 +300,57 @@ export class SynchronizationCoordinator extends EventEmitter {
       relationshipsDeleted: 0,
       errors: [],
       conflicts: [],
+      rollbackPoint: undefined,
     };
 
-    const syncOptions = ((operation as any).options || {}) as SyncOptions;
-
-    // Store changes for processing
+    // Store options and changes for processing
+    ;(operation as any).options = options;
     (operation as any).changes = changes;
 
     this.activeOperations.set(operation.id, operation);
+
+    if (options.rollbackOnError) {
+      if (!this.rollbackCapabilities) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "rollback",
+          message:
+            "Rollback requested but rollback capabilities are not configured",
+          timestamp: new Date(),
+          recoverable: false,
+        });
+        this.activeOperations.delete(operation.id);
+        this.completedOperations.set(operation.id, operation);
+        this.emit("operationFailed", operation);
+        return operation.id;
+      }
+      try {
+        const rollbackId = await this.rollbackCapabilities.createRollbackPoint(
+          operation.id,
+          `Incremental synchronization rollback snapshot for ${operation.id}`
+        );
+        operation.rollbackPoint = rollbackId;
+      } catch (error) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "rollback",
+          message: `Failed to create rollback point: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+          timestamp: new Date(),
+          recoverable: false,
+        });
+        this.activeOperations.delete(operation.id);
+        this.completedOperations.set(operation.id, operation);
+        this.emit("operationFailed", operation);
+        return operation.id;
+      }
+    }
+
     this.operationQueue.push(operation);
 
     this.emit("operationStarted", operation);
@@ -283,12 +375,15 @@ export class SynchronizationCoordinator extends EventEmitter {
         });
         this.emit("operationFailed", op);
       }
-    }, 30000);
+    }, options.timeout ?? 30000);
 
     return operation.id;
   }
 
-  async synchronizePartial(updates: PartialUpdate[]): Promise<string> {
+  async synchronizePartial(
+    updates: PartialUpdate[],
+    options: SyncOptions = {}
+  ): Promise<string> {
     this.ensureDatabaseReady();
     const operation: SyncOperation = {
       id: this.nextOperationId("partial_sync"),
@@ -304,12 +399,57 @@ export class SynchronizationCoordinator extends EventEmitter {
       relationshipsDeleted: 0,
       errors: [],
       conflicts: [],
+      rollbackPoint: undefined,
     };
 
     // Store updates for processing
     (operation as any).updates = updates;
+    ;(operation as any).options = options;
 
     this.activeOperations.set(operation.id, operation);
+
+    if (options.rollbackOnError) {
+      if (!this.rollbackCapabilities) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "rollback",
+          message:
+            "Rollback requested but rollback capabilities are not configured",
+          timestamp: new Date(),
+          recoverable: false,
+        });
+        this.activeOperations.delete(operation.id);
+        this.completedOperations.set(operation.id, operation);
+        this.emit("operationFailed", operation);
+        return operation.id;
+      }
+      try {
+        const rollbackId = await this.rollbackCapabilities.createRollbackPoint(
+          operation.id,
+          `Partial synchronization rollback snapshot for ${operation.id}`
+        );
+        operation.rollbackPoint = rollbackId;
+      } catch (error) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "rollback",
+          message: `Failed to create rollback point: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+          timestamp: new Date(),
+          recoverable: false,
+        });
+        this.activeOperations.delete(operation.id);
+        this.completedOperations.set(operation.id, operation);
+        this.emit("operationFailed", operation);
+        return operation.id;
+      }
+    }
+
     this.operationQueue.push(operation);
 
     this.emit("operationStarted", operation);
@@ -334,7 +474,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         });
         this.emit("operationFailed", op);
       }
-    }, 30000);
+    }, options.timeout ?? 30000);
 
     return operation.id;
   }
@@ -384,16 +524,14 @@ export class SynchronizationCoordinator extends EventEmitter {
             break;
         }
 
-        operation.status = "completed";
-        operation.endTime = new Date();
-        this.activeOperations.delete(operation.id);
-        this.completedOperations.set(operation.id, operation);
-        this.cancelledOperations.delete(operation.id);
-        this.emit("operationCompleted", operation);
+        if (this.operationHasBlockingErrors(operation)) {
+          await this.finalizeFailedOperation(operation);
+          continue;
+        }
+
+        this.finalizeSuccessfulOperation(operation);
       } catch (error) {
         const cancelled = error instanceof OperationCancelledError;
-        operation.status = "failed";
-        operation.endTime = new Date();
         operation.errors.push({
           file: "coordinator",
           type: cancelled ? "cancelled" : "unknown",
@@ -402,18 +540,133 @@ export class SynchronizationCoordinator extends EventEmitter {
           recoverable: cancelled,
         });
 
-        this.activeOperations.delete(operation.id);
-        this.completedOperations.set(operation.id, operation);
-        this.cancelledOperations.delete(operation.id);
-        if (cancelled) {
-          this.emit("operationCancelled", operation);
-        } else {
-          this.emit("operationFailed", operation);
-        }
+        await this.finalizeFailedOperation(operation, { cancelled });
+        continue;
       }
     }
 
     this.isProcessing = false;
+  }
+
+  private operationHasBlockingErrors(operation: SyncOperation): boolean {
+    if (!Array.isArray(operation.errors) || operation.errors.length === 0) {
+      return false;
+    }
+
+    // Only treat non-recoverable errors as blocking so warnings don't fail the sync
+    return operation.errors.some((error) => error.recoverable === false);
+  }
+
+  private finalizeSuccessfulOperation(operation: SyncOperation): void {
+    operation.status = "completed";
+    operation.endTime = new Date();
+    if (operation.rollbackPoint && this.rollbackCapabilities) {
+      try {
+        this.rollbackCapabilities.deleteRollbackPoint(operation.rollbackPoint);
+      } catch {
+        // best effort cleanup
+      }
+    }
+    operation.rollbackPoint = undefined;
+    this.activeOperations.delete(operation.id);
+    this.completedOperations.set(operation.id, operation);
+    this.cancelledOperations.delete(operation.id);
+    this.emit("operationCompleted", operation);
+  }
+
+  private async finalizeFailedOperation(
+    operation: SyncOperation,
+    context: { cancelled?: boolean } = {}
+  ): Promise<void> {
+    const isCancelled = context.cancelled === true;
+
+    if (!isCancelled) {
+      await this.attemptRollback(operation);
+    } else if (operation.rollbackPoint && this.rollbackCapabilities) {
+      try {
+        this.rollbackCapabilities.deleteRollbackPoint(operation.rollbackPoint);
+      } catch {
+        // ignore cleanup failure
+      }
+      operation.rollbackPoint = undefined;
+    }
+
+    operation.status = "failed";
+    operation.endTime = new Date();
+    this.activeOperations.delete(operation.id);
+    this.completedOperations.set(operation.id, operation);
+    this.cancelledOperations.delete(operation.id);
+
+    if (isCancelled) {
+      this.emit("operationCancelled", operation);
+    } else {
+      this.emit("operationFailed", operation);
+    }
+  }
+
+  private async attemptRollback(operation: SyncOperation): Promise<void> {
+    const options = ((operation as any).options || {}) as SyncOptions;
+    if (!options.rollbackOnError) {
+      return;
+    }
+
+    if (!operation.rollbackPoint) {
+      operation.errors.push({
+        file: "coordinator",
+        type: "rollback",
+        message: "Rollback requested but no rollback point was recorded",
+        timestamp: new Date(),
+        recoverable: false,
+      });
+      return;
+    }
+
+    if (!this.rollbackCapabilities) {
+      operation.errors.push({
+        file: "coordinator",
+        type: "rollback",
+        message:
+          "Rollback requested but rollback capabilities are not configured",
+        timestamp: new Date(),
+        recoverable: false,
+      });
+      return;
+    }
+
+    try {
+      const result = await this.rollbackCapabilities.rollbackToPoint(
+        operation.rollbackPoint
+      );
+
+      if (!result.success || result.errors.length > 0) {
+        for (const rollbackError of result.errors) {
+          operation.errors.push({
+            file: "coordinator",
+            type: "rollback",
+            message: `Rollback ${rollbackError.action} failed for ${rollbackError.id}: ${rollbackError.error}`,
+            timestamp: new Date(),
+            recoverable: rollbackError.recoverable,
+          });
+        }
+      }
+    } catch (error) {
+      operation.errors.push({
+        file: "coordinator",
+        type: "rollback",
+        message: `Rollback execution failed: ${
+          error instanceof Error ? error.message : "unknown"
+        }`,
+        timestamp: new Date(),
+        recoverable: false,
+      });
+    } finally {
+      try {
+        this.rollbackCapabilities.deleteRollbackPoint(operation.rollbackPoint);
+      } catch {
+        // ignore cleanup failures
+      }
+      operation.rollbackPoint = undefined;
+    }
   }
 
   // Pause/resume controls
@@ -970,7 +1223,10 @@ export class SynchronizationCoordinator extends EventEmitter {
               if (Array.isArray(parseResult.updatedEntities)) {
                 for (const ent of parseResult.updatedEntities) {
                   try {
-                    await this.kgService.appendVersion(ent, { timestamp: now });
+                    await this.kgService.appendVersion(ent, {
+                      timestamp: now,
+                      changeSetId: changeId,
+                    });
                     operation.entitiesUpdated++;
                     // Queue session relationship for modified entity
                     try {
@@ -1084,7 +1340,13 @@ export class SynchronizationCoordinator extends EventEmitter {
                       if (resolved) toId = resolved;
                     }
                     if (toId && rel.fromEntityId) {
-                      await this.kgService.openEdge(rel.fromEntityId, toId as any, rel.type, now);
+                      await this.kgService.openEdge(
+                        rel.fromEntityId,
+                        toId as any,
+                        rel.type,
+                        now,
+                        changeId
+                      );
                       // Keep edge evidence/properties in sync during incremental updates
                       try {
                         const enriched = { ...rel, toEntityId: toId } as GraphRelationship;
@@ -1114,7 +1376,13 @@ export class SynchronizationCoordinator extends EventEmitter {
                       if (resolved) toId = resolved;
                     }
                     if (toId && rel.fromEntityId) {
-                      await this.kgService.closeEdge(rel.fromEntityId, toId as any, rel.type, now);
+                      await this.kgService.closeEdge(
+                        rel.fromEntityId,
+                        toId as any,
+                        rel.type,
+                        now,
+                        changeId
+                      );
                       operation.relationshipsUpdated++;
                     }
                   } catch (err) {
@@ -1580,12 +1848,17 @@ export class SynchronizationCoordinator extends EventEmitter {
     return this.operationQueue.length;
   }
 
-  async startIncrementalSynchronization(): Promise<string> {
+  async startIncrementalSynchronization(
+    options: SyncOptions = {}
+  ): Promise<string> {
     // Alias for synchronizeFileChanges with empty changes
-    return this.synchronizeFileChanges([]);
+    return this.synchronizeFileChanges([], options);
   }
 
-  async startPartialSynchronization(paths: string[]): Promise<string> {
+  async startPartialSynchronization(
+    paths: string[],
+    options: SyncOptions = {}
+  ): Promise<string> {
     // Convert paths to partial updates
     const updates: PartialUpdate[] = paths.map((path) => ({
       entityId: path,
@@ -1593,7 +1866,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       changes: {},
     }));
 
-    return this.synchronizePartial(updates);
+    return this.synchronizePartial(updates, options);
   }
 
   async cancelOperation(operationId: string): Promise<boolean> {
@@ -1610,10 +1883,6 @@ export class SynchronizationCoordinator extends EventEmitter {
           recoverable: true,
         });
       }
-      active.status = "failed";
-      active.endTime = new Date();
-      this.activeOperations.delete(operationId);
-      this.completedOperations.set(operationId, active);
       return true;
     }
 
@@ -1770,8 +2039,64 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Reset operation status
     operation.status = "pending";
+    operation.startTime = new Date();
+    operation.endTime = undefined;
     operation.errors = [];
     operation.conflicts = [];
+    if (operation.rollbackPoint && this.rollbackCapabilities) {
+      try {
+        this.rollbackCapabilities.deleteRollbackPoint(operation.rollbackPoint);
+      } catch {
+        // best effort cleanup before recreating
+      }
+      operation.rollbackPoint = undefined;
+    }
+
+    const options = ((operation as any).options || {}) as SyncOptions;
+    if (options.rollbackOnError) {
+      if (!this.rollbackCapabilities) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "rollback",
+          message:
+            "Rollback requested but rollback capabilities are not configured",
+          timestamp: new Date(),
+          recoverable: false,
+        });
+        this.completedOperations.set(operation.id, operation);
+        this.emit("operationFailed", operation);
+        return;
+      }
+      try {
+        const rollbackId = await this.rollbackCapabilities.createRollbackPoint(
+          operation.id,
+          `Retry rollback snapshot for ${operation.id}`
+        );
+        operation.rollbackPoint = rollbackId;
+      } catch (error) {
+        operation.status = "failed";
+        operation.endTime = new Date();
+        operation.errors.push({
+          file: "coordinator",
+          type: "rollback",
+          message: `Failed to create rollback point during retry: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+          timestamp: new Date(),
+          recoverable: false,
+        });
+        this.completedOperations.set(operation.id, operation);
+        this.emit("operationFailed", operation);
+        return;
+      }
+    }
+
+    // Re-register as active so cancellation and observers can see the retry
+    this.activeOperations.set(operation.id, operation);
+    this.completedOperations.delete(operation.id);
+    this.cancelledOperations.delete(operation.id);
 
     // Re-add to queue
     this.operationQueue.push(operation);

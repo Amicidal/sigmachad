@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { registerTestRoutes } from '../../../../src/api/routes/tests.js';
+import { registerTestRoutes, aggregatePerformanceMetrics } from '../../../../src/api/routes/tests.js';
 import {
   createMockRequest,
   createMockReply,
@@ -12,6 +12,19 @@ import {
   type MockFastifyReply
 } from '../../../test-utils.js';
 import type { TestPlanResponse } from '../../../../src/models/types.js';
+import type { TestPerformanceMetrics } from '../../../../src/models/entities.js';
+
+const createPerformanceMetric = (
+  overrides: Partial<TestPerformanceMetrics> = {}
+): TestPerformanceMetrics => ({
+  averageExecutionTime: 100,
+  p95ExecutionTime: 120,
+  successRate: 0.9,
+  trend: 'stable',
+  benchmarkComparisons: [],
+  historicalData: [],
+  ...overrides,
+});
 
 // Mock services
 vi.mock('../../../../src/services/KnowledgeGraphService.js', () => ({
@@ -25,6 +38,34 @@ vi.mock('../../../../src/services/TestEngine.js', () => ({
 }));
 
 const planTestsMock = vi.fn();
+
+describe('aggregatePerformanceMetrics', () => {
+  it('selects the most common trend across metrics', () => {
+    const metrics: TestPerformanceMetrics[] = [
+      createPerformanceMetric({ averageExecutionTime: 90, trend: 'stable' }),
+      createPerformanceMetric({ averageExecutionTime: 110, trend: 'stable' }),
+      createPerformanceMetric({ averageExecutionTime: 140, trend: 'degrading' }),
+    ];
+
+    const aggregated = aggregatePerformanceMetrics(metrics);
+
+    expect(aggregated.trend).toBe('stable');
+    expect(aggregated.averageExecutionTime).toBeCloseTo((90 + 110 + 140) / 3, 5);
+  });
+
+  it('prefers degrading trend when counts tie', () => {
+    const metrics: TestPerformanceMetrics[] = [
+      createPerformanceMetric({ trend: 'degrading' }),
+      createPerformanceMetric({ trend: 'degrading' }),
+      createPerformanceMetric({ trend: 'improving' }),
+      createPerformanceMetric({ trend: 'improving' }),
+    ];
+
+    const aggregated = aggregatePerformanceMetrics(metrics);
+
+    expect(aggregated.trend).toBe('degrading');
+  });
+});
 
 vi.mock('../../../../src/services/TestPlanningService.js', async () => {
   const actual = await vi.importActual<typeof import('../../../../src/services/TestPlanningService.js')>(
@@ -129,7 +170,10 @@ describe('Test Routes', () => {
 
     // Create mock services
     mockKgService = vi.fn() as any;
-    mockDbService = vi.fn() as any;
+    mockDbService = {
+      getPerformanceMetricsHistory: vi.fn().mockResolvedValue([]),
+      postgresQuery: vi.fn().mockResolvedValue({ rows: [] }),
+    } as any;
     mockTestEngine = {
       recordTestResults: vi.fn(),
       parseAndRecordTestResults: vi.fn(),
@@ -218,15 +262,15 @@ describe('Test Routes', () => {
       await planHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(400);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: 'INVALID_TEST_PLAN_REQUEST',
-          message: 'Specification ID is required for test planning',
-        },
-        requestId: undefined,
-        timestamp: expect.any(String),
-      });
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: {
+            code: 'INVALID_TEST_PLAN_REQUEST',
+            message: 'Specification ID is required for test planning',
+          },
+        })
+      );
     });
 
     it('should return 404 when specification is missing', async () => {
@@ -236,15 +280,15 @@ describe('Test Routes', () => {
       await planHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(404);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: 'SPEC_NOT_FOUND',
-          message: 'Specification not found',
-        },
-        requestId: undefined,
-        timestamp: expect.any(String),
-      });
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: {
+            code: 'SPEC_NOT_FOUND',
+            message: 'Specification not found',
+          },
+        })
+      );
     });
 
     it('should return 500 when planning service throws unexpected error', async () => {
@@ -254,16 +298,16 @@ describe('Test Routes', () => {
       await planHandler(mockRequest, mockReply);
 
       expect(mockReply.status).toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: 'TEST_PLANNING_FAILED',
-          message: 'Failed to plan and generate tests',
-          details: 'planner failure',
-        },
-        requestId: undefined,
-        timestamp: expect.any(String),
-      });
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: {
+            code: 'TEST_PLANNING_FAILED',
+            message: 'Failed to plan and generate tests',
+            details: 'planner failure',
+          },
+        })
+      );
     });
   });
 
@@ -544,8 +588,24 @@ describe('Test Routes', () => {
           { benchmark: 'industry_avg', value: 280.0, status: 'above' as const }
         ],
         historicalData: [
-          { timestamp: new Date('2023-01-01'), executionTime: 250.0, successRate: 0.9 },
-          { timestamp: new Date('2023-01-02'), executionTime: 245.0, successRate: 0.92 }
+          {
+            timestamp: new Date('2023-01-01'),
+            executionTime: 250.0,
+            averageExecutionTime: 250.0,
+            p95ExecutionTime: 300.0,
+            successRate: 0.9,
+            coveragePercentage: 0,
+            runId: 'run-a'
+          },
+          {
+            timestamp: new Date('2023-01-02'),
+            executionTime: 245.0,
+            averageExecutionTime: 245.0,
+            p95ExecutionTime: 295.0,
+            successRate: 0.92,
+            coveragePercentage: 0,
+            runId: 'run-b'
+          }
         ]
       };
 
@@ -558,14 +618,156 @@ describe('Test Routes', () => {
       });
 
       mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue(mockMetrics);
+      const mockHistory = [
+        {
+          metricId: 'fixtures/latency/p95',
+          currentValue: 320,
+          detectedAt: new Date('2023-01-02T00:00:00Z'),
+          source: 'snapshot' as const,
+        },
+      ];
+      mockDbService.getPerformanceMetricsHistory = vi
+        .fn()
+        .mockResolvedValue(mockHistory);
 
       await performanceHandler(mockRequest, mockReply);
 
       expect(mockTestEngine.getPerformanceMetrics).toHaveBeenCalledWith(entityId);
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({})
+      );
       expect(mockReply.send).toHaveBeenCalledWith({
         success: true,
-        data: mockMetrics
+        data: mockMetrics,
+        history: mockHistory,
       });
+    });
+
+    it('should normalize environment filter before querying history', async () => {
+      const entityId = 'test-entity-env';
+      const mockMetrics = {
+        averageExecutionTime: 200,
+        p95ExecutionTime: 250,
+        successRate: 0.95,
+        trend: 'stable' as const,
+        benchmarkComparisons: [],
+        historicalData: [],
+      };
+
+      mockRequest.params = { entityId };
+      mockRequest.query = { environment: 'Production' } as any;
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: 'test',
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue(mockMetrics);
+      mockDbService.getPerformanceMetricsHistory = vi
+        .fn()
+        .mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({ environment: 'prod' })
+      );
+    });
+
+    it('should normalize metricId filter before querying history', async () => {
+      const entityId = 'test-entity-metric';
+      const mockMetrics = {
+        averageExecutionTime: 210,
+        p95ExecutionTime: 260,
+        successRate: 0.9,
+        trend: 'stable' as const,
+        benchmarkComparisons: [],
+        historicalData: [],
+      };
+
+      mockRequest.params = { entityId };
+      mockRequest.query = { metricId: 'Benchmark/API/Login-Latency ' } as any;
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: 'test',
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue(mockMetrics);
+      mockDbService.getPerformanceMetricsHistory = vi.fn().mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({ metricId: 'benchmark/api/login-latency' })
+      );
+    });
+
+    it('should ignore invalid limit values when building history options', async () => {
+      const entityId = 'test-entity-invalid-limit';
+      const mockMetrics = {
+        averageExecutionTime: 205,
+        p95ExecutionTime: 255,
+        successRate: 0.91,
+        trend: 'stable' as const,
+        benchmarkComparisons: [],
+        historicalData: [],
+      };
+
+      mockRequest.params = { entityId };
+      mockRequest.query = { limit: 'not-a-number' } as any;
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: 'test',
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue(mockMetrics);
+      mockDbService.getPerformanceMetricsHistory = vi.fn().mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({ limit: undefined })
+      );
+    });
+
+    it('should clamp limit filter to maximum allowed value', async () => {
+      const entityId = 'test-entity-limit';
+      const mockMetrics = {
+        averageExecutionTime: 215,
+        p95ExecutionTime: 270,
+        successRate: 0.89,
+        trend: 'stable' as const,
+        benchmarkComparisons: [],
+        historicalData: [],
+      };
+
+      mockRequest.params = { entityId };
+      mockRequest.query = { limit: '9999' } as any;
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: 'test',
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi.fn().mockResolvedValue(mockMetrics);
+      mockDbService.getPerformanceMetricsHistory = vi.fn().mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({ limit: 500 })
+      );
     });
 
     it('should handle performance metrics retrieval errors', async () => {
@@ -581,6 +783,8 @@ describe('Test Routes', () => {
         new Error('Entity not found')
       );
 
+      mockDbService.getPerformanceMetricsHistory.mockResolvedValue([]);
+
       await performanceHandler(mockRequest, mockReply);
 
       expect(mockTestEngine.getPerformanceMetrics).toHaveBeenCalledWith('non-existent-entity');
@@ -594,6 +798,7 @@ describe('Test Routes', () => {
           benchmarkComparisons: [],
           historicalData: [],
         },
+        history: [],
       });
     });
   });

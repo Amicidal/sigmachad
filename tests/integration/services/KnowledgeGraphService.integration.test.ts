@@ -17,6 +17,9 @@ import { GraphRelationship } from "../../../src/models/relationships";
 import { GraphSearchRequest } from "../../../src/models/types";
 import { canonicalRelationshipId } from "../../../src/utils/codeEdges";
 
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 describe("KnowledgeGraphService Integration", () => {
   let testSetup: IsolatedTestSetup;
   let kgService: KnowledgeGraphService;
@@ -45,8 +48,9 @@ describe("KnowledgeGraphService Integration", () => {
 
   describe("Entity CRUD Operations", () => {
     it("should create and retrieve entities successfully", async () => {
+      const rawId = "test-entity-1";
       const testEntity: CodebaseEntity = {
-        id: "test-entity-1",
+        id: rawId,
         path: "src/test.ts",
         hash: "abc123",
         language: "typescript",
@@ -60,12 +64,15 @@ describe("KnowledgeGraphService Integration", () => {
       };
 
       await kgService.createEntity(testEntity);
-      const retrieved = await kgService.getEntity(testEntity.id);
+      const namespacedId = testEntity.id;
+      const retrieved = await kgService.getEntity(namespacedId);
+      const retrievedViaRawId = await kgService.getEntity(rawId);
 
       expect(retrieved).toEqual(expect.objectContaining({ id: testEntity.id }));
       expect(retrieved?.path).toBe(testEntity.path);
       expect(retrieved?.language).toBe(testEntity.language);
       expect(retrieved?.type).toBe("file");
+      expect(retrievedViaRawId?.id).toBe(namespacedId);
     });
 
     it("should create entities with different types", async () => {
@@ -192,10 +199,14 @@ describe("KnowledgeGraphService Integration", () => {
   });
 
   describe("Relationship Operations", () => {
+    const rawEntityIds = {
+      from: "rel-entity-1",
+      to: "rel-entity-2",
+    } as const;
     let testEntities: CodebaseEntity[];
 
     beforeEach(async () => {
-      const staleEntityIds = ["rel-entity-1", "rel-entity-2"];
+      const staleEntityIds = [rawEntityIds.from, rawEntityIds.to];
       for (const entityId of staleEntityIds) {
         try {
           await kgService.deleteEntity(entityId);
@@ -206,7 +217,7 @@ describe("KnowledgeGraphService Integration", () => {
 
       testEntities = [
         {
-          id: "rel-entity-1",
+          id: rawEntityIds.from,
           path: "src/main.ts",
           hash: "main123",
           language: "typescript",
@@ -215,7 +226,7 @@ describe("KnowledgeGraphService Integration", () => {
           type: "file",
         },
         {
-          id: "rel-entity-2",
+          id: rawEntityIds.to,
           path: "src/utils.ts",
           hash: "utils123",
           language: "typescript",
@@ -253,6 +264,15 @@ describe("KnowledgeGraphService Integration", () => {
       expect(retrievedRelationships[0].type).toBe(RelationshipType.IMPORTS);
       expect(retrievedRelationships[0].fromEntityId).toBe(testEntities[0].id);
       expect(retrievedRelationships[0].toEntityId).toBe(testEntities[1].id);
+
+      const retrievedViaRawId = await kgService.getRelationships({
+        fromEntityId: rawEntityIds.from,
+        type: RelationshipType.IMPORTS,
+      });
+
+      expect(retrievedViaRawId.length).toBe(1);
+      expect(retrievedViaRawId[0].fromEntityId).toBe(testEntities[0].id);
+      expect(retrievedViaRawId[0].toEntityId).toBe(testEntities[1].id);
     });
 
     it("should handle multiple relationship types", async () => {
@@ -315,10 +335,236 @@ describe("KnowledgeGraphService Integration", () => {
 
       expect(timeRangeResults.length).toBe(1);
       // The system generates canonical IDs based on relationship content
-      expect(timeRangeResults[0].id).toMatch(/^rel_[a-f0-9]{40}$/);
+      const prefix = testSetup.testContext.entityPrefix ?? "";
+      const idPattern = new RegExp(
+        `^${escapeRegex(prefix)}time-rel_[a-f0-9]{40}$`
+      );
+      expect(timeRangeResults[0].id).toMatch(idPattern);
       expect(timeRangeResults[0].fromEntityId).toBe(relationship.fromEntityId);
       expect(timeRangeResults[0].toEntityId).toBe(relationship.toEntityId);
       expect(timeRangeResults[0].type).toBe(relationship.type);
+    });
+
+    it("should persist structural metadata for import relationships", async () => {
+      const created = new Date();
+      const relationship: GraphRelationship = {
+        id: "structural-import-meta",
+        fromEntityId: testEntities[0].id,
+        toEntityId: testEntities[1].id,
+        type: RelationshipType.IMPORTS,
+        created,
+        lastModified: created,
+        version: 1,
+        metadata: {
+          importKind: "namespace",
+          alias: "Utils",
+          module: "../lib/utils/index.js",
+          importDepth: 2,
+          isNamespace: true,
+          language: "JavaScript",
+          symbolKind: "Module",
+          resolutionState: "partial",
+        },
+      };
+
+      await kgService.createRelationship(relationship);
+
+      const retrievedRelationships = await kgService.getRelationships({
+        fromEntityId: testEntities[0].id,
+        type: RelationshipType.IMPORTS,
+      });
+
+      expect(retrievedRelationships.length).toBeGreaterThanOrEqual(1);
+      const retrieved = retrievedRelationships.find((rel) => rel.id === relationship.id);
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.importAlias).toBe("Utils");
+      expect(retrieved?.importType).toBe("namespace");
+      expect(retrieved?.isNamespace).toBe(true);
+      expect(retrieved?.modulePath).toBe("../lib/utils/index.js");
+      expect(retrieved?.language).toBe("javascript");
+      expect(retrieved?.symbolKind).toBe("module");
+      expect(retrieved?.metadata?.resolutionState).toBe("partial");
+    });
+
+    it("persists structural metadata for alternate language relationships", async () => {
+      const pythonFile: CodebaseEntity = {
+        id: "file:src/models/user.py",
+        path: "src/models/user.py",
+        hash: "userpy123",
+        language: "python",
+        lastModified: new Date(),
+        created: new Date(),
+        type: "file",
+      } as CodebaseEntity;
+      const pythonSymbol: CodebaseEntity = {
+        id: "sym:src/models/user.py#User@dataclass",
+        path: "src/models/user.py:User",
+        hash: "usercls456",
+        language: "python",
+        lastModified: new Date(),
+        created: new Date(),
+        type: "symbol",
+        kind: "class",
+        signature: "@dataclass class User: ...",
+      } as CodebaseEntity;
+
+      await kgService.createEntity(pythonFile);
+      await kgService.createEntity(pythonSymbol);
+
+      const relationship: GraphRelationship = {
+        id: "structural-python-contains",
+        fromEntityId: pythonFile.id,
+        toEntityId: pythonSymbol.id,
+        type: RelationshipType.CONTAINS,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+        metadata: {
+          language: "Python",
+          symbolKind: "Class",
+          modulePath: "models//user.py",
+          languageSpecific: { decorator: "dataclass" },
+        },
+      };
+
+      await kgService.createRelationship(relationship);
+
+      const retrieved = await kgService.getRelationships({
+        fromEntityId: pythonFile.id,
+        type: RelationshipType.CONTAINS,
+      });
+
+      expect(retrieved.length).toBeGreaterThanOrEqual(1);
+      const contains = retrieved.find((rel) => rel.id === relationship.id);
+      expect(contains).toBeDefined();
+      expect(contains?.language).toBe("python");
+      expect(contains?.symbolKind).toBe("class");
+      expect(contains?.modulePath).toBe("models/user.py");
+      expect(contains?.metadata?.languageSpecific).toEqual({
+        decorator: "dataclass",
+      });
+    });
+
+    it("supports structural navigation helpers end-to-end", async () => {
+      const moduleEntity: CodebaseEntity = {
+        id: "nav-module-entity",
+        path: "src/navigation/app.ts",
+        hash: "nav-module",
+        language: "typescript",
+        lastModified: new Date(),
+        created: new Date(),
+        type: "file",
+      };
+      const childSymbol: CodebaseEntity = {
+        id: "sym:src/navigation/app.ts#Component@1234",
+        path: "src/navigation/app.ts:Component",
+        hash: "component-hash",
+        language: "typescript",
+        lastModified: new Date(),
+        created: new Date(),
+        type: "symbol",
+        kind: "class",
+        signature: "class Component {}",
+        startLine: 5,
+        endLine: 40,
+      } as CodebaseEntity;
+      const targetSymbol: CodebaseEntity = {
+        id: "sym:src/navigation/utils.ts#helper@abcd",
+        path: "src/navigation/utils.ts:helper",
+        hash: "helper-hash",
+        language: "typescript",
+        lastModified: new Date(),
+        created: new Date(),
+        type: "symbol",
+        kind: "function",
+        signature: "function helper(): void",
+        startLine: 1,
+        endLine: 10,
+      } as CodebaseEntity;
+
+      await kgService.createEntity(moduleEntity);
+      await kgService.createEntity(childSymbol);
+      await kgService.createEntity(targetSymbol);
+
+      const containsRel: GraphRelationship = {
+        id: "nav-contains-relationship",
+        fromEntityId: moduleEntity.id,
+        toEntityId: childSymbol.id,
+        type: RelationshipType.CONTAINS,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+        metadata: {
+          language: "typescript",
+          symbolKind: "class",
+        },
+      };
+      const importRel: GraphRelationship = {
+        id: "nav-import-relationship",
+        fromEntityId: moduleEntity.id,
+        toEntityId: targetSymbol.id,
+        type: RelationshipType.IMPORTS,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+        metadata: {
+          importKind: "named",
+          alias: "helper",
+          module: "./utils",
+          resolutionState: "resolved",
+          language: "typescript",
+        },
+      };
+      const definesRel: GraphRelationship = {
+        id: "nav-defines-relationship",
+        fromEntityId: moduleEntity.id,
+        toEntityId: childSymbol.id,
+        type: RelationshipType.DEFINES,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+      };
+
+      await kgService.createRelationship(containsRel);
+      await kgService.createRelationship(importRel);
+      await kgService.createRelationship(definesRel);
+
+      const moduleChildren = await kgService.listModuleChildren(moduleEntity.path, {
+        includeFiles: false,
+        includeSymbols: true,
+        limit: 10,
+      });
+
+      expect(moduleChildren.parentId).toBe(moduleEntity.id);
+      expect(moduleChildren.children).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            entity: expect.objectContaining({ id: childSymbol.id }),
+            relationship: expect.objectContaining({ type: RelationshipType.CONTAINS }),
+          }),
+        ])
+      );
+
+      const imports = await kgService.listImports(moduleEntity.id, {
+        resolvedOnly: true,
+        language: "typescript",
+        limit: 5,
+      });
+
+      expect(imports.entityId).toBe(moduleEntity.id);
+      expect(imports.imports).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            relationship: expect.objectContaining({ type: RelationshipType.IMPORTS }),
+            target: expect.objectContaining({ id: targetSymbol.id }),
+          }),
+        ])
+      );
+
+      const definition = await kgService.findDefinition(childSymbol.id);
+      expect(definition.symbolId).toBe(childSymbol.id);
+      expect(definition.relationship?.type).toBe(RelationshipType.DEFINES);
+      expect(definition.source?.id).toBe(moduleEntity.id);
     });
 
     it("normalizes code edges when persisting relationships", async () => {
@@ -428,8 +674,9 @@ describe("KnowledgeGraphService Integration", () => {
           .digest("hex")
           .slice(0, 12);
 
+      const prefix = testSetup.testContext.entityPrefix ?? "";
       expect(stored.id).toBe(
-        canonicalRelationshipId(stored.fromEntityId, stored)
+        `${prefix}${canonicalRelationshipId(stored.fromEntityId, stored)}`
       );
       expect(stored.type).toBe(RelationshipType.TYPE_USES);
       expect(stored.source).toBe("type-checker");
@@ -600,10 +847,11 @@ describe("KnowledgeGraphService Integration", () => {
       expect(storedRelationships).toHaveLength(1);
 
       const stored = storedRelationships[0];
-      const expectedId = canonicalRelationshipId(fromSymbol.id, {
+      const prefix = testSetup.testContext.entityPrefix ?? "";
+      const expectedId = `${prefix}${canonicalRelationshipId(fromSymbol.id, {
         toEntityId: toSymbol.id,
         type: RelationshipType.CALLS,
-      } as GraphRelationship);
+      } as GraphRelationship)}`;
 
       expect(stored.id).toBe(expectedId);
       expect(stored.type).toBe(RelationshipType.CALLS);
@@ -656,6 +904,191 @@ describe("KnowledgeGraphService Integration", () => {
         expect(sites).toContain(stored.siteId);
       }
       expect(stored.siteHash).toMatch(/^sh_[0-9a-f]{16}$/);
+    });
+  });
+
+  describe("Structural history and indexing", () => {
+    it("should ensure graph indexes idempotently without IF NOT EXISTS syntax", async () => {
+      await expect(kgService.ensureGraphIndexes()).resolves.toBeUndefined();
+      await expect(kgService.ensureGraphIndexes()).resolves.toBeUndefined();
+      const firstEnsure = await kgService.ensureIndices();
+      expect(firstEnsure).toMatchObject({
+        status: expect.stringMatching(/completed|deferred|failed/),
+        stats: expect.objectContaining({ created: expect.any(Number) }),
+      });
+
+      const secondEnsure = await kgService.ensureIndices();
+      expect(secondEnsure).toMatchObject({
+        status: expect.stringMatching(/completed|deferred|failed/),
+        stats: expect.objectContaining({ created: expect.any(Number) }),
+      });
+    });
+
+    it("should capture module history with confidence and scope metadata", async () => {
+      const suffix = Date.now().toString(36);
+
+      const moduleBase: CodebaseEntity = {
+        id: `module-history-${suffix}`,
+        path: `packages/history-${suffix}/package.json`,
+        hash: `hash-module-${suffix}`,
+        language: "node",
+        lastModified: new Date(),
+        created: new Date(),
+        type: "module",
+        name: `history-module-${suffix}`,
+      } as any;
+      await kgService.createEntity(moduleBase as CodebaseEntity);
+      const moduleStored = await kgService.getEntity(moduleBase.id);
+      expect(moduleStored).toBeTruthy();
+      const moduleId = moduleStored!.id;
+      const modulePathResolved = moduleStored!.path || moduleBase.path;
+      expect(modulePathResolved).toBeTruthy();
+      if (!moduleStored?.path) {
+        // Debug helper to understand module path resolution when running in isolation
+        // eslint-disable-next-line no-console
+        console.log("moduleStored", moduleStored);
+      }
+      const navigationSummary = await kgService.listModuleChildren(
+        modulePathResolved,
+        { includeFiles: true, includeSymbols: true, limit: 5 }
+      );
+      expect(navigationSummary.parentId).toBe(moduleId);
+
+      const fileABase: CodebaseEntity = {
+        id: `module-history-fileA-${suffix}`,
+        path: `src/history/${suffix}/fileA.ts`,
+        hash: `hash-fileA-${suffix}`,
+        language: "typescript",
+        lastModified: new Date(),
+        created: new Date(),
+        type: "file",
+        name: `fileA-${suffix}`,
+      } as any;
+      const fileBBase: CodebaseEntity = {
+        id: `module-history-fileB-${suffix}`,
+        path: `src/history/${suffix}/fileB.ts`,
+        hash: `hash-fileB-${suffix}`,
+        language: "typescript",
+        lastModified: new Date(),
+        created: new Date(),
+        type: "file",
+        name: `fileB-${suffix}`,
+      } as any;
+
+      await kgService.createEntity(fileABase as CodebaseEntity);
+      await kgService.createEntity(fileBBase as CodebaseEntity);
+      const fileAStored = await kgService.getEntity(fileABase.id);
+      const fileBStored = await kgService.getEntity(fileBBase.id);
+      expect(fileAStored).toBeTruthy();
+      expect(fileBStored).toBeTruthy();
+      const fileAId = fileAStored!.id;
+      const fileBId = fileBStored!.id;
+
+      const now = new Date();
+      const edgeToA = {
+        id: `struct-history-edge-${suffix}-a`,
+        fromEntityId: moduleId,
+        toEntityId: fileAId,
+        type: RelationshipType.CONTAINS,
+        created: now,
+        lastModified: now,
+        version: 1,
+        confidence: 0.9,
+        scope: "local",
+        metadata: { language: "typescript", scope: "local" },
+        firstSeenAt: now,
+        lastSeenAt: now,
+      } as unknown as GraphRelationship;
+      await kgService.createRelationship(edgeToA);
+
+      const beforeClose = await kgService.getRelationships({
+        fromEntityId: moduleId,
+        type: RelationshipType.CONTAINS,
+      });
+      expect(
+        beforeClose.some((rel) => rel.toEntityId === fileAId)
+      ).toBe(true);
+      // eslint-disable-next-line no-console
+      console.log(
+        "beforeClose",
+        beforeClose.map((rel) => ({ id: rel.id, to: rel.toEntityId }))
+      );
+
+      const closeAt = new Date(now.getTime() + 500);
+      await kgService.closeEdge(
+        moduleId,
+        fileAId,
+        RelationshipType.CONTAINS,
+        closeAt
+      );
+
+      const later = new Date(now.getTime() + 1000);
+      const edgeToB = {
+        id: `struct-history-edge-${suffix}-b`,
+        fromEntityId: moduleId,
+        toEntityId: fileBId,
+        type: RelationshipType.CONTAINS,
+        created: later,
+        lastModified: later,
+        version: 1,
+        confidence: 0.75,
+        scope: "external",
+        metadata: { language: "typescript", scope: "external" },
+        firstSeenAt: later,
+        lastSeenAt: later,
+      } as unknown as GraphRelationship;
+      await kgService.createRelationship(edgeToB);
+
+      const relationships = await kgService.getRelationships({
+        fromEntityId: moduleId,
+        type: RelationshipType.CONTAINS,
+      });
+      const relToB = relationships.find((rel) => rel.toEntityId === fileBId);
+      expect(relToB).toBeDefined();
+      expect(relToB?.confidence).toBeCloseTo(0.75, 5);
+      expect(relToB?.scope).toBe("external");
+
+      const history = await kgService.getModuleHistory(modulePathResolved, {
+        includeInactive: true,
+        limit: 10,
+      });
+
+      // eslint-disable-next-line no-console
+      console.log("moduleHistory", history);
+
+      const rawRelationships = await (kgService as any).graphDbQuery(
+        `MATCH (a {id: $fromId})-[r:CONTAINS]->(b)
+         RETURN r.id AS id, r.active AS active, r.temporal AS temporal, b.id AS toId
+         ORDER BY coalesce(r.lastModified, r.validFrom) DESC`,
+        { fromId: moduleId }
+      );
+      // eslint-disable-next-line no-console
+      console.log("rawRel", rawRelationships);
+
+      expect(history.generatedAt).toBeInstanceOf(Date);
+      expect(history.moduleId).toBe(moduleId);
+      expect(history.relationships.length).toBeGreaterThanOrEqual(2);
+
+      const closedRel = history.relationships.find(
+        (rel) => rel.to.id === fileAId
+      );
+      expect(closedRel).toBeDefined();
+      expect(closedRel?.active).toBe(false);
+      expect(closedRel?.confidence).toBeCloseTo(0.9, 5);
+      expect(closedRel?.scope).toBe("local");
+      expect(
+        closedRel?.segments.some((segment) => segment.closedAt instanceof Date)
+      ).toBe(true);
+
+      const activeRel = history.relationships.find(
+        (rel) => rel.to.id === fileBId
+      );
+      expect(activeRel).toBeDefined();
+      expect(activeRel?.active).toBe(true);
+      expect(activeRel?.confidence).toBeCloseTo(0.75, 5);
+      expect(activeRel?.scope).toBe("external");
+      expect(activeRel?.current?.closedAt).toBeUndefined();
+      expect(activeRel?.segments.length).toBeGreaterThan(0);
     });
   });
 

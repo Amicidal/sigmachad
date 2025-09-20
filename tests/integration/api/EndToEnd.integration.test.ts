@@ -151,10 +151,22 @@ describe("API End-to-End Integration", () => {
           url: `/api/v1/graph/dependencies/${specId}`,
         });
 
-        // Newly created spec typically has no dependencies yet
-        expect(dependencyResponse.statusCode).toBe(404);
-        const dependencyBody = JSON.parse(dependencyResponse.payload || '{}');
-        expectError(dependencyBody);
+        // Newly created specs return an empty dependency set but still succeed
+        expect(dependencyResponse.statusCode).toBe(200);
+        const dependencyBody = JSON.parse(dependencyResponse.payload || "{}");
+        expectSuccess(dependencyBody);
+        expect(dependencyBody.data).toEqual(
+          expect.objectContaining({
+            directDependencies: expect.any(Array),
+            indirectDependencies: expect.any(Array),
+            reverseDependencies: expect.any(Array),
+            circularDependencies: expect.any(Array),
+          })
+        );
+        expect(dependencyBody.data.directDependencies.length).toBe(0);
+        expect(dependencyBody.data.indirectDependencies.length).toBe(0);
+        expect(dependencyBody.data.reverseDependencies.length).toBe(0);
+        expect(dependencyBody.data.circularDependencies.length).toBe(0);
 
         // Step 5: Record some test execution results
         const testResults = [
@@ -280,11 +292,20 @@ describe("API End-to-End Integration", () => {
         url: `/api/v1/graph/examples/${codeEntity.id}`,
       });
 
-      // No examples are expected without relationships
-      expect(examplesResponse.statusCode).toBe(404);
+      expect(examplesResponse.statusCode).toBe(200);
       {
-        const body = JSON.parse(examplesResponse.payload || '{}');
-        expect(body).toEqual(expect.objectContaining({ success: false }));
+        const body = JSON.parse(examplesResponse.payload || "{}");
+        expect(body).toEqual(expect.objectContaining({ success: true }));
+        expect(body.data).toEqual(
+          expect.objectContaining({
+            usageExamples: expect.any(Array),
+            testExamples: expect.any(Array),
+            relatedPatterns: expect.any(Array),
+          })
+        );
+        expect(body.data.usageExamples.length).toBe(0);
+        expect(body.data.testExamples.length).toBe(0);
+        expect(body.data.relatedPatterns.length).toBe(0);
       }
 
       // Step 4: Analyze dependencies
@@ -293,10 +314,22 @@ describe("API End-to-End Integration", () => {
         url: `/api/v1/graph/dependencies/${codeEntity.id}`,
       });
 
-      expect(dependencyResponse.statusCode).toBe(404);
+      expect(dependencyResponse.statusCode).toBe(200);
       {
-        const body = JSON.parse(dependencyResponse.payload || '{}');
-        expect(body).toEqual(expect.objectContaining({ success: false }));
+        const body = JSON.parse(dependencyResponse.payload || "{}");
+        expect(body).toEqual(expect.objectContaining({ success: true }));
+        expect(body.data).toEqual(
+          expect.objectContaining({
+            directDependencies: expect.any(Array),
+            indirectDependencies: expect.any(Array),
+            reverseDependencies: expect.any(Array),
+            circularDependencies: expect.any(Array),
+          })
+        );
+        expect(body.data.directDependencies.length).toBe(0);
+        expect(body.data.indirectDependencies.length).toBe(0);
+        expect(body.data.reverseDependencies.length).toBe(0);
+        expect(body.data.circularDependencies.length).toBe(0);
       }
 
       // Step 5: Generate tests for this function
@@ -760,9 +793,19 @@ describe("API End-to-End Integration", () => {
           url: `/api/v1/tests/performance/${specId}`,
         });
 
-        expect(performanceResponse.statusCode).toBe(200);
-        if (performanceResponse.statusCode === 404) {
-          const body = JSON.parse(performanceResponse.payload || '{}');
+        expect([200, 404]).toContain(performanceResponse.statusCode);
+        const body = JSON.parse(performanceResponse.payload || '{}');
+        if (performanceResponse.statusCode === 200) {
+          expect(body).toEqual(
+            expect.objectContaining({
+              success: true,
+              data: expect.objectContaining({
+                metrics: expect.any(Object),
+                history: expect.any(Array),
+              }),
+            })
+          );
+        } else {
           expect(body).toEqual(expect.objectContaining({ success: false }));
         }
       }

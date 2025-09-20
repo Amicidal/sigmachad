@@ -254,8 +254,8 @@ export class SecurityScanner extends EventEmitter {
     try {
       await this.db.falkordbCommand(
         "GRAPH.CONSTRAINT",
-        "CREATE",
         graphKey,
+        "CREATE",
         "UNIQUE",
         "NODE",
         label,

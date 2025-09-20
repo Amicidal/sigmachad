@@ -1328,6 +1328,252 @@ describe('Graph Routes', () => {
     });
   });
 
+  describe('GET /graph/modules/children', () => {
+    let handler: Function;
+
+    beforeEach(async () => {
+      await registerGraphRoutes(mockApp, mockKgService, mockDbService);
+      handler = mockApp.getRegisteredRoutes().get('get:/graph/modules/children');
+    });
+
+    it('returns module children with structural metadata', async () => {
+      await mockKgService.createEntity({
+        id: 'file:src/app.ts:module',
+        type: 'file',
+        path: 'src/app.ts',
+        hash: 'file-hash',
+        language: 'typescript',
+        created: new Date(),
+        lastModified: new Date(),
+      } as any);
+      await mockKgService.createEntity({
+        id: 'sym:src/app.ts#Component@abcd1234',
+        type: 'symbol',
+        kind: 'class',
+        name: 'Component',
+        path: 'src/app.ts:Component',
+        hash: 'sym-hash',
+        language: 'typescript',
+        created: new Date(),
+        lastModified: new Date(),
+      } as any);
+      await mockKgService.createRelationship({
+        id: 'time-rel_child',
+        fromEntityId: 'file:src/app.ts:module',
+        toEntityId: 'sym:src/app.ts#Component@abcd1234',
+        type: 'CONTAINS' as any,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+      } as any);
+
+      mockRequest.query = {
+        modulePath: 'src/app.ts',
+        includeFiles: false,
+      } as any;
+
+      await handler(mockRequest, mockReply);
+
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: expect.objectContaining({
+          modulePath: 'src/app.ts',
+          children: expect.arrayContaining([
+            expect.objectContaining({
+              entity: expect.objectContaining({ id: 'sym:src/app.ts#Component@abcd1234' }),
+              relationship: expect.objectContaining({ type: 'CONTAINS' }),
+            }),
+          ]),
+        }),
+      });
+    });
+
+    it('passes module navigation filters to the service', async () => {
+      const listSpy = vi
+        .spyOn(mockKgService, 'listModuleChildren')
+        .mockResolvedValue({ modulePath: 'src/app.ts', parentId: 'file:src/app.ts:module', children: [] } as any);
+
+      mockRequest.query = {
+        modulePath: 'src/app.ts',
+        includeFiles: 'false',
+        includeSymbols: 'true',
+        language: 'TypeScript,JavaScript',
+        symbolKind: ['Class', 'Function'],
+        modulePathPrefix: 'src/app',
+        limit: '25',
+      } as any;
+
+      await handler(mockRequest, mockReply);
+
+      expect(listSpy).toHaveBeenCalledWith(
+        'src/app.ts',
+        expect.objectContaining({
+          includeFiles: false,
+          includeSymbols: true,
+          language: ['TypeScript', 'JavaScript'],
+          symbolKind: ['Class', 'Function'],
+          modulePathPrefix: 'src/app',
+          limit: 25,
+        })
+      );
+      expect(mockReply.send).toHaveBeenCalledWith({ success: true, data: expect.any(Object) });
+
+      listSpy.mockRestore();
+    });
+  });
+
+  describe('GET /graph/entity/:entityId/imports', () => {
+    let handler: Function;
+
+    beforeEach(async () => {
+      await registerGraphRoutes(mockApp, mockKgService, mockDbService);
+      handler = mockApp.getRegisteredRoutes().get('get:/graph/entity/:entityId/imports');
+    });
+
+    it('returns import relationships for a file', async () => {
+      await mockKgService.createEntity({
+        id: 'file:src/app.ts:module',
+        type: 'file',
+        path: 'src/app.ts',
+        hash: 'file-hash',
+        language: 'typescript',
+        created: new Date(),
+        lastModified: new Date(),
+      } as any);
+      await mockKgService.createEntity({
+        id: 'sym:src/utils.ts#Helper@123',
+        type: 'symbol',
+        kind: 'function',
+        name: 'Helper',
+        path: 'src/utils.ts:Helper',
+        hash: 'sym-hash',
+        language: 'typescript',
+        created: new Date(),
+        lastModified: new Date(),
+      } as any);
+      await mockKgService.createRelationship({
+        id: 'time-rel_import',
+        fromEntityId: 'file:src/app.ts:module',
+        toEntityId: 'sym:src/utils.ts#Helper@123',
+        type: 'IMPORTS' as any,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+        resolutionState: 'resolved',
+      } as any);
+
+      mockRequest.params = { entityId: 'file:src/app.ts:module' } as any;
+      mockRequest.query = { resolvedOnly: true } as any;
+
+      await handler(mockRequest, mockReply);
+
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: expect.objectContaining({
+          entityId: 'file:src/app.ts:module',
+          imports: expect.arrayContaining([
+            expect.objectContaining({
+              relationship: expect.objectContaining({ id: 'time-rel_import' }),
+            }),
+          ]),
+        }),
+      });
+    });
+
+    it('passes import navigation filters to the service', async () => {
+      const listSpy = vi
+        .spyOn(mockKgService, 'listImports')
+        .mockResolvedValue({ entityId: 'file:src/app.ts:module', imports: [] } as any);
+
+      mockRequest.params = { entityId: 'file:src/app.ts:module' } as any;
+      mockRequest.query = {
+        resolvedOnly: 'true',
+        language: 'TypeScript,JavaScript',
+        symbolKind: 'Class',
+        importAlias: 'Utils',
+        importType: ['NAMESPACE', 'named'],
+        isNamespace: 'true',
+        modulePath: '../lib/utils/index.js',
+        modulePathPrefix: '../lib/',
+        limit: '40',
+      } as any;
+
+      await handler(mockRequest, mockReply);
+
+      expect(listSpy).toHaveBeenCalledWith(
+        'file:src/app.ts:module',
+        expect.objectContaining({
+          resolvedOnly: true,
+          language: ['typescript', 'javascript'],
+          symbolKind: 'class',
+          importAlias: 'Utils',
+          importType: ['namespace', 'named'],
+          isNamespace: true,
+          modulePath: '../lib/utils/index.js',
+          modulePathPrefix: '../lib/',
+          limit: 40,
+        })
+      );
+      expect(mockReply.send).toHaveBeenCalledWith({ success: true, data: expect.any(Object) });
+
+      listSpy.mockRestore();
+    });
+  });
+
+  describe('GET /graph/symbol/:symbolId/definition', () => {
+    let handler: Function;
+
+    beforeEach(async () => {
+      await registerGraphRoutes(mockApp, mockKgService, mockDbService);
+      handler = mockApp.getRegisteredRoutes().get('get:/graph/symbol/:symbolId/definition');
+    });
+
+    it('returns defining entity for a symbol', async () => {
+      await mockKgService.createEntity({
+        id: 'file:src/utils.ts:module',
+        type: 'file',
+        path: 'src/utils.ts',
+        hash: 'file-hash',
+        language: 'typescript',
+        created: new Date(),
+        lastModified: new Date(),
+      } as any);
+      await mockKgService.createEntity({
+        id: 'sym:src/utils.ts#Helper@123',
+        type: 'symbol',
+        kind: 'function',
+        name: 'Helper',
+        path: 'src/utils.ts:Helper',
+        hash: 'sym-hash',
+        language: 'typescript',
+        created: new Date(),
+        lastModified: new Date(),
+      } as any);
+      await mockKgService.createRelationship({
+        id: 'time-rel_def',
+        fromEntityId: 'file:src/utils.ts:module',
+        toEntityId: 'sym:src/utils.ts#Helper@123',
+        type: 'DEFINES' as any,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+      } as any);
+
+      mockRequest.params = { symbolId: 'sym:src/utils.ts#Helper@123' } as any;
+
+      await handler(mockRequest, mockReply);
+
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: expect.objectContaining({
+          symbolId: 'sym:src/utils.ts#Helper@123',
+          relationship: expect.objectContaining({ id: 'time-rel_def' }),
+          source: expect.objectContaining({ id: 'file:src/utils.ts:module' }),
+        }),
+      });
+    });
+  });
+
   describe('Integration Scenarios', () => {
     let searchHandler: Function;
     let examplesHandler: Function;

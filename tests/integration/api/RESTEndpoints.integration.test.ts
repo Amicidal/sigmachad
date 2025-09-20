@@ -547,7 +547,10 @@ describe('REST API Endpoints Integration', () => {
         expect(body).toEqual(
           expect.objectContaining({
             success: true,
-            data: expect.any(Object),
+            data: expect.objectContaining({
+              metrics: expect.any(Object),
+              history: expect.any(Array),
+            }),
           })
         );
       });

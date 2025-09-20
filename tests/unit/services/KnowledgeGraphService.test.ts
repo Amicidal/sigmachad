@@ -19,7 +19,10 @@ import { EventEmitter } from 'events';
 import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
 
 // Prevent index helpers from emitting massive CREATE INDEX spam in unit tests
-vi.spyOn(KnowledgeGraphService.prototype as any, 'ensureIndices').mockResolvedValue(undefined);
+vi.spyOn(KnowledgeGraphService.prototype as any, 'ensureIndices').mockResolvedValue({
+  status: 'completed',
+  stats: { created: 0, exists: 0, deferred: 0, failed: 0 },
+});
 vi.spyOn(KnowledgeGraphService.prototype as any, 'ensureGraphIndexes').mockResolvedValue(undefined);
 
 import {
@@ -33,6 +36,7 @@ import {
   GraphRelationship,
   RelationshipType
 } from '../../../src/models/relationships';
+import type { StructuralImportType } from '../../../src/models/relationships';
 import { noiseConfig } from '../../../src/config/noise';
 import {
   GraphSearchRequest,
@@ -122,6 +126,80 @@ describe('KnowledgeGraphService', () => {
 
   beforeAll(() => {
     process.env.EDGE_AUX_DUAL_WRITE = 'false';
+  });
+
+  describe('hydrateEntityProperties', () => {
+    it('rehydrates performance metrics and execution history from stored JSON', () => {
+      const service = knowledgeGraphService as any;
+      const testEntity = {
+        id: 'test-entity-1',
+        type: 'test',
+        created: new Date('2024-05-01T00:00:00Z'),
+        lastModified: new Date('2024-05-02T00:00:00Z'),
+        coverage: {
+          lines: 80,
+          branches: 75,
+          functions: 78,
+          statements: 82,
+        },
+        executionHistory: [
+          {
+            id: 'run-1',
+            timestamp: '2024-05-02T12:00:00Z',
+            status: 'passed',
+            duration: '125',
+            coverage: {
+              lines: 80,
+              branches: 75,
+              functions: 78,
+              statements: 82,
+            },
+          },
+        ],
+        performanceMetrics: {
+          averageExecutionTime: '215',
+          p95ExecutionTime: '265',
+          successRate: '0.92',
+          trend: 'stable',
+          benchmarkComparisons: [
+            {
+              benchmark: 'baseline',
+              value: '210',
+              threshold: '200',
+              status: 'above',
+            },
+          ],
+          historicalData: [
+            {
+              timestamp: '2024-05-02T12:00:00Z',
+              executionTime: '210',
+              averageExecutionTime: '210',
+              p95ExecutionTime: '260',
+              successRate: '0.92',
+              coveragePercentage: '80',
+              runId: 'run-kg-1',
+            },
+          ],
+        },
+      };
+
+      const sanitized = service.sanitizeProperties(testEntity);
+      const hydrated = service.hydrateEntityProperties({
+        id: testEntity.id,
+        ...sanitized,
+      });
+
+      expect(hydrated.coverage.lines).toBe(80);
+      expect(hydrated.executionHistory[0].duration).toBe(125);
+      expect(hydrated.executionHistory[0].timestamp).toBeInstanceOf(Date);
+      expect(hydrated.performanceMetrics.averageExecutionTime).toBe(215);
+      expect(hydrated.performanceMetrics.successRate).toBeCloseTo(0.92);
+      expect(hydrated.performanceMetrics.historicalData[0].timestamp).toBeInstanceOf(Date);
+      expect(hydrated.performanceMetrics.historicalData[0].executionTime).toBe(210);
+      expect(hydrated.performanceMetrics.historicalData[0].averageExecutionTime).toBe(210);
+      expect(hydrated.performanceMetrics.historicalData[0].p95ExecutionTime).toBe(260);
+      expect(hydrated.performanceMetrics.historicalData[0].runId).toBe('run-kg-1');
+    });
   });
 
   afterAll(() => {
@@ -546,6 +624,211 @@ describe('KnowledgeGraphService', () => {
         expect(params.docIntent).toBe('governance');
         expect(params.tags).toEqual(['runbook', 'critical']);
         expect(params.stakeholders).toEqual(['owner@acme.test']);
+      });
+
+      it('normalizes structural import relationships and hoists metadata', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('MERGE (a)-[r:IMPORTS')) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const createdAt = new Date('2024-07-01T12:00:00Z');
+        const relationship: GraphRelationship = {
+          id: 'rel_struct_import',
+          fromEntityId: 'file:src/foo.ts:default',
+          toEntityId: 'import:lodash:default',
+          type: RelationshipType.IMPORTS,
+          created: createdAt,
+          lastModified: createdAt,
+          version: 1,
+          resolved: false,
+          metadata: {
+            importKind: 'DEFAULT',
+            alias: 'Lodash',
+            module: '../lib\\lodash',
+            importDepth: '2',
+            language: 'TypeScript',
+            symbolKind: 'Module',
+            languageSpecific: 'drop-me',
+          },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find(({ query }) => query.includes('MERGE (a)-[r:IMPORTS'));
+        expect(mergeCall).toBeDefined();
+        const { params } = mergeCall!;
+        expect(params.importAlias).toBe('Lodash');
+        expect(params.importType).toBe('default');
+        expect(params.isNamespace).toBeNull();
+        expect(params.importDepth).toBe(2);
+        expect(params.modulePath).toBe('../lib/lodash');
+        expect(params.language).toBe('typescript');
+        expect(params.symbolKind).toBe('module');
+        expect(params.resolutionState).toBe('unresolved');
+
+        const storedMetadata = JSON.parse(params.metadata as string);
+        expect(storedMetadata.importType).toBe('default');
+        expect(storedMetadata.importAlias).toBe('Lodash');
+        expect(storedMetadata.modulePath).toBe('../lib/lodash');
+        expect(storedMetadata.language).toBe('typescript');
+        expect(storedMetadata.symbolKind).toBe('module');
+        expect(storedMetadata.languageSpecific).toEqual({ syntax: 'ts' });
+      });
+
+      it('serializes backfilled reference metadata before persistence', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('MERGE (a)-[r:CALLS')) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const createdAt = new Date('2024-07-05T01:02:03Z');
+        const relationship = {
+          fromEntityId: 'sym:src/source.ts#useHelper@abcd',
+          toEntityId: 'sym:src/target.ts#Helper@deadbeef',
+          type: RelationshipType.CALLS,
+          created: createdAt,
+          lastModified: createdAt,
+          version: 1,
+          toRef: {
+            kind: 'fileSymbol',
+            file: 'src/target.ts',
+            symbol: 'Helper',
+            name: 'Helper',
+          },
+        } as GraphRelationship & { toRef: { kind: string; file: string; symbol: string; name: string } };
+
+        try {
+          await knowledgeGraphService.createRelationship(
+            relationship,
+            undefined,
+            undefined,
+            { validate: false }
+          );
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find(({ query }) => query.includes('MERGE (a)-[r:CALLS'));
+        expect(mergeCall).toBeDefined();
+        const { params } = mergeCall!;
+        const storedMetadata = JSON.parse(params.metadata as string);
+        expect(storedMetadata.toRef).toMatchObject({
+          kind: 'fileSymbol',
+          file: 'src/target.ts',
+          symbol: 'Helper',
+          name: 'Helper',
+        });
+        expect(storedMetadata.toRef.id).toBeDefined();
+      });
+
+      it('captures export re-export metadata and normalized structural fields', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('MERGE (a)-[r:EXPORTS')) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const createdAt = new Date('2024-07-02T08:30:00Z');
+        const relationship: GraphRelationship = {
+          id: 'rel_struct_export',
+          fromEntityId: 'file:src/bar.ts:default',
+          toEntityId: 'sym:src/bar.ts#Widget@abcd1234',
+          type: RelationshipType.EXPORTS,
+          created: createdAt,
+          lastModified: createdAt,
+          version: 1,
+          metadata: {
+            isReExport: 'true',
+            reExportTarget: '../widgets/index.ts',
+            module: '../widgets/index.ts',
+            language: 'TSX',
+            symbolKind: 'Class',
+          },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find(({ query }) => query.includes('MERGE (a)-[r:EXPORTS'));
+        expect(mergeCall).toBeDefined();
+        const { params } = mergeCall!;
+        expect(params.isReExport).toBe(true);
+        expect(params.reExportTarget).toBe('../widgets/index.ts');
+        expect(params.language).toBe('typescript');
+        expect(params.symbolKind).toBe('class');
+
+        const storedMetadata = JSON.parse(params.metadata as string);
+        expect(storedMetadata.isReExport).toBe(true);
+        expect(storedMetadata.reExportTarget).toBe('../widgets/index.ts');
+        expect(storedMetadata.language).toBe('typescript');
+        expect(storedMetadata.symbolKind).toBe('class');
+      });
+
+      it('persists structural metadata for alternate language relationships', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          if (typeof query === 'string' && query.includes('MERGE (a)-[r:CONTAINS')) {
+            calls.push({ query, params });
+          }
+          return [];
+        });
+
+        const createdAt = new Date('2024-07-03T09:00:00Z');
+        const relationship: GraphRelationship = {
+          id: 'rel_struct_contains',
+          fromEntityId: 'file:src/models/user.py:module',
+          toEntityId: 'sym:src/models/user.py#User@deadbeef',
+          type: RelationshipType.CONTAINS,
+          created: createdAt,
+          lastModified: createdAt,
+          version: 1,
+          metadata: {
+            language: 'Python',
+            symbolKind: 'Class',
+            modulePath: 'models/user.py',
+            languageSpecific: { decorator: 'dataclass' },
+          },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationship(relationship, undefined, undefined, { validate: false });
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find(({ query }) => query.includes('MERGE (a)-[r:CONTAINS'));
+        expect(mergeCall).toBeDefined();
+        const { params } = mergeCall!;
+        expect(params.language).toBe('python');
+        expect(params.symbolKind).toBe('class');
+        expect(params.modulePath).toBe('models/user.py');
+        expect(params.isNamespace).toBeNull();
+
+        const storedMetadata = JSON.parse(params.metadata as string);
+        expect(storedMetadata.language).toBe('python');
+        expect(storedMetadata.symbolKind).toBe('class');
+        expect(storedMetadata.modulePath).toBe('models/user.py');
+        expect(storedMetadata.languageSpecific).toEqual({ decorator: 'dataclass' });
       });
 
       it('merges incoming code edges with existing evidence and preserves historical context', async () => {
@@ -1562,7 +1845,250 @@ describe('KnowledgeGraphService', () => {
       });
     });
 
+    describe('performance relationship normalization', () => {
+      it('sanitizes metrics and derives performance deltas', () => {
+        const raw = {
+          id: '',
+          fromEntityId: 'test-entity',
+          toEntityId: 'sym:src/service.ts#Foo@hash',
+          type: RelationshipType.PERFORMANCE_IMPACT,
+          created: new Date('2024-05-01T00:00:00Z'),
+          lastModified: new Date('2024-05-01T00:00:00Z'),
+          version: 1,
+          metricId: 'Test/Foo Latency',
+          environment: 'Production',
+          baselineValue: '140',
+          currentValue: 180,
+          metadata: {
+            metrics: [{ id: 'p95ExecutionTime', value: '180', unit: 'ms' }],
+          },
+          metricsHistory: [
+            {
+              value: '140',
+              timestamp: '2024-04-30T00:00:00Z',
+              runId: 'run-1',
+              unit: 'ms',
+            },
+            {
+              value: 180,
+              timestamp: '2024-05-01T00:00:00Z',
+              runId: 'run-2',
+              unit: 'ms',
+            },
+          ],
+        } as unknown as GraphRelationship;
+
+        const normalized = (knowledgeGraphService as any).normalizeRelationship(raw);
+
+        expect(normalized.metricId).toBe('test/foo-latency');
+        expect(normalized.environment).toBe('prod');
+        expect(normalized.unit).toBe('ms');
+        expect(normalized.delta).toBeCloseTo(40, 4);
+        expect(normalized.percentChange).toBeCloseTo(28.5714, 4);
+        expect(normalized.sampleSize).toBe(2);
+        expect(normalized.trend).toBe('regression');
+        expect(normalized.severity).toBe('high');
+        expect(normalized.riskScore).toBeCloseTo(1.3585, 4);
+        expect(normalized.metricsHistory?.length).toBe(2);
+        expect(normalized.metricsHistory?.[0]?.timestamp).toBeInstanceOf(Date);
+        expect((normalized.metadata as any).metricId).toBe('test/foo-latency');
+        expect((normalized.metadata as any).metricsHistory[0].timestamp).toBe('2024-04-30T00:00:00.000Z');
+
+        const canonical = canonicalRelationshipId(
+          normalized.fromEntityId,
+          normalized as GraphRelationship,
+        );
+        expect(canonical.startsWith('rel_perf_')).toBe(true);
+      });
+
+      it('handles zero baselines without percent change overflow', () => {
+        const raw = {
+          id: '',
+          fromEntityId: 'test-entity',
+          toEntityId: 'sym:src/service.ts#Foo@hash',
+          type: RelationshipType.PERFORMANCE_IMPACT,
+          created: new Date('2024-05-02T00:00:00Z'),
+          lastModified: new Date('2024-05-02T00:00:00Z'),
+          version: 1,
+          metricId: 'Test/Zero Baseline',
+          environment: 'dev',
+          baselineValue: 0,
+          currentValue: 45,
+        } as unknown as GraphRelationship;
+
+        const normalized = (knowledgeGraphService as any).normalizeRelationship(raw);
+
+        expect(normalized.metricId).toBe('test/zero-baseline');
+        expect(normalized.percentChange).toBeUndefined();
+        expect((normalized.metadata as any).percentChangeNote).toBe('baseline-zero');
+        expect(normalized.severity).toBe('low');
+      });
+
+      it('downgrades severity and risk score for improvements', () => {
+        const raw = {
+          id: '',
+          fromEntityId: 'test-entity',
+          toEntityId: 'sym:src/service.ts#Foo@hash',
+          type: RelationshipType.PERFORMANCE_IMPACT,
+          created: new Date('2024-05-03T00:00:00Z'),
+          lastModified: new Date('2024-05-03T00:00:00Z'),
+          version: 1,
+          metricId: 'Test/Improvement',
+          baselineValue: 200,
+          currentValue: 140,
+          percentChange: -30,
+          delta: -60,
+          trend: 'improvement',
+          severity: 'critical',
+        } as unknown as GraphRelationship;
+
+        const normalized = (knowledgeGraphService as any).normalizeRelationship(raw);
+
+        expect(normalized.trend).toBe('improvement');
+        expect(normalized.severity).toBe('low');
+        expect(normalized.riskScore).toBe(0);
+        expect((normalized.metadata as any).severity).toBe('low');
+        expect((normalized.metadata as any).riskScore).toBe(0);
+      });
+
+      it('rejects performance relationships without a metricId', () => {
+        const raw = {
+          id: '',
+          fromEntityId: 'test-entity',
+          toEntityId: 'sym:src/service.ts#Foo@hash',
+          type: RelationshipType.PERFORMANCE_IMPACT,
+          created: new Date('2024-05-04T00:00:00Z'),
+          lastModified: new Date('2024-05-04T00:00:00Z'),
+          version: 1,
+        } as unknown as GraphRelationship;
+
+        expect(() => (knowledgeGraphService as any).normalizeRelationship(raw)).toThrow(
+          /Performance relationships require metricId/
+        );
+      });
+
+      it('rejects metric identifiers without alphanumeric content', () => {
+        const raw = {
+          id: '',
+          fromEntityId: 'test-entity',
+          toEntityId: 'sym:src/service.ts#Foo@hash',
+          type: RelationshipType.PERFORMANCE_IMPACT,
+          created: new Date('2024-05-06T00:00:00Z'),
+          lastModified: new Date('2024-05-06T00:00:00Z'),
+          version: 1,
+          metricId: '???',
+        } as unknown as GraphRelationship;
+
+        expect(() => (knowledgeGraphService as any).normalizeRelationship(raw)).toThrow(
+          /Performance relationships require metricId/
+        );
+      });
+
+      it('sorts metrics history chronologically before deriving deltas', () => {
+        const raw = {
+          id: '',
+          fromEntityId: 'test-entity',
+          toEntityId: 'sym:src/service.ts#Foo@hash',
+          type: RelationshipType.PERFORMANCE_IMPACT,
+          created: new Date('2024-05-05T00:00:00Z'),
+          lastModified: new Date('2024-05-05T00:00:00Z'),
+          version: 1,
+          metricId: 'Latency/p95',
+          metricsHistory: [
+            {
+              value: 200,
+              timestamp: '2024-05-05T00:00:00Z',
+              runId: 'run-2',
+            },
+            {
+              value: 150,
+              timestamp: '2024-05-01T00:00:00Z',
+              runId: 'run-1',
+            },
+          ],
+        } as unknown as GraphRelationship;
+
+        const normalized = (knowledgeGraphService as any).normalizeRelationship(raw);
+
+        expect(normalized.metricsHistory?.[0]?.runId).toBe('run-1');
+        expect(normalized.metricsHistory?.[1]?.runId).toBe('run-2');
+        expect(normalized.baselineValue).toBe(150);
+        expect(normalized.currentValue).toBe(200);
+        expect(normalized.delta).toBe(50);
+        expect(normalized.trend).toBe('regression');
+      });
+    });
+
     describe('createRelationshipsBulk', () => {
+      it('preserves structural metadata fields during bulk merges', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const createdAt = new Date('2024-07-04T10:15:00Z');
+        const relationship: GraphRelationship = {
+          fromEntityId: 'file:src/client.ts:module',
+          toEntityId: 'import:../lib/utils/index.js:*',
+          type: RelationshipType.IMPORTS,
+          created: createdAt,
+          lastModified: createdAt,
+          version: 1,
+          metadata: {
+            importKind: 'namespace',
+            alias: 'Utils',
+            module: '../lib/utils/index.js',
+            importDepth: 1,
+            isNamespace: true,
+            isReExport: false,
+            language: 'JavaScript',
+            symbolKind: 'Module',
+            resolutionState: 'partial',
+          },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([relationship]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const unwindCall = calls.find(({ query }) => typeof query === 'string' && query.includes('UNWIND $rows AS row'));
+        expect(unwindCall).toBeDefined();
+        const [row] = unwindCall!.params.rows as Array<any>;
+        expect(row.importAlias).toBe('Utils');
+        expect(row.importType).toBe('namespace');
+        expect(row.isNamespace).toBe(true);
+        expect(row.isReExport).toBe(false);
+        expect(row.modulePath).toBe('../lib/utils/index.js');
+        expect(row.language).toBe('typescript');
+        expect(row.symbolKind).toBe('module');
+        expect(row.resolutionState).toBe('partial');
+
+        const storedMetadata = JSON.parse(row.metadata as string);
+        expect(storedMetadata.importAlias).toBe('Utils');
+        expect(storedMetadata.importType).toBe('namespace');
+        expect(storedMetadata.isNamespace).toBe(true);
+        expect(storedMetadata.isReExport).toBe(false);
+        expect(storedMetadata.language).toBe('typescript');
+        expect(storedMetadata.symbolKind).toBe('module');
+        expect(storedMetadata.resolutionState).toBe('partial');
+
+        const mergeCall = calls.find(({ query }) => typeof query === 'string' && query.includes('MERGE (a)-[r:IMPORTS'));
+        expect(mergeCall).toBeDefined();
+        const params = mergeCall!.params;
+        expect(params.importAlias).toBe('Utils');
+        expect(params.importType).toBe('namespace');
+        expect(params.isNamespace).toBe(true);
+        expect(params.isReExport).toBe(false);
+        expect(params.modulePath).toBe('../lib/utils/index.js');
+        expect(params.language).toBe('typescript');
+        expect(params.symbolKind).toBe('module');
+        expect(params.resolutionState).toBe('partial');
+      });
+
       it('dedupes by canonical id and backfills missing toRef metadata', async () => {
         const calls: Array<{ query: string; params: any }> = [];
         const originalQuery = mockDb.falkordbQuery;
@@ -1617,7 +2143,19 @@ describe('KnowledgeGraphService', () => {
         expect(rows).toHaveLength(1);
 
         const row = rows[0];
-        expect(row.id).toBe(canonicalRelationshipId(base.fromEntityId, relationships[0]));
+        const expectedId = canonicalRelationshipId(
+          base.fromEntityId,
+          {
+            ...relationships[0],
+            toRef: {
+              kind: 'fileSymbol',
+              file: 'src/target.ts',
+              symbol: 'target',
+              name: 'target',
+            },
+          } as GraphRelationship,
+        );
+        expect(row.id).toBe(expectedId);
         expect(row.occurrencesScan).toBe(3);
         expect(row.to_ref_kind).toBe('fileSymbol');
         expect(row.to_ref_file).toBe('src/target.ts');
@@ -1972,6 +2510,90 @@ describe('KnowledgeGraphService', () => {
         expect(row.candidateCount).toBe(5);
       });
 
+      it('prefers fresher structural metadata when duplicates conflict', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const older: GraphRelationship = {
+          fromEntityId: 'file:src/legacy.ts:module',
+          toEntityId: 'import:../lib/utils/index.js:*',
+          type: RelationshipType.IMPORTS,
+          created: new Date('2024-04-01T00:00:00Z'),
+          lastModified: new Date('2024-04-01T12:00:00Z'),
+          version: 1,
+          metadata: {
+            importKind: 'namespace',
+            alias: 'LegacyUtils',
+            module: '../lib/utils/index.js',
+            isNamespace: true,
+            symbolKind: 'Module',
+            tags: ['legacy'],
+          },
+          importDepth: 1,
+          tags: ['legacy'],
+        } as GraphRelationship;
+
+        const fresher: GraphRelationship = {
+          ...older,
+          created: new Date('2024-04-02T00:00:00Z'),
+          lastModified: new Date('2024-04-05T00:00:00Z'),
+          metadata: {
+            importKind: 'named',
+            alias: 'FreshUtils',
+            module: '../lib/utils/new.ts',
+            isNamespace: false,
+            symbolKind: 'Function',
+            tags: ['fresh'],
+          },
+          importDepth: 3,
+          tags: ['fresh'],
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([older, fresher]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const unwindCall = calls.find(({ query }) =>
+          typeof query === 'string' && query.includes('UNWIND $rows AS row')
+        );
+        expect(unwindCall).toBeDefined();
+        const [row] = unwindCall!.params.rows as Array<any>;
+
+        expect(row.importAlias).toBe('FreshUtils');
+        expect(row.importType).toBe('named');
+        expect(row.modulePath).toBe('../lib/utils/new.ts');
+        expect(row.isNamespace).toBe(false);
+        expect(row.symbolKind).toBe('function');
+        expect(row.importDepth).toBe(3);
+        expect(row.tags).toEqual(['fresh']);
+
+        const metadata = JSON.parse(row.metadata as string);
+        expect(metadata.importAlias).toBe('FreshUtils');
+        expect(metadata.importType).toBe('named');
+        const moduleValue = metadata.module ?? metadata.modulePath;
+        expect(moduleValue).toBe('../lib/utils/new.ts');
+        expect(metadata.isNamespace).toBe(false);
+
+        const mergeCall = calls.find(({ query }) =>
+          typeof query === 'string' && query.includes('MERGE (a)-[r:IMPORTS')
+        );
+        expect(mergeCall).toBeDefined();
+        const params = mergeCall!.params;
+        expect(params.importAlias).toBe('FreshUtils');
+        expect(params.modulePath).toBe('../lib/utils/new.ts');
+        expect(params.importType).toBe('named');
+        expect(params.isNamespace).toBe(false);
+        expect(params.symbolKind).toBe('function');
+        expect(params.tags).toEqual(['fresh']);
+      });
+
       it('dual-writes auxiliary nodes during bulk ingestion when enabled', async () => {
         const calls: Array<{ query: string; params: any }> = [];
         const originalQuery = mockDb.falkordbQuery;
@@ -2217,6 +2839,34 @@ describe('KnowledgeGraphService', () => {
         expect(queryString).toContain('coalesce(r.active, true) = true');
       });
 
+      it('applies structural filters for import metadata', async () => {
+        mockDb.falkordbQuery.mockResolvedValue([]);
+
+        await knowledgeGraphService.getRelationships({
+          importAlias: ['Utils'],
+          importType: 'namespace',
+          isNamespace: true,
+          language: ['typescript'],
+          symbolKind: ['module'],
+          modulePath: '../lib/utils/index.js',
+          modulePathPrefix: '../lib/',
+        } as any);
+
+        const queryCall = mockDb.falkordbQuery.mock.calls.find(
+          ([query]) => typeof query === 'string' && query.includes('MATCH (a)-[r]->(b)')
+        );
+        expect(queryCall).toBeDefined();
+      const [queryString, params] = queryCall!;
+      expect(params.importAlias).toBe('Utils');
+      expect(params.importType).toBe('namespace');
+      expect(params.isNamespace).toBe(true);
+      expect(params.languageFilter).toBe('typescript');
+      expect(params.symbolKind).toBe('module');
+      expect(params.modulePathFilter).toBe('../lib/utils/index.js');
+      expect(params.modulePathPrefix).toBe('../lib/');
+      expect(queryString).toContain('coalesce(b.language');
+    });
+
       it('respects explicit active filters without adding the default clause', async () => {
         mockDb.falkordbQuery.mockResolvedValue([]);
 
@@ -2283,12 +2933,48 @@ describe('KnowledgeGraphService', () => {
         expect(params.docLocaleList).toEqual(['en-US', 'fr-FR']);
         expect(params.stakeholderList).toEqual(['owner@acme.test', 'lead@acme.test']);
         expect(params.tag).toBe('critical');
-        expect(params.lastValidatedAfter).toBe(lastValidatedAfter.toISOString());
-        expect(params.lastValidatedBefore).toBe(lastValidatedBefore.toISOString());
-      });
+      expect(params.lastValidatedAfter).toBe(lastValidatedAfter.toISOString());
+      expect(params.lastValidatedBefore).toBe(lastValidatedBefore.toISOString());
     });
 
-    describe('upsertEdgeEvidenceBulk', () => {
+    it('applies performance relationship filters and range bounds', async () => {
+      mockDb.falkordbQuery.mockResolvedValue([]);
+
+      const detectedAfter = new Date('2024-04-01T10:00:00Z');
+      const detectedBefore = new Date('2024-04-10T10:00:00Z');
+      const resolvedAfter = new Date('2024-04-11T00:00:00Z');
+
+      await knowledgeGraphService.getRelationships({
+        metricId: [' Service/Login-Latency '],
+        environment: ['Production', 'staging'],
+        severity: ['High', 'low'],
+        trend: 'Regression',
+        detectedAfter,
+        detectedBefore,
+        resolvedAfter,
+        resolvedBefore: '2024-04-20T00:00:00Z',
+      } as any);
+
+      const queryCall = mockDb.falkordbQuery.mock.calls.find(
+        ([query]) => typeof query === 'string' && query.includes('MATCH (a)-[r]->(b)')
+      );
+      expect(queryCall).toBeDefined();
+      const [queryString, params] = queryCall!;
+      expect(queryString).toContain('r.metricId');
+      expect(params.metricIdFilter).toBe('service/login-latency');
+      expect(params.environmentFilterList).toEqual(['prod', 'staging']);
+      expect(params.severityFilterList).toEqual(['high', 'low']);
+      expect(params.trendFilter).toBe('regression');
+      expect(params.detectedAfter).toBe(detectedAfter.toISOString());
+      expect(params.detectedBefore).toBe(detectedBefore.toISOString());
+      expect(params.resolvedAfter).toBe(resolvedAfter.toISOString());
+      expect(params.resolvedBefore).toBe('2024-04-20T00:00:00.000Z');
+      expect(queryString).toContain('coalesce(r.detectedAt');
+      expect(queryString).toContain('r.resolvedAt IS NOT NULL');
+    });
+  });
+
+  describe('upsertEdgeEvidenceBulk', () => {
       it('merges evidence, keeps earliest timestamps, and increments counts', async () => {
         const firstSeen = '2024-01-01T00:00:00.000Z';
         const lastSeen = '2024-01-05T00:00:00.000Z';
@@ -3715,7 +4401,7 @@ describe('KnowledgeGraphService', () => {
 
         const labels = (knowledgeGraphService as any).getEntityLabels(fileEntity);
 
-        expect(labels).toEqual(['file', 'test']);
+        expect(labels).toEqual(['Entity', 'file', 'test']);
       });
 
       it('should handle regular entities', () => {
@@ -3745,7 +4431,7 @@ describe('KnowledgeGraphService', () => {
 
         const labels = (knowledgeGraphService as any).getEntityLabels(entity);
 
-        expect(labels).toEqual(['symbol']); // The entity type is 'symbol', not 'function'
+        expect(labels).toEqual(['Entity', 'symbol']); // The entity type is 'symbol', not 'function'
       });
     });
 
@@ -3943,6 +4629,475 @@ describe('KnowledgeGraphService', () => {
 
       await (knowledgeGraphService as any).createEmbedding(entity);
       expect(mockDb.qdrant.upsert).toHaveBeenCalled();
+    });
+  });
+
+  describe('Namespace and lifecycle utilities', () => {
+    it('applies namespace prefixes and routes queries to custom graph', async () => {
+      const namespacedService = new KnowledgeGraphService(mockDb as any, {
+        entityPrefix: 'iso_',
+        falkorGraph: 'kg_iso',
+        qdrantPrefix: 'iso_',
+      });
+
+      mockDb.falkordbQuery.mockClear();
+      mockDb.qdrant.upsert.mockClear();
+      mockEmbeddingService.generateEmbedding.mockResolvedValue([0.1, 0.2, 0.3]);
+      mockDb.falkordbQuery.mockResolvedValueOnce([{ id: 'iso_entity-1' }]);
+
+      const now = new Date();
+      await namespacedService.createEntity({
+        id: 'entity-1',
+        type: 'file',
+        path: '/tmp/a.ts',
+        hash: 'hash',
+        language: 'ts',
+        lastModified: now,
+        created: now,
+        extension: '.ts',
+        size: 1,
+        lines: 1,
+        isTest: false,
+        isConfig: false,
+        dependencies: [],
+      } as any);
+
+      expect(mockDb.falkordbQuery).toHaveBeenCalled();
+      const [query, params, options] = mockDb.falkordbQuery.mock.calls[0];
+      expect(query).toContain('MERGE');
+      expect(params.id).toBe('iso_entity-1');
+      expect(options).toEqual({ graph: 'kg_iso' });
+
+      expect(mockDb.qdrant.upsert).toHaveBeenCalled();
+      const [collection] = mockDb.qdrant.upsert.mock.calls[0];
+      expect(collection).toBe('iso_code_embeddings');
+    });
+
+    it('supports cache reset and prefix invalidation', () => {
+      const namespacedService = new KnowledgeGraphService(mockDb as any, {
+        entityPrefix: 'iso_',
+      });
+      const serviceAny = namespacedService as any;
+
+      serviceAny.entityCache.set('iso_entity', { id: 'iso_entity' });
+      serviceAny.searchCache.set({ entityId: 'iso_entity' }, []);
+
+      namespacedService.invalidateCachesByPrefix('entity');
+      expect(serviceAny.entityCache.get('iso_entity')).toBeNull();
+
+      serviceAny.entityCache.set('iso_other', { id: 'iso_other' });
+      serviceAny.searchCache.set({ entityId: 'iso_other' }, []);
+      namespacedService.resetCaches();
+      expect(serviceAny.entityCache.get('iso_other')).toBeNull();
+      expect(serviceAny.searchCache.get({ entityId: 'iso_other' })).toBeNull();
+    });
+
+    it('shutdown clears caches and listeners by default', async () => {
+      const service = new KnowledgeGraphService(mockDb as any);
+      const serviceAny = service as any;
+      serviceAny.entityCache.set('entity', { id: 'entity' });
+      mockEventEmitter.removeAllListeners.mockClear();
+
+      await service.shutdown();
+
+      expect(serviceAny.entityCache.get('entity')).toBeNull();
+      expect(mockEventEmitter.removeAllListeners).toHaveBeenCalled();
+    });
+
+    it('withScopedInstance initializes and disposes service', async () => {
+      mockDb.initialize.mockClear();
+      mockEventEmitter.removeAllListeners.mockClear();
+
+      const result = await KnowledgeGraphService.withScopedInstance(
+        mockDb as any,
+        { namespace: { falkorGraph: 'kg_scoped' } },
+        async (service) => {
+          expect(service).toBeInstanceOf(KnowledgeGraphService);
+          expect(mockDb.initialize).toHaveBeenCalled();
+          return 42;
+        }
+      );
+
+      expect(result).toBe(42);
+      expect(mockEventEmitter.removeAllListeners).toHaveBeenCalled();
+    });
+  });
+
+  describe('Structural navigation helpers', () => {
+    it('lists module children with type filters applied', async () => {
+      const originalQuery = mockDb.falkordbQuery;
+      const calls: Array<{ query: string; params: any }> = [];
+      mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+        calls.push({ query, params });
+        if (params && Object.prototype.hasOwnProperty.call(params, 'rawId')) {
+          return [
+            {
+              n: [
+                ['labels', ['file']],
+                [
+                  'properties',
+                  [
+                    ['id', 'file:src/app.ts:module'],
+                    ['type', 'file'],
+                    ['path', 'src/app.ts'],
+                    ['name', 'app.ts'],
+                  ],
+                ],
+              ],
+            },
+          ];
+        }
+        if (query.includes('MATCH (parent {id: $parentId})-[r:CONTAINS]->(child)')) {
+          return [
+            {
+              child: [
+                ['labels', ['symbol']],
+                [
+                  'properties',
+                  [
+                    ['id', 'sym:src/app.ts#Component@abcd1234'],
+                    ['type', 'symbol'],
+                    ['name', 'Component'],
+                    ['kind', 'class'],
+                    ['path', 'src/app.ts:Component'],
+                  ],
+                ],
+              ],
+              r: [
+                ['type', RelationshipType.CONTAINS],
+                [
+                  'properties',
+                  [
+                    ['id', 'time-rel_mock'],
+                    ['language', 'typescript'],
+                    ['symbolKind', 'class'],
+                  ],
+                ],
+              ],
+            },
+          ];
+        }
+        return [];
+      });
+
+      try {
+        const result = await knowledgeGraphService.listModuleChildren('src/app.ts', {
+          includeFiles: false,
+          includeSymbols: true,
+          language: ['typescript', 'javascript'],
+          symbolKind: ['class'],
+          modulePathPrefix: 'src/app',
+          limit: 10,
+        });
+
+        expect(result.parentId).toBe('file:src/app.ts:module');
+        expect(result.children).toHaveLength(1);
+        const entry = result.children[0];
+        expect(entry.entity.id).toBe('sym:src/app.ts#Component@abcd1234');
+        expect(entry.relationship.type).toBe(RelationshipType.CONTAINS);
+        const navigationCall = calls.find(({ query }) =>
+          query.includes('MATCH (parent {id: $parentId})-[r:CONTAINS]->(child)')
+        );
+        expect(navigationCall).toBeDefined();
+        expect(navigationCall?.params.languageFilterList).toEqual(['typescript', 'javascript']);
+        expect(navigationCall?.params.symbolKindFilter).toBe('class');
+        expect(navigationCall?.params.modulePathPrefix).toBe('src/app');
+        expect(navigationCall?.params.limit).toBe(10);
+        expect(navigationCall?.query).toContain('languageFilterList');
+        expect(navigationCall?.query).toContain('symbolKindFilter');
+      } finally {
+        mockDb.falkordbQuery = originalQuery;
+      }
+    });
+
+    it('orders parent resolution to favor structural containers', async () => {
+      const originalQuery = mockDb.falkordbQuery;
+      const queries: string[] = [];
+
+      mockDb.falkordbQuery = vi.fn(async (query: string, params: Record<string, any>) => {
+        queries.push(query);
+
+        if (params && Object.prototype.hasOwnProperty.call(params, 'rawId')) {
+          return [
+            {
+              n: [
+                ['labels', ['file']],
+                [
+                  'properties',
+                  [
+                    ['id', 'file:src/app.ts:module'],
+                    ['type', 'file'],
+                    ['path', 'src/app.ts'],
+                  ],
+                ],
+              ],
+            },
+          ];
+        }
+
+        return [];
+      });
+
+      try {
+        await knowledgeGraphService.listModuleChildren('src/app.ts');
+
+        const parentQuery = queries.find((text) => text.includes('MATCH (n)'));
+        expect(parentQuery).toContain("WHEN n.type IN ['module', 'directory', 'file'] THEN 0");
+        expect(parentQuery).toContain('WHEN n.id = $prefixedId THEN 0');
+      } finally {
+        mockDb.falkordbQuery = originalQuery;
+      }
+    });
+
+    it('retains container nodes when applying language filters', async () => {
+      const originalQuery = mockDb.falkordbQuery;
+      const calls: Array<{ query: string; params: Record<string, any> }> = [];
+
+      mockDb.falkordbQuery = vi.fn(async (query: string, params: Record<string, any>) => {
+        calls.push({ query, params });
+
+        if (params && Object.prototype.hasOwnProperty.call(params, 'rawId')) {
+          return [
+            {
+              n: [
+                ['id', 'module:src/app'],
+                ['type', 'module'],
+                ['path', 'src/app'],
+              ],
+            },
+          ];
+        }
+
+        if (query.includes('MATCH (parent {id: $parentId})-[r:CONTAINS]->(child)')) {
+          return [
+            {
+              child: [
+                ['labels', ['directory']],
+                [
+                  'properties',
+                  [
+                    ['id', 'dir:src/app/features'],
+                    ['type', 'directory'],
+                    ['name', 'features'],
+                    ['path', 'src/app/features'],
+                  ],
+                ],
+              ],
+              r: [
+                ['type', RelationshipType.CONTAINS],
+                ['properties', [['id', 'time-rel_dir']]],
+              ],
+            },
+          ];
+        }
+
+        return [];
+      });
+
+      try {
+        const result = await knowledgeGraphService.listModuleChildren('src/app', {
+          language: 'typescript',
+          includeFiles: false,
+          includeSymbols: false,
+        });
+
+        const navigationCall = calls.find(({ query }) =>
+          query.includes('MATCH (parent {id: $parentId})-[r:CONTAINS]->(child)')
+        );
+        expect(navigationCall?.query).toContain("child.type IN ['module', 'directory']");
+        expect(result.children).toHaveLength(1);
+        expect(result.children[0]?.entity.type).toBe('directory');
+      } finally {
+        mockDb.falkordbQuery = originalQuery;
+      }
+    });
+
+    it('resolves module children when modulePath is provided as an entity id', async () => {
+      const originalQuery = mockDb.falkordbQuery;
+      const calls: any[] = [];
+
+      mockDb.falkordbQuery = vi.fn(async (query: string, params: Record<string, any>) => {
+        calls.push({ query, params });
+
+        if (params && Object.prototype.hasOwnProperty.call(params, 'rawId')) {
+          return [
+            {
+              n: [
+                ['id', 'file:src/app.ts:module'],
+                ['type', 'file'],
+                ['path', 'src/app.ts'],
+                ['name', 'app.ts'],
+              ],
+            },
+          ];
+        }
+
+        if (query.includes('MATCH (parent {id: $parentId})-[r:CONTAINS]->(child)')) {
+          return [
+            {
+              child: [
+                ['labels', ['symbol']],
+                [
+                  'properties',
+                  [
+                    ['id', 'sym:src/app.ts#Component@abcd1234'],
+                    ['type', 'symbol'],
+                    ['name', 'Component'],
+                    ['kind', 'class'],
+                  ],
+                ],
+              ],
+              r: [
+                ['type', RelationshipType.CONTAINS],
+                [
+                  'properties',
+                  [
+                    ['id', 'time-rel_mock'],
+                    ['language', 'typescript'],
+                  ],
+                ],
+              ],
+            },
+          ];
+        }
+
+        return [];
+      });
+
+      try {
+        const result = await knowledgeGraphService.listModuleChildren(
+          'file:src/app.ts:module',
+          {
+            includeFiles: false,
+            includeSymbols: true,
+            limit: 5,
+          }
+        );
+
+        expect(calls[0]?.params.rawId).toBe('file:src/app.ts:module');
+        expect(result.parentId).toBe('file:src/app.ts:module');
+        expect(result.modulePath).toBe('src/app.ts');
+        expect(result.children).toHaveLength(1);
+        expect(result.children[0]?.entity.id).toBe('sym:src/app.ts#Component@abcd1234');
+      } finally {
+        mockDb.falkordbQuery = originalQuery;
+      }
+    });
+
+    it('lists imports with optional resolution filtering', async () => {
+      const rel: GraphRelationship = {
+        id: 'time-rel_import',
+        fromEntityId: 'file:src/app.ts:module',
+        toEntityId: 'sym:src/utils.ts#Helper@abcd',
+        type: RelationshipType.IMPORTS,
+        created: new Date('2024-07-01T00:00:00Z'),
+        lastModified: new Date('2024-07-01T00:00:00Z'),
+        version: 1,
+        resolutionState: 'resolved',
+      } as GraphRelationship;
+
+      const inactiveRel: GraphRelationship = {
+        id: 'time-rel_inactive_import',
+        fromEntityId: 'file:src/app.ts:module',
+        toEntityId: 'sym:src/utils.ts#Legacy@efgh',
+        type: RelationshipType.IMPORTS,
+        created: new Date('2024-07-01T00:00:00Z'),
+        lastModified: new Date('2024-07-01T00:00:00Z'),
+        version: 1,
+        resolutionState: 'resolved',
+        active: false,
+      } as GraphRelationship;
+
+      const relSpy = vi
+        .spyOn(knowledgeGraphService, 'getRelationships')
+        .mockResolvedValue([rel, inactiveRel]);
+      const getEntitiesByIdsSpy = vi
+        .spyOn(knowledgeGraphService as any, 'getEntitiesByIds')
+        .mockResolvedValue(
+          new Map<string, any>([
+            [
+              'sym:src/utils.ts#Helper@abcd',
+              {
+                id: 'sym:src/utils.ts#Helper@abcd',
+                type: 'symbol',
+                name: 'Helper',
+              },
+            ],
+          ])
+        );
+
+      try {
+        const result = await knowledgeGraphService.listImports('file:src/app.ts:module', {
+          resolvedOnly: true,
+          language: ['typescript', 'javascript'],
+          symbolKind: ['function'],
+          importAlias: ['Utils'],
+          importType: ['namespace'] as StructuralImportType[],
+          isNamespace: true,
+          modulePath: ['../lib/utils/index.js'],
+          modulePathPrefix: '../lib/',
+          limit: 5,
+        });
+
+        expect(relSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            fromEntityId: 'file:src/app.ts:module',
+            type: RelationshipType.IMPORTS,
+            limit: 5,
+            language: ['typescript', 'javascript'],
+            symbolKind: ['function'],
+            importAlias: ['Utils'],
+            importType: ['namespace'] as StructuralImportType[],
+            isNamespace: true,
+            modulePath: '../lib/utils/index.js',
+            modulePathPrefix: '../lib',
+          })
+        );
+        expect(result.imports).toHaveLength(1);
+        expect(result.imports[0].relationship.id).toBe('time-rel_import');
+        expect(result.imports[0].target?.id).toBe('sym:src/utils.ts#Helper@abcd');
+        expect(getEntitiesByIdsSpy).toHaveBeenCalledWith([
+          'sym:src/utils.ts#Helper@abcd',
+        ]);
+      } finally {
+        relSpy.mockRestore();
+        getEntitiesByIdsSpy.mockRestore();
+      }
+    });
+
+    it('finds definition for a symbol and returns source entity', async () => {
+      const definitionRel: GraphRelationship = {
+        id: 'time-rel_def',
+        fromEntityId: 'file:src/utils.ts:module',
+        toEntityId: 'sym:src/utils.ts#Helper@abcd',
+        type: RelationshipType.DEFINES,
+        created: new Date('2024-07-01T00:00:00Z'),
+        lastModified: new Date('2024-07-01T00:00:00Z'),
+        version: 1,
+      } as GraphRelationship;
+
+      const relSpy = vi
+        .spyOn(knowledgeGraphService, 'getRelationships')
+        .mockResolvedValue([definitionRel]);
+      const entitySpy = vi
+        .spyOn(knowledgeGraphService, 'getEntity')
+        .mockResolvedValue({ id: 'file:src/utils.ts:module', type: 'file' } as any);
+
+      try {
+        const result = await knowledgeGraphService.findDefinition('sym:src/utils.ts#Helper@abcd');
+        expect(relSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            toEntityId: 'sym:src/utils.ts#Helper@abcd',
+            type: RelationshipType.DEFINES,
+            limit: 1,
+          })
+        );
+        expect(result.relationship?.id).toBe('time-rel_def');
+        expect(result.source?.id).toBe('file:src/utils.ts:module');
+      } finally {
+        relSpy.mockRestore();
+        entitySpy.mockRestore();
+      }
     });
   });
 });

@@ -61,7 +61,8 @@ async function main() {
       kgService,
       astParser,
       dbService,
-      conflictResolver
+      conflictResolver,
+      rollbackCapabilities
     );
 
     // Wire up event handlers for monitoring
@@ -247,6 +248,13 @@ async function main() {
         await dbService.close();
 
         console.log('✅ Shutdown complete');
+
+        const failureSignals = new Set(['uncaughtException', 'unhandledRejection']);
+        if (failureSignals.has(signal)) {
+          process.exit(1);
+          return;
+        }
+
         process.exit(0);
       } catch (error) {
         console.error('❌ Error during shutdown:', error);

@@ -820,6 +820,39 @@ export async function registerAdminRoutes(
     }
   });
 
+  registerWithAdminAliases('get', '/logs/health', async (_request, reply) => {
+    try {
+      if (!loggingService || typeof loggingService.getHealthMetrics !== 'function') {
+        reply.status(503).send({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Logging service not available',
+          },
+        });
+        return;
+      }
+
+      const metrics = loggingService.getHealthMetrics();
+
+      reply.send({
+        success: true,
+        data: metrics,
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'LOG_HEALTH_FAILED',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Failed to retrieve logging health metrics',
+        },
+      });
+    }
+  });
+
   registerWithAdminAliases('get', '/logs', {
     schema: {
       querystring: {

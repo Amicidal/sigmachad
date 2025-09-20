@@ -18,6 +18,7 @@ import { TestResultParser } from '../../../src/services/TestResultParser';
 
 // Import the service after mocks are set up
 import { TestEngine, TestResult, TestSuiteResult, FlakyTestAnalysis, TestCoverageAnalysis } from '../../../src/services/TestEngine';
+import { normalizeMetricIdForId } from '../../../src/utils/codeEdges';
 
 import {
   Test,
@@ -34,12 +35,14 @@ const mockKnowledgeGraphService = {
   getEntity: vi.fn().mockResolvedValue(null),
   queryRelationships: vi.fn().mockResolvedValue([]),
   createRelationship: vi.fn().mockResolvedValue(undefined),
+  createRelationshipsBulk: vi.fn().mockResolvedValue(undefined),
 };
 
 const mockDatabaseService = {
   storeTestSuiteResult: vi.fn().mockResolvedValue(undefined),
   storeFlakyTestAnalyses: vi.fn().mockResolvedValue(undefined),
   getTestExecutionHistory: vi.fn().mockResolvedValue([]),
+  recordPerformanceMetricSnapshot: vi.fn().mockResolvedValue(undefined),
 };
 
 const mockTestResultParser = {
@@ -132,6 +135,16 @@ const createMockTestEntity = (overrides: Partial<Test> = {}): Test => ({
   ...overrides
 });
 
+const createDeferred = <T = void>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+
 describe('TestEngine', () => {
   let testEngine: TestEngine;
   let mockKgService: any;
@@ -144,11 +157,274 @@ describe('TestEngine', () => {
 
     // Initialize mocks
     mockKgService = mockKnowledgeGraphService;
+    mockKgService.createRelationshipsBulk.mockResolvedValue(undefined);
     mockDbService = mockDatabaseService;
     mockParser = mockTestResultParser;
 
     // Create service instance
     testEngine = new TestEngine(mockKgService, mockDbService);
+  });
+
+  describe('performance metrics handling', () => {
+    it('uses execution timestamp when recording historical data', async () => {
+      const executionTimestamp = new Date('2024-05-05T10:00:00Z');
+      const testEntity = createMockTestEntity({
+        targetSymbol: undefined,
+      });
+      testEntity.id = 'src/components/Button.test.js:renders button';
+
+      testEntity.executionHistory = [
+        {
+          id: 'run-1',
+          timestamp: executionTimestamp,
+          status: 'passed',
+          duration: 123,
+          coverage: { ...testEntity.coverage },
+          performance: undefined,
+          environment: undefined,
+        } as TestExecution,
+      ];
+
+      await (testEngine as any).updatePerformanceMetrics(testEntity);
+
+      const latestHistorical =
+        testEntity.performanceMetrics.historicalData[
+          testEntity.performanceMetrics.historicalData.length - 1
+        ];
+
+      expect(latestHistorical).toBeDefined();
+      expect(latestHistorical.timestamp).toBeInstanceOf(Date);
+      expect((latestHistorical.timestamp as Date).getTime()).toBe(
+        executionTimestamp.getTime()
+      );
+      expect(latestHistorical.runId).toBe('run-1');
+      expect(latestHistorical.averageExecutionTime).toBeCloseTo(
+        testEntity.performanceMetrics.averageExecutionTime,
+        5
+      );
+      expect(latestHistorical.p95ExecutionTime).toBeCloseTo(
+        testEntity.performanceMetrics.p95ExecutionTime,
+        5
+      );
+    });
+
+    it('records a performance snapshot even when the target entity is missing', async () => {
+      const testEntity = createMockTestEntity({
+        targetSymbol: undefined,
+      });
+      testEntity.executionHistory = [
+        {
+          id: 'run-solo',
+          timestamp: new Date('2024-05-05T12:00:00Z'),
+          status: 'passed',
+          duration: 250,
+          coverage: { ...testEntity.coverage },
+          performance: undefined,
+          environment: undefined,
+        } as TestExecution,
+      ];
+
+      await (testEngine as any).updatePerformanceMetrics(testEntity);
+
+      expect(mockDatabaseService.recordPerformanceMetricSnapshot).toHaveBeenCalled();
+      const snapshot =
+        mockDatabaseService.recordPerformanceMetricSnapshot.mock.calls[0]?.[0];
+      expect(snapshot?.fromEntityId).toBe(testEntity.id);
+      expect(snapshot?.toEntityId).toBe(testEntity.id);
+      expect(snapshot?.scenario).toBe('test-latency-observation');
+      expect(snapshot?.severity).toBe('low');
+    });
+
+    it('builds performance relationships with success rate in percent', () => {
+      const baseTimestamp = new Date('2024-05-05T10:00:00Z');
+      const latestTimestamp = new Date('2024-05-06T10:00:00Z');
+      const testEntity = createMockTestEntity({ targetSymbol: undefined });
+      testEntity.id = 'src/components/Button.test.js:renders button';
+
+      testEntity.performanceMetrics = {
+        averageExecutionTime: 210,
+        p95ExecutionTime: 260,
+        successRate: 0.87,
+        trend: 'degrading',
+        benchmarkComparisons: [],
+        historicalData: [
+          {
+            timestamp: baseTimestamp,
+            executionTime: 200,
+            averageExecutionTime: 200,
+            p95ExecutionTime: 250,
+            successRate: 0.9,
+            coveragePercentage: 85,
+            runId: 'run-1',
+          },
+          {
+            timestamp: latestTimestamp,
+            executionTime: 220,
+            averageExecutionTime: 220,
+            p95ExecutionTime: 280,
+            successRate: 0.87,
+            coveragePercentage: 85,
+            runId: 'run-2',
+          },
+        ],
+      };
+
+      testEntity.executionHistory = [
+        {
+          id: 'run-2',
+          timestamp: latestTimestamp,
+          status: 'passed',
+          duration: 220,
+          coverage: { ...testEntity.coverage },
+          performance: undefined,
+          environment: undefined,
+        } as TestExecution,
+      ];
+      testEntity.lastRunAt = latestTimestamp;
+
+      const relationship = (testEngine as any).buildPerformanceRelationship(
+        testEntity,
+        'target-entity',
+        RelationshipType.PERFORMANCE_IMPACT,
+        {
+          reason: 'Latency threshold breached',
+        }
+      );
+
+      expect(relationship).not.toBeNull();
+      const expectedMetricId = normalizeMetricIdForId(
+        'test/src/components/Button.test.js:renders button/latency/p95'
+      );
+      expect(relationship?.metricId).toBe(expectedMetricId);
+      const successMetric = relationship?.metadata?.metrics?.find(
+        (metric: any) => metric.id === 'successRate'
+      );
+      expect(successMetric).toBeDefined();
+      expect(successMetric?.unit).toBe('percent');
+      expect(successMetric?.value).toBeCloseTo(87, 2);
+      expect(relationship?.baselineValue).toBeCloseTo(250, 5);
+      expect(relationship?.currentValue).toBeCloseTo(280, 5);
+      expect(relationship?.metricsHistory?.[0]?.value).toBeCloseTo(250, 5);
+      expect(relationship?.metricsHistory?.[0]?.runId).toBe('run-1');
+    });
+
+    it('emits a resolved performance relationship when metrics recover', async () => {
+      const now = new Date('2024-05-07T10:00:00Z');
+      const testEntity = createMockTestEntity({
+        id: 'perf-test-1',
+        targetSymbol: 'target-entity',
+      });
+
+      // Preset historical data to satisfy history requirements (previous regression samples)
+      const previousHistory = Array.from({ length: 4 }, (_, index) => ({
+        timestamp: new Date(now.getTime() - (index + 6) * 60000),
+        executionTime: 2100 - index * 100,
+        averageExecutionTime: 2100 - index * 100,
+        p95ExecutionTime: 2300 - index * 100,
+        successRate: 0.9,
+        coveragePercentage: 80,
+        runId: `hist-${index}`,
+      }));
+
+      const durations = [920, 900, 880, 860, 840];
+      testEntity.executionHistory = durations.map((duration, index) => ({
+        id: `run-${index}`,
+        timestamp: new Date(now.getTime() - (durations.length - index) * 60000),
+        status: 'passed',
+        duration,
+        coverage: { ...testEntity.coverage },
+        performance: undefined,
+        environment: 'staging',
+      })) as TestExecution[];
+
+      testEntity.performanceMetrics = {
+        averageExecutionTime: 0,
+        p95ExecutionTime: 0,
+        successRate: 0.95,
+        trend: 'stable',
+        benchmarkComparisons: [],
+        historicalData: previousHistory,
+      } as TestPerformanceMetrics;
+
+      (testEngine as any).perfIncidentSeeds.add(testEntity.id);
+      mockKgService.getEntity.mockResolvedValueOnce({ id: 'target-entity' });
+
+      await (testEngine as any).updatePerformanceMetrics(testEntity);
+
+      expect(mockDatabaseService.recordPerformanceMetricSnapshot).toHaveBeenCalled();
+      const snapshot = mockDatabaseService.recordPerformanceMetricSnapshot.mock.calls.at(-1)?.[0];
+      expect(snapshot?.resolvedAt).toBeInstanceOf(Date);
+      expect(snapshot?.trend).toBe('improvement');
+      expect(snapshot?.environment).toBe('staging');
+      expect(snapshot?.metadata?.status).toBe('resolved');
+
+      const buffer = (testEngine as any).perfRelBuffer;
+      expect(buffer).toHaveLength(1);
+      expect(buffer[0].resolvedAt).toBeInstanceOf(Date);
+      expect(buffer[0].environment).toBe('staging');
+      expect((testEngine as any).perfIncidentSeeds.has(testEntity.id)).toBe(false);
+    });
+
+    it('flushes performance relationships without dropping concurrent additions', async () => {
+      const deferred = createDeferred<void>();
+      const flushedBatches: any[][] = [];
+
+      mockKgService.createRelationshipsBulk = vi
+        .fn()
+        .mockImplementation(async (relationships: any[]) => {
+          flushedBatches.push([...relationships]);
+          await deferred.promise;
+        });
+
+      const firstRel = { id: 'rel-1' } as any;
+      const secondRel = { id: 'rel-2' } as any;
+
+      (testEngine as any).perfRelBuffer = [firstRel];
+
+      const flushPromise = (testEngine as any).flushPerformanceRelationships();
+
+      await vi.waitFor(() => {
+        expect(mockKgService.createRelationshipsBulk).toHaveBeenCalledTimes(1);
+      });
+
+      (testEngine as any).perfRelBuffer.push(secondRel);
+
+      deferred.resolve();
+      await flushPromise;
+
+      expect(flushedBatches).toEqual([[firstRel]]);
+      expect((testEngine as any).perfRelBuffer).toEqual([secondRel]);
+    });
+
+    it('requeues performance relationships when bulk creation fails', async () => {
+      const deferred = createDeferred<void>();
+      const error = new Error('bulk failure');
+
+      mockKgService.createRelationshipsBulk = vi
+        .fn()
+        .mockImplementation(async () => {
+          await deferred.promise;
+          throw error;
+        });
+
+      const firstRel = { id: 'rel-1' } as any;
+      const secondRel = { id: 'rel-2' } as any;
+
+      (testEngine as any).perfRelBuffer = [firstRel];
+
+      const flushPromise = (testEngine as any).flushPerformanceRelationships();
+
+      await vi.waitFor(() => {
+        expect(mockKgService.createRelationshipsBulk).toHaveBeenCalledTimes(1);
+      });
+
+      (testEngine as any).perfRelBuffer.push(secondRel);
+
+      deferred.reject(error);
+
+      await expect(flushPromise).rejects.toThrow(error);
+      expect((testEngine as any).perfRelBuffer).toEqual([firstRel, secondRel]);
+    });
   });
 
   afterEach(() => {
@@ -284,9 +560,11 @@ describe('TestEngine', () => {
         duration: 0
       });
 
-      await expect(testEngine.recordTestResults(emptySuiteResult)).resolves.toBeUndefined();
+      await expect(
+        testEngine.recordTestResults(emptySuiteResult)
+      ).rejects.toThrow('Test suite must include at least one test result');
 
-      expect(mockDbService.storeTestSuiteResult).toHaveBeenCalledWith(emptySuiteResult);
+      expect(mockDbService.storeTestSuiteResult).not.toHaveBeenCalled();
       expect(mockKgService.createOrUpdateEntity).not.toHaveBeenCalled();
     });
 
@@ -313,16 +591,56 @@ describe('TestEngine', () => {
       expect(mockKgService.createOrUpdateEntity).toHaveBeenCalledTimes(4);
     });
 
+    it('should keep performance metrics finite when all runs fail', async () => {
+      mockKgService.createOrUpdateEntity.mockClear();
+
+      const failingResult = createMockTestResult({
+        status: 'failed',
+        duration: 200,
+      });
+      const suiteResult = createMockTestSuiteResult({
+        results: [failingResult],
+        passedTests: 0,
+        failedTests: 1,
+        totalTests: 1,
+      });
+
+      await testEngine.recordTestResults(suiteResult);
+
+      const savedEntity = mockKgService.createOrUpdateEntity.mock.calls[0]?.[0];
+      expect(savedEntity).toBeTruthy();
+      expect(savedEntity?.performanceMetrics).toBeDefined();
+      const metrics = savedEntity.performanceMetrics;
+      expect(Number.isNaN(metrics.averageExecutionTime)).toBe(false);
+      expect(Number.isNaN(metrics.p95ExecutionTime)).toBe(false);
+      expect(metrics.averageExecutionTime).toBe(200);
+      expect(metrics.p95ExecutionTime).toBe(200);
+      expect(metrics.successRate).toBe(0);
+    });
+
     it('should update test entities with coverage information', async () => {
       const coverageResult = createMockTestResult({
         coverage: { lines: 95, branches: 90, functions: 100, statements: 95 }
       });
       const suiteResult = createMockTestSuiteResult({ results: [coverageResult] });
 
+      mockKgService.getEntity.mockImplementation((id: string) => {
+        if (id === coverageResult.testId) {
+          return Promise.resolve(null);
+        }
+        if (id === `${coverageResult.testSuite}#${coverageResult.testName}`) {
+          return Promise.resolve({ id, type: 'function' });
+        }
+        return Promise.resolve(null);
+      });
+
       await testEngine.recordTestResults(suiteResult);
 
       // Should create coverage relationships
-      expect(mockKgService.createRelationship).toHaveBeenCalled();
+      const coverageCall = mockKgService.createRelationship.mock.calls.find(
+        ([rel]) => rel?.type === RelationshipType.COVERAGE_PROVIDES
+      );
+      expect(coverageCall).toBeDefined();
     });
 
     it('should perform flaky test analysis', async () => {
@@ -622,8 +940,11 @@ describe('TestEngine', () => {
             {
               timestamp: new Date(),
               executionTime: 140,
+              averageExecutionTime: 140,
+              p95ExecutionTime: 190,
               successRate: 0.9,
-              coveragePercentage: 85
+              coveragePercentage: 85,
+              runId: 'run-hist',
             }
           ]
         }
@@ -700,9 +1021,10 @@ describe('TestEngine', () => {
 
       const analysis = await testEngine.getCoverageAnalysis('target-entity');
 
-      expect(analysis.overallCoverage.lines).toBe((80 + 90 + 70) / 3); // Average
-      expect(analysis.testCases).toHaveLength(3);
-      expect(analysis.testCases[0]).toHaveProperty('testId', 'test-1');
+      expect(analysis.overallCoverage.lines).toBeCloseTo((85 + 80 + 90 + 70) / 4); // Includes baseline test entity
+      expect(analysis.testCases).toHaveLength(4);
+      expect(analysis.testCases.find((t) => t.testId === 'target-entity')).toBeDefined();
+      expect(analysis.testCases.find((t) => t.testId === 'test-1')).toBeDefined();
     });
 
     it('should handle different test types in breakdown', async () => {
@@ -728,7 +1050,7 @@ describe('TestEngine', () => {
 
       const analysis = await testEngine.getCoverageAnalysis('target-entity');
 
-      expect(analysis.testBreakdown.unitTests.lines).toBe(80);
+      expect(analysis.testBreakdown.unitTests.lines).toBeCloseTo((85 + 80) / 2);
       expect(analysis.testBreakdown.integrationTests.lines).toBe(90);
       expect(analysis.testBreakdown.e2eTests.lines).toBe(70);
     });
@@ -746,11 +1068,17 @@ describe('TestEngine', () => {
 
       const analysis = await testEngine.getCoverageAnalysis('test-123');
 
-      expect(analysis.overallCoverage.lines).toBe(0);
-      expect(analysis.testBreakdown.unitTests.lines).toBe(0);
+      expect(analysis.overallCoverage.lines).toBe(85);
+      expect(analysis.testBreakdown.unitTests.lines).toBe(85);
       expect(analysis.testBreakdown.integrationTests.lines).toBe(0);
       expect(analysis.testBreakdown.e2eTests.lines).toBe(0);
-      expect(analysis.testCases).toEqual([]);
+      expect(analysis.testCases).toEqual([
+        {
+          testId: 'test-123',
+          testName: 'MyTestSuite#should pass basic test',
+          covers: ['MyTestSuite#should pass basic test'],
+        },
+      ]);
     });
 
     it('should handle knowledge graph query errors', async () => {

@@ -14,6 +14,12 @@ import type {
   RelationshipQuery,
   RelationshipType,
 } from '../../src/models/relationships';
+import type {
+  ModuleChildrenResult,
+  ListImportsResult,
+  DefinitionLookupResult,
+  StructuralNavigationEntry,
+} from '../../src/models/types';
 
 type GraphSearchRequest = {
   query: string;
@@ -161,6 +167,251 @@ export class RealisticKnowledgeGraphMock extends EventEmitter {
     const offset = opts.offset ?? 0;
     const limit = opts.limit ?? total;
     return { relationships: list.slice(offset, offset + limit), total };
+  }
+
+  async listModuleChildren(
+    modulePath: string,
+    options: {
+      includeFiles?: boolean;
+      includeSymbols?: boolean;
+      limit?: number;
+      language?: string | string[];
+      symbolKind?: string | string[];
+      modulePathPrefix?: string;
+    } = {}
+  ): Promise<ModuleChildrenResult> {
+    const normalizedPath = modulePath.replace(/\\/g, '/');
+    const parent = Array.from(this.entities.values()).find(
+      (entity) => entity.path === normalizedPath || entity.id === normalizedPath
+    );
+    if (!parent) {
+      return { modulePath: normalizedPath, children: [] };
+    }
+
+    const includeFiles = options.includeFiles !== false;
+    const includeSymbols = options.includeSymbols !== false;
+
+    const normalize = (value?: string | string[]): string[] => {
+      if (!value) return [];
+      const raw = Array.isArray(value) ? value : [value];
+      return raw
+        .flatMap((entry) =>
+          typeof entry === 'string' ? entry.split(',') : []
+        )
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    };
+
+    const languages = normalize(options.language).map((v) => v.toLowerCase());
+    const symbolKinds = normalize(options.symbolKind).map((v) => v.toLowerCase());
+    const modulePrefix =
+      typeof options.modulePathPrefix === 'string' && options.modulePathPrefix.trim().length > 0
+        ? options.modulePathPrefix.trim()
+        : undefined;
+
+    const matchesLanguage = (rel: GraphRelationship, entity?: Entity | null) => {
+      if (!languages.length) return true;
+      const relLang = (rel as any).language || (rel.metadata as any)?.language;
+      const entityLang = (entity as any)?.language;
+      const relNormalized =
+        typeof relLang === 'string' ? relLang.toLowerCase() : null;
+      const entityNormalized =
+        typeof entityLang === 'string' ? entityLang.toLowerCase() : null;
+      return Boolean(
+        (relNormalized && languages.includes(relNormalized)) ||
+          (entityNormalized && languages.includes(entityNormalized))
+      );
+    };
+
+    const matchesSymbolKind = (entity?: Entity | null) => {
+      if (!symbolKinds.length) return true;
+      if (!entity || entity.type !== 'symbol') return true;
+      const kind = (entity as any)?.kind;
+      const normalized = typeof kind === 'string' ? kind.toLowerCase() : '';
+      return symbolKinds.includes(normalized);
+    };
+
+    const matchesModulePrefix = (
+      rel: GraphRelationship,
+      entity?: Entity | null
+    ) => {
+      if (!modulePrefix) return true;
+      const relModulePath =
+        (rel as any).modulePath || (rel.metadata as any)?.modulePath;
+      const entityModulePath =
+        (entity as any)?.modulePath || (entity as any)?.path;
+      const candidate =
+        typeof relModulePath === 'string'
+          ? relModulePath
+          : typeof entityModulePath === 'string'
+          ? entityModulePath
+          : '';
+      return candidate.startsWith(modulePrefix);
+    };
+
+    const children: StructuralNavigationEntry[] = [];
+    for (const rel of this.relationships.values()) {
+      if (rel.type !== ('CONTAINS' as RelationshipType)) continue;
+      if (rel.fromEntityId !== parent.id) continue;
+      const entity = this.entities.get(rel.toEntityId || '');
+      if (!entity) continue;
+      if (!includeFiles && entity.type === 'file') continue;
+      if (!includeSymbols && entity.type === 'symbol') continue;
+      if (!matchesLanguage(rel, entity)) continue;
+      if (!matchesSymbolKind(entity)) continue;
+      if (!matchesModulePrefix(rel, entity)) continue;
+      children.push({
+        entity: structuredClone(entity),
+        relationship: structuredClone(rel),
+      });
+    }
+
+    const limit = Math.min(options.limit ?? children.length, children.length);
+    return {
+      modulePath: normalizedPath,
+      parentId: parent.id,
+      children: children.slice(0, limit),
+    };
+  }
+
+
+  async listImports(
+    entityId: string,
+    options: {
+      resolvedOnly?: boolean;
+      language?: string | string[];
+      symbolKind?: string | string[];
+      importAlias?: string | string[];
+      importType?: string | string[];
+      isNamespace?: boolean;
+      modulePath?: string | string[];
+      modulePathPrefix?: string;
+      limit?: number;
+    } = {}
+  ): Promise<ListImportsResult> {
+    const resolvedId = entityId;
+
+    const normalize = (value?: string | string[]): string[] => {
+      if (!value) return [];
+      const raw = Array.isArray(value) ? value : [value];
+      return raw
+        .flatMap((entry) =>
+          typeof entry === 'string' ? entry.split(',') : []
+        )
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    };
+
+    const languages = normalize(options.language).map((v) => v.toLowerCase());
+    const symbolKinds = normalize(options.symbolKind).map((v) => v.toLowerCase());
+    const importAliases = normalize(options.importAlias);
+    const importTypes = normalize(options.importType).map((v) => v.toLowerCase());
+    const modulePaths = normalize(options.modulePath);
+    const modulePathPrefix =
+      typeof options.modulePathPrefix === 'string' && options.modulePathPrefix.trim().length > 0
+        ? options.modulePathPrefix.trim()
+        : undefined;
+    const isNamespace =
+      typeof options.isNamespace === 'boolean' ? options.isNamespace : undefined;
+    const limit = options.limit ?? Number.MAX_SAFE_INTEGER;
+
+    const entries = Array.from(this.relationships.values())
+      .filter((rel) => rel.type === ('IMPORTS' as RelationshipType))
+      .filter((rel) => rel.fromEntityId === resolvedId)
+      .filter((rel) => {
+        if (!options.resolvedOnly) return true;
+        return (
+          (rel as any).resolutionState === 'resolved' ||
+          (rel as any).resolved === true
+        );
+      })
+      .map((rel) => ({
+        rel,
+        target: rel.toEntityId ? this.entities.get(rel.toEntityId) : undefined,
+      }))
+      .filter(({ rel, target }) => {
+        if (!languages.length) return true;
+        const relLang = (rel as any).language || (rel.metadata as any)?.language;
+        const targetLang = target?.language;
+        const relNormalized =
+          typeof relLang === 'string' ? relLang.toLowerCase() : null;
+        const targetNormalized =
+          typeof targetLang === 'string' ? targetLang.toLowerCase() : null;
+        return Boolean(
+          (relNormalized && languages.includes(relNormalized)) ||
+            (targetNormalized && languages.includes(targetNormalized))
+        );
+      })
+      .filter(({ target }) => {
+        if (!symbolKinds.length) return true;
+        if (!target || target.type !== 'symbol') return true;
+        const kind = (target as any)?.kind;
+        const normalized = typeof kind === 'string' ? kind.toLowerCase() : '';
+        return symbolKinds.includes(normalized);
+      })
+      .filter(({ rel }) => {
+        if (!importAliases.length) return true;
+        const alias =
+          (rel as any).importAlias || (rel.metadata as any)?.importAlias;
+        if (typeof alias !== 'string') return false;
+        return importAliases.includes(alias);
+      })
+      .filter(({ rel }) => {
+        if (!importTypes.length) return true;
+        const type =
+          (rel as any).importType || (rel.metadata as any)?.importType;
+        const normalized =
+          typeof type === 'string' ? type.toLowerCase() : '';
+        return importTypes.includes(normalized);
+      })
+      .filter(({ rel }) => {
+        if (typeof isNamespace !== 'boolean') return true;
+        const value = (rel as any).isNamespace;
+        return Boolean(value) === isNamespace;
+      })
+      .filter(({ rel }) => {
+        if (!modulePaths.length) return true;
+        const modulePath =
+          (rel as any).modulePath || (rel.metadata as any)?.modulePath;
+        if (typeof modulePath !== 'string') return false;
+        return modulePaths.includes(modulePath);
+      })
+      .filter(({ rel, target }) => {
+        if (!modulePathPrefix) return true;
+        const modulePath =
+          (rel as any).modulePath || (rel.metadata as any)?.modulePath;
+        if (typeof modulePath === 'string') {
+          return modulePath.startsWith(modulePathPrefix);
+        }
+        const candidate = (target as any)?.modulePath || (target as any)?.path;
+        return typeof candidate === 'string'
+          ? candidate.startsWith(modulePathPrefix)
+          : false;
+      })
+      .slice(0, limit)
+      .map(({ rel, target }) => ({
+        relationship: structuredClone(rel),
+        target: target ? structuredClone(target) : undefined,
+      }));
+
+    return { entityId: resolvedId, imports: entries };
+  }
+
+
+  async findDefinition(symbolId: string): Promise<DefinitionLookupResult> {
+    const relation = Array.from(this.relationships.values()).find(
+      (rel) => rel.type === ('DEFINES' as RelationshipType) && rel.toEntityId === symbolId
+    );
+
+    const source = relation?.fromEntityId
+      ? this.entities.get(relation.fromEntityId)
+      : null;
+
+    return {
+      symbolId,
+      relationship: relation ? structuredClone(relation) : null,
+      source: source ? structuredClone(source) : null,
+    };
   }
 
   async getEntityExamples(entityId: string): Promise<{

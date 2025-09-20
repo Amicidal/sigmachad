@@ -82,6 +82,95 @@
   - Update docs once Tasks 1–3 land so the narrative matches reality.
 - **Acceptance**: Clean git status after builds/tests, generated spec available, documentation reflects delivered behaviour.
 
+### 6. Enrich Structural Relationship Persistence
+- **Context**: `Docs/Blueprints/structural-relationships.md` calls for storing import/export metadata (alias, type, namespace flag, re-export target, language, symbol kind, module path), but `KnowledgeGraphService` currently persists only minimal location details, and Falkor nodes reject nested JSON props.
+- **Entry Points**:
+  - `src/services/KnowledgeGraphService.ts`
+  - `src/services/graph/FalkorDBService.ts`
+  - Graph Cypher templates under `src/services/graph/queries/`
+  - Parser emitters in `src/services/ASTParser.ts`
+- **Scope**:
+  - Design schema changes that persist each metadata field as first-class properties (or dedicated helper nodes) while respecting Falkor constraints, and extend persistence queries/templates with the new parameters.
+  - Normalize property names/enums (e.g., `importType`, `symbolKind`) so multi-language ingestion can plug in.
+  - Update entity/index definitions and validate query builders so the richer fields remain filterable without triggering RedisGraph serialization errors.
+  - Refresh `KnowledgeGraphService` read helpers, API DTOs, and docs to surface the enriched metadata end-to-end.
+  - Define and implement a migration/backfill strategy (plus verification checks) so existing structural edges pick up the new schema without data drift.
+  - Add unit/integration coverage for persistence and read paths that exercises TypeScript and one additional language fixture, including migrated edges.
+- **Acceptance**: Structural edges persist without runtime errors, metadata is retrievable with all fields populated, and tests lock in serialization behaviour.
+
+### 7. Normalize Structural Relationships & Language Adapters
+- **Context**: Relationship normalization still emits raw `USES` types with missing `resolved` flags and inconsistent `canonicalRelationshipId`. Blueprint section 6 mandates a `normalizeStructuralRelationship` helper plus per-language adapters.
+- **Entry Points**:
+  - `src/services/relationships/RelationshipNormalizer.ts`
+  - Language adapters under `src/services/relationships/adapters/`
+  - Parser pipelines in `src/services/ASTParser.ts`
+- **Scope**:
+  - Introduce a normalization path for structural edges that maps inferred types to canonical values, enforces `time-rel-*` IDs, and fills in `resolved`, `confidence`, and language metadata.
+  - Implement adapters for at least TypeScript today, with scaffolding/tests for future languages (`py`, `go`).
+  - Align `KnowledgeGraphService` ingestion with the new normalized payloads.
+  - Cover with unit tests that future bulk operations re-use the single-edge normalization pipeline.
+- **Acceptance**: Normalized structural edges are consistent across ingestion modes, IDs/flags conform to blueprint contracts, tests verify adapter behaviour and bulk ingestion regressions stay fixed.
+
+### 8. Expand Structural Query Surface & Navigation APIs
+- **Context**: Graph queries currently lack filters for structural fields, forcing clients to parse metadata manually. Blueprint section 8 specifies helper APIs (`listModuleChildren`, `listImports`, `findDefinition`) and new filter parameters.
+- **Entry Points**:
+  - `src/api/routes/graph.ts` (or relevant route handlers)
+  - `src/services/KnowledgeGraphService.ts`
+  - Query builders under `src/services/graph/queries/`
+- **Scope**:
+  - Add query filters for `importAlias`, `importType`, `isNamespace`, `language`, `symbolKind`, `modulePath` prefix.
+  - Implement the navigation helpers, wiring them into REST/MCP endpoints and documenting usage.
+  - Provide tests (unit + integration) exercising filtering and helper outputs using seeded structural data (see `tests/test-utils/realistic-kg.ts` and `tests/integration/services/KnowledgeGraphService.integration.test.ts`).
+  - Update API docs and blueprint examples with the new query capabilities.
+- **Acceptance**: Clients can query structural relationships with the new filters, helper APIs return populated data, and documentation mirrors the implementation.
+
+### 9. Integrate Structural History & Index Management
+- **Context**: Temporal handling, confidence metadata, and index bootstrapping remain inconsistent. Structural edges ignore `confidence`/`scope`, rely on `CREATE INDEX ... IF NOT EXISTS` (rejected by RedisGraph), and there’s no first-write bootstrap path to guarantee indices.
+- **Entry Points**:
+  - `src/services/graph/FalkorDBService.ts`
+  - Index utilities in `src/services/graph/setupGraph.ts`
+  - History pipeline modules (`src/services/history/`)
+- **Scope**:
+  - Capture `confidence`/`scope` on structural edges and persist them alongside `lastSeenAt`.
+  - Replace unsupported index DDL with a compatible strategy (e.g., probe, then issue plain `CREATE INDEX` once) and expose a bootstrap path invoked during startup or first ingestion.
+  - Ensure history records close/reopen edges on moves/removals and surface timeline queries (`getModuleHistory`).
+  - Add integration coverage validating index bootstrap, confidence persistence, and history diffs when files move.
+- **Acceptance**: Service bootstraps indices deterministically, structural edges carry confidence/history metadata, and regression tests cover file move scenarios.
+
+### 10. Operationalize Temporal Relationship Lifecycle & Timelines
+- **Context**: `Docs/Blueprints/temporal-relationships.md` notes that versioning helpers (`appendVersion`, `openEdge`, `closeEdge`) are stubbed, provenance edges are missing, and consumers lack timeline APIs; SynchronizationCoordinator & rollback tests highlight pending-state leaks during failures.
+- **Entry Points**:
+  - `src/services/KnowledgeGraphService.ts`
+  - `src/services/SynchronizationCoordinator.ts`
+  - `src/api/routes/history.ts`
+  - History-related tests (`tests/unit/services/HistoryAndSchedulers.test.ts`, `tests/integration/history/` to be created)
+- **Scope**:
+  - [x] Persist provenance by creating/connecting `change` nodes via `MODIFIED_BY`/`MODIFIED_IN`/`CREATED_IN`/`REMOVED_IN` when `changeSetId` or session metadata is available; expose ingestion helpers so coordinators can pass context.
+  - [x] Add timeline query helpers (`getEntityTimeline`, `getRelationshipTimeline`, `getChangesForSession/range`) and wire them into History API routes with pagination + filtering.
+  - [x] Extend unit coverage for provenance and timeline flows (FalkorDB stubs capturing temporal metadata).
+  - [x] Add a `runTemporalTransaction` helper in `KnowledgeGraphService` leveraging FalkorDB `MULTI`/`EXEC` so `appendVersion`, `openEdge`, and `closeEdge` persist all mutations atomically.
+  - [x] Enforce `PREVIOUS_VERSION` continuity by verifying we link to the latest historical node inside the transaction and rejecting out-of-order writes with actionable errors.
+  - [x] Introduce a `validateTemporalContinuity` maintenance job (`src/jobs/TemporalHistoryValidator.ts`) that scans for missing/duplicate version edges, repairs simple gaps, and reports irreparable ones.
+  - [x] Harden SynchronizationCoordinator + rollback error handling so FalkorDB failures surface, pending states transition to `failed`, rollback tests assert on surfaced errors, and history fixtures avoid `clearTestData` hangs.
+  - [x] Document the transactional behaviour + validation runbook in the blueprint/API docs, publish migration/backfill scripts, and seed integration tests covering the history endpoints.
+- **Acceptance**: Temporal edges and versions persist with transactional guarantees, provenance relationships are populated, timeline endpoints return ordered history (unit + integration coverage), coordinator failure recovery is validated, rollback surfaces errors, and documentation/backfill plans cover the new pipelines.
+
+### 11. Establish Performance Relationship Ingestion & Analytics
+- **Context**: `Docs/Blueprints/performance-relationships.md` highlights missing ingestion contracts, metric-aware canonical IDs, absent history/trend storage, and failing perf suites due to undersized fixtures.
+- **Entry Points**:
+  - `Docs/Blueprints/performance-relationships.md` (contract)
+  - `src/models/relationships.ts`, `src/utils/codeEdges.ts`, `src/services/KnowledgeGraphService.ts` (normalization + persistence)
+  - `src/services/TestEngine.ts`, `src/services/database/PostgreSQLService.ts`, `tests/integration/services/TestEngine.integration.test.ts` (emission + history)
+  - API surfaces in `src/api/routes/tests.ts`, `src/api/mcp-router.ts`
+- **Scope**:
+  - Define and enforce the performance ingestion schema (`normalizePerformanceRelationship`), including metric IDs, thresholds, severity, evidence, and derived deltas/trends.
+  - Extend canonical relationship IDs and Falkor storage to disambiguate `metricId`/`environment`, persist metrics history, and expose risk/resolution markers for regressions.
+  - Update TestEngine + bulk query fixtures to emit populated performance relationships, seed larger datasets for load tests, and document JSON/JSONB handling/opt-in raw mode.
+  - Plumb metrics history through DatabaseService + API endpoints, add filtering helpers (metric/environment/severity), and cover workflows with unit/integration tests.
+  - Capture follow-up instrumentation (batch sizing, backpressure, policy configs) and log any deferred work in TODO when scoped.
+- **Follow-up (pending)**: Load-test instrumentation for performance ingestion is still missing. Problem: 50-row batch ingestion paths lack telemetry and validation, leaving `PostgreSQLService.bulkQuery` without timing/backpressure signals during `performance_metric_snapshots` writes. Proposed fix: instrument the bulk writer, then add an integration scenario that seeds ≥50 performance snapshots to exercise throttling logic. Follow-up steps: (1) add timing/backpressure metrics in `PostgreSQLService.bulkQuery`, (2) extend `tests/integration/services/TestEngine.integration.test.ts` with a high-volume snapshot fixture, (3) document configuration knobs for batch sizing/backpressure in the blueprint.
+- **Acceptance**: Performance relationships ingest metric-rich data end-to-end, APIs return persisted metrics/history, load tests exercise 50-row batches, and docs/tests match the new contract.
+
 ## General Notes
 - Keep changes ASCII unless files already contain Unicode.
 - Prefer `pnpm` commands; respect ESM import paths.

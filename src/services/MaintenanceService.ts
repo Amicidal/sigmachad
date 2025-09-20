@@ -7,6 +7,7 @@ import { DatabaseService } from './DatabaseService.js';
 import { KnowledgeGraphService } from './KnowledgeGraphService.js';
 import { MaintenanceMetrics } from './metrics/MaintenanceMetrics.js';
 import { MaintenanceOperationError } from './BackupService.js';
+import { TemporalHistoryValidator } from '../jobs/TemporalHistoryValidator.js';
 
 export interface MaintenanceTask {
   id: string;
@@ -32,11 +33,14 @@ export interface MaintenanceResult {
 export class MaintenanceService {
   private activeTasks = new Map<string, MaintenanceTask>();
   private completedTasks = new Map<string, MaintenanceTask>();
+  private readonly temporalValidator: TemporalHistoryValidator;
 
   constructor(
     private dbService: DatabaseService,
     private kgService: KnowledgeGraphService
-  ) {}
+  ) {
+    this.temporalValidator = new TemporalHistoryValidator(this.kgService);
+  }
 
   async runMaintenanceTask(taskType: string): Promise<MaintenanceResult> {
     this.ensureDependenciesReady(taskType);
@@ -259,7 +263,14 @@ export class MaintenanceService {
 
   private async runValidation(task: MaintenanceTask): Promise<MaintenanceResult> {
     const changes: Array<Record<string, unknown>> = [];
-    const stats = { invalidEntities: 0, invalidRelationships: 0, integrityIssues: 0, validatedCollections: 0 };
+    const stats = {
+      invalidEntities: 0,
+      invalidRelationships: 0,
+      integrityIssues: 0,
+      validatedCollections: 0,
+      temporalIssues: 0,
+      temporalRepairs: 0,
+    };
 
     try {
       // 1. Validate entity integrity
@@ -299,6 +310,36 @@ export class MaintenanceService {
 
       // 4. Validate database connectivity
       await this.validateDatabaseConnections();
+
+      const temporalReport = await this.temporalValidator.validate({
+        autoRepair: true,
+        dryRun: false,
+        batchSize: 25,
+        timelineLimit: 200,
+        logger: (message, context) =>
+          console.log(`temporal-validator:${message}`, context ?? {}),
+      });
+      const unresolvedTemporalIssues = temporalReport.issues.filter(
+        (issue) => issue.repaired !== true
+      ).length;
+      stats.temporalIssues += temporalReport.issues.length;
+      stats.temporalRepairs += temporalReport.repairedLinks;
+      stats.integrityIssues += unresolvedTemporalIssues;
+      if (
+        temporalReport.issues.length > 0 ||
+        temporalReport.repairedLinks > 0
+      ) {
+        changes.push({
+          type: "temporal_history_validation",
+          report: {
+            scannedEntities: temporalReport.scannedEntities,
+            inspectedVersions: temporalReport.inspectedVersions,
+            repairedLinks: temporalReport.repairedLinks,
+            unresolvedIssues: unresolvedTemporalIssues,
+            sampleIssues: temporalReport.issues.slice(0, 50),
+          },
+        });
+      }
 
     } catch (error) {
       console.warn('Some validation operations failed:', error);

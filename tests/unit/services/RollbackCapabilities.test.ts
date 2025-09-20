@@ -378,6 +378,9 @@ describe('RollbackCapabilities', () => {
         expect(rollbackPoint?.relationships[0]).toEqual({
           id: mockRelationship.id,
           action: 'create',
+          fromEntityId: mockRelationship.fromEntityId,
+          toEntityId: mockRelationship.toEntityId,
+          type: mockRelationship.type,
           previousState: undefined,
           newState: mockRelationship,
         });
@@ -394,6 +397,9 @@ describe('RollbackCapabilities', () => {
         expect(rollbackPoint?.relationships[0]).toEqual({
           id: mockRelationship.id,
           action: 'update',
+          fromEntityId: mockRelationship.fromEntityId,
+          toEntityId: mockRelationship.toEntityId,
+          type: mockRelationship.type,
           previousState,
           newState,
         });
@@ -407,6 +413,9 @@ describe('RollbackCapabilities', () => {
         expect(rollbackPoint?.relationships[0]).toEqual({
           id: mockRelationship.id,
           action: 'delete',
+          fromEntityId: mockRelationship.fromEntityId,
+          toEntityId: mockRelationship.toEntityId,
+          type: mockRelationship.type,
           previousState: mockRelationship,
           newState: undefined,
         });

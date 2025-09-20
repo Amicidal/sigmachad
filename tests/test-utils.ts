@@ -22,7 +22,7 @@ export interface MockFastifyReply {
   statusCode: number;
   status: (code: number) => MockFastifyReply;
   send: (data: any) => void;
-  header: (name: string, value: string) => void;
+  header: (name: string, value: string) => MockFastifyReply;
   headers: Record<string, string>;
 }
 
@@ -55,6 +55,7 @@ export function createMockReply(): MockFastifyReply {
     send: vi.fn(),
     header: vi.fn((name: string, value: string) => {
       headers[name] = value;
+      return mockReply;
     }),
     headers,
   };

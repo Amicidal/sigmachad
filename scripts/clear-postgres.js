@@ -13,7 +13,7 @@ const TABLES = [
   'changes',
   'sessions',
   'documents',
-  'performance_metrics',
+  'performance_metric_snapshots',
   'coverage_history',
 ];
 

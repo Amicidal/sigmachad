@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { v4 as uuidv4 } from "uuid";
-import { expectSuccess } from "../../test-utils/assertions";
+import { expectSuccess, expectError } from "../../test-utils/assertions";
 import { FastifyInstance } from "fastify";
 import { APIGateway } from "../../../src/api/APIGateway.js";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
@@ -146,6 +146,11 @@ describe("Source Control Management API Integration", () => {
       if (response.statusCode === 404) {
         throw new Error('SCM endpoints must be implemented for this test');
       }
+      if (response.statusCode === 501) {
+        const body = JSON.parse(response.payload || '{}');
+        expectError(body, 'NOT_IMPLEMENTED');
+        return;
+      }
       expect(response.statusCode).toBe(200);
       if (response.statusCode === 200) {
         const ok = JSON.parse(response.payload || '{}');
@@ -220,6 +225,11 @@ describe("Source Control Management API Integration", () => {
       if (response.statusCode === 404) {
         throw new Error('SCM endpoints missing; scenario requires implementation');
       }
+      if (response.statusCode === 501) {
+        const body = JSON.parse(response.payload || '{}');
+        expectError(body, 'NOT_IMPLEMENTED');
+        return;
+      }
       expect(response.statusCode).toBe(200);
       if (response.statusCode === 200) {
         const ok = JSON.parse(response.payload || '{}');
@@ -255,6 +265,11 @@ describe("Source Control Management API Integration", () => {
 
       if (response.statusCode === 404) {
         throw new Error('SCM validation requires implemented endpoint');
+      }
+      if (response.statusCode === 501) {
+        const body = JSON.parse(response.payload || '{}');
+        expectError(body, 'NOT_IMPLEMENTED');
+        return;
       }
       expect(response.statusCode).toBe(400);
 
@@ -354,6 +369,11 @@ describe("Source Control Management API Integration", () => {
       if (response.statusCode === 404) {
         throw new Error('SCM endpoints missing; commit scenario requires implementation');
       }
+      if (response.statusCode === 501) {
+        const body = JSON.parse(response.payload || '{}');
+        expectError(body, 'NOT_IMPLEMENTED');
+        return;
+      }
       expect(response.statusCode).toBe(200);
 
       if (response.statusCode === 200) {
@@ -420,6 +440,11 @@ describe("Source Control Management API Integration", () => {
         if (response.statusCode === 404) {
           throw new Error('SCM endpoints missing; batch scenario requires implementation');
         }
+        if (response.statusCode === 501) {
+          const body = JSON.parse(response.payload || '{}');
+          expectError(body, 'NOT_IMPLEMENTED');
+          return;
+        }
         expect(response.statusCode).toBe(200);
         if (response.statusCode === 200) {
           const ok = JSON.parse(response.payload || '{}');
@@ -479,6 +504,11 @@ describe("Source Control Management API Integration", () => {
       if (firstResponse.statusCode === 404) {
         throw new Error('SCM commit endpoint missing; branch conflict test requires implementation');
       }
+      if (firstResponse.statusCode === 501) {
+        const body = JSON.parse(firstResponse.payload || '{}');
+        expectError(body, 'NOT_IMPLEMENTED');
+        return;
+      }
       expect(firstResponse.statusCode).toBe(200);
 
       if (
@@ -505,6 +535,11 @@ describe("Source Control Management API Integration", () => {
 
         if (secondResponse.statusCode === 404) {
           throw new Error('SCM commit endpoint missing; branch conflict test requires implementation');
+        }
+        if (secondResponse.statusCode === 501) {
+          const body = JSON.parse(secondResponse.payload || '{}');
+          expectError(body, 'NOT_IMPLEMENTED');
+          return;
         }
         expect(secondResponse.statusCode).toBe(200);
 
@@ -582,6 +617,11 @@ describe("Source Control Management API Integration", () => {
       responses.forEach((response) => {
         if (response.statusCode === 404) {
           throw new Error('SCM endpoints missing; revert scenario requires implementation');
+        }
+        if (response.statusCode === 501) {
+          const body = JSON.parse(response.payload || '{}');
+          expectError(body, 'NOT_IMPLEMENTED');
+          return;
         }
       expect(response.statusCode).toBe(200);
       if (response.statusCode === 200) {

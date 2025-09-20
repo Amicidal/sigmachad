@@ -221,6 +221,150 @@ export async function registerHistoryRoutes(
     }
   );
 
+  // GET /api/v1/history/entities/:id/timeline - entity version timeline with optional relationships
+  app.get(
+    "/history/entities/:id/timeline",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            includeRelationships: { type: "boolean" },
+            limit: { type: "number" },
+            offset: { type: "number" },
+            since: { type: "string" },
+            until: { type: "string" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        const query = request.query as any;
+        const includeRelationships =
+          query?.includeRelationships === true ||
+          query?.includeRelationships === 'true';
+        const limit = query?.limit !== undefined ? Number(query.limit) : undefined;
+        const offset = query?.offset !== undefined ? Number(query.offset) : undefined;
+        const since = typeof query?.since === 'string' && query.since ? query.since : undefined;
+        const until = typeof query?.until === 'string' && query.until ? query.until : undefined;
+        const timeline = await kgService.getEntityTimeline(id, {
+          includeRelationships,
+          limit,
+          offset,
+          since,
+          until,
+        });
+        reply.send({ success: true, data: timeline });
+      } catch (error) {
+        reply.status(500).send({
+          success: false,
+          error: {
+            code: 'ENTITY_TIMELINE_FAILED',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Failed to load entity timeline',
+          },
+        });
+      }
+    }
+  );
+
+  // GET /api/v1/history/relationships/:id/timeline - relationship temporal segments
+  app.get(
+    "/history/relationships/:id/timeline",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        const timeline = await kgService.getRelationshipTimeline(id);
+        if (!timeline) {
+          reply.status(404).send({
+            success: false,
+            error: {
+              code: 'RELATIONSHIP_NOT_FOUND',
+              message: 'Relationship not found',
+            },
+          });
+          return;
+        }
+        reply.send({ success: true, data: timeline });
+      } catch (error) {
+        reply.status(500).send({
+          success: false,
+          error: {
+            code: 'RELATIONSHIP_TIMELINE_FAILED',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Failed to load relationship timeline',
+          },
+        });
+      }
+    }
+  );
+
+  // GET /api/v1/history/sessions/:id/changes - change summaries for a session
+  app.get(
+    "/history/sessions/:id/changes",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            since: { type: "string" },
+            until: { type: "string" },
+            limit: { type: "number" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        const query = request.query as any;
+        const options = {
+          since: typeof query?.since === 'string' ? query.since : undefined,
+          until: typeof query?.until === 'string' ? query.until : undefined,
+          limit: query?.limit !== undefined ? Number(query.limit) : undefined,
+        };
+        const changes = await kgService.getChangesForSession(id, options);
+        reply.send({ success: true, data: changes });
+      } catch (error) {
+        reply.status(500).send({
+          success: false,
+          error: {
+            code: 'SESSION_CHANGES_FAILED',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Failed to load session changes',
+          },
+        });
+      }
+    }
+  );
+
   // POST /api/v1/graph/time-travel - time-scoped traversal (stub)
   app.post(
     "/graph/time-travel",

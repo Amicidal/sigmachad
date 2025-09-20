@@ -1167,7 +1167,11 @@ export class ASTParser {
               this.createRelationship(
                 fileEntity.id,
                 symbolEntity.id,
-                RelationshipType.DEFINES
+                RelationshipType.DEFINES,
+                {
+                  language: fileEntity.language,
+                  symbolKind: symbolEntity.kind,
+                }
               )
             );
 
@@ -1176,7 +1180,11 @@ export class ASTParser {
               this.createRelationship(
                 fileEntity.id,
                 symbolEntity.id,
-                RelationshipType.CONTAINS
+                RelationshipType.CONTAINS,
+                {
+                  language: fileEntity.language,
+                  symbolKind: symbolEntity.kind,
+                }
               )
             );
 
@@ -1198,7 +1206,11 @@ export class ASTParser {
                       this.createRelationship(
                         owner.entity.id,
                         symbolEntity.id,
-                        RelationshipType.CONTAINS
+                        RelationshipType.CONTAINS,
+                        {
+                          language: fileEntity.language,
+                          symbolKind: symbolEntity.kind,
+                        }
                       )
                     );
                   }
@@ -1212,7 +1224,11 @@ export class ASTParser {
                 this.createRelationship(
                   fileEntity.id,
                   symbolEntity.id,
-                  RelationshipType.EXPORTS
+                  RelationshipType.EXPORTS,
+                  {
+                    language: fileEntity.language,
+                    symbolKind: symbolEntity.kind,
+                  }
                 )
               );
             }
@@ -4114,23 +4130,31 @@ export class ASTParser {
           const abs = modSf.getFilePath();
           const rel = path.relative(process.cwd(), abs);
           relationships.push(
-            this.createRelationship(
-              fileEntity.id,
-              `file:${rel}:${path.basename(rel)}`,
-              RelationshipType.IMPORTS,
-              { importKind: "side-effect", module: moduleSpecifier }
-            )
-          );
-        } else {
-          relationships.push(
-            this.createRelationship(
-              fileEntity.id,
-              `import:${moduleSpecifier}:*`,
-              RelationshipType.IMPORTS,
-              { importKind: "side-effect", module: moduleSpecifier }
-            )
-          );
-        }
+              this.createRelationship(
+                fileEntity.id,
+                `file:${rel}:${path.basename(rel)}`,
+                RelationshipType.IMPORTS,
+                {
+                  importKind: "side-effect",
+                  module: moduleSpecifier,
+                  language: fileEntity.language,
+                }
+              )
+            );
+          } else {
+            relationships.push(
+              this.createRelationship(
+                fileEntity.id,
+                `import:${moduleSpecifier}:*`,
+                RelationshipType.IMPORTS,
+                {
+                  importKind: "side-effect",
+                  module: moduleSpecifier,
+                  language: fileEntity.language,
+                }
+              )
+            );
+          }
       }
 
       // Default import
@@ -4146,7 +4170,12 @@ export class ASTParser {
                 fileEntity.id,
                 `file:${target}:default`,
                 RelationshipType.IMPORTS,
-                { importKind: "default", alias, module: moduleSpecifier }
+                {
+                  importKind: "default",
+                  alias,
+                  module: moduleSpecifier,
+                  language: fileEntity.language,
+                }
               )
             );
           } else {
@@ -4155,7 +4184,12 @@ export class ASTParser {
                 fileEntity.id,
                 `import:${moduleSpecifier}:default`,
                 RelationshipType.IMPORTS,
-                { importKind: "default", alias, module: moduleSpecifier }
+                {
+                  importKind: "default",
+                  alias,
+                  module: moduleSpecifier,
+                  language: fileEntity.language,
+                }
               )
             );
           }
@@ -4167,25 +4201,35 @@ export class ASTParser {
       if (ns) {
         const alias = ns.getText();
         const target = alias ? importMap?.get(alias) : undefined;
-        if (target) {
-          relationships.push(
-            this.createRelationship(
-              fileEntity.id,
-              `file:${target}:*`,
-              RelationshipType.IMPORTS,
-              { importKind: "namespace", alias, module: moduleSpecifier }
-            )
-          );
-        } else {
-          relationships.push(
-            this.createRelationship(
-              fileEntity.id,
-              `import:${moduleSpecifier}:*`,
-              RelationshipType.IMPORTS,
-              { importKind: "namespace", alias, module: moduleSpecifier }
-            )
-          );
-        }
+          if (target) {
+            relationships.push(
+              this.createRelationship(
+                fileEntity.id,
+                `file:${target}:*`,
+                RelationshipType.IMPORTS,
+                {
+                  importKind: "namespace",
+                  alias,
+                  module: moduleSpecifier,
+                  language: fileEntity.language,
+                }
+              )
+            );
+          } else {
+            relationships.push(
+              this.createRelationship(
+                fileEntity.id,
+                `import:${moduleSpecifier}:*`,
+                RelationshipType.IMPORTS,
+                {
+                  importKind: "namespace",
+                  alias,
+                  module: moduleSpecifier,
+                  language: fileEntity.language,
+                }
+              )
+            );
+          }
       }
 
       // Named imports
@@ -4219,6 +4263,7 @@ export class ASTParser {
                 alias,
                 module: moduleSpecifier,
                 importDepth: resolved.depth,
+                language: fileEntity.language,
               }
             )
           );
@@ -4228,7 +4273,12 @@ export class ASTParser {
               fileEntity.id,
               `import:${moduleSpecifier}:${alias || name}`,
               RelationshipType.IMPORTS,
-              { importKind: "named", alias, module: moduleSpecifier }
+              {
+                importKind: "named",
+                alias,
+                module: moduleSpecifier,
+                language: fileEntity.language,
+              }
             )
           );
         }

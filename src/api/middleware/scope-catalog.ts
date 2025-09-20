@@ -77,6 +77,11 @@ export const DEFAULT_SCOPE_RULES: ScopeRule[] = [
     description: "Administrative endpoints",
   },
   {
+    matcher: /^\/api\/v1\/history(?:\/|$)/,
+    scopes: ["admin"],
+    description: "Historical data endpoints require administrative access",
+  },
+  {
     matcher: /^\/api\/v1\/graph\/search$/,
     method: "POST",
     scopes: ["graph:read"],

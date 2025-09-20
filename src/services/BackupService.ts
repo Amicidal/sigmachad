@@ -11,6 +11,7 @@ import type {
   BackupRetentionPolicyConfig,
 } from "./database/index.js";
 import * as path from "path";
+import * as fs from "fs/promises";
 import * as crypto from "crypto";
 import archiver from "archiver";
 import type { LoggingService } from "./LoggingService.js";
@@ -101,6 +102,31 @@ interface ComponentValidation {
   status: "valid" | "warning" | "invalid" | "missing";
   details: string;
   metadata?: Record<string, unknown>;
+}
+
+interface PostgresColumnDefinition {
+  name: string;
+  dataType: string;
+  udtName?: string | null;
+  isNullable: boolean;
+  columnDefault?: string | null;
+  characterMaximumLength?: number | null;
+  numericPrecision?: number | null;
+  numericScale?: number | null;
+}
+
+interface PostgresTableDump {
+  name: string;
+  columns: PostgresColumnDefinition[];
+  primaryKey: string[];
+  createStatement: string;
+  rows: Array<Record<string, any>>;
+}
+
+interface PostgresBackupArtifact {
+  version: number;
+  createdAt: string;
+  tables: PostgresTableDump[];
 }
 
 export interface RestorePreviewToken {
@@ -1630,22 +1656,64 @@ export class BackupService {
   private async validatePostgresBackup(
     backupId: string
   ): Promise<ComponentValidation> {
-    const artifact = `${backupId}_postgres.sql`;
-    const exists = await this.artifactExists(backupId, artifact);
-    if (!exists) {
+    const jsonArtifact = `${backupId}_postgres.json`;
+    const sqlArtifact = `${backupId}_postgres.sql`;
+
+    const jsonExists = await this.artifactExists(backupId, jsonArtifact);
+    const sqlExists = await this.artifactExists(backupId, sqlArtifact);
+
+    if (!jsonExists && !sqlExists) {
       return {
         component: "postgres",
         action: "validate",
         status: "missing",
-        details: "PostgreSQL dump not found",
+        details: "PostgreSQL artifacts not found",
       };
     }
 
+    if (jsonExists) {
+      try {
+        const artifact = (await this.readArtifact(backupId, jsonArtifact)).toString(
+          "utf-8"
+        );
+        const payload = JSON.parse(artifact) as PostgresBackupArtifact;
+        const liveTables = await this.fetchPostgresTableNames();
+
+        return {
+          component: "postgres",
+          action: "validate",
+          status: payload.tables.length === 0 ? "warning" : "valid",
+          details:
+            payload.tables.length > 0
+              ? "Structured PostgreSQL backup artifact parsed successfully"
+              : "Structured artifact parsed but contains no tables",
+          metadata: {
+            tables: payload.tables.map((table) => ({
+              name: table.name,
+              rowCount: table.rows.length,
+            })),
+            liveTables,
+            checksum: this.computeBufferChecksum(Buffer.from(artifact)),
+          },
+        };
+      } catch (error) {
+        return {
+          component: "postgres",
+          action: "validate",
+          status: "invalid",
+          details: "Failed to parse structured PostgreSQL artifact",
+          metadata: {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
+    }
+
     try {
-      const dump = (await this.readArtifact(backupId, artifact)).toString(
+      const dump = (await this.readArtifact(backupId, sqlArtifact)).toString(
         "utf-8"
       );
-      const tableMatches = dump.match(/CREATE TABLE IF NOT EXISTS\s+([a-zA-Z0-9_]+)/g);
+      const tableMatches = dump.match(/CREATE TABLE IF NOT EXISTS\s+([a-zA-Z0-9_"\.]+)/g);
       const backupTables = tableMatches ? tableMatches.length : 0;
       const liveTables = await this.fetchPostgresTableNames();
 
@@ -1658,8 +1726,8 @@ export class BackupService {
         status,
         details:
           status === "valid"
-            ? "PostgreSQL dump contains table definitions"
-            : "PostgreSQL dump parsed but no table definitions found",
+            ? "Legacy PostgreSQL dump contains table definitions"
+            : "Legacy PostgreSQL dump parsed but no table definitions found",
         metadata: {
           backupTables,
           liveTables,
@@ -1886,7 +1954,8 @@ export class BackupService {
 
   private async backupPostgreSQL(backupId: string): Promise<void> {
     try {
-      const artifactName = `${backupId}_postgres.sql`;
+      const sqlArtifactName = `${backupId}_postgres.sql`;
+      const jsonArtifactName = `${backupId}_postgres.json`;
 
       const postgresService = this.dbService.getPostgreSQLService();
       const tablesQuery = `
@@ -1902,16 +1971,23 @@ export class BackupService {
         tableCount: tables.length,
       });
 
-      let dumpContent = `-- PostgreSQL dump created by Memento Backup Service\n`;
-      dumpContent += `-- Created: ${new Date().toISOString()}\n\n`;
+      const tableDumps: PostgresTableDump[] = [];
+      let schemaContent = `-- PostgreSQL schema snapshot created by Memento Backup Service\n`;
+      schemaContent += `-- Created: ${new Date().toISOString()}\n\n`;
 
-      // Dump schema and data for each table
       for (const table of tables) {
-        const tableName = table.tablename;
+        const tableName: string = table.tablename;
 
-        // Get table schema
         const schemaQuery = `
-          SELECT column_name, data_type, is_nullable
+          SELECT
+            column_name,
+            data_type,
+            udt_name,
+            is_nullable,
+            column_default,
+            character_maximum_length,
+            numeric_precision,
+            numeric_scale
           FROM information_schema.columns
           WHERE table_name = $1 AND table_schema = 'public'
           ORDER BY ordinal_position;
@@ -1921,51 +1997,81 @@ export class BackupService {
           tableName,
         ]);
         const columns = columnsResult.rows || columnsResult;
-        dumpContent += `-- Schema for table: ${tableName}\n`;
-        dumpContent += `CREATE TABLE IF NOT EXISTS ${tableName} (\n`;
-        dumpContent += columns
-          .map(
-            (col: any) =>
-              `  ${col.column_name} ${col.data_type}${
-                col.is_nullable === "NO" ? " NOT NULL" : ""
-              }`
-          )
-          .join(",\n");
-        dumpContent += `\n);\n\n`;
 
-        // Get table data
-        const dataQuery = `SELECT * FROM ${tableName};`;
+        const primaryKeyQuery = `
+          SELECT
+            a.attname AS column_name
+          FROM pg_index i
+          JOIN pg_attribute a ON a.attrelid = i.indrelid
+            AND a.attnum = ANY(i.indkey)
+          WHERE i.indrelid = $1::regclass AND i.indisprimary = true;
+        `;
+
+        const primaryKeyResult = await postgresService.query(primaryKeyQuery, [
+          tableName,
+        ]);
+        const primaryKeys = (primaryKeyResult.rows || primaryKeyResult).map(
+          (row: any) => row.column_name
+        );
+
+        const columnDefinitions: PostgresColumnDefinition[] = columns.map(
+          (col: any) => ({
+            name: col.column_name,
+            dataType: col.data_type,
+            udtName: col.udt_name,
+            isNullable: col.is_nullable !== "NO",
+            columnDefault: col.column_default,
+            characterMaximumLength: col.character_maximum_length,
+            numericPrecision: col.numeric_precision,
+            numericScale: col.numeric_scale,
+          })
+        );
+
+        const createStatement = this.generateCreateTableStatement(
+          tableName,
+          columnDefinitions,
+          primaryKeys
+        );
+
+        schemaContent += `-- Schema for table: ${tableName}\n`;
+        schemaContent += `${createStatement}\n\n`;
+        schemaContent += `-- Data for table: ${tableName} captured in ${jsonArtifactName}\n\n`;
+
+        const dataQuery = `SELECT * FROM ${this.quoteIdentifier(
+          tableName
+        )};`;
         const dataResult = await postgresService.query(dataQuery);
         const data = dataResult.rows || dataResult;
 
-        if (data.length > 0) {
-          dumpContent += `-- Data for table: ${tableName}\n`;
-          for (const row of data) {
-            const values = Object.values(row).map((value) =>
-              value === null
-                ? "NULL"
-                : typeof value === "string"
-                ? `'${value.replace(/'/g, "''")}'`
-                : typeof value === "object"
-                ? `'${JSON.stringify(value)}'`
-                : value
-                ? value.toString()
-                : "NULL"
-            );
+        const sanitizedRows = data.map((row: Record<string, any>) =>
+          this.sanitizeRowForBackup(row)
+        );
 
-            dumpContent += `INSERT INTO ${tableName} VALUES (${values.join(
-              ", "
-            )});\n`;
-          }
-          dumpContent += `\n`;
-        }
+        tableDumps.push({
+          name: tableName,
+          columns: columnDefinitions,
+          primaryKey: primaryKeys,
+          createStatement,
+          rows: sanitizedRows,
+        });
       }
 
-      await this.writeArtifact(backupId, artifactName, dumpContent);
+      const artifactPayload: PostgresBackupArtifact = {
+        version: 1,
+        createdAt: new Date().toISOString(),
+        tables: tableDumps,
+      };
+
+      await this.writeArtifact(backupId, sqlArtifactName, schemaContent);
+      await this.writeArtifact(
+        backupId,
+        jsonArtifactName,
+        JSON.stringify(artifactPayload, null, 2)
+      );
 
       this.logInfo("backup", "PostgreSQL backup created", {
         backupId,
-        bytes: dumpContent.length,
+        tables: tableDumps.length,
       });
     } catch (error) {
       this.logError("backup", "PostgreSQL backup failed", {
@@ -2122,6 +2228,176 @@ export class BackupService {
     }
   }
 
+  private quoteIdentifier(identifier: string): string {
+    return `"${identifier.replace(/"/g, '""')}"`;
+  }
+
+  private sanitizeRowForBackup(row: Record<string, any>): Record<string, any> {
+    const sanitized: Record<string, any> = {};
+    for (const [key, value] of Object.entries(row)) {
+      sanitized[key] = this.sanitizeValueForBackup(value);
+    }
+    return sanitized;
+  }
+
+  private sanitizeValueForBackup(value: any): any {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (Buffer.isBuffer(value)) {
+      return {
+        __backupType: "Buffer",
+        data: value.toString("base64"),
+      };
+    }
+
+    if (value instanceof Date) {
+      return {
+        __backupType: "Date",
+        value: value.toISOString(),
+      };
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeValueForBackup(item));
+    }
+
+    if (typeof value === "object") {
+      return value;
+    }
+
+    return value;
+  }
+
+  private hydrateValueForRestore(value: any): any {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.hydrateValueForRestore(item));
+    }
+
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      value.__backupType === "Buffer" &&
+      typeof value.data === "string"
+    ) {
+      return Buffer.from(value.data, "base64");
+    }
+
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      value.__backupType === "Date" &&
+      typeof value.value === "string"
+    ) {
+      return new Date(value.value);
+    }
+
+    return value;
+  }
+
+  private mapUdtNameToSqlType(udtName?: string | null): string {
+    if (!udtName) {
+      return "text";
+    }
+
+    const normalized = udtName.replace(/^_/, "");
+    const mapping: Record<string, string> = {
+      int2: "smallint",
+      int4: "integer",
+      int8: "bigint",
+      float4: "real",
+      float8: "double precision",
+      numeric: "numeric",
+      varchar: "character varying",
+      text: "text",
+      bool: "boolean",
+      bytea: "bytea",
+      timestamp: "timestamp",
+      timestamptz: "timestamp with time zone",
+      date: "date",
+      time: "time",
+      timetz: "time with time zone",
+      uuid: "uuid",
+      json: "json",
+      jsonb: "jsonb",
+      citext: "citext",
+    };
+
+    return mapping[normalized] ?? normalized;
+  }
+
+  private resolveColumnType(column: PostgresColumnDefinition): string {
+    const dataType = column.dataType.toLowerCase();
+
+    if (dataType === "array") {
+      const elementType = this.mapUdtNameToSqlType(column.udtName);
+      return `${elementType}[]`;
+    }
+
+    if (dataType === "user-defined") {
+      return column.udtName ?? column.dataType;
+    }
+
+    if (dataType === "character varying" || dataType === "varchar") {
+      if (column.characterMaximumLength) {
+        return `character varying(${column.characterMaximumLength})`;
+      }
+      return "character varying";
+    }
+
+    if (dataType === "numeric" || dataType === "decimal") {
+      if (column.numericPrecision) {
+        if (column.numericScale) {
+          return `numeric(${column.numericPrecision}, ${column.numericScale})`;
+        }
+        return `numeric(${column.numericPrecision})`;
+      }
+      return "numeric";
+    }
+
+    return column.dataType;
+  }
+
+  private generateCreateTableStatement(
+    tableName: string,
+    columns: PostgresColumnDefinition[],
+    primaryKey: string[]
+  ): string {
+    const columnStatements = columns.map((column) => {
+      const parts = [
+        `${this.quoteIdentifier(column.name)} ${this.resolveColumnType(column)}`,
+      ];
+
+      if (column.columnDefault) {
+        parts.push(`DEFAULT ${column.columnDefault}`);
+      }
+
+      if (!column.isNullable) {
+        parts.push("NOT NULL");
+      }
+
+      return parts.join(" ");
+    });
+
+    let statement = `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(
+      tableName
+    )} (\n  ${columnStatements.join(",\n  ")}`;
+
+    if (primaryKey.length > 0) {
+      statement += `,\n  PRIMARY KEY (${primaryKey
+        .map((key) => this.quoteIdentifier(key))
+        .join(", ")})`;
+    }
+
+    statement += `\n);`;
+    return statement;
+  }
+
   private async storeBackupMetadata(
     metadata: BackupMetadata,
     context: {
@@ -2228,22 +2504,13 @@ export class BackupService {
       );
 
       if (!result.rows || result.rows.length === 0) {
-        return null;
+        return await this.loadLegacyBackupRecord(backupId);
       }
 
       const row = result.rows[0];
-      const raw = row.metadata || row.metadata_json;
-      if (!raw) {
-        return null;
-      }
-
-      const parsed =
-        typeof raw === "string"
-          ? (JSON.parse(raw) as BackupMetadata)
-          : (raw as BackupMetadata);
-
-      if (parsed.timestamp && !(parsed.timestamp instanceof Date)) {
-        parsed.timestamp = new Date(parsed.timestamp as unknown as string);
+      const parsed = this.deserializeBackupMetadata(row.metadata ?? row.metadata_json);
+      if (!parsed) {
+        return await this.loadLegacyBackupRecord(backupId);
       }
 
       return {
@@ -2258,7 +2525,7 @@ export class BackupService {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
-      return null;
+      return await this.loadLegacyBackupRecord(backupId);
     }
   }
 
@@ -2470,30 +2737,128 @@ export class BackupService {
     this.logInfo("restore", "Restoring PostgreSQL", { backupId });
 
     try {
-      const artifact = `${backupId}_postgres.sql`;
-      const exists = await this.artifactExists(backupId, artifact);
-      if (!exists) {
-        this.logInfo("restore", "PostgreSQL dump not found; skipping", {
+      const jsonArtifact = `${backupId}_postgres.json`;
+      const sqlArtifact = `${backupId}_postgres.sql`;
+      const postgresService = this.dbService.getPostgreSQLService();
+
+      if (await this.artifactExists(backupId, jsonArtifact)) {
+        const artifactContent = (await this.readArtifact(
+          backupId,
+          jsonArtifact
+        )).toString("utf-8");
+        const payload = JSON.parse(artifactContent) as PostgresBackupArtifact;
+
+        for (const table of payload.tables) {
+          const columnDefinitions = table.columns ?? [];
+          const primaryKeys = table.primaryKey ?? [];
+          const createStatement =
+            table.createStatement?.trim() ||
+            this.generateCreateTableStatement(
+              table.name,
+              columnDefinitions,
+              primaryKeys
+            );
+
+          if (createStatement) {
+            try {
+              await postgresService.query(createStatement);
+            } catch (error: any) {
+              if (!error?.message?.includes("already exists")) {
+                this.logError("restore", "Failed to create table", {
+                  backupId,
+                  table: table.name,
+                  error: error instanceof Error ? error.message : error,
+                });
+                throw error;
+              }
+            }
+          }
+
+          if (!Array.isArray(table.rows) || table.rows.length === 0) {
+            continue;
+          }
+
+          const columnNames = columnDefinitions.length
+            ? columnDefinitions.map((col) => col.name)
+            : Object.keys(table.rows[0] ?? {});
+
+          if (columnNames.length === 0) {
+            continue;
+          }
+
+          const quotedColumns = columnNames.map((name) =>
+            this.quoteIdentifier(name)
+          );
+          const placeholders = columnNames
+            .map((_, index) => `$${index + 1}`)
+            .join(", ");
+
+          const upsertClause = (() => {
+            if (!primaryKeys.length) {
+              return "";
+            }
+            const nonPkColumns = columnNames.filter(
+              (name) => !primaryKeys.includes(name)
+            );
+            if (!nonPkColumns.length) {
+              return ` ON CONFLICT (${primaryKeys
+                .map((key) => this.quoteIdentifier(key))
+                .join(", ")}) DO NOTHING`;
+            }
+            const updateAssignments = nonPkColumns
+              .map(
+                (name) =>
+                  `${this.quoteIdentifier(name)} = EXCLUDED.${this.quoteIdentifier(
+                    name
+                  )}`
+              )
+              .join(", ");
+            return ` ON CONFLICT (${primaryKeys
+              .map((key) => this.quoteIdentifier(key))
+              .join(", ")}) DO UPDATE SET ${updateAssignments}`;
+          })();
+
+          const insertSql = `INSERT INTO ${this.quoteIdentifier(
+            table.name
+          )} (${quotedColumns.join(", ")}) VALUES (${placeholders})${upsertClause}`;
+
+          for (const row of table.rows) {
+            const values = columnNames.map((name) =>
+              this.hydrateValueForRestore(row[name])
+            );
+            await postgresService.query(insertSql, values);
+          }
+        }
+
+        this.logInfo("restore", "PostgreSQL restored from structured artifact", {
+          backupId,
+          tablesRestored: payload.tables.length,
+        });
+        return;
+      }
+
+      const sqlExists = await this.artifactExists(backupId, sqlArtifact);
+      if (!sqlExists) {
+        this.logInfo("restore", "PostgreSQL artifacts not found; skipping", {
           backupId,
         });
         return;
       }
 
-      const dumpContent = (await this.readArtifact(backupId, artifact)).toString(
+      const dumpContent = (await this.readArtifact(backupId, sqlArtifact)).toString(
         "utf-8"
       );
-      const postgresService = this.dbService.getPostgreSQLService();
 
       try {
         await postgresService.query(dumpContent);
-        this.logInfo("restore", "PostgreSQL restored using fast-path", {
+        this.logInfo("restore", "PostgreSQL restored using legacy dump", {
           backupId,
         });
         return;
       } catch (multiErr: any) {
         this.logError(
           "restore",
-          "Multi-statement restore failed; attempting granular replay",
+          "Legacy dump replay failed; attempting statement-by-statement recovery",
           {
             backupId,
             error: multiErr?.message ?? multiErr,
@@ -2501,7 +2866,6 @@ export class BackupService {
         );
       }
 
-      // Split by complete statements (handling multiline statements)
       const statements: string[] = [];
       let currentStatement = "";
       let inParentheses = 0;
@@ -2512,7 +2876,6 @@ export class BackupService {
         const char = dumpContent[i];
         const prevChar = i > 0 ? dumpContent[i - 1] : "";
 
-        // Handle quotes
         if ((char === '"' || char === "'") && prevChar !== "\\") {
           if (!inQuotes) {
             inQuotes = true;
@@ -2523,7 +2886,6 @@ export class BackupService {
           }
         }
 
-        // Handle parentheses (only when not in quotes)
         if (!inQuotes) {
           if (char === "(") inParentheses++;
           else if (char === ")") inParentheses--;
@@ -2531,7 +2893,6 @@ export class BackupService {
 
         currentStatement += char;
 
-        // Check for statement end
         if (char === ";" && !inQuotes && inParentheses === 0) {
           const trimmed = currentStatement.trim();
           if (trimmed && !trimmed.startsWith("--")) {
@@ -2541,7 +2902,6 @@ export class BackupService {
         }
       }
 
-      // Execute statements in order: CREATE TABLE first, then INSERT
       const createStatements: string[] = [];
       const insertStatements: string[] = [];
 
@@ -2553,12 +2913,10 @@ export class BackupService {
         }
       }
 
-      // Execute CREATE TABLE statements first
       for (const statement of createStatements) {
         try {
           await postgresService.query(statement);
         } catch (error: any) {
-          // Skip table already exists errors
           if (!error?.message?.includes("already exists")) {
             console.warn(
               `⚠️ Failed to create table: ${statement.substring(0, 50)}...`,
@@ -2568,41 +2926,33 @@ export class BackupService {
         }
       }
 
-      // Execute INSERT statements with conflict resolution
       for (const statement of insertStatements) {
         try {
-          // Try the original statement first
           await postgresService.query(statement);
         } catch (error: any) {
-          // If it's a duplicate key error, try with ON CONFLICT DO UPDATE
           if (
             error.code === "23505" &&
             error.message?.includes("duplicate key")
           ) {
             try {
-              // Extract table name and values from the INSERT statement
               const insertMatch = statement.match(
-                /INSERT INTO (\w+) VALUES \((.+)\);/
+                /INSERT INTO ([\w"]+) VALUES \((.+)\);/
               );
               if (insertMatch) {
-                const tableName = insertMatch[1];
-                const valuesStr = insertMatch[2];
-
-                // Get column information to build UPDATE clause
+                const tableIdentifier = insertMatch[1].replace(/"/g, "");
                 const columnsQuery = `
-                  SELECT column_name, data_type
+                  SELECT column_name
                   FROM information_schema.columns
                   WHERE table_name = $1 AND table_schema = 'public'
                   ORDER BY ordinal_position;
                 `;
                 const columnsResult = await postgresService.query(
                   columnsQuery,
-                  [tableName]
+                  [tableIdentifier]
                 );
                 const columns = columnsResult.rows || columnsResult;
 
                 if (columns.length > 0) {
-                  // Build ON CONFLICT DO UPDATE statement
                   const updateClause = columns
                     .map(
                       (col: any) =>
@@ -2615,18 +2965,7 @@ export class BackupService {
                     -1
                   )} ON CONFLICT (id) DO UPDATE SET ${updateClause};`;
                   await postgresService.query(conflictStatement);
-                } else {
-                  console.warn(
-                    `⚠️ Could not resolve conflict for table ${tableName}: no columns found`
-                  );
                 }
-              } else {
-                console.warn(
-                  `⚠️ Could not parse INSERT statement: ${statement.substring(
-                    0,
-                    50
-                  )}...`
-                );
               }
             } catch (updateError) {
               console.warn(
@@ -2646,7 +2985,9 @@ export class BackupService {
         }
       }
 
-      this.logInfo("restore", "PostgreSQL restored", { backupId });
+      this.logInfo("restore", "PostgreSQL restored from legacy artifact", {
+        backupId,
+      });
     } catch (error) {
       this.logError("restore", "Failed to restore PostgreSQL", {
         backupId,
@@ -2726,6 +3067,7 @@ export class BackupService {
       }
 
       const expectedArtifacts: string[] = [];
+      const missingFiles: string[] = [];
 
       if (metadata.components.falkordb) {
         expectedArtifacts.push(`${backupId}_falkordb.dump`);
@@ -2736,13 +3078,25 @@ export class BackupService {
         expectedArtifacts.push(...qdrantArtifacts);
       }
       if (metadata.components.postgres) {
-        expectedArtifacts.push(`${backupId}_postgres.sql`);
+        const postgresJson = `${backupId}_postgres.json`;
+        const postgresSql = `${backupId}_postgres.sql`;
+        const jsonExists = await this.artifactExists(backupId, postgresJson);
+        const sqlExists = await this.artifactExists(backupId, postgresSql);
+
+        if (jsonExists) {
+          expectedArtifacts.push(postgresJson);
+        }
+        if (sqlExists) {
+          expectedArtifacts.push(postgresSql);
+        }
+        if (!jsonExists && !sqlExists) {
+          missingFiles.push(postgresJson);
+        }
       }
       if (metadata.components.config) {
         expectedArtifacts.push(`${backupId}_config.json`);
       }
 
-      const missingFiles: string[] = [];
       for (const artifact of expectedArtifacts) {
         const exists = await this.artifactExists(backupId, artifact);
         if (!exists) {
@@ -2801,25 +3155,210 @@ export class BackupService {
         `SELECT metadata FROM maintenance_backups ${whereClause} ORDER BY recorded_at DESC`,
         params
       );
+      const records = new Map<string, BackupMetadata>();
 
-      return (result.rows || [])
-        .map((row: any) => {
-          const raw = row.metadata || row.metadata_json;
-          if (!raw) return null;
-          const parsed =
-            typeof raw === "string"
-              ? (JSON.parse(raw) as BackupMetadata)
-              : (raw as BackupMetadata);
-          if (parsed.timestamp && !(parsed.timestamp instanceof Date)) {
-            parsed.timestamp = new Date(parsed.timestamp as unknown as string);
+      for (const row of result.rows || []) {
+        const metadata = this.deserializeBackupMetadata(row.metadata ?? row.metadata_json);
+        if (metadata) {
+          records.set(metadata.id, metadata);
+        }
+      }
+
+      if (!options?.destination) {
+        const legacyBackups = await this.listLegacyBackupMetadata();
+        for (const metadata of legacyBackups) {
+          if (!records.has(metadata.id)) {
+            records.set(metadata.id, metadata);
           }
-          return parsed;
-        })
-        .filter((item): item is BackupMetadata => Boolean(item));
+        }
+      }
+
+      return Array.from(records.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     } catch (error) {
       this.logError("backup", "Failed to list backups", {
         error: error instanceof Error ? error.message : error,
       });
+      const legacyBackups = await this.listLegacyBackupMetadata();
+      if (legacyBackups.length > 0 && !options?.destination) {
+        return legacyBackups.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      }
+      return [];
+    }
+  }
+
+  private deserializeBackupMetadata(raw: unknown): BackupMetadata | null {
+    if (!raw) {
+      return null;
+    }
+
+    let value: any = raw;
+    if (typeof raw === "string") {
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+
+    const timestampInput = (value as any).timestamp;
+    const timestamp =
+      timestampInput instanceof Date
+        ? timestampInput
+        : new Date(typeof timestampInput === "string" ? timestampInput : Number(timestampInput));
+
+    if (!timestamp || Number.isNaN(timestamp.getTime())) {
+      return null;
+    }
+
+    const id = (value as any).id;
+    const type = (value as any).type;
+    if (typeof id !== "string" || !id) {
+      return null;
+    }
+
+    const normalizedType = type === "incremental" ? "incremental" : "full";
+
+    const sourceComponents = (value as any).components ?? {};
+
+    const metadata: BackupMetadata = {
+      id,
+      type: normalizedType,
+      timestamp,
+      size: Number((value as any).size ?? (value as any).size_bytes ?? 0) || 0,
+      checksum: typeof (value as any).checksum === "string" ? (value as any).checksum : "",
+      components: {
+        falkordb: Boolean(sourceComponents.falkordb),
+        qdrant: Boolean(sourceComponents.qdrant),
+        postgres: Boolean(sourceComponents.postgres),
+        config: Boolean(sourceComponents.config),
+      },
+      status:
+        (value as any).status === "failed"
+          ? "failed"
+          : (value as any).status === "in_progress"
+          ? "in_progress"
+          : "completed",
+    };
+
+    return metadata;
+  }
+
+  private async loadLegacyBackupRecord(
+    backupId: string
+  ): Promise<
+    | {
+        metadata: BackupMetadata;
+        storageProviderId: string;
+        destination?: string | null;
+        labels?: string[] | null;
+        status: string;
+      }
+    | null
+  > {
+    const metadata = await this.readLegacyBackupMetadata(backupId);
+    if (!metadata) {
+      return null;
+    }
+
+    return {
+      metadata,
+      storageProviderId: this.storageProvider.id,
+      destination: null,
+      labels: null,
+      status: metadata.status,
+    };
+  }
+
+  private async readLegacyBackupMetadata(backupId: string): Promise<BackupMetadata | null> {
+    const fileName = `${backupId}_metadata.json`;
+
+    const metadataFromProvider = await this.readLegacyMetadataFromProvider(fileName);
+    if (metadataFromProvider) {
+      return metadataFromProvider;
+    }
+
+    try {
+      const metadataPath = path.join(this.backupDir, fileName);
+      const content = await fs.readFile(metadataPath, "utf-8");
+      return this.deserializeBackupMetadata(content);
+    } catch {
+      return null;
+    }
+  }
+
+  private async readLegacyMetadataFromProvider(fileName: string): Promise<BackupMetadata | null> {
+    try {
+      await this.storageProvider.ensureReady();
+      const exists = await this.storageProvider.exists(fileName);
+      if (!exists) {
+        return null;
+      }
+
+      const buffer = await this.storageProvider.readFile(fileName);
+      return this.deserializeBackupMetadata(buffer.toString("utf-8"));
+    } catch {
+      return null;
+    }
+  }
+
+  private async listLegacyBackupMetadata(): Promise<BackupMetadata[]> {
+    const results = new Map<string, BackupMetadata>();
+    const metadataSuffix = "_metadata.json";
+
+    const providerEntries = await this.listLegacyMetadataFromProvider();
+    for (const metadata of providerEntries) {
+      results.set(metadata.id, metadata);
+    }
+
+    try {
+      const files = await fs.readdir(this.backupDir);
+      for (const file of files) {
+        if (!file.endsWith(metadataSuffix)) {
+          continue;
+        }
+        if (results.has(file.replace(metadataSuffix, ""))) {
+          continue;
+        }
+        try {
+          const content = await fs.readFile(path.join(this.backupDir, file), "utf-8");
+          const metadata = this.deserializeBackupMetadata(content);
+          if (metadata) {
+            results.set(metadata.id, metadata);
+          }
+        } catch {
+          // Ignore unreadable legacy file
+        }
+      }
+    } catch {
+      // Ignore missing local backup directory
+    }
+
+    return Array.from(results.values());
+  }
+
+  private async listLegacyMetadataFromProvider(): Promise<BackupMetadata[]> {
+    try {
+      await this.storageProvider.ensureReady();
+      const files = await this.storageProvider.list();
+      const metadataFiles = files.filter((file) => file.endsWith("_metadata.json"));
+      const results: BackupMetadata[] = [];
+      for (const file of metadataFiles) {
+        try {
+          const buffer = await this.storageProvider.readFile(file);
+          const metadata = this.deserializeBackupMetadata(buffer.toString("utf-8"));
+          if (metadata) {
+            results.push(metadata);
+          }
+        } catch {
+          // Ignore unreadable provider metadata
+        }
+      }
+      return results;
+    } catch {
       return [];
     }
   }

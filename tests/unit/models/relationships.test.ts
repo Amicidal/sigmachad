@@ -827,23 +827,62 @@ describe('Performance Relationship Interface', () => {
       created: testDate,
       lastModified: testDate,
       version: 1,
-      executionTime: 150,
-      memoryUsage: 50,
-      coveragePercentage: 85,
+      metricId: 'test/user-service/latency/p95',
+      scenario: 'test-suite',
+      environment: 'test',
+      baselineValue: 120,
+      currentValue: 180,
+      delta: 60,
+      percentChange: 50,
+      unit: 'ms',
+      sampleSize: 8,
+      confidenceInterval: { lower: 110, upper: 190 },
+      trend: 'regression',
+      severity: 'high',
+      riskScore: 1.5,
+      runId: 'run-123',
+      detectedAt: testDate,
+      metricsHistory: [
+        {
+          value: 120,
+          timestamp: testDate,
+          environment: 'test',
+          unit: 'ms',
+        },
+        {
+          value: 180,
+          timestamp: new Date('2024-01-02T00:00:00Z'),
+          environment: 'test',
+          unit: 'ms',
+        },
+      ],
+      evidence: [
+        {
+          source: 'heuristic',
+          note: 'Latency regression detected',
+        },
+      ],
+      metadata: {
+        reason: 'Latency regression detected',
+        metrics: [
+          { id: 'averageExecutionTime', value: 120, unit: 'ms' },
+          { id: 'p95ExecutionTime', value: 180, unit: 'ms' },
+        ],
+      },
     };
   });
 
   it('should create a valid PerformanceRelationship', () => {
     expect(performanceRelationship.type).toBe(RelationshipType.PERFORMANCE_IMPACT);
-    expect(performanceRelationship.executionTime).toBe(150);
-    expect(performanceRelationship.memoryUsage).toBe(50);
-    expect(performanceRelationship.coveragePercentage).toBe(85);
+    expect(performanceRelationship.metricId).toBe('test/user-service/latency/p95');
+    expect(performanceRelationship.currentValue).toBe(180);
+    expect(performanceRelationship.trend).toBe('regression');
+    expect(performanceRelationship.severity).toBe('high');
   });
 
   it('should accept all performance relationship types', () => {
-    const performanceTypes: Array<RelationshipType.PERFORMANCE_IMPACT | RelationshipType.COVERAGE_PROVIDES | RelationshipType.PERFORMANCE_REGRESSION> = [
+    const performanceTypes: Array<RelationshipType.PERFORMANCE_IMPACT | RelationshipType.PERFORMANCE_REGRESSION> = [
       RelationshipType.PERFORMANCE_IMPACT,
-      RelationshipType.COVERAGE_PROVIDES,
       RelationshipType.PERFORMANCE_REGRESSION,
     ];
 
@@ -858,62 +897,20 @@ describe('Performance Relationship Interface', () => {
     });
   });
 
-  it('should handle performance metrics', () => {
-    const fastExecution: PerformanceRelationship = {
-      ...performanceRelationship,
-      executionTime: 25,
-      memoryUsage: 30,
-    };
-
-    const slowExecution: PerformanceRelationship = {
-      ...performanceRelationship,
-      executionTime: 5000,
-      memoryUsage: 200,
-    };
-
-    expect(fastExecution.executionTime).toBe(25);
-    expect(fastExecution.memoryUsage).toBe(30);
-    expect(slowExecution.executionTime).toBe(5000);
-    expect(slowExecution.memoryUsage).toBe(200);
-  });
-
-  it('should handle coverage percentages', () => {
-    const highCoverage: PerformanceRelationship = {
-      ...performanceRelationship,
-      coveragePercentage: 95,
-    };
-
-    const lowCoverage: PerformanceRelationship = {
-      ...performanceRelationship,
-      coveragePercentage: 45,
-    };
-
-    expect(highCoverage.coveragePercentage).toBe(95);
-    expect(lowCoverage.coveragePercentage).toBe(45);
-  });
-
-  it('should handle benchmark values', () => {
-    const benchmarkRelationship: PerformanceRelationship = {
-      ...performanceRelationship,
-      benchmarkValue: 1000,
-    };
-
-    expect(benchmarkRelationship.benchmarkValue).toBe(1000);
-  });
-
   it('should handle optional performance metrics', () => {
     const minimalPerformanceRelationship: PerformanceRelationship = {
       ...performanceRelationship,
-      executionTime: undefined,
-      memoryUsage: undefined,
-      coveragePercentage: undefined,
-      benchmarkValue: undefined,
+      baselineValue: undefined,
+      currentValue: undefined,
+      delta: undefined,
+      percentChange: undefined,
+      metricsHistory: undefined,
     };
 
-    expect(minimalPerformanceRelationship.executionTime).toBeUndefined();
-    expect(minimalPerformanceRelationship.memoryUsage).toBeUndefined();
-    expect(minimalPerformanceRelationship.coveragePercentage).toBeUndefined();
-    expect(minimalPerformanceRelationship.benchmarkValue).toBeUndefined();
+    expect(minimalPerformanceRelationship.baselineValue).toBeUndefined();
+    expect(minimalPerformanceRelationship.currentValue).toBeUndefined();
+    expect(minimalPerformanceRelationship.delta).toBeUndefined();
+    expect(minimalPerformanceRelationship.metricsHistory).toBeUndefined();
   });
 });
 

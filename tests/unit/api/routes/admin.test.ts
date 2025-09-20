@@ -36,7 +36,15 @@ vi.mock('../../../../src/services/RollbackCapabilities.js', () => ({
   RollbackCapabilities: vi.fn()
 }));
 vi.mock('../../../../src/services/BackupService.js', () => ({
-  BackupService: vi.fn()
+  BackupService: vi.fn(),
+  MaintenanceOperationError: class MaintenanceOperationError extends Error {
+    statusCode = 500;
+    code = 'MOCK_MAINTENANCE_ERROR';
+
+    constructor(message?: string) {
+      super(message ?? 'Maintenance operation failed');
+    }
+  }
 }));
 vi.mock('../../../../src/services/LoggingService.js', () => ({
   LoggingService: vi.fn()
@@ -165,7 +173,10 @@ describe('Admin Routes', () => {
       expect(mockApp.post).toHaveBeenCalledWith('/sync', expect.any(Object), expect.any(Function));
       expect(mockApp.get).toHaveBeenCalledWith('/analytics', expect.any(Object), expect.any(Function));
       expect(mockApp.post).toHaveBeenCalledWith('/backup', expect.any(Object), expect.any(Function));
-      expect(mockApp.post).toHaveBeenCalledWith('/restore', expect.any(Object), expect.any(Function));
+      expect(mockApp.post).toHaveBeenCalledWith('/restore/preview', expect.any(Object), expect.any(Function));
+      expect(mockApp.post).toHaveBeenCalledWith('/restore/confirm', expect.any(Object), expect.any(Function));
+      expect(mockApp.post).toHaveBeenCalledWith('/restore/approve', expect.any(Object), expect.any(Function));
+      expect(mockApp.get).toHaveBeenCalledWith('/logs/health', expect.any(Function));
       expect(mockApp.get).toHaveBeenCalledWith('/logs', expect.any(Object), expect.any(Function));
       expect(mockApp.get).toHaveBeenCalledWith('/maintenance/metrics', expect.any(Function));
       expect(mockApp.get).toHaveBeenCalledWith('/maintenance/metrics/prometheus', expect.any(Function));
@@ -183,12 +194,22 @@ describe('Admin Routes', () => {
         // All optional services are undefined
       );
 
-      // Routes should still be registered (some may return 503 if service unavailable)
-      expect(mockApp.get).toHaveBeenCalledWith('/maintenance/metrics', expect.any(Function));
-      expect(mockApp.get).toHaveBeenCalledWith('/maintenance/metrics/prometheus', expect.any(Function));
-      expect(mockApp.get).toHaveBeenCalledTimes(7); // health, sync-status, analytics, logs, config, maintenance metrics (2)
-      expect(mockApp.post).toHaveBeenCalledTimes(4); // sync, backup, restore, maintenance
-      expect(mockApp.put).toHaveBeenCalledTimes(1); // config update
+      const registeredRoutes = mockApp.getRegisteredRoutes();
+      expect(registeredRoutes.has('get:/admin-health')).toBe(true);
+      expect(registeredRoutes.has('get:/sync-status')).toBe(true);
+      expect(registeredRoutes.has('get:/analytics')).toBe(true);
+      expect(registeredRoutes.has('get:/logs/health')).toBe(true);
+      expect(registeredRoutes.has('get:/logs')).toBe(true);
+      expect(registeredRoutes.has('get:/maintenance/metrics')).toBe(true);
+      expect(registeredRoutes.has('get:/maintenance/metrics/prometheus')).toBe(true);
+      expect(registeredRoutes.has('get:/config')).toBe(true);
+      expect(registeredRoutes.has('post:/sync')).toBe(true);
+      expect(registeredRoutes.has('post:/backup')).toBe(true);
+      expect(registeredRoutes.has('post:/restore/preview')).toBe(true);
+      expect(registeredRoutes.has('post:/restore/confirm')).toBe(true);
+      expect(registeredRoutes.has('post:/restore/approve')).toBe(true);
+      expect(registeredRoutes.has('post:/maintenance')).toBe(true);
+      expect(registeredRoutes.has('put:/config')).toBe(true);
     });
   });
 
@@ -830,7 +851,7 @@ describe('Admin Routes', () => {
     });
   });
 
-  describe('POST /restore', () => {
+  describe('POST /restore/preview', () => {
     let restoreHandler: Function;
 
     beforeEach(async () => {
@@ -846,7 +867,7 @@ describe('Admin Routes', () => {
         mockBackupService
       );
 
-      restoreHandler = getHandler('post', '/restore');
+      restoreHandler = getHandler('post', '/restore/preview');
     });
 
     it('should restore from backup with dry run', async () => {
@@ -859,20 +880,31 @@ describe('Admin Routes', () => {
         backupId: 'backup-123',
         status: 'dry-run-completed',
         changes: ['Would restore 150 entities', 'Would restore 200 relationships'],
-        estimatedDuration: '30 seconds'
+        estimatedDuration: '30 seconds',
+        success: true
       };
 
       mockBackupService.restoreBackup = vi.fn().mockResolvedValue(mockResult);
 
       await restoreHandler(mockRequest, mockReply);
 
-      expect(mockBackupService.restoreBackup).toHaveBeenCalledWith('backup-123', {
-        dryRun: true
-      });
+      expect(mockBackupService.restoreBackup).toHaveBeenCalledWith(
+        'backup-123',
+        expect.objectContaining({
+          dryRun: true,
+          validateIntegrity: true
+        })
+      );
 
+      expect(mockReply.status).toHaveBeenCalledWith(200);
       expect(mockReply.send).toHaveBeenCalledWith({
         success: true,
-        data: mockResult
+        data: mockResult,
+        metadata: {
+          status: mockResult.status,
+          tokenExpiresAt: undefined,
+          requiresApproval: undefined
+        }
       });
     });
 
@@ -888,9 +920,13 @@ describe('Admin Routes', () => {
 
       await restoreHandler(mockRequest, mockReply);
 
-      expect(mockBackupService.restoreBackup).toHaveBeenCalledWith('backup-456', {
-        dryRun: true
-      });
+      expect(mockBackupService.restoreBackup).toHaveBeenCalledWith(
+        'backup-456',
+        expect.objectContaining({
+          dryRun: true,
+          validateIntegrity: true
+        })
+      );
     });
 
     it('should return 503 when backup service is not available', async () => {
@@ -903,7 +939,7 @@ describe('Admin Routes', () => {
         mockFileWatcher
       );
 
-      const handlerNoBackup = getHandler('post', '/restore', mockAppNoBackup);
+      const handlerNoBackup = getHandler('post', '/restore/preview', mockAppNoBackup);
 
       await handlerNoBackup(mockRequest, mockReply);
 
@@ -929,7 +965,7 @@ describe('Admin Routes', () => {
       expect(mockReply.send).toHaveBeenCalledWith({
         success: false,
         error: {
-          code: 'RESTORE_FAILED',
+          code: 'RESTORE_PREVIEW_FAILED',
           message: 'Restore failed: backup not found'
         }
       });
@@ -1077,6 +1113,104 @@ describe('Admin Routes', () => {
         error: {
           code: 'LOGS_FAILED',
           message: 'Database query failed'
+        }
+      });
+    });
+  });
+
+  describe('GET /logs/health', () => {
+    let healthHandler: Function;
+
+    beforeEach(async () => {
+      await registerAdminRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockFileWatcher,
+        mockSyncCoordinator,
+        mockSyncMonitor,
+        mockConflictResolver,
+        mockRollbackCapabilities,
+        mockBackupService,
+        mockLoggingService
+      );
+
+      healthHandler = getHandler('get', '/logs/health');
+    });
+
+    it('should return logging health metrics when service is available', async () => {
+      const metrics = {
+        dispatcher: {
+          registeredConsumers: 1,
+          consoleOverridesActive: true,
+          processListenersAttached: 2,
+          dispatchedEvents: 42,
+          droppedEvents: 0
+        },
+        inMemoryLogCount: 10,
+        maxLogsInMemory: 1000,
+        droppedFromMemory: 3,
+        fileSink: {
+          bytesWritten: 1024,
+          failedWrites: 1,
+          suppressedWrites: 0,
+          rotations: 2,
+          lastError: 'boom',
+          path: '/var/log/memento.log'
+        },
+        logFilePath: '/var/log/memento.log',
+        disposed: false
+      };
+
+      mockLoggingService.getHealthMetrics = vi.fn().mockReturnValue(metrics);
+
+      await healthHandler(mockRequest, mockReply);
+
+      expect(mockLoggingService.getHealthMetrics).toHaveBeenCalled();
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: metrics
+      });
+    });
+
+    it('should return 503 when logging service is unavailable', async () => {
+      const mockAppNoLogging = createMockApp();
+
+      await registerAdminRoutes(
+        mockAppNoLogging as any,
+        mockKgService,
+        mockDbService,
+        mockFileWatcher
+      );
+
+      const noServiceHandler = getHandler('get', '/logs/health', mockAppNoLogging);
+
+      await noServiceHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(503);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Logging service not available'
+        }
+      });
+    });
+
+    it('should handle unexpected errors from the logging service', async () => {
+      const failingError = new Error('metrics failure');
+      mockLoggingService.getHealthMetrics = vi.fn(() => {
+        throw failingError;
+      });
+
+      await healthHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(500);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          code: 'LOG_HEALTH_FAILED',
+          message: 'metrics failure'
         }
       });
     });

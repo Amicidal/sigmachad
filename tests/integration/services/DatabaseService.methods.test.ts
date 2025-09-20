@@ -37,10 +37,10 @@ describe("DatabaseService Methods Coverage", () => {
     it("should execute getPerformanceMetricsHistory method", async () => {
       // Should return empty array when no data exists
       const testEntityId = uuidv4();
-      const metrics = await dbService.getPerformanceMetricsHistory(
-        testEntityId,
-        7
-      );
+    const metrics = await dbService.getPerformanceMetricsHistory(
+      testEntityId,
+      { days: 7 }
+    );
       expect(Array.isArray(metrics)).toBe(true);
       expect(metrics.length).toBeGreaterThanOrEqual(0);
     });

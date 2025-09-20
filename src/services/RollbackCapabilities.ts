@@ -8,6 +8,8 @@ import { DatabaseService } from "./DatabaseService.js";
 import { Entity } from "../models/entities.js";
 import { GraphRelationship } from "../models/relationships.js";
 
+const SNAPSHOT_PAGE_SIZE = 1000;
+
 export interface RollbackPoint {
   id: string;
   operationId: string;
@@ -27,6 +29,9 @@ export interface RollbackEntity {
 export interface RollbackRelationship {
   id: string;
   action: "create" | "update" | "delete";
+  fromEntityId?: string;
+  toEntityId?: string;
+  type?: GraphRelationship["type"];
   previousState?: GraphRelationship;
   newState?: GraphRelationship;
 }
@@ -138,11 +143,7 @@ export class RollbackCapabilities {
    */
   private async captureCurrentEntities(): Promise<any[]> {
     try {
-      // Get all entities from the graph - these represent the state to restore to
-      const entities = await this.kgService.listEntities({ limit: 1000 });
-      // For rollback points, we store the entities as they exist in the captured state
-      // These are not "changes" but rather the target state to restore to
-      return entities.entities || [];
+      return await this.collectAllEntities();
     } catch (error) {
       console.error("Failed to capture current entities:", error);
       // Re-throw database connection errors for proper error handling in tests
@@ -161,14 +162,14 @@ export class RollbackCapabilities {
    */
   private async captureCurrentRelationships(): Promise<any[]> {
     try {
-      // Get all relationships from the graph
-      const relationships = await this.kgService.listRelationships({
-        limit: 1000,
-      });
-      const relationshipList = relationships.relationships || [];
-      return relationshipList.map((relationship) => ({
+      const relationships = await this.collectAllRelationships();
+
+      return relationships.map((relationship) => ({
         id: relationship.id,
         action: "create",
+        fromEntityId: relationship.fromEntityId,
+        toEntityId: relationship.toEntityId,
+        type: relationship.type,
         previousState: relationship,
         newState: relationship,
       }));
@@ -183,6 +184,67 @@ export class RollbackCapabilities {
       }
       return [];
     }
+  }
+
+  private async collectAllEntities(): Promise<Entity[]> {
+    const allEntities: Entity[] = [];
+    let offset = 0;
+
+    while (true) {
+      const batch = await this.kgService.listEntities({
+        limit: SNAPSHOT_PAGE_SIZE,
+        offset,
+      });
+      const entities = batch.entities || [];
+
+      if (entities.length === 0) {
+        break;
+      }
+
+      allEntities.push(...entities);
+      offset += entities.length;
+
+      const reachedEnd =
+        entities.length < SNAPSHOT_PAGE_SIZE ||
+        (typeof batch.total === "number" && allEntities.length >= batch.total);
+
+      if (reachedEnd) {
+        break;
+      }
+    }
+
+    return allEntities;
+  }
+
+  private async collectAllRelationships(): Promise<GraphRelationship[]> {
+    const allRelationships: GraphRelationship[] = [];
+    let offset = 0;
+
+    while (true) {
+      const batch = await this.kgService.listRelationships({
+        limit: SNAPSHOT_PAGE_SIZE,
+        offset,
+      });
+      const relationships = batch.relationships || [];
+
+      if (relationships.length === 0) {
+        break;
+      }
+
+      allRelationships.push(...relationships);
+      offset += relationships.length;
+
+      const reachedEnd =
+        relationships.length < SNAPSHOT_PAGE_SIZE ||
+        (typeof batch.total === "number" &&
+          allRelationships.length >= batch.total);
+
+      if (reachedEnd) {
+        break;
+      }
+    }
+
+    return allRelationships;
   }
 
   /**
@@ -230,9 +292,20 @@ export class RollbackCapabilities {
       throw new Error(`Rollback point ${rollbackId} not found`);
     }
 
+    const stateForKeys = newState ?? previousState;
+
+    if (!stateForKeys) {
+      throw new Error(
+        `Cannot record relationship change for ${relationshipId} without relationship state`
+      );
+    }
+
     rollbackPoint.relationships.push({
       id: relationshipId,
       action,
+      fromEntityId: stateForKeys.fromEntityId,
+      toEntityId: stateForKeys.toEntityId,
+      type: stateForKeys.type,
       previousState,
       newState,
     });
@@ -300,76 +373,6 @@ export class RollbackCapabilities {
         return result;
       }
 
-      // Restore relationships to captured state
-      // First, get current relationships
-      const currentRelationships = await this.kgService.listRelationships({
-        limit: 1000,
-      });
-      const currentRelationshipMap = new Map(
-        currentRelationships.relationships.map((r) => [
-          `${r.fromEntityId}-${r.toEntityId}-${r.type}`,
-          r,
-        ])
-      );
-
-      // Delete relationships that don't exist in the captured state
-      for (const currentRelationship of currentRelationships.relationships) {
-        const relationshipKey = `${currentRelationship.fromEntityId}-${currentRelationship.toEntityId}-${currentRelationship.type}`;
-        const existsInCaptured = rollbackPoint.relationships.some(
-          (captured: any) => {
-            return (
-              captured.fromEntityId === currentRelationship.fromEntityId &&
-              captured.toEntityId === currentRelationship.toEntityId &&
-              captured.type === currentRelationship.type
-            );
-          }
-        );
-
-        if (!existsInCaptured) {
-          try {
-            await this.kgService.deleteRelationship(currentRelationship.id);
-            result.rolledBackRelationships++;
-          } catch (error) {
-            const rollbackError: RollbackError = {
-              type: "relationship",
-              id: currentRelationship.id,
-              action: "delete",
-              error: error instanceof Error ? error.message : "Unknown error",
-              recoverable: false,
-            };
-            result.errors.push(rollbackError);
-            result.success = false;
-          }
-        }
-      }
-
-      // Restore relationships to their captured state (recreate any missing ones)
-      for (const capturedRelationship of rollbackPoint.relationships) {
-        const rel = capturedRelationship as any;
-        const relationshipKey = `${rel.fromEntityId}-${rel.toEntityId}-${rel.type}`;
-        const currentRelationship = currentRelationshipMap.get(relationshipKey);
-
-        if (!currentRelationship) {
-          // Relationship doesn't exist, create it
-          try {
-            await this.kgService.createRelationship(
-              capturedRelationship as unknown as GraphRelationship
-            );
-            result.rolledBackRelationships++;
-          } catch (error) {
-            const rollbackError: RollbackError = {
-              type: "relationship",
-              id: rel.id,
-              action: "create",
-              error: error instanceof Error ? error.message : "Unknown error",
-              recoverable: false,
-            };
-            result.errors.push(rollbackError);
-            result.success = false;
-          }
-        }
-      }
-
       // Handle both change-based and state-based rollback
       // Check if rollbackPoint.entities contains change objects or entity objects
       const hasChangeObjects =
@@ -399,15 +402,11 @@ export class RollbackCapabilities {
       } else {
         // State-based rollback - restore to captured state
         // First, get current entities
-        const currentEntities = await this.kgService.listEntities({
-          limit: 1000,
-        });
-        const currentEntityMap = new Map(
-          currentEntities.entities.map((e) => [e.id, e])
-        );
+        const currentEntities = await this.collectAllEntities();
+        const currentEntityMap = new Map(currentEntities.map((e) => [e.id, e]));
 
         // Delete entities that don't exist in the captured state
-        for (const currentEntity of currentEntities.entities) {
+        for (const currentEntity of currentEntities) {
           const existsInCaptured = rollbackPoint.entities.some(
             (captured: any) => captured.id === currentEntity.id
           );
@@ -474,6 +473,98 @@ export class RollbackCapabilities {
               result.success = false;
             }
           }
+        }
+      }
+
+      // With entities restored, reconcile relationships to captured state
+      const currentRelationshipList = await this.collectAllRelationships();
+      const currentRelationshipMap = new Map(
+        currentRelationshipList.map((relationship) => [
+          `${relationship.fromEntityId}-${relationship.toEntityId}-${relationship.type}`,
+          relationship,
+        ])
+      );
+
+      const capturedRelationships: Array<{
+        key: string;
+        id: string;
+        state?: GraphRelationship;
+      }> = [];
+      const capturedRelationshipKeys = new Set<string>();
+
+      for (const captured of rollbackPoint.relationships) {
+        const baseState = captured.newState ?? captured.previousState;
+        const fromEntityId = captured.fromEntityId ?? baseState?.fromEntityId;
+        const toEntityId = captured.toEntityId ?? baseState?.toEntityId;
+        const type = captured.type ?? baseState?.type;
+
+        if (!fromEntityId || !toEntityId || !type) {
+          continue;
+        }
+
+        const key = `${fromEntityId}-${toEntityId}-${type}`;
+        capturedRelationshipKeys.add(key);
+        capturedRelationships.push({
+          key,
+          id: captured.id,
+          state: baseState,
+        });
+      }
+
+      // Delete relationships that are not part of the snapshot
+      for (const currentRelationship of currentRelationshipList) {
+        const relationshipKey = `${currentRelationship.fromEntityId}-${currentRelationship.toEntityId}-${currentRelationship.type}`;
+        if (!capturedRelationshipKeys.has(relationshipKey)) {
+          try {
+            await this.kgService.deleteRelationship(currentRelationship.id);
+            result.rolledBackRelationships++;
+            currentRelationshipMap.delete(relationshipKey);
+          } catch (error) {
+            const rollbackError: RollbackError = {
+              type: "relationship",
+              id: currentRelationship.id,
+              action: "delete",
+              error: error instanceof Error ? error.message : "Unknown error",
+              recoverable: false,
+            };
+            result.errors.push(rollbackError);
+            result.success = false;
+          }
+        }
+      }
+
+      // Recreate any missing relationships now that entities are back in place
+      for (const captured of capturedRelationships) {
+        if (currentRelationshipMap.has(captured.key)) {
+          continue;
+        }
+
+        if (!captured.state) {
+          result.errors.push({
+            type: "relationship",
+            id: captured.id,
+            action: "create",
+            error: `Captured relationship ${captured.id} is missing state for recreation`,
+            recoverable: false,
+          });
+          result.success = false;
+          continue;
+        }
+
+        try {
+          await this.kgService.createRelationship(captured.state);
+          result.rolledBackRelationships++;
+          currentRelationshipMap.set(captured.key, captured.state);
+        } catch (error) {
+          const rollbackError: RollbackError = {
+            type: "relationship",
+            id: captured.id,
+            action: "create",
+            error: error instanceof Error ? error.message : "Unknown error",
+            recoverable: false,
+          };
+          result.errors.push(rollbackError);
+          result.success = false;
         }
       }
 

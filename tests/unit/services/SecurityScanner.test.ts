@@ -351,30 +351,34 @@ describe("SecurityScanner", () => {
         (call) => call[0] === "GRAPH.CONSTRAINT"
       );
 
+      const expectedGraphKey =
+        (mockDb as any).getConfig?.()?.falkordb?.graphKey ?? "memento";
+
+      expect(constraintCalls).toHaveLength(2);
       expect(constraintCalls).toEqual(
         expect.arrayContaining([
-          expect.arrayContaining([
+          [
             "GRAPH.CONSTRAINT",
+            expectedGraphKey,
             "CREATE",
-            expect.any(String),
             "UNIQUE",
             "NODE",
             "SecurityIssue",
             "PROPERTIES",
             "1",
             "id",
-          ]),
-          expect.arrayContaining([
+          ],
+          [
             "GRAPH.CONSTRAINT",
+            expectedGraphKey,
             "CREATE",
-            expect.any(String),
             "UNIQUE",
             "NODE",
             "Vulnerability",
             "PROPERTIES",
             "1",
             "id",
-          ]),
+          ],
         ])
       );
 

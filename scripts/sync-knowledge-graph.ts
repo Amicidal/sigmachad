@@ -6,6 +6,7 @@ import { KnowledgeGraphService } from '../src/services/KnowledgeGraphService.js'
 import { ASTParser } from '../src/services/ASTParser.js';
 import { SynchronizationCoordinator } from '../src/services/SynchronizationCoordinator.js';
 import { ConflictResolution } from '../src/services/ConflictResolution.js';
+import { RollbackCapabilities } from '../src/services/RollbackCapabilities.js';
 
 async function waitForCompletion(
   coordinator: SynchronizationCoordinator,
@@ -56,11 +57,13 @@ async function main() {
   }
 
   const conflictResolver = new ConflictResolution(kgService);
+  const rollbackCapabilities = new RollbackCapabilities(kgService, dbService);
   const coordinator = new SynchronizationCoordinator(
     kgService,
     astParser,
     dbService,
-    conflictResolver
+    conflictResolver,
+    rollbackCapabilities
   );
   const operationId = await coordinator.startFullSynchronization({ includeEmbeddings: false });
   console.log(`🚀 Full synchronization started (operation: ${operationId})`);

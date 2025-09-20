@@ -667,8 +667,11 @@ describe("Models Integration Tests", () => {
               {
                 timestamp: new Date(Date.now() - 86400000),
                 executionTime: 145,
+                averageExecutionTime: 145,
+                p95ExecutionTime: 155,
                 successRate: 0.95,
                 coveragePercentage: 88,
+                runId: 'run-hist-1',
               },
             ],
           },

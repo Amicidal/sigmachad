@@ -98,6 +98,11 @@ describe("FalkorDBService Integration", () => {
 
       await newService.close();
     });
+
+    it("should tolerate repeated graph setup when indexes exist", async () => {
+      await expect(falkorService.setupGraph()).resolves.toBeUndefined();
+      await expect(falkorService.setupGraph()).resolves.toBeUndefined();
+    });
   });
 
   describe("Basic Graph Operations Integration", () => {
