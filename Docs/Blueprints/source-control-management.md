@@ -1,20 +1,25 @@
 # Source Control Management Blueprint
 
 ## 1. Overview
-The SCM surface is responsible for automating commit creation, pull request scaffolding, branch management, and diff/log retrieval so AI-driven workflows can land code safely. Today the Fastify router exposes `/api/v1/scm/*` endpoints, but most handlers are stubs that return `501 NOT_IMPLEMENTED`.
+The SCM surface automates commit creation, pull-request scaffolding, branch management, and diff/log retrieval so AI-driven workflows can land code safely. The Fastify router exposes `/api/v1/scm/*` endpoints which now orchestrate real git operations through `GitService`, persist commit metadata, and publish provenance into the knowledge graph.
 
-## 2. Current State & Gaps (2025-09-19)
-- `/api/v1/scm/commit-pr` always responds with `{ success: false, error: { code: "NOT_IMPLEMENTED" } }`. There is no orchestration over git, no commit metadata persistence, and no graph integration beyond the tests seeding entities.
-- Related endpoints (`/scm/commit`, `/scm/push`, `/scm/branch`, `/scm/status`, etc.) share the same stub handler. They provide neither validation nor structured responses beyond the generic 501 envelope.
-- Integration tests previously assumed successful commits and branch management, masking the fact that no SCM automation exists. The suite now asserts the 501 envelope instead, ensuring we notice when real functionality lands.
-- A basic async git wrapper already exists (`src/services/GitService.ts`) and powers diff/stat helpers, but the HTTP routes do not call it yet and there are no provider adapters (GitHub, GitLab) or persistence hooks for commit metadata.
+## 2. Current Behaviour (2025-09-19)
+- `/api/v1/scm/commit-pr` stages requested paths, creates a commit, persists metadata to Postgres (`scm_commits`), materialises change entities/relationships in the knowledge graph, and optionally asks the configured SCM provider to push and create a PR payload. Responses include commit status, provider details, retry metadata, and linked artifacts (spec/tests/validation).
+- Companion endpoints (`/scm/commit`, `/scm/push`, `/scm/branch`, `/scm/status`, `/scm/changes`, `/scm/diff`, `/scm/log`) delegate to `SCMService` and enforce Fastify schemas for request/response validation.
+- A feature flag (`FEATURE_SCM` / `SCM_FEATURE_FLAG`) can disable the surface. When disabled the handlers return a structured `NOT_IMPLEMENTED` payload so existing callers can detect availability.
+- The default provider is `LocalGitProvider`, which pushes to a configured remote and synthesises a PR URL (`<remote>#<branch>:<hash>`). GitHub/GitLab adapters are not yet implemented; see follow-up plan in `TODO.md`.
 
-## 3. Interim Behaviour
-- Clients should treat the SCM APIs as non-functional placeholders. The only contract guaranteed at the moment is the structured error payload (`code: NOT_IMPLEMENTED`, descriptive `message`, `success: false`).
-- Tests exercise the endpoints purely to ensure the gateway wiring and error formatting remain stable.
+## 3. Implementation Notes
+- `SCMService.createCommitAndMaybePR` serialises git access with a mutex to avoid concurrent branch switches, captures author info from environment (`GIT_AUTHOR_*`, `GITHUB_ACTOR`), and records provider attempts/errors for downstream automation.
+- Commit metadata is stored in Postgres (`scm_commits`) with JSONB metadata for provider diagnostics and validation/test linkage. `DatabaseService` exposes helpers for listing and querying these records to power `/scm/changes`.
+- Knowledge graph entities use `change:${commitHash}` as the canonical ID and create `MODIFIED_IN` edges back to related specs/tests when they exist.
+- Provider orchestration supports configurable retry/backoff (`SCM_PROVIDER_MAX_RETRIES`, `SCM_PROVIDER_RETRY_DELAY_MS`). When retries exhaust, the API marks the response as `failed` with `escalationRequired=true` and surfaces the serialized provider errors.
+- Integration tests spin up ephemeral git repositories to exercise staging, commit, push, and failure flows. Use them as references when extending provider behaviour.
 
-## 4. Next Steps
-1. Layer orchestration on top of the existing `GitService` (staging, commit, diff helpers) and introduce provider adapters that can push branches and open PRs/merge requests.
-2. Model commit metadata in Postgres and link produced commits back into the knowledge graph so downstream analytics can reason about code provenance.
-3. Introduce request validation schemas for `/scm/commit-pr` to reject malformed payloads before orchestration runs.
-4. Replace the 501 stubs with real handlers behind a feature flag, migrate integration tests to exercise the full workflow, then retire the fallback assertions.
+## 4. Known Gaps & Follow-up Work
+1. Implement hosted SCM adapters (GitHub, GitLab) that can:
+   - push feature branches using provider credentials
+   - create merge/pull requests with metadata captured in `SCMService`
+   - honour token scopes and provider-specific validation semantics
+2. Extend Postgres schema to capture provider PR identifiers/status and sync updates (merged/closed) back into the knowledge graph.
+3. Expand documentation with end-to-end examples once hosted providers exist, including troubleshooting for provider escalations.

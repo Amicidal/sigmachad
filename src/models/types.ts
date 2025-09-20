@@ -18,6 +18,7 @@ import {
   type PerformanceMetricSample,
   type PerformanceSeverity,
   type PerformanceTrend,
+  type SessionRelationship,
 } from "./relationships.js";
 
 // Base API response types
@@ -216,6 +217,94 @@ export interface SessionChangesResult {
   sessionId: string;
   total: number;
   changes: SessionChangeSummary[];
+}
+
+export interface SessionTimelineEvent {
+  relationshipId: string;
+  type: RelationshipType;
+  fromEntityId: string;
+  toEntityId: string;
+  timestamp: Date | null;
+  sequenceNumber?: number | null;
+  actor?: string;
+  impactSeverity?: 'critical' | 'high' | 'medium' | 'low';
+  stateTransitionTo?: 'working' | 'broken' | 'unknown';
+  changeInfo?: SessionRelationship['changeInfo'];
+  impact?: SessionRelationship['impact'];
+  stateTransition?: SessionRelationship['stateTransition'];
+  metadata?: Record<string, any>;
+}
+
+export interface SessionTimelineSummary {
+  totalEvents: number;
+  byType: Record<string, number>;
+  bySeverity: Record<string, number>;
+  actors: Array<{ actor: string; count: number }>;
+  firstTimestamp?: Date;
+  lastTimestamp?: Date;
+}
+
+export interface SessionTimelineResult {
+  sessionId: string;
+  total: number;
+  events: SessionTimelineEvent[];
+  page: {
+    limit: number;
+    offset: number;
+    count: number;
+  };
+  summary: SessionTimelineSummary;
+}
+
+export interface SessionImpactEntry {
+  entityId: string;
+  relationshipIds: string[];
+  impactCount: number;
+  firstTimestamp?: Date;
+  latestTimestamp?: Date;
+  latestSeverity?: 'critical' | 'high' | 'medium' | 'low' | null;
+  latestSequenceNumber?: number | null;
+  actors: string[];
+}
+
+export interface SessionImpactsResult {
+  sessionId: string;
+  totalEntities: number;
+  impacts: SessionImpactEntry[];
+  page: {
+    limit: number;
+    offset: number;
+    count: number;
+  };
+  summary: {
+    bySeverity: Record<string, number>;
+    totalRelationships: number;
+  };
+}
+
+export interface SessionsAffectingEntityEntry {
+  sessionId: string;
+  relationshipIds: string[];
+  eventCount: number;
+  firstTimestamp?: Date;
+  lastTimestamp?: Date;
+  actors: string[];
+  severities: Record<string, number>;
+}
+
+export interface SessionsAffectingEntityResult {
+  entityId: string;
+  totalSessions: number;
+  sessions: SessionsAffectingEntityEntry[];
+  page: {
+    limit: number;
+    offset: number;
+    count: number;
+  };
+  summary: {
+    bySeverity: Record<string, number>;
+    totalRelationships: number;
+  };
 }
 
 // Design & Specification Management Types
@@ -679,7 +768,7 @@ export interface CommitPRRequest {
   changes: string[];
   relatedSpecId?: string;
   testResults?: string[];
-  validationResults?: string;
+  validationResults?: string | ValidationResult | Record<string, unknown>;
   createPR?: boolean;
   branchName?: string;
   labels?: string[];
@@ -689,11 +778,90 @@ export interface CommitPRResponse {
   commitHash: string;
   prUrl?: string;
   branch: string;
-  relatedArtifacts: {
-    spec: Spec;
-    tests: Test[];
-    validation: ValidationResult;
+  status: "committed" | "pending" | "failed";
+  provider?: string;
+  retryAttempts?: number;
+  escalationRequired?: boolean;
+  escalationMessage?: string;
+  providerError?: {
+    message: string;
+    code?: string;
+    lastAttempt?: number;
   };
+  relatedArtifacts: {
+    spec: Spec | null;
+    tests: Test[];
+    validation: ValidationResult | Record<string, unknown> | null;
+  };
+}
+
+export interface SCMCommitRecord {
+  id?: string;
+  commitHash: string;
+  branch: string;
+  title: string;
+  description?: string;
+  author?: string;
+  changes: string[];
+  relatedSpecId?: string;
+  testResults?: string[];
+  validationResults?: any;
+  prUrl?: string;
+  provider?: string;
+  status?: "pending" | "committed" | "pushed" | "merged" | "failed";
+  metadata?: Record<string, unknown>;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface SCMStatusSummary {
+  branch: string;
+  clean: boolean;
+  ahead: number;
+  behind: number;
+  staged: string[];
+  unstaged: string[];
+  untracked: string[];
+  lastCommit?: {
+    hash: string;
+    author: string;
+    date?: string;
+    title: string;
+  } | null;
+}
+
+export interface SCMBranchInfo {
+  name: string;
+  isCurrent: boolean;
+  isRemote?: boolean;
+  upstream?: string | null;
+  lastCommit?: {
+    hash: string;
+    title: string;
+    author?: string;
+    date?: string;
+  } | null;
+}
+
+export interface SCMPushResult {
+  remote: string;
+  branch: string;
+  forced: boolean;
+  pushed: boolean;
+  commitHash?: string;
+  provider?: string;
+  url?: string;
+  message?: string;
+  timestamp: string;
+}
+
+export interface SCMCommitLogEntry {
+  hash: string;
+  author: string;
+  email?: string;
+  date: string;
+  message: string;
+  refs?: string[];
 }
 
 // Security Types

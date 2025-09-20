@@ -1,8 +1,15 @@
-import type { Pool as PgPool } from "pg";
-import { IPostgreSQLService } from "./interfaces.js";
+import type { Pool as PgPool, PoolClient as PgPoolClient } from "pg";
+import {
+  IPostgreSQLService,
+  type BulkQueryInstrumentationConfig,
+  type BulkQueryMetrics,
+  type BulkQueryMetricsSnapshot,
+  type BulkQueryTelemetryEntry,
+} from "./interfaces.js";
 import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
+  SCMCommitRecord,
 } from "../../models/types.js";
 import type {
   PerformanceMetricSample,
@@ -10,6 +17,18 @@ import type {
 } from "../../models/relationships.js";
 import { normalizeMetricIdForId } from "../../utils/codeEdges.js";
 import { sanitizeEnvironment } from "../../utils/environment.js";
+import { performance } from "node:perf_hooks";
+
+interface BulkTelemetryListenerPayload {
+  entry: BulkQueryTelemetryEntry;
+  metrics: BulkQueryMetricsSnapshot;
+}
+
+interface PostgreSQLServiceOptions {
+  poolFactory?: () => PgPool;
+  bulkConfig?: Partial<BulkQueryInstrumentationConfig>;
+  bulkTelemetryEmitter?: (payload: BulkTelemetryListenerPayload) => void;
+}
 
 export class PostgreSQLService implements IPostgreSQLService {
   private postgresPool!: PgPool;
@@ -21,6 +40,27 @@ export class PostgreSQLService implements IPostgreSQLService {
     idleTimeoutMillis?: number;
     connectionTimeoutMillis?: number;
   };
+  private bulkMetrics: BulkQueryMetrics = {
+    activeBatches: 0,
+    maxConcurrentBatches: 0,
+    totalBatches: 0,
+    totalQueries: 0,
+    totalDurationMs: 0,
+    maxBatchSize: 0,
+    maxQueueDepth: 0,
+    maxDurationMs: 0,
+    averageDurationMs: 0,
+    lastBatch: null,
+    history: [],
+    slowBatches: [],
+  };
+  private bulkInstrumentationConfig: BulkQueryInstrumentationConfig = {
+    warnOnLargeBatchSize: 50,
+    slowBatchThresholdMs: 750,
+    queueDepthWarningThreshold: 3,
+    historyLimit: 10,
+  };
+  private bulkTelemetryEmitter?: (payload: BulkTelemetryListenerPayload) => void;
 
   constructor(
     config: {
@@ -29,10 +69,35 @@ export class PostgreSQLService implements IPostgreSQLService {
       idleTimeoutMillis?: number;
       connectionTimeoutMillis?: number;
     },
-    options?: { poolFactory?: () => PgPool }
+    options?: PostgreSQLServiceOptions
   ) {
     this.config = config;
     this.poolFactory = options?.poolFactory;
+    if (options?.bulkConfig) {
+      this.bulkInstrumentationConfig = {
+        ...this.bulkInstrumentationConfig,
+        ...options.bulkConfig,
+      };
+    }
+    this.bulkTelemetryEmitter = options?.bulkTelemetryEmitter;
+
+    // Sanitize instrumentation config values
+    this.bulkInstrumentationConfig.historyLimit = Math.max(
+      0,
+      Math.floor(this.bulkInstrumentationConfig.historyLimit)
+    );
+    this.bulkInstrumentationConfig.warnOnLargeBatchSize = Math.max(
+      1,
+      Math.floor(this.bulkInstrumentationConfig.warnOnLargeBatchSize)
+    );
+    this.bulkInstrumentationConfig.slowBatchThresholdMs = Math.max(
+      0,
+      this.bulkInstrumentationConfig.slowBatchThresholdMs
+    );
+    this.bulkInstrumentationConfig.queueDepthWarningThreshold = Math.max(
+      0,
+      Math.floor(this.bulkInstrumentationConfig.queueDepthWarningThreshold)
+    );
   }
 
   async initialize(): Promise<void> {
@@ -250,11 +315,30 @@ export class PostgreSQLService implements IPostgreSQLService {
       this.validateQueryParams(query.params);
     }
 
+    const batchSize = queries.length;
+    const continueOnError = options?.continueOnError ?? false;
     const results: any[] = [];
-    const client = await this.postgresPool.connect();
+
+    const startedAtIso = new Date().toISOString();
+    const startTime = performance.now();
+
+    let client: PgPoolClient | null = null;
+    let transactionStarted = false;
+    let capturedError: unknown;
+
+    const activeAtStart = ++this.bulkMetrics.activeBatches;
+    if (this.bulkMetrics.activeBatches > this.bulkMetrics.maxConcurrentBatches) {
+      this.bulkMetrics.maxConcurrentBatches = this.bulkMetrics.activeBatches;
+    }
+    const queueDepthAtStart = Math.max(0, activeAtStart - 1);
+    if (queueDepthAtStart > this.bulkMetrics.maxQueueDepth) {
+      this.bulkMetrics.maxQueueDepth = queueDepthAtStart;
+    }
 
     try {
-      if (options.continueOnError) {
+      client = await this.postgresPool.connect();
+
+      if (continueOnError) {
         // Execute queries independently to avoid aborting the whole transaction
         for (const { query, params } of queries) {
           try {
@@ -266,31 +350,236 @@ export class PostgreSQLService implements IPostgreSQLService {
           }
         }
         return results;
-      } else {
-        await client.query("BEGIN");
-        for (const { query, params } of queries) {
-          const result = await client.query(query, params);
-          results.push(result);
-        }
-        await client.query("COMMIT");
-        return results;
       }
+
+      await client.query("BEGIN");
+      transactionStarted = true;
+      for (const { query, params } of queries) {
+        const result = await client.query(query, params);
+        results.push(result);
+      }
+      await client.query("COMMIT");
+      transactionStarted = false;
+      return results;
     } catch (error) {
-      // Only attempt rollback if a transaction was opened
-      try {
-        await client.query("ROLLBACK");
-      } catch {}
+      capturedError = error;
+      if (transactionStarted && client) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {}
+      }
       throw error;
     } finally {
-      try {
-        client.release();
-      } catch (releaseError) {
-        console.error(
-          "Error releasing PostgreSQL client in bulk operation:",
-          releaseError
-        );
+      const durationMs = performance.now() - startTime;
+
+      if (client) {
+        try {
+          client.release();
+        } catch (releaseError) {
+          console.error(
+            "Error releasing PostgreSQL client in bulk operation:",
+            releaseError
+          );
+        }
       }
+
+      this.bulkMetrics.activeBatches = Math.max(
+        0,
+        this.bulkMetrics.activeBatches - 1
+      );
+
+      this.recordBulkOperationTelemetry({
+        batchSize,
+        continueOnError,
+        durationMs,
+        startedAt: startedAtIso,
+        queueDepth: queueDepthAtStart,
+        error: capturedError,
+      });
     }
+  }
+
+  private recordBulkOperationTelemetry(params: {
+    batchSize: number;
+    continueOnError: boolean;
+    durationMs: number;
+    startedAt: string;
+    queueDepth: number;
+    error?: unknown;
+  }): void {
+    const safeDuration = Number.isFinite(params.durationMs)
+      ? Math.max(0, params.durationMs)
+      : 0;
+    const roundedDuration = Number(safeDuration.toFixed(3));
+    const entry: BulkQueryTelemetryEntry = {
+      batchSize: params.batchSize,
+      continueOnError: params.continueOnError,
+      durationMs: roundedDuration,
+      startedAt: params.startedAt,
+      finishedAt: new Date().toISOString(),
+      queueDepth: Math.max(0, params.queueDepth || 0),
+      mode: params.continueOnError ? "independent" : "transaction",
+      success: !params.error,
+      error: params.error
+        ? params.error instanceof Error
+          ? params.error.message
+          : String(params.error)
+        : undefined,
+    };
+
+    this.bulkMetrics.totalBatches += 1;
+    this.bulkMetrics.totalQueries += params.batchSize;
+    this.bulkMetrics.totalDurationMs += roundedDuration;
+    this.bulkMetrics.averageDurationMs =
+      this.bulkMetrics.totalBatches === 0
+        ? 0
+        : this.bulkMetrics.totalDurationMs / this.bulkMetrics.totalBatches;
+    this.bulkMetrics.maxBatchSize = Math.max(
+      this.bulkMetrics.maxBatchSize,
+      params.batchSize
+    );
+    this.bulkMetrics.maxDurationMs = Math.max(
+      this.bulkMetrics.maxDurationMs,
+      roundedDuration
+    );
+    this.bulkMetrics.maxQueueDepth = Math.max(
+      this.bulkMetrics.maxQueueDepth,
+      entry.queueDepth
+    );
+    this.bulkMetrics.lastBatch = entry;
+
+    this.appendTelemetryRecord(this.bulkMetrics.history, entry);
+
+    const shouldTrackSlowBatch =
+      !entry.success ||
+      entry.durationMs >= this.bulkInstrumentationConfig.slowBatchThresholdMs ||
+      entry.batchSize >= this.bulkInstrumentationConfig.warnOnLargeBatchSize ||
+      entry.queueDepth >=
+        this.bulkInstrumentationConfig.queueDepthWarningThreshold;
+
+    if (shouldTrackSlowBatch) {
+      this.appendTelemetryRecord(this.bulkMetrics.slowBatches, entry);
+    }
+
+    const snapshot = this.createBulkTelemetrySnapshot();
+    this.emitBulkTelemetry(entry, snapshot);
+    this.logBulkTelemetry(entry);
+  }
+
+  private appendTelemetryRecord(
+    collection: BulkQueryTelemetryEntry[],
+    entry: BulkQueryTelemetryEntry
+  ): void {
+    const rawLimit = this.bulkInstrumentationConfig.historyLimit;
+    const limit = Number.isFinite(rawLimit)
+      ? Math.max(0, Math.floor(rawLimit as number))
+      : 10;
+
+    if (limit === 0) {
+      collection.length = 0;
+      return;
+    }
+
+    collection.push(entry);
+    if (collection.length > limit) {
+      collection.splice(0, collection.length - limit);
+    }
+  }
+
+  private createBulkTelemetrySnapshot(): BulkQueryMetricsSnapshot {
+    return {
+      activeBatches: this.bulkMetrics.activeBatches,
+      maxConcurrentBatches: this.bulkMetrics.maxConcurrentBatches,
+      totalBatches: this.bulkMetrics.totalBatches,
+      totalQueries: this.bulkMetrics.totalQueries,
+      totalDurationMs: this.bulkMetrics.totalDurationMs,
+      maxBatchSize: this.bulkMetrics.maxBatchSize,
+      maxQueueDepth: this.bulkMetrics.maxQueueDepth,
+      maxDurationMs: this.bulkMetrics.maxDurationMs,
+      averageDurationMs: this.bulkMetrics.averageDurationMs,
+      lastBatch: this.bulkMetrics.lastBatch
+        ? { ...this.bulkMetrics.lastBatch }
+        : null,
+    };
+  }
+
+  private emitBulkTelemetry(
+    entry: BulkQueryTelemetryEntry,
+    snapshot: BulkQueryMetricsSnapshot
+  ): void {
+    if (!this.bulkTelemetryEmitter) {
+      return;
+    }
+
+    try {
+      this.bulkTelemetryEmitter({
+        entry: { ...entry },
+        metrics: {
+          ...snapshot,
+          lastBatch: snapshot.lastBatch ? { ...snapshot.lastBatch } : null,
+        },
+      });
+    } catch (error) {
+      console.error("Bulk telemetry emitter threw an error:", error);
+    }
+  }
+
+  private logBulkTelemetry(entry: BulkQueryTelemetryEntry): void {
+    const baseMessage =
+      `[PostgreSQLService.bulkQuery] batch=${entry.batchSize} ` +
+      `duration=${entry.durationMs.toFixed(2)}ms ` +
+      `mode=${entry.mode} queueDepth=${entry.queueDepth}`;
+
+    if (!entry.success) {
+      console.error(
+        `${baseMessage} failed: ${entry.error ?? "unknown error"}`
+      );
+      return;
+    }
+
+    const isLargeBatch =
+      entry.batchSize >= this.bulkInstrumentationConfig.warnOnLargeBatchSize;
+    const isSlow =
+      entry.durationMs >= this.bulkInstrumentationConfig.slowBatchThresholdMs;
+    const hasBackpressure =
+      entry.queueDepth >=
+      this.bulkInstrumentationConfig.queueDepthWarningThreshold;
+
+    if (isLargeBatch || isSlow || hasBackpressure) {
+      const flags = [
+        isLargeBatch ? "large-batch" : null,
+        isSlow ? "slow" : null,
+        hasBackpressure ? "backpressure" : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      console.warn(
+        `${baseMessage}${flags.length ? ` flags=[${flags}]` : ""}`
+      );
+      return;
+    }
+
+    console.debug(baseMessage);
+  }
+
+  getBulkWriterMetrics(): BulkQueryMetrics {
+    return {
+      activeBatches: this.bulkMetrics.activeBatches,
+      maxConcurrentBatches: this.bulkMetrics.maxConcurrentBatches,
+      totalBatches: this.bulkMetrics.totalBatches,
+      totalQueries: this.bulkMetrics.totalQueries,
+      totalDurationMs: this.bulkMetrics.totalDurationMs,
+      maxBatchSize: this.bulkMetrics.maxBatchSize,
+      maxQueueDepth: this.bulkMetrics.maxQueueDepth,
+      maxDurationMs: this.bulkMetrics.maxDurationMs,
+      averageDurationMs: this.bulkMetrics.averageDurationMs,
+      lastBatch: this.bulkMetrics.lastBatch
+        ? { ...this.bulkMetrics.lastBatch }
+        : null,
+      history: this.bulkMetrics.history.map((entry) => ({ ...entry })),
+      slowBatches: this.bulkMetrics.slowBatches.map((entry) => ({ ...entry })),
+    };
   }
 
   async setupSchema(): Promise<void> {
@@ -435,6 +724,25 @@ export class PostgreSQLService implements IPostgreSQLService {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`,
 
+      `CREATE TABLE IF NOT EXISTS scm_commits (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        commit_hash TEXT NOT NULL UNIQUE,
+        branch TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        author TEXT,
+        metadata JSONB,
+        changes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        related_spec_id TEXT,
+        test_results TEXT[] DEFAULT ARRAY[]::TEXT[],
+        validation_results JSONB,
+        pr_url TEXT,
+        provider TEXT,
+        status TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
+
       `CREATE TABLE IF NOT EXISTS performance_metric_snapshots (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         test_id TEXT NOT NULL,
@@ -521,6 +829,8 @@ export class PostgreSQLService implements IPostgreSQLService {
       "CREATE INDEX IF NOT EXISTS idx_changes_entity_id ON changes(entity_id)",
       "CREATE INDEX IF NOT EXISTS idx_changes_timestamp ON changes(timestamp)",
       "CREATE INDEX IF NOT EXISTS idx_changes_session_id ON changes(session_id)",
+      "CREATE INDEX IF NOT EXISTS idx_scm_commits_branch ON scm_commits(branch)",
+      "CREATE INDEX IF NOT EXISTS idx_scm_commits_created_at ON scm_commits(created_at)",
       "CREATE INDEX IF NOT EXISTS idx_test_suites_timestamp ON test_suites(timestamp)",
       "CREATE INDEX IF NOT EXISTS idx_test_suites_framework ON test_suites(framework)",
       "CREATE INDEX IF NOT EXISTS idx_test_results_test_id ON test_results(test_id)",
@@ -863,6 +1173,231 @@ export class PostgreSQLService implements IPostgreSQLService {
     } finally {
       client.release();
     }
+  }
+
+  async recordSCMCommit(commit: SCMCommitRecord): Promise<void> {
+    if (!this.initialized) {
+      throw new Error("PostgreSQL service not initialized");
+    }
+
+    const changes = Array.isArray(commit.changes)
+      ? commit.changes.map((c) => String(c))
+      : [];
+    const testResults = Array.isArray(commit.testResults)
+      ? commit.testResults.map((t) => String(t))
+      : [];
+
+    const metadata = commit.metadata ? JSON.stringify(commit.metadata) : null;
+    const validationResults =
+      commit.validationResults !== undefined && commit.validationResults !== null
+        ? JSON.stringify(commit.validationResults)
+        : null;
+
+    const query = `
+      INSERT INTO scm_commits (
+        commit_hash,
+        branch,
+        title,
+        description,
+        author,
+        metadata,
+        changes,
+        related_spec_id,
+        test_results,
+        validation_results,
+        pr_url,
+        provider,
+        status,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12,
+        $13,
+        COALESCE($14, NOW()),
+        COALESCE($15, NOW())
+      )
+      ON CONFLICT (commit_hash)
+      DO UPDATE SET
+        branch = EXCLUDED.branch,
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        author = EXCLUDED.author,
+        metadata = EXCLUDED.metadata,
+        changes = EXCLUDED.changes,
+        related_spec_id = EXCLUDED.related_spec_id,
+        test_results = EXCLUDED.test_results,
+        validation_results = EXCLUDED.validation_results,
+        pr_url = EXCLUDED.pr_url,
+        provider = EXCLUDED.provider,
+        status = EXCLUDED.status,
+        updated_at = NOW();
+    `;
+
+    await this.query(query, [
+      commit.commitHash,
+      commit.branch,
+      commit.title,
+      commit.description ?? null,
+      commit.author ?? null,
+      metadata,
+      changes,
+      commit.relatedSpecId ?? null,
+      testResults,
+      validationResults,
+      commit.prUrl ?? null,
+      commit.provider ?? "local",
+      commit.status ?? "committed",
+      commit.createdAt ? new Date(commit.createdAt) : null,
+      commit.updatedAt ? new Date(commit.updatedAt) : null,
+    ]);
+  }
+
+  async getSCMCommitByHash(
+    commitHash: string
+  ): Promise<SCMCommitRecord | null> {
+    if (!this.initialized) {
+      throw new Error("PostgreSQL service not initialized");
+    }
+
+    const result = await this.query(
+      `
+        SELECT
+          id,
+          commit_hash,
+          branch,
+          title,
+          description,
+          author,
+          metadata,
+          changes,
+          related_spec_id,
+          test_results,
+          validation_results,
+          pr_url,
+          provider,
+          status,
+          created_at,
+          updated_at
+        FROM scm_commits
+        WHERE commit_hash = $1
+      `,
+      [commitHash]
+    );
+
+    if (!result?.rows?.length) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    const parseJson = (value: unknown) => {
+      if (value == null) return undefined;
+      if (typeof value === "object") return value as Record<string, any>;
+      try {
+        return JSON.parse(String(value));
+      } catch {
+        return undefined;
+      }
+    };
+
+    return {
+      id: row.id ?? undefined,
+      commitHash: row.commit_hash,
+      branch: row.branch,
+      title: row.title,
+      description: row.description ?? undefined,
+      author: row.author ?? undefined,
+      changes: Array.isArray(row.changes) ? row.changes : [],
+      relatedSpecId: row.related_spec_id ?? undefined,
+      testResults: Array.isArray(row.test_results) ? row.test_results : undefined,
+      validationResults: parseJson(row.validation_results),
+      prUrl: row.pr_url ?? undefined,
+      provider: row.provider ?? undefined,
+      status: row.status ?? undefined,
+      metadata: parseJson(row.metadata),
+      createdAt: row.created_at ? new Date(row.created_at) : undefined,
+      updatedAt: row.updated_at ? new Date(row.updated_at) : undefined,
+    };
+  }
+
+  async listSCMCommits(limit: number = 50): Promise<SCMCommitRecord[]> {
+    if (!this.initialized) {
+      throw new Error("PostgreSQL service not initialized");
+    }
+
+    const sanitizedLimit = Math.max(1, Math.min(Math.floor(limit), 200));
+
+    const result = await this.query(
+      `
+        SELECT
+          id,
+          commit_hash,
+          branch,
+          title,
+          description,
+          author,
+          metadata,
+          changes,
+          related_spec_id,
+          test_results,
+          validation_results,
+          pr_url,
+          provider,
+          status,
+          created_at,
+          updated_at
+        FROM scm_commits
+        ORDER BY created_at DESC
+        LIMIT $1
+      `,
+      [sanitizedLimit]
+    );
+
+    if (!result?.rows?.length) {
+      return [];
+    }
+
+    const parseJson = (value: unknown) => {
+      if (value == null) return undefined;
+      if (typeof value === "object") return value as Record<string, any>;
+      try {
+        return JSON.parse(String(value));
+      } catch {
+        return undefined;
+      }
+    };
+
+    return result.rows.map((row) => ({
+      id: row.id ?? undefined,
+      commitHash: row.commit_hash,
+      branch: row.branch,
+      title: row.title,
+      description: row.description ?? undefined,
+      author: row.author ?? undefined,
+      changes: Array.isArray(row.changes) ? row.changes : [],
+      relatedSpecId: row.related_spec_id ?? undefined,
+      testResults: Array.isArray(row.test_results)
+        ? row.test_results
+        : undefined,
+      validationResults: parseJson(row.validation_results),
+      prUrl: row.pr_url ?? undefined,
+      provider: row.provider ?? undefined,
+      status: row.status ?? undefined,
+      metadata: parseJson(row.metadata),
+      createdAt: row.created_at ? new Date(row.created_at) : undefined,
+      updatedAt: row.updated_at ? new Date(row.updated_at) : undefined,
+    }));
   }
 
   async getTestExecutionHistory(

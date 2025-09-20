@@ -4,17 +4,27 @@
  */
 
 import { EventEmitter } from "events";
+import crypto from "crypto";
 import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
 import { ASTParser } from "./ASTParser.js";
 import { DatabaseService } from "./DatabaseService.js";
 import { FileChange } from "./FileWatcher.js";
 import { GraphRelationship, RelationshipType } from "../models/relationships.js";
+import { TimeRangeParams } from "../models/types.js";
 import { GitService } from "./GitService.js";
 import {
   ConflictResolution as ConflictResolutionService,
   Conflict,
 } from "./ConflictResolution.js";
 import { RollbackCapabilities } from "./RollbackCapabilities.js";
+import {
+  SessionCheckpointJobRunner,
+  type SessionCheckpointJobMetrics,
+  type SessionCheckpointJobSnapshot,
+} from "../jobs/SessionCheckpointJob.js";
+import type { SessionCheckpointJobOptions } from "../jobs/SessionCheckpointJob.js";
+import { PostgresSessionCheckpointJobStore } from "../jobs/persistence/PostgresSessionCheckpointJobStore.js";
+import { canonicalRelationshipId } from "../utils/codeEdges.js";
 
 export interface SyncOperation {
   id: string;
@@ -54,11 +64,58 @@ export interface SyncOptions {
   batchSize?: number;
 }
 
+export type SessionEventKind =
+  | "session_started"
+  | "session_keepalive"
+  | "session_relationships"
+  | "session_checkpoint"
+  | "session_teardown";
+
+export interface SessionStreamPayload {
+  changeId?: string;
+  relationships?: Array<{
+    id: string;
+    type: string;
+    fromEntityId?: string;
+    toEntityId?: string;
+    metadata?: Record<string, unknown> | null;
+  }>;
+  checkpointId?: string;
+  seeds?: string[];
+  status?: SyncOperation["status"] | "failed" | "cancelled" | "queued" | "manual_intervention";
+  errors?: SyncError[];
+  processedChanges?: number;
+  totalChanges?: number;
+  details?: Record<string, unknown>;
+}
+
+export interface SessionStreamEvent {
+  type: SessionEventKind;
+  sessionId: string;
+  operationId: string;
+  timestamp: string;
+  payload?: SessionStreamPayload;
+}
+
+export interface CheckpointMetricsSnapshot {
+  event: string;
+  metrics: SessionCheckpointJobMetrics;
+  deadLetters: SessionCheckpointJobSnapshot[];
+  context?: Record<string, unknown>;
+  timestamp: string;
+}
+
 class OperationCancelledError extends Error {
   constructor(operationId: string) {
     super(`Operation ${operationId} cancelled`);
     this.name = "OperationCancelledError";
   }
+}
+
+interface SessionSequenceTrackingState {
+  lastSequence: number | null;
+  lastType: RelationshipType | null;
+  perType: Map<RelationshipType | string, number>;
 }
 
 export class SynchronizationCoordinator extends EventEmitter {
@@ -83,20 +140,43 @@ export class SynchronizationCoordinator extends EventEmitter {
     sourceFilePath?: string;
   }> = [];
 
+  // Session stream bookkeeping for WebSocket adapters
+  private sessionKeepaliveTimers = new Map<string, NodeJS.Timeout>();
+  private activeSessionIds = new Map<string, string>();
+
   // Runtime tuning knobs per operation (can be updated during sync)
   private tuning = new Map<string, { maxConcurrency?: number; batchSize?: number }>();
 
   // Local symbol index to speed up same-file relationship resolution
   private localSymbolIndex: Map<string, string> = new Map();
 
+  private sessionSequenceState: Map<string, SessionSequenceTrackingState> =
+    new Map();
+
+  private sessionSequence = new Map<string, number>();
+
+  private checkpointJobRunner: SessionCheckpointJobRunner;
+
   constructor(
     private kgService: KnowledgeGraphService,
     private astParser: ASTParser,
     private dbService: DatabaseService,
     private conflictResolution: ConflictResolutionService,
-    private rollbackCapabilities?: RollbackCapabilities
+    private rollbackCapabilities?: RollbackCapabilities,
+    checkpointJobRunner?: SessionCheckpointJobRunner
   ) {
     super();
+    if (checkpointJobRunner) {
+      this.checkpointJobRunner = checkpointJobRunner;
+    } else {
+      const checkpointOptions = this.createCheckpointJobOptions();
+      this.checkpointJobRunner = new SessionCheckpointJobRunner(
+        this.kgService,
+        this.rollbackCapabilities,
+        checkpointOptions
+      );
+    }
+    this.bindCheckpointJobEvents();
     this.setupEventHandlers();
   }
 
@@ -104,6 +184,317 @@ export class SynchronizationCoordinator extends EventEmitter {
     this.on("operationCompleted", this.handleOperationCompleted.bind(this));
     this.on("operationFailed", this.handleOperationFailed.bind(this));
     this.on("conflictDetected", this.handleConflictDetected.bind(this));
+  }
+
+  private nextSessionSequence(sessionId: string): number {
+    const current = this.sessionSequence.get(sessionId) ?? 0;
+    const next = current + 1;
+    this.sessionSequence.set(sessionId, next);
+    return next;
+  }
+
+  private createCheckpointJobOptions(): SessionCheckpointJobOptions {
+    const options: SessionCheckpointJobOptions = {};
+    if (!this.dbService || typeof this.dbService.isInitialized !== "function") {
+      return options;
+    }
+    if (!this.dbService.isInitialized()) {
+      return options;
+    }
+    try {
+      const postgresService = this.dbService.getPostgreSQLService();
+      if (postgresService && typeof postgresService.query === "function") {
+        options.persistence = new PostgresSessionCheckpointJobStore(postgresService);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      console.warn(
+        `⚠️ Unable to configure checkpoint persistence: ${message}`
+      );
+    }
+    return options;
+  }
+
+  private async ensureCheckpointPersistence(): Promise<void> {
+    if (!this.checkpointJobRunner || this.checkpointJobRunner.hasPersistence()) {
+      return;
+    }
+    if (!this.dbService || typeof this.dbService.isInitialized !== "function") {
+      return;
+    }
+    if (!this.dbService.isInitialized()) {
+      return;
+    }
+
+    try {
+      const postgresService = this.dbService.getPostgreSQLService();
+      if (!postgresService || typeof postgresService.query !== "function") {
+        return;
+      }
+
+      const store = new PostgresSessionCheckpointJobStore(postgresService);
+      await this.checkpointJobRunner.attachPersistence(store);
+      this.emitCheckpointMetrics("persistence_attached", {
+        store: "postgres",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `⚠️ Failed to attach checkpoint persistence: ${message}`
+      );
+    }
+  }
+
+  private async scheduleSessionCheckpoint(
+    sessionId: string,
+    seedEntityIds: string[],
+    options?: {
+      reason?: "daily" | "incident" | "manual";
+      hopCount?: number;
+      eventId?: string;
+      actor?: string;
+      annotations?: string[];
+      operationId?: string;
+      window?: TimeRangeParams;
+    }
+  ): Promise<
+    | { success: true; jobId: string; sequenceNumber: number }
+    | { success: false; error: string }
+  > {
+    if (!seedEntityIds || seedEntityIds.length === 0) {
+      return { success: false, error: "No checkpoint seeds provided" };
+    }
+
+    const dedupedSeeds = Array.from(new Set(seedEntityIds.filter(Boolean)));
+    if (dedupedSeeds.length === 0) {
+      return { success: false, error: "No valid checkpoint seeds resolved" };
+    }
+
+    try {
+      await this.ensureCheckpointPersistence();
+      const sequenceNumber = this.nextSessionSequence(sessionId);
+      const jobId = await this.checkpointJobRunner.enqueue({
+        sessionId,
+        seedEntityIds: dedupedSeeds,
+        reason: options?.reason ?? "manual",
+        hopCount: Math.max(1, Math.min(options?.hopCount ?? 2, 5)),
+        sequenceNumber,
+        operationId: options?.operationId,
+        eventId: options?.eventId,
+        actor: options?.actor,
+        annotations: options?.annotations,
+        triggeredBy: "SynchronizationCoordinator",
+        window: options?.window,
+      });
+      this.emit("checkpointScheduled", {
+        sessionId,
+        sequenceNumber,
+        seeds: dedupedSeeds.length,
+        jobId,
+      });
+      return { success: true, jobId, sequenceNumber };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : `Unknown error: ${String(error)}`;
+      console.warn(
+        `⚠️ Failed to enqueue session checkpoint job for ${sessionId}: ${message}`
+      );
+      this.emit("checkpointScheduleFailed", { sessionId, error: message });
+      return { success: false, error: message };
+    }
+  }
+
+  private async enqueueCheckpointWithNotification(params: {
+    sessionId: string;
+    seeds: string[];
+    options?: {
+      reason?: "daily" | "incident" | "manual";
+      hopCount?: number;
+      operationId?: string;
+      eventId?: string;
+      actor?: string;
+      annotations?: string[];
+      window?: TimeRangeParams;
+    };
+    publish: (payload: SessionStreamPayload) => void;
+    processedChanges: number;
+    totalChanges: number;
+  }): Promise<void> {
+    if (!params.seeds || params.seeds.length === 0) {
+      return;
+    }
+
+    const checkpointResult = await this.scheduleSessionCheckpoint(
+      params.sessionId,
+      params.seeds,
+      params.options
+    );
+
+    if (checkpointResult.success) {
+      params.publish({
+        status: "queued",
+        checkpointId: undefined,
+        seeds: params.seeds,
+        processedChanges: params.processedChanges,
+        totalChanges: params.totalChanges,
+        details: {
+          jobId: checkpointResult.jobId,
+          sequenceNumber: checkpointResult.sequenceNumber,
+        },
+      });
+      return;
+    }
+
+    const errorMessage = checkpointResult.error || "Failed to schedule checkpoint";
+    try {
+      await this.kgService.annotateSessionRelationshipsWithCheckpoint(
+        params.sessionId,
+        params.seeds,
+        {
+          status: "manual_intervention",
+          reason: params.options?.reason,
+          hopCount: params.options?.hopCount,
+          seedEntityIds: params.seeds,
+          jobId: undefined,
+          error: errorMessage,
+          triggeredBy: "SynchronizationCoordinator",
+        }
+      );
+    } catch (error) {
+      console.warn(
+        "⚠️ Failed to annotate session relationships after checkpoint enqueue failure",
+        error instanceof Error ? error.message : error
+      );
+    }
+    params.publish({
+      status: "manual_intervention",
+      checkpointId: undefined,
+      seeds: params.seeds,
+      processedChanges: params.processedChanges,
+      totalChanges: params.totalChanges,
+      errors: [
+        {
+          file: params.sessionId,
+          type: "checkpoint",
+          message: errorMessage,
+          timestamp: new Date(),
+          recoverable: false,
+        },
+      ],
+      details: {
+        jobId: undefined,
+        error: errorMessage,
+      },
+    });
+  }
+
+  private bindCheckpointJobEvents(): void {
+    this.checkpointJobRunner.on("jobEnqueued", ({ jobId, payload }) => {
+      this.emitCheckpointMetrics("job_enqueued", {
+        jobId,
+        sessionId: payload?.sessionId,
+      });
+    });
+
+    this.checkpointJobRunner.on("jobStarted", ({ jobId, attempts, payload }) => {
+      this.emitCheckpointMetrics("job_started", {
+        jobId,
+        attempts,
+        sessionId: payload?.sessionId,
+      });
+    });
+
+    this.checkpointJobRunner.on(
+      "jobAttemptFailed",
+      ({ jobId, attempts, error, payload }) => {
+        this.emitCheckpointMetrics("job_attempt_failed", {
+          jobId,
+          attempts,
+          error,
+          sessionId: payload?.sessionId,
+        });
+      }
+    );
+
+    this.checkpointJobRunner.on(
+      "jobCompleted",
+      ({ payload, checkpointId, jobId, attempts }) => {
+        const operationId = payload.operationId ?? payload.sessionId;
+        this.emitSessionEvent({
+          type: "session_checkpoint",
+          sessionId: payload.sessionId,
+          operationId,
+          timestamp: new Date().toISOString(),
+          payload: {
+            checkpointId,
+            seeds: payload.seedEntityIds,
+            status: "completed",
+            details: {
+              jobId,
+              attempts,
+            },
+          },
+        });
+
+        this.emitCheckpointMetrics("job_completed", {
+          jobId,
+          attempts,
+          sessionId: payload.sessionId,
+          checkpointId,
+        });
+      }
+    );
+
+    this.checkpointJobRunner.on(
+      "jobFailed",
+      ({ payload, jobId, attempts, error }) => {
+        const operationId = payload.operationId ?? payload.sessionId;
+        this.emitSessionEvent({
+          type: "session_checkpoint",
+          sessionId: payload.sessionId,
+          operationId,
+          timestamp: new Date().toISOString(),
+          payload: {
+            checkpointId: undefined,
+            seeds: payload.seedEntityIds,
+            status: "manual_intervention",
+            errors: [
+              {
+                file: payload.sessionId,
+                type: "unknown",
+                message: error,
+                timestamp: new Date(),
+                recoverable: false,
+              },
+            ],
+            details: {
+              jobId,
+              attempts,
+            },
+          },
+        });
+
+        this.emitCheckpointMetrics("job_failed", {
+          jobId,
+          attempts,
+          sessionId: payload.sessionId,
+          error,
+        });
+      }
+    );
+
+    this.checkpointJobRunner.on(
+      "jobDeadLettered",
+      ({ jobId, attempts, error, payload }) => {
+        this.emitCheckpointMetrics("job_dead_lettered", {
+          jobId,
+          attempts,
+          error,
+          sessionId: payload?.sessionId,
+        });
+      }
+    );
   }
 
   // Update tuning for an active operation; applies on next batch boundary
@@ -142,6 +533,216 @@ export class SynchronizationCoordinator extends EventEmitter {
     if (!hasChecker || !this.dbService.isInitialized()) {
       throw new Error("Database not initialized");
     }
+  }
+
+  private recordSessionSequence(
+    sessionId: string,
+    type: RelationshipType,
+    sequenceNumber: number,
+    eventId: string,
+    timestamp: Date
+  ): void {
+    let state = this.sessionSequenceState.get(sessionId);
+    if (!state) {
+      state = {
+        lastSequence: null,
+        lastType: null,
+        perType: new Map(),
+      };
+      this.sessionSequenceState.set(sessionId, state);
+    }
+
+    let reason: "duplicate" | "out_of_order" | null = null;
+    let previousSequence: number | null = null;
+    let previousType: RelationshipType | null = null;
+
+    if (state.lastSequence !== null) {
+      if (sequenceNumber === state.lastSequence) {
+        reason = "duplicate";
+        previousSequence = state.lastSequence;
+        previousType = state.lastType;
+      } else if (sequenceNumber < state.lastSequence) {
+        reason = "out_of_order";
+        previousSequence = state.lastSequence;
+        previousType = state.lastType;
+      }
+    }
+
+    const perTypePrevious = state.perType.get(type);
+    if (!reason && typeof perTypePrevious === "number") {
+      if (sequenceNumber === perTypePrevious) {
+        reason = "duplicate";
+        previousSequence = perTypePrevious;
+        previousType = type;
+      } else if (sequenceNumber < perTypePrevious) {
+        reason = "out_of_order";
+        previousSequence = perTypePrevious;
+        previousType = type;
+      }
+    }
+
+    if (reason) {
+      this.emit("sessionSequenceAnomaly", {
+        sessionId,
+        type,
+        sequenceNumber,
+        previousSequence: previousSequence ?? null,
+        reason,
+        eventId,
+        timestamp,
+        previousType: previousType ?? null,
+      });
+    }
+
+    state.perType.set(type, sequenceNumber);
+    if (state.lastSequence === null || sequenceNumber > state.lastSequence) {
+      state.lastSequence = sequenceNumber;
+      state.lastType = type;
+    }
+
+    const lastRecorded =
+      state.lastSequence === null ? sequenceNumber : state.lastSequence;
+    this.sessionSequence.set(sessionId, lastRecorded);
+  }
+
+  private clearSessionTracking(sessionId: string): void {
+    this.sessionSequenceState.delete(sessionId);
+    this.sessionSequence.delete(sessionId);
+  }
+
+  private toIsoTimestamp(value: unknown): string | undefined {
+    if (value == null) {
+      return undefined;
+    }
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    if (typeof value === "string") {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+    }
+    if (typeof value === "number") {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+    }
+    return undefined;
+  }
+
+  private serializeSessionRelationship(
+    rel: GraphRelationship
+  ): Record<string, unknown> {
+    const asAny = rel as Record<string, any>;
+    const result: Record<string, unknown> = {
+      id: asAny.id ?? null,
+      type: String(rel.type),
+      fromEntityId: rel.fromEntityId,
+      toEntityId: rel.toEntityId,
+      metadata: asAny.metadata ?? null,
+    };
+
+    if (asAny.sessionId) {
+      result.sessionId = asAny.sessionId;
+    }
+
+    if (typeof asAny.sequenceNumber === "number") {
+      result.sequenceNumber = asAny.sequenceNumber;
+    }
+
+    const timestampIso = this.toIsoTimestamp(asAny.timestamp ?? rel.created);
+    if (timestampIso) {
+      result.timestamp = timestampIso;
+    }
+
+    const createdIso = this.toIsoTimestamp(rel.created);
+    if (createdIso) {
+      result.created = createdIso;
+    }
+
+    const modifiedIso = this.toIsoTimestamp(rel.lastModified);
+    if (modifiedIso) {
+      result.lastModified = modifiedIso;
+    }
+
+    if (typeof asAny.eventId === "string") {
+      result.eventId = asAny.eventId;
+    }
+
+    if (typeof asAny.actor === "string") {
+      result.actor = asAny.actor;
+    }
+
+    if (Array.isArray(asAny.annotations) && asAny.annotations.length > 0) {
+      result.annotations = asAny.annotations;
+    }
+
+    if (asAny.changeInfo) {
+      result.changeInfo = asAny.changeInfo;
+    }
+
+    if (asAny.stateTransition) {
+      result.stateTransition = asAny.stateTransition;
+    }
+
+    if (asAny.impact) {
+      result.impact = asAny.impact;
+    }
+
+    return result;
+  }
+
+  private emitSessionEvent(event: SessionStreamEvent): void {
+    try {
+      this.emit("sessionEvent", event);
+    } catch (error) {
+      console.warn(
+        "Failed to emit session event",
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+
+  getCheckpointMetrics(): {
+    metrics: SessionCheckpointJobMetrics;
+    deadLetters: SessionCheckpointJobSnapshot[];
+  } {
+    return {
+      metrics: this.checkpointJobRunner.getMetrics(),
+      deadLetters: this.checkpointJobRunner.getDeadLetterJobs(),
+    };
+  }
+
+  private emitCheckpointMetrics(
+    event: string,
+    context?: Record<string, unknown>
+  ): void {
+    const snapshot = this.getCheckpointMetrics();
+    const payload: CheckpointMetricsSnapshot = {
+      event,
+      metrics: snapshot.metrics,
+      deadLetters: snapshot.deadLetters,
+      context,
+      timestamp: new Date().toISOString(),
+    };
+    try {
+      this.emit("checkpointMetricsUpdated", payload);
+    } catch (error) {
+      console.warn(
+        "Failed to emit checkpoint metrics",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+
+    try {
+      console.log("[session.checkpoint.metrics]", {
+        event,
+        enqueued: snapshot.metrics.enqueued,
+        completed: snapshot.metrics.completed,
+        failed: snapshot.metrics.failed,
+        retries: snapshot.metrics.retries,
+        deadLetters: snapshot.deadLetters.length,
+        ...(context || {}),
+      });
+    } catch {}
   }
 
   // Convenience methods used by integration tests
@@ -1015,6 +1616,94 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Track entities to embed in batch and session relationships buffer
     const toEmbed: any[] = [];
     const sessionRelBuffer: Array<import("../models/relationships.js").GraphRelationship> = [];
+    const sessionSequenceLocal = new Map<string, number>();
+    const allocateSessionSequence = () => {
+      const next = sessionSequenceLocal.get(sessionId) ?? 0;
+      sessionSequenceLocal.set(sessionId, next + 1);
+      return next;
+    };
+    const flushSessionRelationships = async () => {
+      if (sessionRelBuffer.length === 0) {
+        return;
+      }
+
+      const batch = sessionRelBuffer.slice();
+
+      try {
+        await this.kgService.createRelationshipsBulk(batch, { validate: false });
+        sessionRelBuffer.splice(0, batch.length);
+        const relationships = batch.map((rel) =>
+          this.serializeSessionRelationship(rel)
+        );
+        publishSessionEvent("session_relationships", {
+          changeId,
+          relationships,
+          processedChanges,
+          totalChanges,
+        });
+      } catch (e) {
+        operation.errors.push({
+          file: "coordinator",
+          type: "database",
+          message: `Bulk session rels failed: ${
+            e instanceof Error ? e.message : "unknown"
+          }`,
+          timestamp: new Date(),
+          recoverable: true,
+        });
+      }
+    };
+    const enqueueSessionRelationship = (
+      type: RelationshipType,
+      toEntityId: string,
+      options: {
+        metadata?: Record<string, any>;
+        changeInfo?: Record<string, any> | null;
+        stateTransition?: Record<string, any> | null;
+        impact?: Record<string, any> | null;
+        annotations?: string[];
+        actor?: string;
+        timestamp?: Date;
+      } = {}
+    ) => {
+      const timestamp = options.timestamp ?? new Date();
+      const sequenceNumber = allocateSessionSequence();
+      const eventId =
+        "evt_" +
+        crypto
+          .createHash("sha1")
+          .update(
+            `${sessionId}|${sequenceNumber}|${type}|${toEntityId}|${timestamp.valueOf()}`
+          )
+          .digest("hex")
+          .slice(0, 16);
+      const metadata = { ...(options.metadata ?? {}) };
+      if (metadata.source === undefined) metadata.source = "sync";
+      if (metadata.sessionId === undefined) metadata.sessionId = sessionId;
+      const relationship: any = {
+        fromEntityId: sessionId,
+        toEntityId,
+        type,
+        created: timestamp,
+        lastModified: timestamp,
+        version: 1,
+        sessionId,
+        sequenceNumber,
+        timestamp,
+        eventId,
+        actor: options.actor ?? "sync-coordinator",
+        annotations: options.annotations,
+        changeInfo: options.changeInfo ?? undefined,
+        stateTransition: options.stateTransition ?? undefined,
+        impact: options.impact ?? undefined,
+        metadata,
+      };
+      const graphRelationship = relationship as GraphRelationship;
+      graphRelationship.id = canonicalRelationshipId(sessionId, graphRelationship);
+      sessionRelBuffer.push(relationship as import("../models/relationships.js").GraphRelationship);
+      this.recordSessionSequence(sessionId, type, sequenceNumber, eventId, timestamp);
+      return { sequenceNumber, eventId, timestamp };
+    };
     // Track changed entities for checkpointing and change metadata
     const changedSeeds = new Set<string>();
     // Create a Change entity to associate temporal edges for this batch
@@ -1031,19 +1720,87 @@ export class SynchronizationCoordinator extends EventEmitter {
       } as any);
       // Link session to this change descriptor
       try {
-        await this.kgService.createRelationship({
-          id: `rel_${sessionId}_${changeId}_DEPENDS_ON_CHANGE`,
-          fromEntityId: sessionId,
-          toEntityId: changeId,
-          type: RelationshipType.DEPENDS_ON_CHANGE as any,
-          created: new Date(),
-          lastModified: new Date(),
-          version: 1,
-        } as any, undefined, undefined, { validate: false });
+        enqueueSessionRelationship(
+          RelationshipType.DEPENDS_ON_CHANGE,
+          changeId,
+          {
+            timestamp: new Date(),
+            metadata: { changeId },
+            stateTransition: {
+              from: "working",
+              to: "working",
+              verifiedBy: "sync",
+              confidence: 0.5,
+            },
+          }
+        );
       } catch {}
     } catch {}
 
-    for (const change of changes) {
+    this.activeSessionIds.set(operation.id, sessionId);
+
+    const publishSessionEvent = (
+      type: SessionEventKind,
+      payload?: SessionStreamPayload
+    ) => {
+      this.emitSessionEvent({
+        type,
+        sessionId,
+        operationId: operation.id,
+        timestamp: new Date().toISOString(),
+        payload,
+      });
+    };
+
+    const sessionDetails: Record<string, unknown> = {
+      totalChanges,
+    };
+    if (typeof syncOptions.batchSize === "number") {
+      sessionDetails.batchSize = syncOptions.batchSize;
+    }
+    if (typeof syncOptions.maxConcurrency === "number") {
+      sessionDetails.maxConcurrency = syncOptions.maxConcurrency;
+    }
+
+    publishSessionEvent("session_started", {
+      totalChanges,
+      processedChanges: 0,
+      details: sessionDetails,
+    });
+
+    const keepaliveInterval = Math.min(
+      Math.max(
+        typeof syncOptions.timeout === "number"
+          ? Math.floor(syncOptions.timeout / 6)
+          : 5000,
+        3000
+      ),
+      20000
+    );
+
+    let teardownSent = false;
+    const sendTeardown = (payload: SessionStreamPayload) => {
+      if (teardownSent) return;
+      teardownSent = true;
+      publishSessionEvent("session_teardown", payload);
+    };
+
+    const keepalive = () => {
+      publishSessionEvent("session_keepalive", {
+        processedChanges,
+        totalChanges,
+      });
+    };
+
+    keepalive();
+    const keepaliveTimer = setInterval(keepalive, keepaliveInterval);
+    this.sessionKeepaliveTimers.set(operation.id, keepaliveTimer);
+
+    let teardownPayload: SessionStreamPayload = { status: "completed" };
+    let runError: unknown;
+
+    try {
+      for (const change of changes) {
       await awaitIfPaused();
       this.ensureNotCancelled(operation);
       try {
@@ -1186,16 +1943,15 @@ export class SynchronizationCoordinator extends EventEmitter {
                     } as any, undefined, undefined, { validate: false });
                   } catch {}
                   try {
-                    sessionRelBuffer.push({
-                      id: `rel_${sessionId}_${entity.id}_SESSION_IMPACTED`,
-                      fromEntityId: sessionId,
-                      toEntityId: entity.id,
-                      type: RelationshipType.SESSION_IMPACTED,
-                      created: now2,
-                      lastModified: now2,
-                      version: 1,
-                      metadata: { severity: 'high', file: change.path },
-                    } as any);
+                    enqueueSessionRelationship(
+                      RelationshipType.SESSION_IMPACTED,
+                      entity.id,
+                      {
+                        timestamp: now2,
+                        metadata: { severity: 'high', file: change.path },
+                        impact: { severity: 'high' },
+                      }
+                    );
                   } catch {}
                   changedSeeds.add(entity.id);
                   await this.kgService.deleteEntity(entity.id);
@@ -1228,68 +1984,76 @@ export class SynchronizationCoordinator extends EventEmitter {
                       changeSetId: changeId,
                     });
                     operation.entitiesUpdated++;
-                    // Queue session relationship for modified entity
+                    const operationKind =
+                      change.type === "create"
+                        ? "added"
+                        : change.type === "delete"
+                        ? "deleted"
+                        : "modified";
+                    const changeInfo = {
+                      elementType: "file",
+                      elementName: change.path,
+                      operation: operationKind,
+                    };
+                    let stateTransition: Record<string, any> | undefined = {
+                      from: "unknown",
+                      to: "working",
+                      verifiedBy: "manual",
+                      confidence: 0.5,
+                    };
                     try {
                       const git = new GitService();
                       const diff = await git.getUnifiedDiff(change.path, 3);
-                      // Extract small before/after snippets from first hunk
-                      let beforeSnippet = '';
-                      let afterSnippet = '';
+                      let beforeSnippet = "";
+                      let afterSnippet = "";
                       if (diff) {
-                        const lines = diff.split('\n');
+                        const lines = diff.split("\n");
                         for (const ln of lines) {
-                          if (ln.startsWith('---') || ln.startsWith('+++') || ln.startsWith('@@')) continue;
-                          if (ln.startsWith('-') && beforeSnippet.length < 400) beforeSnippet += ln.substring(1) + '\n';
-                          if (ln.startsWith('+') && afterSnippet.length < 400) afterSnippet += ln.substring(1) + '\n';
+                          if (ln.startsWith("---") || ln.startsWith("+++") || ln.startsWith("@@")) continue;
+                          if (ln.startsWith("-") && beforeSnippet.length < 400)
+                            beforeSnippet += ln.substring(1) + "\n";
+                          if (ln.startsWith("+") && afterSnippet.length < 400)
+                            afterSnippet += ln.substring(1) + "\n";
                           if (beforeSnippet.length >= 400 && afterSnippet.length >= 400) break;
                         }
                       }
-                      sessionRelBuffer.push({
-                        id: `rel_${sessionId}_${ent.id}_SESSION_MODIFIED`,
-                        fromEntityId: sessionId,
-                        toEntityId: ent.id,
-                        type: RelationshipType.SESSION_MODIFIED,
-                        created: now,
-                        lastModified: now,
-                        version: 1,
-                        metadata: {
-                          file: change.path,
-                          stateTransition: {
-                            from: 'unknown',
-                            to: 'working',
-                            verifiedBy: 'manual',
-                            confidence: 0.5,
-                            criticalChange: {
-                              entityId: ent.id,
-                              beforeSnippet: beforeSnippet.trim() || undefined,
-                              afterSnippet: afterSnippet.trim() || undefined,
-                            },
-                          },
-                        },
-                      } as any);
+                      const criticalChange: Record<string, any> = { entityId: ent.id };
+                      if (beforeSnippet.trim()) criticalChange.beforeSnippet = beforeSnippet.trim();
+                      if (afterSnippet.trim()) criticalChange.afterSnippet = afterSnippet.trim();
+                      if (Object.keys(criticalChange).length > 1) {
+                        stateTransition = {
+                          ...stateTransition,
+                          criticalChange,
+                        };
+                      }
                     } catch {
-                      sessionRelBuffer.push({
-                        id: `rel_${sessionId}_${ent.id}_SESSION_MODIFIED`,
-                        fromEntityId: sessionId,
-                        toEntityId: ent.id,
-                        type: RelationshipType.SESSION_MODIFIED,
-                        created: now,
-                        lastModified: now,
-                        version: 1,
-                        metadata: { file: change.path },
-                      } as any);
+                      // best-effort; keep default stateTransition
                     }
+                    try {
+                      enqueueSessionRelationship(
+                        RelationshipType.SESSION_MODIFIED,
+                        ent.id,
+                        {
+                          timestamp: now,
+                          metadata: { file: change.path },
+                          changeInfo,
+                          stateTransition,
+                        }
+                      );
+                    } catch {}
                     // Also mark session impacted and link entity to the change
-                    sessionRelBuffer.push({
-                      id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
-                      fromEntityId: sessionId,
-                      toEntityId: ent.id,
-                      type: RelationshipType.SESSION_IMPACTED,
-                      created: now,
-                      lastModified: now,
-                      version: 1,
-                      metadata: { severity: 'medium', file: change.path },
-                    } as any);
+                    try {
+                      enqueueSessionRelationship(
+                        RelationshipType.SESSION_IMPACTED,
+                        ent.id,
+                        {
+                          timestamp: now,
+                          metadata: { severity: 'medium', file: change.path },
+                          impact: { severity: 'medium' },
+                        }
+                      );
+                    } catch {}
+
                     try {
                       await this.kgService.createRelationship({
                         id: `rel_${ent.id}_${changeId}_MODIFIED_IN`,
@@ -1313,7 +2077,14 @@ export class SynchronizationCoordinator extends EventEmitter {
                         created: now,
                         lastModified: now,
                         version: 1,
-                        metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
+                        metadata: info
+                          ? {
+                              author: info.author,
+                              email: info.email,
+                              commitHash: info.hash,
+                              date: info.date,
+                            }
+                          : { source: "sync" },
                       } as any, undefined, undefined, { validate: false });
                     } catch {}
                     changedSeeds.add(ent.id);
@@ -1426,53 +2197,49 @@ export class SynchronizationCoordinator extends EventEmitter {
                         metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
                       } as any, undefined, undefined, { validate: false });
                     } catch {}
+                    let stateTransitionNew: Record<string, any> | undefined = {
+                      from: "unknown",
+                      to: "working",
+                      verifiedBy: "manual",
+                      confidence: 0.4,
+                    };
                     try {
                       const git = new GitService();
                       const diff = await git.getUnifiedDiff(change.path, 2);
-                      let afterSnippet = '';
+                      let afterSnippet = "";
                       if (diff) {
-                        const lines = diff.split('\n');
+                        const lines = diff.split("\n");
                         for (const ln of lines) {
-                          if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@')) continue;
-                          if (ln.startsWith('+') && afterSnippet.length < 300) afterSnippet += ln.substring(1) + '\n';
+                          if (ln.startsWith("+++") || ln.startsWith("---") || ln.startsWith("@@")) continue;
+                          if (ln.startsWith("+") && afterSnippet.length < 300)
+                            afterSnippet += ln.substring(1) + "\n";
                           if (afterSnippet.length >= 300) break;
                         }
                       }
-                      sessionRelBuffer.push({
-                        id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
-                        fromEntityId: sessionId,
-                        toEntityId: ent.id,
-                        type: RelationshipType.SESSION_IMPACTED,
-                        created: now3,
-                        lastModified: now3,
-                        version: 1,
-                        metadata: {
-                          severity: 'low',
-                          file: change.path,
-                          stateTransition: {
-                            from: 'unknown',
-                            to: 'working',
-                            verifiedBy: 'manual',
-                            confidence: 0.4,
-                            criticalChange: {
-                              entityId: ent.id,
-                              afterSnippet: afterSnippet.trim() || undefined,
-                            },
+                      if (afterSnippet.trim()) {
+                        stateTransitionNew = {
+                          ...stateTransitionNew,
+                          criticalChange: {
+                            entityId: ent.id,
+                            afterSnippet: afterSnippet.trim(),
                           },
-                        },
-                      } as any);
+                        };
+                      }
                     } catch {
-                      sessionRelBuffer.push({
-                        id: `rel_${sessionId}_${ent.id}_SESSION_IMPACTED`,
-                        fromEntityId: sessionId,
-                        toEntityId: ent.id,
-                        type: RelationshipType.SESSION_IMPACTED,
-                        created: now3,
-                        lastModified: now3,
-                        version: 1,
-                        metadata: { severity: 'low', file: change.path },
-                      } as any);
+                      // ignore diff errors
                     }
+                    try {
+                      enqueueSessionRelationship(
+                        RelationshipType.SESSION_IMPACTED,
+                        ent.id,
+                        {
+                          timestamp: now3,
+                          metadata: { severity: 'low', file: change.path },
+                          stateTransition: stateTransitionNew,
+                          impact: { severity: 'low' },
+                        }
+                      );
+                    } catch {}
                     changedSeeds.add(ent.id);
                   } catch {}
                 }
@@ -1521,44 +2288,32 @@ export class SynchronizationCoordinator extends EventEmitter {
           recoverable: true,
         });
       }
+
+      await flushSessionRelationships();
     }
 
     // Post-pass for any unresolved relationships from this batch
     await this.runPostResolution(operation);
 
     // Bulk create session relationships
-    if (sessionRelBuffer.length > 0) {
-      try {
-        await this.kgService.createRelationshipsBulk(sessionRelBuffer, { validate: false });
-      } catch (e) {
-        operation.errors.push({
-          file: "coordinator",
-          type: "database",
-          message: `Bulk session rels failed: ${e instanceof Error ? e.message : 'unknown'}`,
-          timestamp: new Date(),
-          recoverable: true,
-        });
-      }
-    }
+    await flushSessionRelationships();
 
-    // Create a small checkpoint for changed neighborhood and link session -> checkpoint
-    try {
-      const seeds = Array.from(changedSeeds);
-      if (seeds.length > 0) {
-        const { checkpointId } = await this.kgService.createCheckpoint(seeds, "manual", 2);
-        try {
-          await this.kgService.createRelationship({
-            id: `rel_${sessionId}_${checkpointId}_SESSION_CHECKPOINT`,
-            fromEntityId: sessionId,
-            toEntityId: checkpointId,
-            type: RelationshipType.SESSION_CHECKPOINT as any,
-            created: new Date(),
-            lastModified: new Date(),
-            version: 1,
-          } as any, undefined, undefined, { validate: false });
-        } catch {}
-      }
-    } catch {}
+    // Schedule checkpoint job for changed neighborhood
+    const seeds = Array.from(changedSeeds);
+    if (seeds.length > 0) {
+      await this.enqueueCheckpointWithNotification({
+        sessionId,
+        seeds,
+        options: {
+          reason: "manual",
+          hopCount: 2,
+          operationId: operation.id,
+        },
+        processedChanges,
+        totalChanges,
+        publish: (payload) => publishSessionEvent("session_checkpoint", payload),
+      });
+    }
 
     // Batch-generate embeddings for affected entities
     if (toEmbed.length > 0) {
@@ -1577,6 +2332,52 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Deactivate edges not seen during this scan window (best-effort)
     try { await this.kgService.finalizeScan(scanStart); } catch {}
+
+    } catch (error) {
+      runError = error;
+      teardownPayload = {
+        status: "failed",
+        details: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+      throw error;
+    } finally {
+      const timer = this.sessionKeepaliveTimers.get(operation.id);
+      if (timer) {
+        clearInterval(timer);
+        this.sessionKeepaliveTimers.delete(operation.id);
+      }
+      this.activeSessionIds.delete(operation.id);
+      this.clearSessionTracking(sessionId);
+
+      const summaryPayload: SessionStreamPayload = {
+        ...teardownPayload,
+        processedChanges,
+        totalChanges,
+      };
+
+      if (
+        !summaryPayload.errors &&
+        (summaryPayload.status === "failed" || operation.errors.length > 0)
+      ) {
+        summaryPayload.errors = operation.errors.slice(-5);
+      }
+
+      if (summaryPayload.status !== "failed" && runError) {
+        summaryPayload.status = "failed";
+      }
+
+      if (
+        summaryPayload.status !== "failed" &&
+        operation.errors.some((err) => err.recoverable === false)
+      ) {
+        summaryPayload.status = "failed";
+      }
+
+      keepalive();
+      sendTeardown(summaryPayload);
+    }
 
     this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
   }

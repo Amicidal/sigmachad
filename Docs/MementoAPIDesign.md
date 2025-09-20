@@ -912,20 +912,20 @@ async function vectorSearch(params: VectorSearchRequest): Promise<VectorSearchRe
 ## 7. Source Control Management
 
 ### 7.1 Create Commit/PR
-**Endpoint:** `POST /api/scm/commit-pr`
+**Endpoint:** `POST /api/v1/scm/commit-pr`
 **MCP Tool:** `scm.commit_pr`
 
-Creates a commit and/or pull request with links to related artifacts.
+Creates a commit and optionally prepares a pull/merge request via the configured SCM provider. The handler stages requested files, commits with the provided metadata, pushes branches when `createPR !== false`, persists the commit in Postgres, and establishes provenance edges in the knowledge graph.
 
 ```typescript
 interface CommitPRRequest {
   title: string;
   description: string;
-  changes: string[]; // File paths
+  changes: string[];            // File paths to stage
   relatedSpecId?: string;
-  testResults?: string[]; // Test IDs
-  validationResults?: string; // Validation result ID
-  createPR?: boolean;
+  testResults?: string[];       // Test entity IDs
+  validationResults?: string | ValidationResult | Record<string, unknown>;
+  createPR?: boolean;           // defaults to true
   branchName?: string;
   labels?: string[];
 }
@@ -934,15 +934,27 @@ interface CommitPRResponse {
   commitHash: string;
   prUrl?: string;
   branch: string;
+  status: "committed" | "pending" | "failed";
+  provider?: string;
+  retryAttempts?: number;
+  escalationRequired?: boolean;
+  escalationMessage?: string;
+  providerError?: {
+    message: string;
+    code?: string;
+    lastAttempt?: number;
+  };
   relatedArtifacts: {
-    spec: Spec;
+    spec: Spec | null;
     tests: Test[];
-    validation: ValidationResult;
+    validation: ValidationResult | Record<string, unknown> | null;
   };
 }
 
 async function createCommitPR(params: CommitPRRequest): Promise<CommitPRResponse>
 ```
+
+> **Note:** The default provider is `local`, which pushes to the configured remote and returns a synthetic PR URL. Hosted providers (GitHub/GitLab) will extend this payload with real PR identifiers once implemented.
 
 ---
 

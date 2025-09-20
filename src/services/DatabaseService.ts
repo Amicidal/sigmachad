@@ -12,9 +12,11 @@ import {
   IRedisService,
   IDatabaseHealthCheck,
 } from "./database/index.js";
+import type { BulkQueryMetrics } from "./database/index.js";
 import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
+  SCMCommitRecord,
 } from "../models/types.js";
 import type { PerformanceRelationship } from "../models/relationships.js";
 import { FalkorDBService } from "./database/FalkorDBService.js";
@@ -547,6 +549,19 @@ export class DatabaseService {
     return this.postgresqlService.bulkQuery(queries, options);
   }
 
+  getPostgresBulkWriterMetrics(): BulkQueryMetrics {
+    if (!this.initialized) {
+      throw new Error("Database not initialized");
+    }
+    const metrics = this.postgresqlService.getBulkWriterMetrics();
+    return {
+      ...metrics,
+      lastBatch: metrics.lastBatch ? { ...metrics.lastBatch } : null,
+      history: metrics.history.map((entry) => ({ ...entry })),
+      slowBatches: metrics.slowBatches.map((entry) => ({ ...entry })),
+    };
+  }
+
   /**
    * Get test execution history for an entity
    */
@@ -583,6 +598,42 @@ export class DatabaseService {
       throw new Error("Database service not initialized");
     }
     await this.postgresqlService.recordPerformanceMetricSnapshot(snapshot);
+  }
+
+  async recordSCMCommit(commit: SCMCommitRecord): Promise<void> {
+    if (!this.initialized) {
+      throw new Error("Database service not initialized");
+    }
+    if (!this.postgresqlService.recordSCMCommit) {
+      throw new Error("PostgreSQL service does not implement recordSCMCommit");
+    }
+    await this.postgresqlService.recordSCMCommit(commit);
+  }
+
+  async getSCMCommitByHash(
+    commitHash: string
+  ): Promise<SCMCommitRecord | null> {
+    if (!this.initialized) {
+      throw new Error("Database service not initialized");
+    }
+    if (!this.postgresqlService.getSCMCommitByHash) {
+      throw new Error(
+        "PostgreSQL service does not implement getSCMCommitByHash"
+      );
+    }
+    return this.postgresqlService.getSCMCommitByHash(commitHash);
+  }
+
+  async listSCMCommits(limit: number = 50): Promise<SCMCommitRecord[]> {
+    if (!this.initialized) {
+      throw new Error("Database service not initialized");
+    }
+    if (!this.postgresqlService.listSCMCommits) {
+      throw new Error(
+        "PostgreSQL service does not implement listSCMCommits"
+      );
+    }
+    return this.postgresqlService.listSCMCommits(limit);
   }
 
   /**

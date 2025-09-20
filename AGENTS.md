@@ -8,7 +8,7 @@
 - Expect concurrent agent sessions; unexpected working tree changes can happen—diff, sync, and adapt instead of reverting unseen work.
 
 ## Capturing Test Output
-- Test suites produce high-volume output that can overflow Codex context. Redirect full logs to a file instead of streaming them to the assistant.
+- Test suites produce high-volume output that WILL overflow Codex context. YOU MUST Redirect full logs to a file instead of streaming them to the assistant.
 - Example: `pnpm vitest > logs/latest-test.log 2>&1` (create the `logs/` directory first if missing).
 - Share only the relevant excerpts or summaries back in chat to keep the context focused.
 - When debugging interactively, prefer quiet flags such as `pnpm vitest --run --reporter=basic` or target specific specs to minimize noise.

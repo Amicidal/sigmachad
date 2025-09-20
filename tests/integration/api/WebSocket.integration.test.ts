@@ -7,16 +7,46 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { FastifyInstance } from "fastify";
 import { WebSocket } from "ws";
+import { EventEmitter } from "events";
 import { APIGateway } from "../../../src/api/APIGateway.js";
 import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
 import { DatabaseService } from "../../../src/services/DatabaseService.js";
 import { FileWatcher } from "../../../src/services/FileWatcher.js";
+import type {
+  SessionStreamEvent,
+  SynchronizationCoordinator,
+} from "../../../src/services/SynchronizationCoordinator.js";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
   checkDatabaseHealth,
 } from "../../test-utils/database-helpers.js";
+import { mintAccessToken } from "../../test-utils/auth";
+
+class StubSyncCoordinator extends EventEmitter {
+  async startFullSynchronization(): Promise<string> {
+    return "stub-sync-op";
+  }
+
+  async stopSync(): Promise<void> {}
+
+  getQueueLength(): number {
+    return 0;
+  }
+
+  getActiveOperations(): Array<unknown> {
+    return [];
+  }
+
+  getCompletedOperations(): Array<unknown> {
+    return [];
+  }
+
+  getOperationStatus(): unknown {
+    return undefined;
+  }
+}
 
 describe("WebSocket Router Integration", () => {
   let dbService: DatabaseService;
@@ -25,6 +55,7 @@ describe("WebSocket Router Integration", () => {
   let app: FastifyInstance;
   let server: any;
   let testFileWatcher: FileWatcher;
+  let stubSyncCoordinator: StubSyncCoordinator;
 
   beforeAll(async () => {
     // Setup test database
@@ -39,9 +70,22 @@ describe("WebSocket Router Integration", () => {
     // Create services
     kgService = new KnowledgeGraphService(dbService);
     testFileWatcher = new FileWatcher();
+    stubSyncCoordinator = new StubSyncCoordinator();
+
+    const syncCoordinatorForGateway =
+      stubSyncCoordinator as unknown as SynchronizationCoordinator;
 
     // Create API Gateway with file watcher
-    apiGateway = new APIGateway(kgService, dbService, testFileWatcher);
+    apiGateway = new APIGateway(
+      kgService,
+      dbService,
+      testFileWatcher,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { syncCoordinator: syncCoordinatorForGateway }
+    );
     app = apiGateway.getApp();
 
     // Start the server
@@ -62,6 +106,11 @@ describe("WebSocket Router Integration", () => {
     if (dbService && dbService.isInitialized()) {
       await clearTestData(dbService);
     }
+
+    const wsRouter = (apiGateway as any)?.wsRouter as
+      | { lastEvents?: Map<string, unknown> }
+      | undefined;
+    wsRouter?.lastEvents?.clear?.();
   });
 
   describe("WebSocket Server Setup", () => {
@@ -138,6 +187,82 @@ describe("WebSocket Router Integration", () => {
           reject(new Error("WebSocket connection timeout"));
         }, 10000);
       });
+    });
+  });
+
+  describe("WebSocket Authentication", () => {
+    const WS_JWT_SECRET = "ws-test-secret";
+
+    it("should accept access tokens provided via query string", async () => {
+      const originalSecret = process.env.JWT_SECRET;
+      try {
+        process.env.JWT_SECRET = WS_JWT_SECRET;
+
+        const port = apiGateway.getConfig().port;
+        const baseUrl = `ws://localhost:${port}/ws`;
+
+        // Without token the connection should be rejected
+        const unauthorizedAttempt = new Promise<void>((resolve, reject) => {
+          const ws = new WebSocket(baseUrl);
+          const cleanup = () => {
+            try {
+              ws.close();
+            } catch {}
+          };
+          ws.on("open", () => {
+            cleanup();
+            reject(
+              new Error(
+                "WebSocket connection unexpectedly succeeded without token"
+              )
+            );
+          });
+          ws.on("error", () => {
+            cleanup();
+            resolve();
+          });
+        });
+        await expect(unauthorizedAttempt).resolves.toBeUndefined();
+
+        const token = mintAccessToken(WS_JWT_SECRET, {
+          scopes: ["graph:read"],
+        });
+
+        const authenticatedAttempt = new Promise<void>((resolve, reject) => {
+          const ws = new WebSocket(`${baseUrl}?access_token=${token}`);
+          const timeoutId = setTimeout(() => {
+            cleanup();
+            reject(
+              new Error(
+                "Timed out waiting for authenticated WebSocket connection"
+              )
+            );
+          }, 5000);
+
+          const cleanup = () => {
+            clearTimeout(timeoutId);
+            try {
+              ws.close();
+            } catch {}
+          };
+
+          ws.on("open", () => {
+            cleanup();
+            resolve();
+          });
+          ws.on("error", (error) => {
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+          });
+        });
+        await expect(authenticatedAttempt).resolves.toBeUndefined();
+      } finally {
+        if (originalSecret) {
+          process.env.JWT_SECRET = originalSecret;
+        } else {
+          delete process.env.JWT_SECRET;
+        }
+      }
     });
   });
 
@@ -824,6 +949,577 @@ describe("WebSocket Router Integration", () => {
             finishFailure(error instanceof Error ? error : new Error(String(error)));
           });
         }
+      });
+    });
+  });
+
+  describe("Session WebSocket Notifications", () => {
+    it("should broadcast session relationship events to subscribers", async () => {
+      const port = apiGateway.getConfig().port;
+      const wsUrl = `ws://localhost:${port}/ws`;
+      const sessionId = `session_test_${Date.now()}`;
+      const operationId = `op_${Date.now()}`;
+
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl);
+        const timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out waiting for session relationship event"));
+        }, 8000);
+
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          try {
+            ws.close();
+          } catch {}
+        };
+
+        ws.on("open", () => {
+          ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              id: "session-rel-test",
+              data: {
+                event: "session_event",
+                filter: {
+                  sessionId,
+                },
+              },
+            })
+          );
+        });
+
+        ws.on("message", (buffer) => {
+          let message: any;
+          try {
+            message = JSON.parse(buffer.toString());
+          } catch (error) {
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+
+          if (message.type === "subscribed") {
+            const event: SessionStreamEvent = {
+              type: "session_relationships",
+              sessionId,
+              operationId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                changeId: `${operationId}-change`,
+                relationships: [
+                  {
+                    id: "rel_session_entity",
+                    type: "session_modified",
+                    fromEntityId: sessionId,
+                    toEntityId: "entity_1",
+                    metadata: { file: "src/example.ts" },
+                  },
+                ],
+                processedChanges: 1,
+                totalChanges: 3,
+              },
+            };
+            setTimeout(() => {
+              stubSyncCoordinator.emit("sessionEvent", event);
+            }, 10);
+            return;
+          }
+
+          if (message.type === "event" && message.data?.event === "session_relationships") {
+            try {
+              expect(message.data.sessionId).toBe(sessionId);
+              expect(message.data.operationId).toBe(operationId);
+              expect(message.data.relationships).toEqual(
+                expect.arrayContaining([
+                  expect.objectContaining({
+                    id: "rel_session_entity",
+                    type: "session_modified",
+                  }),
+                ])
+              );
+              cleanup();
+              resolve();
+            } catch (error) {
+              cleanup();
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+          }
+        });
+
+        ws.on("error", (error) => {
+          cleanup();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
+      });
+    });
+
+    it("should forward session keepalive and teardown events", async () => {
+      const port = apiGateway.getConfig().port;
+      const wsUrl = `ws://localhost:${port}/ws`;
+      const sessionId = `session_keepalive_${Date.now()}`;
+      const operationId = `op_keepalive_${Date.now()}`;
+
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl);
+        const timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out waiting for keepalive/teardown events"));
+        }, 8000);
+
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          try {
+            ws.close();
+          } catch {}
+        };
+
+        const received: string[] = [];
+
+        ws.on("open", () => {
+          ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              id: "session-keepalive-test",
+              data: {
+                event: "session_event",
+                filter: {
+                  sessionId,
+                  sessionEvents: ["session_keepalive", "session_teardown"],
+                },
+              },
+            })
+          );
+        });
+
+        ws.on("message", (buffer) => {
+          let message: any;
+          try {
+            message = JSON.parse(buffer.toString());
+          } catch (error) {
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+
+          if (message.type === "subscribed") {
+            const keepaliveEvent: SessionStreamEvent = {
+              type: "session_keepalive",
+              sessionId,
+              operationId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                processedChanges: 2,
+                totalChanges: 5,
+              },
+            };
+            const teardownEvent: SessionStreamEvent = {
+              type: "session_teardown",
+              sessionId,
+              operationId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                status: "completed",
+                processedChanges: 5,
+                totalChanges: 5,
+              },
+            };
+            setTimeout(() => {
+              stubSyncCoordinator.emit("sessionEvent", keepaliveEvent);
+              setTimeout(() => {
+                stubSyncCoordinator.emit("sessionEvent", teardownEvent);
+              }, 25);
+            }, 10);
+            return;
+          }
+
+          if (message.type === "event" && message.data?.event === "session_keepalive") {
+            try {
+              expect(message.data.sessionId).toBe(sessionId);
+              expect(message.data.processedChanges).toBe(2);
+              expect(message.data.totalChanges).toBe(5);
+              received.push("session_keepalive");
+            } catch (error) {
+              cleanup();
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+            return;
+          }
+
+          if (message.type === "event" && message.data?.event === "session_teardown") {
+            try {
+              expect(message.data.status).toBe("completed");
+              expect(message.data.sessionId).toBe(sessionId);
+              received.push("session_teardown");
+              expect(received).toEqual([
+                "session_keepalive",
+                "session_teardown",
+              ]);
+              cleanup();
+              resolve();
+            } catch (error) {
+              cleanup();
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+          }
+        });
+
+        ws.on("error", (error) => {
+          cleanup();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
+      });
+    });
+
+    it("should forward session checkpoint events with metadata", async () => {
+      const port = apiGateway.getConfig().port;
+      const wsUrl = `ws://localhost:${port}/ws`;
+      const sessionId = `session_checkpoint_${Date.now()}`;
+      const operationId = `op_checkpoint_${Date.now()}`;
+      const checkpointId = `chk_${Date.now()}`;
+
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl);
+        const timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out waiting for session checkpoint event"));
+        }, 8000);
+
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          try {
+            ws.close();
+          } catch {}
+        };
+
+        ws.on("open", () => {
+          ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              id: "session-checkpoint-test",
+              data: {
+                event: "session_event",
+                filter: {
+                  sessionId,
+                  sessionEvents: ["session_checkpoint"],
+                },
+              },
+            })
+          );
+        });
+
+        ws.on("message", (buffer) => {
+          let message: any;
+          try {
+            message = JSON.parse(buffer.toString());
+          } catch (error) {
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+
+          if (message.type === "subscribed") {
+            const checkpointEvent: SessionStreamEvent = {
+              type: "session_checkpoint",
+              sessionId,
+              operationId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                status: "queued",
+                checkpointId,
+                seeds: ["entity_checkpoint_target"],
+                details: {
+                  jobId: "job-checkpoint-1",
+                  attempts: 1,
+                },
+              },
+            };
+            setTimeout(() => {
+              stubSyncCoordinator.emit("sessionEvent", checkpointEvent);
+            }, 10);
+            return;
+          }
+
+          if (message.type === "event" && message.data?.event === "session_checkpoint") {
+            try {
+              expect(message.data.sessionId).toBe(sessionId);
+              expect(message.data.operationId).toBe(operationId);
+              expect(message.data.checkpointId).toBe(checkpointId);
+              expect(message.data.seeds).toEqual(
+                expect.arrayContaining(["entity_checkpoint_target"])
+              );
+              expect(message.data.status).toBe("queued");
+              cleanup();
+              resolve();
+            } catch (error) {
+              cleanup();
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+          }
+        });
+
+        ws.on("error", (error) => {
+          cleanup();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
+      });
+    });
+
+    it("should close sockets when the router disconnects clients", async () => {
+      const port = apiGateway.getConfig().port;
+      const wsUrl = `ws://localhost:${port}/ws`;
+      const router = (apiGateway as any).wsRouter;
+
+      const { finalReadyState } = await new Promise<{ finalReadyState: number }>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl);
+        const fail = (error: Error) => {
+          try {
+            ws.close();
+          } catch {}
+          reject(error);
+        };
+
+        ws.on("open", () => {
+          const connections = router.getConnections();
+          expect(connections.length).toBeGreaterThan(0);
+          const connectionId = connections[0].id;
+
+          const timeoutId = setTimeout(() => {
+            fail(new Error("Timed out waiting for router-driven close"));
+          }, 4000);
+
+          ws.once("close", () => {
+            clearTimeout(timeoutId);
+            resolve({ finalReadyState: ws.readyState });
+          });
+
+          try {
+            (router as any).handleDisconnection(connectionId);
+          } catch (error) {
+            fail(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+
+        ws.on("error", (error) => {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        });
+      });
+
+      expect(finalReadyState).toBe(WebSocket.CLOSED);
+      expect((apiGateway as any).wsRouter.getConnections().length).toBe(0);
+    });
+
+    it("should filter session events by operationId", async () => {
+      const port = apiGateway.getConfig().port;
+      const wsUrl = `ws://localhost:${port}/ws`;
+      const sessionId = `session_op_filter_${Date.now()}`;
+      const acceptedOperationId = `op_match_${Date.now()}`;
+      const rejectedOperationId = `op_reject_${Date.now()}`;
+
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl);
+        const timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out waiting for filtered session event"));
+        }, 8000);
+
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          try {
+            ws.close();
+          } catch {}
+        };
+
+        ws.on("open", () => {
+          ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              id: "session-operation-filter",
+              data: {
+                event: "session_event",
+                filter: {
+                  sessionId,
+                  operationId: acceptedOperationId,
+                },
+              },
+            })
+          );
+        });
+
+        ws.on("message", (buffer) => {
+          let message: any;
+          try {
+            message = JSON.parse(buffer.toString());
+          } catch (error) {
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+
+          if (message.type === "subscribed") {
+            const mismatchEvent: SessionStreamEvent = {
+              type: "session_keepalive",
+              sessionId,
+              operationId: rejectedOperationId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                processedChanges: 1,
+                totalChanges: 5,
+              },
+            };
+            const matchEvent: SessionStreamEvent = {
+              type: "session_keepalive",
+              sessionId,
+              operationId: acceptedOperationId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                processedChanges: 2,
+                totalChanges: 5,
+              },
+            };
+
+            setTimeout(() => {
+              stubSyncCoordinator.emit("sessionEvent", mismatchEvent);
+            }, 10);
+
+            setTimeout(() => {
+              stubSyncCoordinator.emit("sessionEvent", matchEvent);
+            }, 40);
+            return;
+          }
+
+          if (message.type === "event" && message.data?.event === "session_keepalive") {
+            try {
+              expect(message.data.operationId).toBe(acceptedOperationId);
+              cleanup();
+              resolve();
+            } catch (error) {
+              cleanup();
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+          }
+        });
+
+        ws.on("error", (error) => {
+          cleanup();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
+      });
+    });
+
+    it("should filter session events by sessionEdgeTypes", async () => {
+      const port = apiGateway.getConfig().port;
+      const wsUrl = `ws://localhost:${port}/ws`;
+      const sessionId = `session_edge_filter_${Date.now()}`;
+      const operationId = `op_edge_${Date.now()}`;
+
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl);
+        const timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out waiting for session edge filtered event"));
+        }, 8000);
+
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          try {
+            ws.close();
+          } catch {}
+        };
+
+        ws.on("open", () => {
+          ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              id: "session-edge-filter",
+              data: {
+                event: "session_event",
+                filter: {
+                  sessionId,
+                  sessionEdgeTypes: ["session_impacted"],
+                },
+              },
+            })
+          );
+        });
+
+        ws.on("message", (buffer) => {
+          let message: any;
+          try {
+            message = JSON.parse(buffer.toString());
+          } catch (error) {
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+
+          if (message.type === "subscribed") {
+            const nonMatching: SessionStreamEvent = {
+              type: "session_relationships",
+              sessionId,
+              operationId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                relationships: [
+                  {
+                    id: "rel_non_match",
+                    type: "session_modified",
+                    fromEntityId: sessionId,
+                    toEntityId: "entity_x",
+                  },
+                ],
+              },
+            };
+
+            const matching: SessionStreamEvent = {
+              type: "session_relationships",
+              sessionId,
+              operationId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                relationships: [
+                  {
+                    id: "rel_match",
+                    type: "session_impacted",
+                    fromEntityId: sessionId,
+                    toEntityId: "entity_y",
+                  },
+                ],
+              },
+            };
+
+            setTimeout(() => {
+              stubSyncCoordinator.emit("sessionEvent", nonMatching);
+            }, 10);
+
+            setTimeout(() => {
+              stubSyncCoordinator.emit("sessionEvent", matching);
+            }, 40);
+            return;
+          }
+
+          if (message.type === "event" && message.data?.event === "session_relationships") {
+            try {
+              const relationships = message.data.relationships ?? [];
+              expect(Array.isArray(relationships)).toBe(true);
+              expect(relationships).toEqual(
+                expect.arrayContaining([
+                  expect.objectContaining({ type: "session_impacted" }),
+                ])
+              );
+              cleanup();
+              resolve();
+            } catch (error) {
+              cleanup();
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+          }
+        });
+
+        ws.on("error", (error) => {
+          cleanup();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
       });
     });
   });

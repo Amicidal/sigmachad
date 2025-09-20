@@ -721,6 +721,14 @@ describe("PostgreSQLService Integration", () => {
         ["large-bulk-test"]
       );
       expect(parseInt(countResult.rows[0].count)).toBe(largeBulkSize);
+
+      const metrics = pgService.getBulkWriterMetrics();
+      expect(metrics.lastBatch?.batchSize).toBe(largeBulkSize);
+      expect(metrics.maxBatchSize).toBeGreaterThanOrEqual(largeBulkSize);
+      expect(metrics.history.length).toBeGreaterThan(0);
+      expect(
+        metrics.slowBatches.some((entry) => entry.batchSize === largeBulkSize)
+      ).toBe(true);
     });
   });
 

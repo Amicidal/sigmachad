@@ -709,19 +709,19 @@ describe('REST API Endpoints Integration', () => {
   });
 
   describe('Source Control API Endpoints', () => {
-    it('GET /api/v1/scm/changes responds with not implemented notice', async () => {
+    it('GET /api/v1/scm/changes returns recent commit metadata', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/scm/changes' });
-      expect(res.statusCode).toBe(501);
+      expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body).toEqual(
         expect.objectContaining({
-          success: false,
-          error: expect.objectContaining({ code: 'NOT_IMPLEMENTED' }),
+          success: true,
+          data: expect.any(Array),
         })
       );
     });
 
-    it('POST /api/v1/scm/commit-pr returns not implemented until SCM service ships', async () => {
+    it('POST /api/v1/scm/commit-pr creates commit metadata', async () => {
       const payload = { title: 't', description: 'd', changes: ['README.md'] };
       const res = await app.inject({
         method: 'POST',
@@ -729,24 +729,24 @@ describe('REST API Endpoints Integration', () => {
         headers: { 'content-type': 'application/json' },
         payload: JSON.stringify(payload),
       });
-      expect(res.statusCode).toBe(501);
+      expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body).toEqual(
         expect.objectContaining({
-          success: false,
-          error: expect.objectContaining({ code: 'NOT_IMPLEMENTED' }),
+          success: true,
+          data: expect.objectContaining({ commitHash: expect.any(String) }),
         })
       );
     });
 
-    it('GET /api/v1/scm/branches returns not implemented placeholder', async () => {
+    it('GET /api/v1/scm/branches lists branches', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/scm/branches' });
-      expect(res.statusCode).toBe(501);
+      expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body).toEqual(
         expect.objectContaining({
-          success: false,
-          error: expect.objectContaining({ code: 'NOT_IMPLEMENTED' }),
+          success: true,
+          data: expect.any(Array),
         })
       );
     });

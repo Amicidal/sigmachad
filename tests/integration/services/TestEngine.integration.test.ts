@@ -553,6 +553,88 @@ describe("TestEngine Integration", () => {
     });
   });
 
+  describe("Performance Snapshot Ingestion", () => {
+    it("should bulk ingest high-volume performance snapshots and expose telemetry", async () => {
+      const batchSize = 60;
+      const testPrefix = "bulk-perf-snapshot";
+      const metricId = "performance/bulk-fixture";
+      const now = Date.now();
+
+      const bulkQueries = Array.from({ length: batchSize }, (_, index) => {
+        const detectedAt = new Date(now - index * 60_000);
+        return {
+          query: `
+            INSERT INTO performance_metric_snapshots (
+              test_id,
+              target_id,
+              metric_id,
+              current_value,
+              baseline_value,
+              delta,
+              percent_change,
+              severity,
+              trend,
+              environment,
+              unit,
+              sample_size,
+              detected_at,
+              metadata
+            )
+            VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          `,
+          params: [
+            `${testPrefix}-${index}`,
+            metricId,
+            150 + index,
+            100,
+            50 + index,
+            0.2 * (index + 1),
+            index % 4 === 0 ? "critical" : index % 3 === 0 ? "high" : "medium",
+            index % 3 === 0 ? "regression" : "neutral",
+            index % 2 === 0 ? "perf-lab" : "staging",
+            "ms",
+            10 + index,
+            detectedAt,
+            JSON.stringify({ source: "integration", batch: "high-volume" }),
+          ],
+        };
+      });
+
+      await dbService.postgresBulkQuery(bulkQueries);
+
+      const metrics = dbService.getPostgresBulkWriterMetrics();
+
+      expect(metrics.lastBatch).not.toBeNull();
+      expect(metrics.lastBatch?.batchSize).toBe(batchSize);
+      expect(metrics.lastBatch?.mode).toBe("transaction");
+      expect(metrics.totalBatches).toBeGreaterThanOrEqual(1);
+      expect(metrics.totalQueries).toBeGreaterThanOrEqual(batchSize);
+      expect(metrics.maxBatchSize).toBeGreaterThanOrEqual(batchSize);
+      expect(metrics.history.length).toBeGreaterThan(0);
+      expect(
+        metrics.slowBatches.some((entry) => entry.batchSize === batchSize)
+      ).toBe(true);
+
+      const history = await dbService.getPerformanceMetricsHistory(
+        `${testPrefix}-0`,
+        { limit: 5, metricId }
+      );
+      expect(history.length).toBeGreaterThan(0);
+      expect(history[0]?.metricId).toBe(metricId);
+
+      const countResult = await dbService.postgresQuery(
+        "SELECT COUNT(*)::int AS count FROM performance_metric_snapshots WHERE test_id LIKE $1",
+        [`${testPrefix}-%`]
+      );
+      expect(countResult.rows?.[0]?.count).toBe(batchSize);
+
+      await dbService.postgresQuery(
+        "DELETE FROM performance_metric_snapshots WHERE test_id LIKE $1",
+        [`${testPrefix}-%`]
+      );
+    });
+  });
+
   describe("File-based Test Processing", () => {
     it("should parse and record test results from file", async () => {
       const jestResults = {

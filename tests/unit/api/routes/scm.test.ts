@@ -1,9 +1,4 @@
-/**
- * Unit tests for SCM (Source Control Management) Routes
- * Tests Git operations, commits, pull requests, and version control endpoints
- */
-
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { registerSCMRoutes } from "../../../../src/api/routes/scm.js";
 import {
   createMockRequest,
@@ -12,740 +7,356 @@ import {
   type MockFastifyReply,
 } from "../../../test-utils.js";
 
-// Mock services
-vi.mock("../../../../src/services/KnowledgeGraphService.js", () => ({
-  KnowledgeGraphService: vi.fn(),
-}));
-vi.mock("../../../../src/services/DatabaseService.js", () => ({
-  DatabaseService: vi.fn(),
-}));
+const scmServiceMocks: {
+  createCommitAndMaybePR: ReturnType<typeof vi.fn>;
+  getStatus: ReturnType<typeof vi.fn>;
+  push: ReturnType<typeof vi.fn>;
+  listBranches: ReturnType<typeof vi.fn>;
+  ensureBranch: ReturnType<typeof vi.fn>;
+  listCommitRecords: ReturnType<typeof vi.fn>;
+  getDiff: ReturnType<typeof vi.fn>;
+  getCommitLog: ReturnType<typeof vi.fn>;
+} = {
+  createCommitAndMaybePR: vi.fn(),
+  getStatus: vi.fn(),
+  push: vi.fn(),
+  listBranches: vi.fn(),
+  ensureBranch: vi.fn(),
+  listCommitRecords: vi.fn(),
+  getDiff: vi.fn(),
+  getCommitLog: vi.fn(),
+};
+
+var ExportedValidationError: any;
+
+vi.mock("../../../../src/services/SCMService.js", () => {
+  class MockValidationError extends Error {
+    details: string[];
+
+    constructor(details: string[]) {
+      super(details.join("; "));
+      this.name = "ValidationError";
+      this.details = details;
+    }
+  }
+
+  class MockSCMService {
+    constructor() {
+      scmServiceMocks.createCommitAndMaybePR.mockClear();
+      scmServiceMocks.getStatus.mockClear();
+      scmServiceMocks.push.mockClear();
+      scmServiceMocks.listBranches.mockClear();
+      scmServiceMocks.ensureBranch.mockClear();
+      scmServiceMocks.listCommitRecords.mockClear();
+      scmServiceMocks.getDiff.mockClear();
+      scmServiceMocks.getCommitLog.mockClear();
+    }
+
+    createCommitAndMaybePR = scmServiceMocks.createCommitAndMaybePR;
+    getStatus = scmServiceMocks.getStatus;
+    push = scmServiceMocks.push;
+    listBranches = scmServiceMocks.listBranches;
+    ensureBranch = scmServiceMocks.ensureBranch;
+    listCommitRecords = scmServiceMocks.listCommitRecords;
+    getDiff = scmServiceMocks.getDiff;
+    getCommitLog = scmServiceMocks.getCommitLog;
+  }
+
+  ExportedValidationError = MockValidationError;
+
+  return {
+    SCMService: MockSCMService,
+    ValidationError: MockValidationError,
+  };
+});
 
 describe("SCM Routes", () => {
   let mockApp: any;
-  let mockKgService: any;
-  let mockDbService: any;
   let mockRequest: MockFastifyRequest;
   let mockReply: MockFastifyReply;
 
-  // Create a properly mocked Fastify app that tracks registered routes
   const createMockApp = () => {
-    const routes = new Map<string, Function>();
+    const routes = new Map<string, { options?: any; handler: Function }>();
 
     const registerRoute = (
       method: string,
       path: string,
-      handler: Function,
-      _options?: any
+      options: any,
+      handler: Function
     ) => {
       const key = `${method}:${path}`;
-      routes.set(key, handler);
+      routes.set(key, { options, handler });
     };
 
     return {
-      get: vi.fn((path: string, optionsOrHandler?: any, handler?: Function) => {
-        if (typeof optionsOrHandler === "function") {
-          registerRoute("get", path, optionsOrHandler);
-        } else if (handler) {
-          registerRoute("get", path, handler);
+      get: vi.fn((path: string, options: any, handler?: Function) => {
+        if (typeof options === "function") {
+          registerRoute("get", path, undefined, options);
+        } else {
+          registerRoute("get", path, options, handler as Function);
         }
       }),
-      post: vi.fn(
-        (path: string, optionsOrHandler?: any, handler?: Function) => {
-          if (typeof optionsOrHandler === "function") {
-            registerRoute("post", path, optionsOrHandler);
-          } else if (handler) {
-            registerRoute("post", path, handler);
-          }
+      post: vi.fn((path: string, options: any, handler?: Function) => {
+        if (typeof options === "function") {
+          registerRoute("post", path, undefined, options);
+        } else {
+          registerRoute("post", path, options, handler as Function);
         }
-      ),
+      }),
       getRegisteredRoutes: () => routes,
     };
   };
 
-  // Helper function to extract route handlers
   const getHandler = (
     method: "get" | "post",
-    path: string,
-    app = mockApp
-  ): Function => {
-    const routes = app.getRegisteredRoutes();
+    path: string
+  ): { handler: Function; options?: any } => {
     const key = `${method}:${path}`;
-    const handler = routes.get(key);
-
-    if (!handler) {
-      const availableRoutes = Array.from(routes.keys()).join(", ");
-      throw new Error(
-        `Route ${key} not found. Available routes: ${availableRoutes}`
-      );
+    const entry = mockApp.getRegisteredRoutes().get(key);
+    if (!entry) {
+      const available = Array.from(
+        mockApp.getRegisteredRoutes().keys()
+      ).join(", ");
+      throw new Error(`Route ${key} not registered. Available: ${available}`);
     }
-
-    return handler;
+    return entry;
   };
 
-  beforeEach(() => {
-    // Clear all mocks
-    vi.clearAllMocks();
-
-    // Create mock services
-    mockKgService = vi.fn() as any;
-    mockDbService = vi.fn() as any;
-
-    // Mock Fastify app - recreate it fresh for each test
+  beforeEach(async () => {
+    Object.values(scmServiceMocks).forEach((mockFn) => mockFn.mockReset());
     mockApp = createMockApp();
-
-    // Create fresh mocks for each test
     mockRequest = createMockRequest();
     mockReply = createMockReply();
+    vi.spyOn(mockReply, "status");
+    process.env.FEATURE_SCM = "true";
+    await registerSCMRoutes(mockApp as any, {} as any, {} as any);
   });
 
-  describe("registerSCMRoutes", () => {
-    it("should register all SCM routes with required services", async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-
-      // Verify all routes are registered
-      expect(mockApp.post).toHaveBeenCalledWith(
-        "/scm/commit-pr",
-        expect.any(Function)
-      );
-      expect(mockApp.get).toHaveBeenCalledWith(
-        "/scm/status",
-        expect.any(Function)
-      );
-      expect(mockApp.post).toHaveBeenCalledWith(
-        "/scm/commit",
-        expect.any(Function)
-      );
-      expect(mockApp.post).toHaveBeenCalledWith(
-        "/scm/push",
-        expect.any(Function)
-      );
-      expect(mockApp.get).toHaveBeenCalledWith(
-        "/scm/branches",
-        expect.any(Function)
-      );
-      expect(mockApp.post).toHaveBeenCalledWith(
-        "/scm/branch",
-        expect.any(Function)
-      );
-      expect(mockApp.get).toHaveBeenCalledWith("/diff", expect.any(Function));
-      expect(mockApp.get).toHaveBeenCalledWith("/log", expect.any(Function));
-    });
+  afterEach(() => {
+    vi.resetModules();
   });
 
-  describe("POST /scm/commit-pr", () => {
-    let commitPrHandler: Function;
+  it("registers all expected routes", () => {
+    const routes = Array.from(mockApp.getRegisteredRoutes().keys());
+    expect(routes).toEqual(
+      expect.arrayContaining([
+        "post:/scm/commit-pr",
+        "post:/scm/commit",
+        "get:/scm/status",
+        "post:/scm/push",
+        "get:/scm/branches",
+        "post:/scm/branch",
+        "get:/scm/changes",
+        "get:/scm/diff",
+        "get:/scm/log",
+      ])
+    );
+  });
 
-    beforeEach(async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      commitPrHandler = getHandler("post", "/scm/commit-pr");
+  it("handles commit-pr success flow", async () => {
+    const responsePayload = {
+      commitHash: "abc123",
+      branch: "feature/test",
+      status: "committed",
+      provider: "local",
+      retryAttempts: 0,
+      escalationRequired: false,
+      relatedArtifacts: {
+        spec: null,
+        tests: [],
+        validation: null,
+      },
+    };
+    scmServiceMocks.createCommitAndMaybePR.mockResolvedValue(responsePayload);
+
+    const { handler } = getHandler("post", "/scm/commit-pr");
+    mockRequest.body = {
+      title: "feat: add route",
+      description: "Adds SCM route",
+      changes: ["src/api/routes/scm.ts"],
+    };
+
+    await handler(mockRequest, mockReply);
+
+    expect(scmServiceMocks.createCommitAndMaybePR).toHaveBeenCalledWith({
+      title: "feat: add route",
+      description: "Adds SCM route",
+      changes: ["src/api/routes/scm.ts"],
+      createPR: true,
     });
-
-    it("should create commit and PR with required fields", async () => {
-      const commitPrData = {
-        title: "feat: add new authentication system",
-        description:
-          "This commit adds a new authentication system with JWT tokens",
-        changes: ["src/auth/auth.ts", "src/auth/jwt.ts", "tests/auth.test.ts"],
-      };
-
-      mockRequest.body = commitPrData;
-
-      await commitPrHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Commit and PR automation is not available in this build.",
-        },
-      });
-    });
-
-    it("should create commit and PR with all optional fields", async () => {
-      const commitPrData = {
-        title: "fix: resolve authentication bug",
-        description: "Fixes the authentication bug in login flow",
-        changes: ["src/auth/login.ts"],
-        relatedSpecId: "spec-123",
-        testResults: ["test-result-1", "test-result-2"],
-        validationResults: "validation-passed",
-        createPR: true,
-        branchName: "fix/auth-bug",
-        labels: ["bug", "authentication"],
-      };
-
-      mockRequest.body = commitPrData;
-
-      await commitPrHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Commit and PR automation is not available in this build.",
-        },
-      });
-    });
-
-    it("should create PR when createPR is true", async () => {
-      const commitPrData = {
-        title: "feat: add user profile",
-        description: "Adds user profile functionality",
-        changes: ["src/profile/user.ts"],
-        createPR: true,
-        branchName: "feature/user-profile",
-      };
-
-      mockRequest.body = commitPrData;
-
-      await commitPrHandler(mockRequest, mockReply);
-
-      const response = (mockReply.send as any).mock.calls[0][0];
-      expect(response.success).toBe(false);
-      expect(response.error.code).toBe("NOT_IMPLEMENTED");
-    });
-
-    it("should not create PR when createPR is false or undefined", async () => {
-      const commitPrData = {
-        title: "feat: add user profile",
-        description: "Adds user profile functionality",
-        changes: ["src/profile/user.ts"],
-        createPR: false,
-      };
-
-      mockRequest.body = commitPrData;
-
-      await commitPrHandler(mockRequest, mockReply);
-
-      const response = (mockReply.send as any).mock.calls[0][0];
-      expect(response.success).toBe(false);
-      expect(response.error.code).toBe("NOT_IMPLEMENTED");
-    });
-
-    it("should use default branch name when branchName not provided", async () => {
-      const commitPrData = {
-        title: "feat: add user profile",
-        description: "Adds user profile functionality",
-        changes: ["src/profile/user.ts"],
-      };
-
-      mockRequest.body = commitPrData;
-
-      await commitPrHandler(mockRequest, mockReply);
-
-      const response = (mockReply.send as any).mock.calls[0][0];
-      expect(response.success).toBe(false);
-      expect(response.error.code).toBe("NOT_IMPLEMENTED");
-    });
-
-    it("should handle errors gracefully", async () => {
-      // The current implementation doesn't have proper error handling
-      // but we test that the route is registered and can be called
-      const commitPrData = {
-        title: "feat: add user profile",
-        description: "Adds user profile functionality",
-        changes: ["src/profile/user.ts"],
-      };
-
-      mockRequest.body = commitPrData;
-
-      await commitPrHandler(mockRequest, mockReply);
-
-      // Since the current implementation doesn't throw errors in normal operation
-      // we verify it returns a successful response
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Commit and PR automation is not available in this build.",
-        },
-      });
-    });
-
-    it("should validate required fields", async () => {
-      // Test missing title
-      mockRequest.body = {
-        description: "Test description",
-        changes: ["file.ts"],
-      };
-
-      // The current implementation doesn't validate required fields in the handler
-      // but the schema validation would catch this
-      await commitPrHandler(mockRequest, mockReply);
-
-      // Since validation happens at the Fastify level, we test that the handler is called
-      expect(mockReply.send).toHaveBeenCalled();
+    expect(mockReply.send).toHaveBeenCalledWith({
+      success: true,
+      data: responsePayload,
     });
   });
 
-  describe("GET /scm/status", () => {
-    let statusHandler: Function;
+  it("returns validation error when SCM service rejects commit", async () => {
+    const ValidationError = ExportedValidationError;
+    if (!ValidationError) {
+      throw new Error("ValidationError mock not initialized");
+    }
+    scmServiceMocks.createCommitAndMaybePR.mockRejectedValue(
+      new ValidationError(["title is required"])
+    );
+    const { handler } = getHandler("post", "/scm/commit-pr");
+    mockRequest.body = {
+      title: "",
+      description: "",
+      changes: [],
+    };
 
-    beforeEach(async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      statusHandler = getHandler("get", "/scm/status");
-    });
+    await handler(mockRequest, mockReply);
 
-    it("should return repository status", async () => {
-      await statusHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
-    });
-
-    it("should handle errors gracefully", async () => {
-      // Mock an error scenario
-      const errorHandler = getHandler("get", "/scm/status");
-
-      // In the current implementation, the handler doesn't throw errors
-      // but we can test that it completes successfully
-      await statusHandler(mockRequest, mockReply);
-
-      expect(mockReply.status).not.toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
+    expect(mockReply.status).toHaveBeenCalledWith(400);
+    expect(mockReply.send).toHaveBeenCalledWith({
+      success: false,
+      error: expect.objectContaining({ code: "VALIDATION_ERROR" }),
     });
   });
 
-  describe("POST /scm/commit", () => {
-    let commitHandler: Function;
-
-    beforeEach(async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      commitHandler = getHandler("post", "/scm/commit");
+  it("normalizes commit-only requests", async () => {
+    scmServiceMocks.createCommitAndMaybePR.mockResolvedValue({
+      commitHash: "hash123",
+      branch: "main",
+      status: "committed",
+      provider: "local",
+      retryAttempts: 0,
+      escalationRequired: false,
+      relatedArtifacts: { spec: null, tests: [], validation: null },
     });
+    const { handler } = getHandler("post", "/scm/commit");
+    mockRequest.body = {
+      message: "fix: bug",
+      body: "Detailed description",
+      files: ["src/app.ts"],
+      branch: "main",
+    };
 
-    it("should create commit with message and files", async () => {
-      const commitData = {
-        message: "feat: add new component",
-        files: ["src/components/Button.tsx", "src/components/Button.test.ts"],
-      };
+    await handler(mockRequest, mockReply);
 
-      mockRequest.body = commitData;
-
-      await commitHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
+    expect(scmServiceMocks.createCommitAndMaybePR).toHaveBeenCalledWith({
+      title: "fix: bug",
+      description: "Detailed description",
+      changes: ["src/app.ts"],
+      branchName: "main",
+      labels: [],
+      relatedSpecId: undefined,
+      testResults: [],
+      validationResults: undefined,
+      createPR: false,
     });
+    expect(mockReply.send).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true })
+    );
+  });
 
-    it("should create commit with message only", async () => {
-      const commitData = {
-        message: "fix: resolve linting errors",
-      };
+  it("surfaces SCM service errors as 500", async () => {
+    scmServiceMocks.createCommitAndMaybePR.mockRejectedValue(
+      new Error("boom")
+    );
+    const { handler } = getHandler("post", "/scm/commit-pr");
+    mockRequest.body = {
+      title: "feat: add route",
+      description: "Adds SCM route",
+      changes: ["src/api/routes/scm.ts"],
+    };
 
-      mockRequest.body = commitData;
+    await handler(mockRequest, mockReply);
 
-      await commitHandler(mockRequest, mockReply);
-
-      const response = (mockReply.send as any).mock.calls[0][0];
-      expect(response.success).toBe(false);
-      expect(response.error.code).toBe("NOT_IMPLEMENTED");
-    });
-
-    it("should handle amend flag", async () => {
-      const commitData = {
-        message: "fix: update commit message",
-        amend: true,
-        files: ["src/fix.ts"],
-      };
-
-      mockRequest.body = commitData;
-
-      await commitHandler(mockRequest, mockReply);
-
-      // The current implementation doesn't use the amend flag
-      // but we test that the request is processed
-      expect(mockReply.send).toHaveBeenCalled();
-    });
-
-    it("should validate required message field", async () => {
-      // Test missing message - the schema validation would catch this
-      mockRequest.body = {
-        files: ["file.ts"],
-      };
-
-      await commitHandler(mockRequest, mockReply);
-
-      // Since validation happens at the Fastify level, we test that the handler is called
-      expect(mockReply.send).toHaveBeenCalled();
+    expect(mockReply.status).toHaveBeenCalledWith(500);
+    expect(mockReply.send).toHaveBeenCalledWith({
+      success: false,
+      error: expect.objectContaining({ code: "SCM_ERROR" }),
     });
   });
 
-  describe("POST /scm/push", () => {
-    let pushHandler: Function;
+  it("exposes repository status", async () => {
+    const status = {
+      branch: "main",
+      clean: true,
+      ahead: 0,
+      behind: 0,
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      lastCommit: null,
+    };
+    scmServiceMocks.getStatus.mockResolvedValue(status);
 
-    beforeEach(async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      pushHandler = getHandler("post", "/scm/push");
-    });
+    const { handler } = getHandler("get", "/scm/status");
 
-    it("should push with custom branch and remote", async () => {
-      const pushData = {
-        branch: "feature/new-feature",
-        remote: "upstream",
-        force: false,
-      };
+    await handler(mockRequest, mockReply);
 
-      mockRequest.body = pushData;
+    expect(mockReply.send).toHaveBeenCalledWith({ success: true, data: status });
+  });
 
-      await pushHandler(mockRequest, mockReply);
+  it("returns 503 when status unavailable", async () => {
+    scmServiceMocks.getStatus.mockResolvedValue(null);
+    const { handler } = getHandler("get", "/scm/status");
 
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
-    });
+    await handler(mockRequest, mockReply);
 
-    it("should push with default values", async () => {
-      mockRequest.body = {};
-
-      await pushHandler(mockRequest, mockReply);
-
-      const response = (mockReply.send as any).mock.calls[0][0];
-      expect(response.success).toBe(false);
-      expect(response.error.code).toBe("NOT_IMPLEMENTED");
-    });
-
-    it("should handle force push", async () => {
-      const pushData = {
-        branch: "main",
-        force: true,
-      };
-
-      mockRequest.body = pushData;
-
-      await pushHandler(mockRequest, mockReply);
-
-      // The current implementation doesn't use the force flag
-      // but we test that the request is processed
-      expect(mockReply.send).toHaveBeenCalled();
+    expect(mockReply.status).toHaveBeenCalledWith(503);
+    expect(mockReply.send).toHaveBeenCalledWith({
+      success: false,
+      error: expect.objectContaining({ code: "SCM_UNAVAILABLE" }),
     });
   });
 
-  describe("GET /scm/branches", () => {
-    let branchesHandler: Function;
+  it("lists commit records", async () => {
+    const commits = [
+      { commitHash: "abc", branch: "main", title: "feat", changes: [] },
+    ];
+    scmServiceMocks.listCommitRecords.mockResolvedValue(commits as any);
+    const { handler } = getHandler("get", "/scm/changes");
 
-    beforeEach(async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      branchesHandler = getHandler("get", "/scm/branches");
-    });
+    await handler(mockRequest, mockReply);
 
-    it("should return list of branches", async () => {
-      await branchesHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
-    });
-
-    it("should handle errors gracefully", async () => {
-      await branchesHandler(mockRequest, mockReply);
-
-      expect(mockReply.status).not.toHaveBeenCalledWith(500);
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
+    expect(scmServiceMocks.listCommitRecords).toHaveBeenCalledWith(20);
+    expect(mockReply.send).toHaveBeenCalledWith({
+      success: true,
+      data: commits,
     });
   });
 
-  describe("POST /scm/branch", () => {
-    let branchHandler: Function;
-
-    beforeEach(async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      branchHandler = getHandler("post", "/scm/branch");
+  it("delegates push requests to SCM service", async () => {
+    scmServiceMocks.push.mockResolvedValue({
+      remote: "origin",
+      branch: "main",
+      forced: false,
+      pushed: true,
+      timestamp: new Date().toISOString(),
     });
+    const { handler } = getHandler("post", "/scm/push");
+    mockRequest.body = { remote: "origin", branch: "main" };
 
-    it("should create branch with custom from branch", async () => {
-      const branchData = {
-        name: "feature/new-ui",
-        from: "develop",
-      };
+    await handler(mockRequest, mockReply);
 
-      mockRequest.body = branchData;
-
-      await branchHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
+    expect(scmServiceMocks.push).toHaveBeenCalledWith({
+      remote: "origin",
+      branch: "main",
     });
-
-    it("should create branch with default from branch", async () => {
-      const branchData = {
-        name: "bugfix/login-issue",
-      };
-
-      mockRequest.body = branchData;
-
-      await branchHandler(mockRequest, mockReply);
-
-      const response = (mockReply.send as any).mock.calls[0][0];
-      expect(response.success).toBe(false);
-      expect(response.error.code).toBe("NOT_IMPLEMENTED");
-    });
-
-    it("should validate required name field", async () => {
-      // Test missing name - the schema validation would catch this
-      mockRequest.body = {
-        from: "main",
-      };
-
-      await branchHandler(mockRequest, mockReply);
-
-      // Since validation happens at the Fastify level, we test that the handler is called
-      expect(mockReply.send).toHaveBeenCalled();
-    });
+    expect(mockReply.send).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true })
+    );
   });
 
-  describe("GET /diff", () => {
-    let diffHandler: Function;
+  it("parses diff query parameters", async () => {
+    scmServiceMocks.getDiff.mockResolvedValue("diff-content");
+    const { handler } = getHandler("get", "/scm/diff");
+    mockRequest.query = { files: "a.ts,b.ts", from: "main", to: "HEAD" };
 
-    beforeEach(async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      diffHandler = getHandler("get", "/diff");
+    await handler(mockRequest, mockReply);
+
+    expect(scmServiceMocks.getDiff).toHaveBeenCalledWith({
+      files: ["a.ts", "b.ts"],
+      from: "main",
+      to: "HEAD",
+      context: undefined,
     });
-
-    it("should get diff with custom parameters", async () => {
-      mockRequest.query = {
-        from: "HEAD~2",
-        to: "HEAD",
-        files: "src/**/*.ts,tests/**/*.test.ts",
-      };
-
-      await diffHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
-    });
-
-    it("should get diff with default parameters", async () => {
-      mockRequest.query = {};
-
-      await diffHandler(mockRequest, mockReply);
-
-      const response = (mockReply.send as any).mock.calls[0][0];
-      expect(response.success).toBe(false);
-      expect(response.error.code).toBe("NOT_IMPLEMENTED");
-    });
-
-    it("should handle file list parsing", async () => {
-      mockRequest.query = {
-        files: "package.json,src/main.ts,README.md",
-      };
-
-      await diffHandler(mockRequest, mockReply);
-
-      const response = (mockReply.send as any).mock.calls[0][0];
-      expect(response.success).toBe(false);
-      expect(response.error.code).toBe("NOT_IMPLEMENTED");
-    });
-  });
-
-  describe("GET /log", () => {
-    let logHandler: Function;
-
-    beforeEach(async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      logHandler = getHandler("get", "/log");
-    });
-
-    it("should get commit history with custom parameters", async () => {
-      mockRequest.query = {
-        limit: 50,
-        since: "2023-01-01T00:00:00.000Z",
-        author: "john.doe@example.com",
-        path: "src/",
-      };
-
-      await logHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
-    });
-
-    it("should get commit history with default parameters", async () => {
-      mockRequest.query = {};
-
-      await logHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
-    });
-
-    it("should handle various filter combinations", async () => {
-      mockRequest.query = {
-        limit: 10,
-        author: "jane.smith@example.com",
-      };
-
-      await logHandler(mockRequest, mockReply);
-
-      // The current implementation returns an empty array
-      // but we test that the request is processed correctly
-      expect(mockReply.send).toHaveBeenCalledWith({
-        success: false,
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "Feature is not available in this build.",
-        },
-      });
-    });
-  });
-
-  describe("Error handling", () => {
-    it("should handle service unavailability", async () => {
-      // Test with undefined services
-      const mockAppNoServices = createMockApp();
-
-      await registerSCMRoutes(mockAppNoServices as any, undefined, undefined);
-
-      // Routes should still be registered even with undefined services
-      expect(mockAppNoServices.post).toHaveBeenCalledWith(
-        "/scm/commit-pr",
-        expect.any(Function)
-      );
-      expect(mockAppNoServices.get).toHaveBeenCalledWith(
-        "/scm/status",
-        expect.any(Function)
-      );
-    });
-
-    it("should handle malformed request bodies", async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-      const commitPrHandler = getHandler("post", "/scm/commit-pr");
-
-      // Test with malformed body
-      mockRequest.body = null;
-
-      // The current implementation doesn't validate the body structure
-      // but we can test that it doesn't crash
-      await commitPrHandler(mockRequest, mockReply);
-
-      expect(mockReply.send).toHaveBeenCalled();
-    });
-  });
-
-  describe("Route schema validation", () => {
-    it("should validate commit-pr schema requirements", async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-
-      // Verify that the POST /scm/commit-pr route is registered
-      expect(mockApp.post).toHaveBeenCalledWith(
-        "/scm/commit-pr",
-        expect.any(Function)
-      );
-    });
-
-    it("should validate commit schema requirements", async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-
-      // Verify that the POST /scm/commit route is registered
-      expect(mockApp.post).toHaveBeenCalledWith(
-        "/scm/commit",
-        expect.any(Function)
-      );
-    });
-
-    it("should validate branch schema requirements", async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-
-      // Verify that the POST /scm/branch route is registered
-      expect(mockApp.post).toHaveBeenCalledWith(
-        "/scm/branch",
-        expect.any(Function)
-      );
-    });
-
-    it("should validate diff query parameters", async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-
-      // Verify that the GET /diff route is registered with query schema validation
-      expect(mockApp.get).toHaveBeenCalledWith(
-        "/diff",
-        expect.objectContaining({
-          schema: expect.objectContaining({
-            querystring: expect.objectContaining({
-              type: "object",
-              properties: expect.objectContaining({
-                from: { type: "string" },
-                to: { type: "string", default: "HEAD" },
-                files: { type: "string" },
-              }),
-            }),
-          }),
-        }),
-        expect.any(Function)
-      );
-    });
-
-    it("should validate log query parameters", async () => {
-      await registerSCMRoutes(mockApp as any, mockKgService, mockDbService);
-
-      // Verify that the GET /log route is registered with query schema validation
-      expect(mockApp.get).toHaveBeenCalledWith(
-        "/log",
-        expect.objectContaining({
-          schema: expect.objectContaining({
-            querystring: expect.objectContaining({
-              type: "object",
-              properties: expect.objectContaining({
-                limit: { type: "number", default: 20 },
-                since: { type: "string", format: "date-time" },
-                author: { type: "string" },
-                path: { type: "string" },
-              }),
-            }),
-          }),
-        }),
-        expect.any(Function)
-      );
+    expect(mockReply.send).toHaveBeenCalledWith({
+      success: true,
+      data: { diff: "diff-content" },
     });
   });
 });

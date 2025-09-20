@@ -2,6 +2,7 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
+  SCMCommitRecord,
 } from '../../models/types.js';
 import type { PerformanceRelationship } from '../../models/relationships.js';
 
@@ -32,6 +33,43 @@ export interface BackupConfiguration {
   };
   providers?: Record<string, BackupProviderDefinition>;
   retention?: BackupRetentionPolicyConfig;
+}
+
+export interface BulkQueryTelemetryEntry {
+  batchSize: number;
+  continueOnError: boolean;
+  durationMs: number;
+  startedAt: string;
+  finishedAt: string;
+  queueDepth: number;
+  mode: 'transaction' | 'independent';
+  success: boolean;
+  error?: string;
+}
+
+export interface BulkQueryMetricsSnapshot {
+  activeBatches: number;
+  maxConcurrentBatches: number;
+  totalBatches: number;
+  totalQueries: number;
+  totalDurationMs: number;
+  maxBatchSize: number;
+  maxQueueDepth: number;
+  maxDurationMs: number;
+  averageDurationMs: number;
+  lastBatch: BulkQueryTelemetryEntry | null;
+}
+
+export interface BulkQueryMetrics extends BulkQueryMetricsSnapshot {
+  history: BulkQueryTelemetryEntry[];
+  slowBatches: BulkQueryTelemetryEntry[];
+}
+
+export interface BulkQueryInstrumentationConfig {
+  warnOnLargeBatchSize: number;
+  slowBatchThresholdMs: number;
+  queueDepthWarningThreshold: number;
+  historyLimit: number;
 }
 
 export interface DatabaseConfig {
@@ -105,7 +143,11 @@ export interface IPostgreSQLService {
   recordPerformanceMetricSnapshot(
     snapshot: PerformanceRelationship
   ): Promise<void>;
+  recordSCMCommit(commit: SCMCommitRecord): Promise<void>;
+  getSCMCommitByHash?(commitHash: string): Promise<SCMCommitRecord | null>;
+  listSCMCommits?(limit?: number): Promise<SCMCommitRecord[]>;
   getCoverageHistory(entityId: string, days?: number): Promise<any[]>;
+  getBulkWriterMetrics(): BulkQueryMetrics;
 }
 
 export interface IRedisService {

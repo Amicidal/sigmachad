@@ -5,87 +5,41 @@
 
 import { FastifyInstance } from "fastify";
 import { EventEmitter } from "events";
+import type { Server as HttpServer } from "http";
 import { FileWatcher, FileChange } from "../services/FileWatcher.js";
 import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
 import { DatabaseService } from "../services/DatabaseService.js";
-import { WebSocketServer } from "ws";
-import path from "path";
+import { WebSocketServer, WebSocket } from "ws";
 import {
   authenticateHeaders,
   scopesSatisfyRequirement,
 } from "./middleware/authentication.js";
+import { isApiKeyRegistryConfigured } from "./middleware/api-key-registry.js";
 import type { AuthContext } from "./middleware/authentication.js";
+import {
+  SessionStreamEvent,
+  SynchronizationCoordinator,
+} from "../services/SynchronizationCoordinator.js";
+import {
+  WebSocketConnection,
+  WebSocketMessage,
+  WebSocketFilter,
+  SubscriptionRequest,
+  WebSocketEvent,
+  ConnectionSubscription,
+} from "./websocket/types.js";
+import { normalizeFilter, matchesEvent } from "./websocket/filters.js";
+import { BackpressureManager } from "./websocket/backpressure.js";
 
-export interface WebSocketConnection {
-  id: string;
-  socket: any;
-  subscriptions: Map<string, ConnectionSubscription>;
-  lastActivity: Date;
-  userAgent?: string;
-  ip?: string;
-  subscriptionCounter: number;
-  auth?: AuthContext;
-}
-
-export interface WebSocketMessage {
-  type: string;
-  id?: string;
-  data?: any;
-  filter?: WebSocketFilter;
-  timestamp?: string;
-}
-
-export interface WebSocketFilter {
-  path?: string;
-  paths?: string[];
-  type?: string;
-  types?: string[];
-  changeType?: string;
-  changeTypes?: string[];
-  eventTypes?: string[];
-  entityTypes?: string[];
-  entityType?: string;
-  relationshipTypes?: string[];
-  relationshipType?: string;
-  extensions?: string[];
-}
-
-export interface SubscriptionRequest {
-  event: string;
-  filter?: WebSocketFilter;
-}
-
-export interface WebSocketEvent {
-  type:
-    | "file_change"
-    | "graph_update"
-    | "entity_created"
-    | "entity_updated"
-    | "entity_deleted"
-    | "relationship_created"
-    | "relationship_deleted"
-    | "sync_status";
-  timestamp: string;
-  data: any;
-  source?: string;
-}
-
-interface ConnectionSubscription {
-  id: string;
-  event: string;
-  rawFilter?: WebSocketFilter;
-  normalizedFilter?: NormalizedSubscriptionFilter;
-}
-
-interface NormalizedSubscriptionFilter {
-  paths: string[];
-  absolutePaths: string[];
-  extensions: string[];
-  types: string[];
-  eventTypes: string[];
-  entityTypes: string[];
-  relationshipTypes: string[];
-}
+export type {
+  WebSocketConnection,
+  WebSocketFilter,
+  WebSocketMessage,
+  SubscriptionRequest,
+  WebSocketEvent,
+  ConnectionSubscription,
+  NormalizedSubscriptionFilter,
+} from "./websocket/types.js";
 
 const WEBSOCKET_REQUIRED_SCOPES = ["graph:read"];
 
@@ -95,12 +49,26 @@ export class WebSocketRouter extends EventEmitter {
   private heartbeatInterval?: NodeJS.Timeout;
   private cleanupInterval?: NodeJS.Timeout;
   private wss?: WebSocketServer;
+  private httpServer?: HttpServer;
+  private upgradeHandler?: (request: any, socket: any, head: any) => void;
   private lastEvents = new Map<string, WebSocketEvent>();
+  private backpressureThreshold = 512 * 1024; // 512 KB per connection buffer ceiling
+  private backpressureRetryDelayMs = 100;
+  private maxBackpressureRetries = 5;
+  private backpressureManager: BackpressureManager;
+  private metrics = {
+    backpressureSkips: 0,
+    stalledConnections: new Set<string>(),
+    backpressureDisconnects: 0,
+  };
+  private keepAliveGraceMs = 15000;
+  private sessionEventHandler?: (event: SessionStreamEvent) => void;
 
   constructor(
     private kgService: KnowledgeGraphService,
     private dbService: DatabaseService,
-    private fileWatcher?: FileWatcher
+    private fileWatcher?: FileWatcher,
+    private syncCoordinator?: SynchronizationCoordinator
   ) {
     super();
 
@@ -109,6 +77,23 @@ export class WebSocketRouter extends EventEmitter {
 
     // Bind event handlers
     this.bindEventHandlers();
+    this.bindSessionEvents();
+
+    this.backpressureManager = new BackpressureManager({
+      thresholdBytes: this.backpressureThreshold,
+      retryDelayMs: this.backpressureRetryDelayMs,
+      maxRetries: this.maxBackpressureRetries,
+    });
+  }
+
+  private isAuthRequired(): boolean {
+    const hasJwt =
+      typeof process.env.JWT_SECRET === "string" &&
+      process.env.JWT_SECRET.trim().length > 0;
+    const hasAdmin =
+      typeof process.env.ADMIN_API_TOKEN === "string" &&
+      process.env.ADMIN_API_TOKEN.trim().length > 0;
+    return hasJwt || hasAdmin || isApiKeyRegistryConfigured();
   }
 
   private bindEventHandlers(): void {
@@ -187,6 +172,18 @@ export class WebSocketRouter extends EventEmitter {
     });
   }
 
+  private bindSessionEvents(): void {
+    if (!this.syncCoordinator) {
+      return;
+    }
+
+    this.sessionEventHandler = (event: SessionStreamEvent) => {
+      this.handleSessionStreamEvent(event);
+    };
+
+    this.syncCoordinator.on("sessionEvent", this.sessionEventHandler);
+  }
+
   registerRoutes(app: FastifyInstance): void {
     // Plain GET route so tests can detect route registration
     app.get("/ws", async (request, reply) => {
@@ -258,8 +255,8 @@ export class WebSocketRouter extends EventEmitter {
       this.handleConnection({ ws }, request);
     });
 
-    // Hook into Fastify's underlying Node server
-    app.server.on("upgrade", (request: any, socket: any, head: any) => {
+    this.httpServer = app.server;
+    this.upgradeHandler = (request: any, socket: any, head: any) => {
       try {
         if (request.url && request.url.startsWith("/ws")) {
           const audit = {
@@ -267,14 +264,67 @@ export class WebSocketRouter extends EventEmitter {
             ip: socket.remoteAddress,
             userAgent: request.headers["user-agent"] as string | undefined,
           };
-          const authContext = authenticateHeaders(request.headers, audit);
+          const headerSource: Record<string, any> = { ...request.headers };
+          try {
+            const parsedUrl = new URL(request.url, "http://localhost");
+            const query = parsedUrl.searchParams;
+            const bearerToken =
+              query.get("access_token") ||
+              query.get("token") ||
+              query.get("bearer_token");
+            const apiKeyToken =
+              query.get("api_key") ||
+              query.get("apikey") ||
+              query.get("apiKey");
+
+            if (bearerToken && !headerSource["authorization"]) {
+              headerSource["authorization"] = `Bearer ${bearerToken}`;
+            }
+
+            if (apiKeyToken && !headerSource["x-api-key"]) {
+              headerSource["x-api-key"] = apiKeyToken;
+            }
+
+            if ((bearerToken || apiKeyToken) && typeof request.url === "string") {
+              const sanitizedParams = new URLSearchParams(parsedUrl.searchParams);
+              if (sanitizedParams.has("access_token")) {
+                sanitizedParams.set("access_token", "***");
+              }
+              if (sanitizedParams.has("token")) {
+                sanitizedParams.set("token", "***");
+              }
+              if (sanitizedParams.has("bearer_token")) {
+                sanitizedParams.set("bearer_token", "***");
+              }
+              if (sanitizedParams.has("api_key")) {
+                sanitizedParams.set("api_key", "***");
+              }
+              if (sanitizedParams.has("apikey")) {
+                sanitizedParams.set("apikey", "***");
+              }
+              if (sanitizedParams.has("apiKey")) {
+                sanitizedParams.set("apiKey", "***");
+              }
+              const sanitizedQuery = sanitizedParams.toString();
+              const sanitizedUrl = sanitizedQuery
+                ? `${parsedUrl.pathname}?${sanitizedQuery}`
+                : parsedUrl.pathname;
+              try {
+                request.url = sanitizedUrl;
+              } catch {}
+            }
+          } catch {}
+
+          const authContext = authenticateHeaders(headerSource as any, audit);
+          const authRequired = this.isAuthRequired();
 
           if (authContext.tokenError) {
-            const code = authContext.tokenError === "TOKEN_EXPIRED"
-              ? "TOKEN_EXPIRED"
-              : authContext.tokenError === "INVALID_API_KEY"
-              ? "INVALID_API_KEY"
-              : "UNAUTHORIZED";
+            const code =
+              authContext.tokenError === "TOKEN_EXPIRED"
+                ? "TOKEN_EXPIRED"
+                : authContext.tokenError === "INVALID_API_KEY"
+                ? "INVALID_API_KEY"
+                : "UNAUTHORIZED";
             respondWithHttpError(
               socket,
               401,
@@ -286,7 +336,10 @@ export class WebSocketRouter extends EventEmitter {
             return;
           }
 
-          if (!scopesSatisfyRequirement(authContext.scopes, WEBSOCKET_REQUIRED_SCOPES)) {
+          if (
+            authRequired &&
+            !scopesSatisfyRequirement(authContext.scopes, WEBSOCKET_REQUIRED_SCOPES)
+          ) {
             respondWithHttpError(
               socket,
               403,
@@ -311,7 +364,11 @@ export class WebSocketRouter extends EventEmitter {
           socket.destroy();
         } catch {}
       }
-    });
+    };
+
+    if (this.httpServer && this.upgradeHandler) {
+      this.httpServer.on("upgrade", this.upgradeHandler);
+    }
 
     // Health check for WebSocket connections
     app.get("/ws/health", async (request, reply) => {
@@ -319,6 +376,11 @@ export class WebSocketRouter extends EventEmitter {
         status: "healthy",
         connections: this.connections.size,
         subscriptions: Array.from(this.subscriptions.keys()),
+        metrics: {
+          backpressureSkips: this.metrics.backpressureSkips,
+          stalledConnections: this.metrics.stalledConnections.size,
+          backpressureDisconnects: this.metrics.backpressureDisconnects,
+        },
         timestamp: new Date().toISOString(),
       });
     });
@@ -397,6 +459,10 @@ export class WebSocketRouter extends EventEmitter {
       } catch {}
     });
 
+    wsSock.on("pong", () => {
+      wsConnection.lastActivity = new Date();
+    });
+
     // In test runs, proactively send periodic pongs to satisfy heartbeat tests
     if (
       process.env.NODE_ENV === "test" ||
@@ -449,14 +515,20 @@ export class WebSocketRouter extends EventEmitter {
         });
         break;
       case "list_subscriptions":
-        this.sendMessage(connection, {
-          type: "subscriptions",
-          id: message.id,
-          data: Array.from(connection.subscriptions.values()).map((sub) => ({
+        const summaries = Array.from(connection.subscriptions.values()).map(
+          (sub) => ({
             id: sub.id,
             event: sub.event,
             filter: sub.rawFilter,
-          })),
+          })
+        );
+        this.sendMessage(connection, {
+          type: "subscriptions",
+          id: message.id,
+          data: summaries.map((sub) => sub.event),
+          // Provide detailed data for clients that need richer info
+          // @ts-ignore allow protocol extension field
+          details: summaries,
         });
         break;
       default:
@@ -517,7 +589,7 @@ export class WebSocketRouter extends EventEmitter {
       this.removeSubscription(connection, subscriptionId);
     }
 
-    const normalizedFilter = this.normalizeFilter(rawFilter);
+    const normalizedFilter = normalizeFilter(rawFilter);
 
     const subscription: ConnectionSubscription = {
       id: subscriptionId,
@@ -555,235 +627,25 @@ export class WebSocketRouter extends EventEmitter {
 
     // If we have a recent event of this type, replay it to the new subscriber
     const recent = this.lastEvents.get(event);
-    if (recent && this.matchesFilter(subscription, recent)) {
+    if (recent && matchesEvent(subscription, recent)) {
       this.sendMessage(connection, this.toEventMessage(recent));
     }
   }
 
-  private normalizeFilter(
-    filter?: WebSocketFilter
-  ): NormalizedSubscriptionFilter | undefined {
-    if (!filter) {
-      return undefined;
-    }
-
-    const collectStrings = (
-      ...values: Array<string | string[] | undefined>
-    ): string[] => {
-      const results: string[] = [];
-      for (const value of values) {
-        if (!value) continue;
-        if (Array.isArray(value)) {
-          for (const inner of value) {
-            if (inner) {
-              results.push(inner);
-            }
-          }
-        } else if (value) {
-          results.push(value);
-        }
-      }
-      return results;
+  private handleSessionStreamEvent(event: SessionStreamEvent): void {
+    const payload = {
+      event: event.type,
+      sessionId: event.sessionId,
+      operationId: event.operationId,
+      ...(event.payload ?? {}),
     };
 
-    const paths = collectStrings(filter.path, filter.paths);
-    const absolutePaths = paths.map((p) => path.resolve(p));
-
-    const normalizeExtension = (ext: string): string => {
-      const trimmed = ext.trim();
-      if (!trimmed) return trimmed;
-      const lowered = trimmed.toLowerCase();
-      return lowered.startsWith(".") ? lowered : `.${lowered}`;
-    };
-
-    const extensions = collectStrings(filter.extensions).map((ext) =>
-      normalizeExtension(ext)
-    );
-
-    const toLower = (value: string) => value.toLowerCase();
-
-    const types = collectStrings(
-      filter.type,
-      filter.types,
-      filter.changeType,
-      filter.changeTypes
-    )
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map(toLower);
-
-    const eventTypes = collectStrings(filter.eventTypes)
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map(toLower);
-
-    const entityTypes = collectStrings(filter.entityType, filter.entityTypes)
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map(toLower);
-
-    const relationshipTypes = collectStrings(
-      filter.relationshipType,
-      filter.relationshipTypes
-    )
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map(toLower);
-
-    return {
-      paths,
-      absolutePaths,
-      extensions,
-      types,
-      eventTypes,
-      entityTypes,
-      relationshipTypes,
-    };
-  }
-
-  private matchesFilter(
-    subscription: ConnectionSubscription,
-    event: WebSocketEvent
-  ): boolean {
-    const normalized = subscription.normalizedFilter;
-    if (!normalized) {
-      return true;
-    }
-
-    const eventType = event.type?.toLowerCase?.() ?? "";
-    if (
-      normalized.eventTypes.length > 0 &&
-      !normalized.eventTypes.includes(eventType)
-    ) {
-      return false;
-    }
-
-    if (event.type === "file_change") {
-      return this.matchesFileChange(normalized, event);
-    }
-
-    if (event.type.startsWith("entity_")) {
-      return this.matchesEntityEvent(normalized, event);
-    }
-
-    if (event.type.startsWith("relationship_")) {
-      return this.matchesRelationshipEvent(normalized, event);
-    }
-
-    return true;
-  }
-
-  private matchesFileChange(
-    filter: NormalizedSubscriptionFilter,
-    event: WebSocketEvent
-  ): boolean {
-    const change = event.data || {};
-    const changeType: string = (change.type || change.changeType || "")
-      .toString()
-      .toLowerCase();
-
-    if (filter.types.length > 0 && !filter.types.includes(changeType)) {
-      return false;
-    }
-
-    const candidatePath: string | undefined =
-      typeof change.absolutePath === "string"
-        ? change.absolutePath
-        : typeof change.path === "string"
-        ? path.resolve(process.cwd(), change.path)
-        : undefined;
-
-    if (
-      filter.absolutePaths.length > 0 &&
-      !this.pathMatchesAbsolute(filter.absolutePaths, candidatePath)
-    ) {
-      return false;
-    }
-
-    if (filter.extensions.length > 0) {
-      const target =
-        typeof change.path === "string"
-          ? change.path
-          : typeof change.absolutePath === "string"
-          ? change.absolutePath
-          : undefined;
-      if (!target) {
-        return false;
-      }
-      const extension = path.extname(target).toLowerCase();
-      if (!filter.extensions.includes(extension)) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  private matchesEntityEvent(
-    filter: NormalizedSubscriptionFilter,
-    event: WebSocketEvent
-  ): boolean {
-    if (filter.entityTypes.length === 0) {
-      return true;
-    }
-
-    const candidate =
-      (event.data?.type || event.data?.entityType || "")
-        .toString()
-        .toLowerCase();
-
-    if (!candidate) {
-      return false;
-    }
-
-    return filter.entityTypes.includes(candidate);
-  }
-
-  private matchesRelationshipEvent(
-    filter: NormalizedSubscriptionFilter,
-    event: WebSocketEvent
-  ): boolean {
-    if (filter.relationshipTypes.length === 0) {
-      return true;
-    }
-
-    const candidate =
-      (event.data?.type || event.data?.relationshipType || "")
-        .toString()
-        .toLowerCase();
-
-    if (!candidate) {
-      return false;
-    }
-
-    return filter.relationshipTypes.includes(candidate);
-  }
-
-  private pathMatchesAbsolute(
-    prefixes: string[],
-    candidate?: string
-  ): boolean {
-    if (!candidate) {
-      return false;
-    }
-
-    const normalizedCandidate = path.resolve(candidate);
-    for (const prefix of prefixes) {
-      const normalizedPrefix = path.resolve(prefix);
-      if (normalizedCandidate === normalizedPrefix) {
-        return true;
-      }
-      if (
-        normalizedCandidate.startsWith(
-          normalizedPrefix.endsWith(path.sep)
-            ? normalizedPrefix
-            : `${normalizedPrefix}${path.sep}`
-        )
-      ) {
-        return true;
-      }
-    }
-    return false;
+    this.broadcastEvent({
+      type: "session_event",
+      timestamp: event.timestamp,
+      data: payload,
+      source: "synchronization",
+    });
   }
 
   private toEventMessage(event: WebSocketEvent): WebSocketMessage {
@@ -795,21 +657,39 @@ export class WebSocketRouter extends EventEmitter {
     let payloadData: any;
     if (event.type === "file_change") {
       const change =
-        event.data && typeof event.data === "object" ? event.data : {};
+        event.data && typeof event.data === "object" ? { ...event.data } : {};
+      let changeType: string | undefined;
+      if (typeof (change as any).type === "string") {
+        changeType = String((change as any).type);
+        delete (change as any).type;
+      }
+      if (!changeType && typeof (change as any).changeType === "string") {
+        changeType = String((change as any).changeType);
+      }
       payloadData = {
         type: "file_change",
-        changeType: change.type,
         ...change,
         ...basePayload,
       };
+      if (changeType) {
+        (payloadData as any).changeType = changeType;
+      }
     } else {
       const eventData =
-        event.data && typeof event.data === "object" ? event.data : {};
+        event.data && typeof event.data === "object" ? { ...event.data } : {};
+      let innerType: string | undefined;
+      if (typeof (eventData as any).type === "string") {
+        innerType = String((eventData as any).type);
+        delete (eventData as any).type;
+      }
       payloadData = {
-        type: event.type,
         ...eventData,
         ...basePayload,
+        type: event.type,
       };
+      if (innerType && innerType !== event.type) {
+        (payloadData as any).entityType = innerType;
+      }
     }
 
     return {
@@ -912,6 +792,31 @@ export class WebSocketRouter extends EventEmitter {
 
     console.log(`🔌 WebSocket connection closed: ${connectionId}`);
 
+    this.backpressureManager.clear(connectionId);
+
+    const socket: WebSocket | undefined = connection.socket as WebSocket | undefined;
+    if (socket) {
+      try {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.close(4000, "Connection terminated by server");
+        } else if (socket.readyState === WebSocket.CONNECTING) {
+          socket.close(4000, "Connection terminated by server");
+        } else if (
+          socket.readyState !== WebSocket.CLOSED &&
+          typeof (socket as any).terminate === "function"
+        ) {
+          (socket as any).terminate();
+        }
+      } catch (error) {
+        try {
+          console.warn(
+            `⚠️ Failed to close WebSocket connection ${connectionId}`,
+            error instanceof Error ? error.message : error
+          );
+        } catch {}
+      }
+    }
+
     // Clean up subscriptions
     const subscriptionIds = Array.from(connection.subscriptions.keys());
     for (const id of subscriptionIds) {
@@ -920,6 +825,7 @@ export class WebSocketRouter extends EventEmitter {
 
     // Remove from connections
     this.connections.delete(connectionId);
+    this.metrics.stalledConnections.delete(connectionId);
   }
 
   private broadcastEvent(event: WebSocketEvent): void {
@@ -950,7 +856,7 @@ export class WebSocketRouter extends EventEmitter {
       }
 
       const shouldBroadcast = relevantSubscriptions.some((sub) =>
-        this.matchesFilter(sub, event)
+        matchesEvent(sub, event)
       );
 
       if (!shouldBroadcast) {
@@ -972,31 +878,115 @@ export class WebSocketRouter extends EventEmitter {
     connection: WebSocketConnection,
     message: WebSocketMessage
   ): void {
-    const payload = {
+    const payload: WebSocketMessage = {
       ...message,
       timestamp: message.timestamp || new Date().toISOString(),
     };
 
-    const json = JSON.stringify(payload);
-    const trySend = (attempt: number) => {
+    this.dispatchWithBackpressure(connection, payload);
+  }
+
+  private dispatchWithBackpressure(
+    connection: WebSocketConnection,
+    payload: WebSocketMessage
+  ): void {
+    const socket: WebSocket | undefined = connection.socket as
+      | WebSocket
+      | undefined;
+    if (!socket) {
+      return;
+    }
+
+    if (
+      socket.readyState === WebSocket.CLOSING ||
+      socket.readyState === WebSocket.CLOSED
+    ) {
+      return;
+    }
+
+    const bufferedAmount =
+      typeof socket.bufferedAmount === "number" ? socket.bufferedAmount : 0;
+
+    if (bufferedAmount > this.backpressureManager.getThreshold()) {
+      this.metrics.backpressureSkips++;
+      this.metrics.stalledConnections.add(connection.id);
+
+      const { attempts, exceeded } = this.backpressureManager.registerThrottle(
+        connection.id
+      );
+
       try {
-        if (connection.socket.readyState === 1) {
-          // OPEN
+        console.warn(
+          `⚠️  Delaying message to ${connection.id} due to backpressure`,
+          {
+            bufferedAmount,
+            threshold: this.backpressureManager.getThreshold(),
+            messageType: (payload as any)?.type ?? "unknown",
+            attempts,
+          }
+        );
+      } catch {}
+
+      if (exceeded) {
+        this.metrics.backpressureDisconnects++;
+        this.backpressureManager.clear(connection.id);
+        try {
+          socket.close(1013, "Backpressure threshold exceeded");
+          if (typeof (socket as any).readyState === "number") {
+            (socket as any).readyState = WebSocket.CLOSING;
+          }
+        } catch {}
+        this.handleDisconnection(connection.id);
+        return;
+      }
+
+      setTimeout(() => {
+        const activeConnection = this.connections.get(connection.id);
+        if (!activeConnection) {
+          return;
+        }
+        this.dispatchWithBackpressure(activeConnection, payload);
+      }, this.backpressureManager.getRetryDelay());
+      return;
+    }
+
+    this.backpressureManager.clear(connection.id);
+    this.metrics.stalledConnections.delete(connection.id);
+
+    const json = JSON.stringify(payload);
+    this.writeToSocket(connection, json, payload);
+  }
+
+  private writeToSocket(
+    connection: WebSocketConnection,
+    json: string,
+    payload: WebSocketMessage
+  ): void {
+    const socket: WebSocket | undefined = connection.socket as
+      | WebSocket
+      | undefined;
+    if (!socket) {
+      return;
+    }
+
+    const trySend = (retriesRemaining: number) => {
+      try {
+        if (socket.readyState === WebSocket.OPEN) {
           try {
             console.log(
               `➡️  WS SEND to ${connection.id}: ${String(
-                (message as any)?.type || "unknown"
+                (payload as any)?.type || "unknown"
               )}`
             );
           } catch {}
-          connection.socket.send(json);
+          socket.send(json);
           return;
         }
-        if (attempt < 3) {
-          setTimeout(() => trySend(attempt + 1), 10);
-        } else {
-          // Final attempt regardless of state; let ws handle errors
-          connection.socket.send(json);
+
+        if (retriesRemaining > 0) {
+          setTimeout(() => trySend(retriesRemaining - 1), 10);
+        } else if (socket.readyState === WebSocket.OPEN) {
+          socket.send(json);
         }
       } catch (error) {
         console.error(
@@ -1007,7 +997,7 @@ export class WebSocketRouter extends EventEmitter {
       }
     };
 
-    trySend(0);
+    trySend(3);
   }
 
   private generateConnectionId(): string {
@@ -1022,7 +1012,24 @@ export class WebSocketRouter extends EventEmitter {
       const timeout = 30000; // 30 seconds
 
       for (const [connectionId, connection] of this.connections) {
-        if (now - connection.lastActivity.getTime() > timeout) {
+        const idleMs = now - connection.lastActivity.getTime();
+
+        if (idleMs > this.keepAliveGraceMs) {
+          try {
+            if (typeof connection.socket?.ping === "function") {
+              connection.socket.ping();
+            }
+          } catch (error) {
+            try {
+              console.warn(
+                `⚠️  Failed to ping WebSocket connection ${connectionId}`,
+                error instanceof Error ? error.message : error
+              );
+            } catch {}
+          }
+        }
+
+        if (idleMs > timeout) {
           console.log(`💔 Connection ${connectionId} timed out`);
           this.handleDisconnection(connectionId);
         }
@@ -1061,6 +1068,9 @@ export class WebSocketRouter extends EventEmitter {
     totalConnections: number;
     activeSubscriptions: Record<string, number>;
     uptime: number;
+    backpressureSkips: number;
+    stalledConnections: number;
+    backpressureDisconnects: number;
   } {
     const activeSubscriptions: Record<string, number> = {};
     for (const [event, connections] of this.subscriptions) {
@@ -1071,6 +1081,9 @@ export class WebSocketRouter extends EventEmitter {
       totalConnections: this.connections.size,
       activeSubscriptions,
       uptime: process.uptime(),
+      backpressureSkips: this.metrics.backpressureSkips,
+      stalledConnections: this.metrics.stalledConnections.size,
+      backpressureDisconnects: this.metrics.backpressureDisconnects,
     };
   }
 
@@ -1104,6 +1117,32 @@ export class WebSocketRouter extends EventEmitter {
     // Stop connection management
     this.stopConnectionManagement();
 
+    if (this.httpServer && this.upgradeHandler) {
+      try {
+        if (typeof (this.httpServer as any).off === "function") {
+          (this.httpServer as any).off("upgrade", this.upgradeHandler);
+        } else {
+          this.httpServer.removeListener("upgrade", this.upgradeHandler);
+        }
+      } catch {}
+      this.upgradeHandler = undefined;
+    }
+
+    if (this.syncCoordinator && this.sessionEventHandler) {
+      if (typeof (this.syncCoordinator as any).off === "function") {
+        (this.syncCoordinator as any).off(
+          "sessionEvent",
+          this.sessionEventHandler
+        );
+      } else if (typeof this.syncCoordinator.removeListener === "function") {
+        this.syncCoordinator.removeListener(
+          "sessionEvent",
+          this.sessionEventHandler
+        );
+      }
+      this.sessionEventHandler = undefined;
+    }
+
     // Close all connections
     const closePromises: Promise<void>[] = [];
     for (const connection of this.connections.values()) {
@@ -1123,8 +1162,22 @@ export class WebSocketRouter extends EventEmitter {
     }
 
     await Promise.all(closePromises);
+
+    if (this.wss) {
+      await new Promise<void>((resolve) => {
+        try {
+          this.wss!.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      });
+      this.wss = undefined;
+    }
+    this.httpServer = undefined;
+
     this.connections.clear();
     this.subscriptions.clear();
+    this.metrics.stalledConnections.clear();
 
     console.log("✅ WebSocket router shutdown complete");
   }

@@ -170,6 +170,29 @@ describe('canonicalRelationshipId', () => {
     const rel = makeRelationship({ type: RelationshipType.CONTAINS, toEntityId: 'file:src/a.ts' });
     expect(canonicalRelationshipId('from1', rel)).toMatch(/^time-rel_[0-9a-f]{40}$/);
   });
+
+  it('derives session relationship ids from session metadata', () => {
+    const baseTimestamp = new Date('2024-02-01T12:00:00Z');
+    const rel = {
+      fromEntityId: 'session_abc',
+      toEntityId: 'entity_1',
+      type: RelationshipType.SESSION_MODIFIED,
+      created: baseTimestamp,
+      lastModified: baseTimestamp,
+      version: 1,
+      sessionId: 'session_abc',
+      sequenceNumber: 3,
+      timestamp: baseTimestamp,
+    } as GraphRelationship;
+
+    const id = canonicalRelationshipId(rel.fromEntityId, rel);
+    expect(id).toMatch(/^rel_session_[0-9a-f]{40}$/);
+
+    const relNext = { ...rel, sequenceNumber: 4 } as GraphRelationship;
+    const nextId = canonicalRelationshipId(relNext.fromEntityId, relNext);
+    expect(nextId).toMatch(/^rel_session_[0-9a-f]{40}$/);
+    expect(nextId).not.toBe(id);
+  });
 });
 
 describe('normalizeCodeEdge', () => {

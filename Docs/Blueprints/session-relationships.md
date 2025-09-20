@@ -18,6 +18,12 @@ Session relationships (`SESSION_MODIFIED`, `SESSION_IMPACTED`, `SESSION_CHECKPOI
 4. Link session checkpoints to knowledge graph snapshots for recovery and audit.
 5. Support integration with history (temporal edges) and change management tools.
 
+## 3.a Checkpoint Processing Lifecycle
+- `SessionCheckpointJobRunner` enqueues checkpoint requests from `SynchronizationCoordinator` and processes them asynchronously. Jobs transition through `pending → completed` or `manual_intervention` states, and the current status is recorded on the originating session relationships via `metadata.checkpoint`.
+- Successful jobs create the checkpoint node, persist `SESSION_CHECKPOINT` edges with enriched metadata (`reason`, `hopCount`, `jobId`, `seedEntityIds`), and register linkage with `RollbackCapabilities` for future recovery tooling.
+- Failures after retry exhaustion mark the affected session edges with `metadata.checkpoint.status = manual_intervention` and surface the error context for operators.
+- Job-level metrics (`enqueued`, `completed`, `failed`, `retries`) are exposed through the runner for observability dashboards.
+
 ## 4. Inputs & Consumers
 - **Inputs**: SynchronizationCoordinator events, IDE integrations, manual annotations, incident response tooling.
 - **Consumers**: History/Timeline UI, Rollback service, admin dashboards, analytics on session effectiveness, automation gating (e.g., auto-tests when session impacts critical entities).

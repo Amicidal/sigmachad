@@ -27,33 +27,15 @@ import {
   DocumentationPolicyType,
   DocumentationQuality,
   DOCUMENTATION_RELATIONSHIP_TYPES,
-  isStructuralRelationshipType,
-  StructuralImportType,
-  isPerformanceRelationshipType,
 } from "../models/relationships.js";
+import { ImpactAnalysis, ImpactAnalysisRequest } from "../models/types.js";
+import { noiseConfig } from "../config/noise.js";
 import {
-  ImpactAnalysis,
-  ImpactAnalysisRequest,
   GraphSearchRequest,
   GraphExamples,
   DependencyAnalysis,
   TimeRangeParams,
-  EntityTimelineEntry,
-  EntityTimelineResult,
-  RelationshipTimeline,
-  RelationshipTimelineSegment,
-  SessionChangeSummary,
-  SessionChangesResult,
-  ModuleChildrenResult,
-  ModuleHistoryEntitySummary,
-  ModuleHistoryOptions,
-  ModuleHistoryRelationship,
-  ModuleHistoryResult,
-  ListImportsResult,
-  DefinitionLookupResult,
-  StructuralNavigationEntry,
 } from "../models/types.js";
-import { noiseConfig } from "../config/noise.js";
 import { embeddingService } from "../utils/embedding.js";
 import {
   normalizeCodeEdge,
@@ -61,104 +43,10 @@ import {
   isCodeRelationship,
   mergeEdgeEvidence,
   mergeEdgeLocations,
-  legacyStructuralRelationshipId,
 } from "../utils/codeEdges.js";
-import { sanitizeEnvironment } from "../utils/environment.js";
 import { EventEmitter } from "events";
 import crypto from "crypto";
 import path from "path";
-import {
-  createNamespaceScope,
-  NamespaceScope,
-} from "./namespace/NamespaceScope.js";
-import {
-  normalizeStructuralRelationship as normalizeStructuralRelationshipExternal,
-} from "./relationships/RelationshipNormalizer.js";
-import { extractStructuralPersistenceFields } from "./relationships/structuralPersistence.js";
-
-export interface GraphNamespaceConfig {
-  id?: string;
-  name?: string;
-  postgresSchema?: string;
-  falkorGraph?: string;
-  qdrantPrefix?: string;
-  codeCollection?: string;
-  documentationCollection?: string;
-  redisPrefix?: string;
-  entityPrefix?: string;
-  created?: Date;
-}
-
-type ResolvedGraphNamespace = {
-  id?: string;
-  label?: string;
-  falkorGraph: string;
-  qdrant: {
-    code: string;
-    documentation: string;
-  };
-  redisPrefix: string;
-  entityPrefix: string;
-};
-
-type TemporalSegmentRecord = {
-  segmentId: string;
-  openedAt: string;
-  closedAt?: string | null;
-  changeSetId?: string;
-};
-
-type TemporalEventRecord = {
-  type: "opened" | "closed";
-  at: string;
-  changeSetId?: string;
-  segmentId?: string;
-};
-
-type TemporalMetadataRecord = {
-  changeSetId?: string;
-  current?: TemporalSegmentRecord;
-  segments: TemporalSegmentRecord[];
-  events: TemporalEventRecord[];
-};
-
-const DEFAULT_GRAPH_KEY = "memento";
-const DEFAULT_QDRANT_CODE_COLLECTION = "code_embeddings";
-const DEFAULT_QDRANT_DOC_COLLECTION = "documentation_embeddings";
-const DEFAULT_REDIS_PREFIX = "kg:";
-
-type ModuleChildrenOptions = {
-  includeFiles?: boolean;
-  includeSymbols?: boolean;
-  limit?: number;
-  language?: string | string[];
-  symbolKind?: string | string[];
-  modulePathPrefix?: string;
-};
-
-type ListImportsOptions = {
-  resolvedOnly?: boolean;
-  language?: string | string[];
-  symbolKind?: string | string[];
-  importAlias?: string | string[];
-  importType?: StructuralImportType | StructuralImportType[];
-  isNamespace?: boolean;
-  modulePath?: string | string[];
-  modulePathPrefix?: string;
-  limit?: number;
-};
-
-type EnsureIndicesStats = {
-  created: number;
-  exists: number;
-  deferred: number;
-  failed: number;
-};
-
-type EnsureIndicesResult = {
-  status: "completed" | "deferred" | "failed";
-  stats: EnsureIndicesStats;
-};
 
 // Simple cache interface for search results
 interface CacheEntry<T> {
@@ -234,80 +122,6 @@ class SimpleCache<T> {
   }
 }
 
-type LocationEntry = { path?: string; line?: number; column?: number };
-
-function collapseLocationsToEarliest(
-  locations: LocationEntry[] = [],
-  limit = 20
-): LocationEntry[] {
-  if (!Array.isArray(locations) || locations.length === 0) {
-    return [];
-  }
-
-  const byPath = new Map<string, { location: LocationEntry; index: number }>();
-
-  locations.forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") return;
-    const key = entry.path ?? "";
-    const existing = byPath.get(key);
-    if (!existing) {
-      byPath.set(key, { location: entry, index });
-      return;
-    }
-
-    const existingLine =
-      typeof existing.location.line === "number"
-        ? existing.location.line
-        : Number.POSITIVE_INFINITY;
-    const incomingLine =
-      typeof entry.line === "number" ? entry.line : Number.POSITIVE_INFINITY;
-    if (incomingLine < existingLine) {
-      byPath.set(key, { location: entry, index });
-      return;
-    }
-    if (incomingLine > existingLine) {
-      return;
-    }
-
-    const existingColumn =
-      typeof existing.location.column === "number"
-        ? existing.location.column
-        : Number.POSITIVE_INFINITY;
-    const incomingColumn =
-      typeof entry.column === "number"
-        ? entry.column
-        : Number.POSITIVE_INFINITY;
-
-    if (incomingColumn < existingColumn) {
-      byPath.set(key, { location: entry, index });
-      return;
-    }
-    if (incomingColumn > existingColumn) {
-      return;
-    }
-
-    // Tie-breaker: retain earlier occurrence in the original list
-    if (index < existing.index) {
-      byPath.set(key, { location: entry, index });
-    }
-  });
-
-  return Array.from(byPath.values())
-    .sort((a, b) => a.index - b.index)
-    .slice(0, limit)
-    .map((entry) => entry.location);
-}
-
-type TemporalTransactionStep = {
-  query: string;
-  params?: Record<string, any>;
-};
-
-type TemporalTransactionResult = {
-  data: Array<Record<string, any>>;
-  headers: string[];
-};
-
 const IMPACT_CODE_RELATIONSHIP_TYPES: RelationshipType[] = [
   RelationshipType.CALLS,
   RelationshipType.REFERENCES,
@@ -359,8 +173,6 @@ const SPEC_IMPACT_ORDER: Record<
 };
 
 export class KnowledgeGraphService extends EventEmitter {
-  private readonly namespace: ResolvedGraphNamespace;
-  private readonly namespaceScope: NamespaceScope;
   private searchCache: SimpleCache<Entity[]>;
   private entityCache: SimpleCache<Entity>;
   private _lastPruneSummary: {
@@ -371,309 +183,16 @@ export class KnowledgeGraphService extends EventEmitter {
     checkpoints: number;
     dryRun?: boolean;
   } | null = null;
-  private _indexesEnsured = false;
-  private _indexEnsureInFlight: Promise<EnsureIndicesResult> | null = null;
-  private temporalTransactionChain: Promise<void>;
 
-  constructor(
-    private db: DatabaseService,
-    namespace?: GraphNamespaceConfig
-  ) {
+  constructor(private db: DatabaseService) {
     super();
-    this.namespace = this.resolveNamespace(namespace);
-    this.namespaceScope = createNamespaceScope({
-      entityPrefix: this.namespace.entityPrefix,
-      redisPrefix: this.namespace.redisPrefix,
-      qdrant: this.namespace.qdrant,
-    });
     this.setMaxListeners(100); // Allow more listeners for WebSocket connections
     this.searchCache = new SimpleCache<Entity[]>(500, 300000); // Increased cache size to 500 results for 5 minutes
     this.entityCache = new SimpleCache<Entity>(1000, 600000); // Cache individual entities for 10 minutes
-    // Index creation moved to initialize() method
-    this.temporalTransactionChain = Promise.resolve();
-  }
-
-  private resolveNamespace(
-    namespace?: GraphNamespaceConfig
-  ): ResolvedGraphNamespace {
-    const prefix = namespace?.qdrantPrefix ?? "";
-    const codeCollection =
-      namespace?.codeCollection ??
-      (prefix
-        ? `${prefix}code_embeddings`
-        : DEFAULT_QDRANT_CODE_COLLECTION);
-    const documentationCollection =
-      namespace?.documentationCollection ??
-      (prefix
-        ? `${prefix}documentation_embeddings`
-        : DEFAULT_QDRANT_DOC_COLLECTION);
-
-    return {
-      id: namespace?.id,
-      label: namespace?.name ?? namespace?.id,
-      falkorGraph: namespace?.falkorGraph || DEFAULT_GRAPH_KEY,
-      qdrant: {
-        code: codeCollection,
-        documentation: documentationCollection,
-      },
-      redisPrefix: namespace?.redisPrefix ?? DEFAULT_REDIS_PREFIX,
-      entityPrefix: namespace?.entityPrefix ?? "",
-    };
-  }
-
-  private graphDbQuery(
-    query: string,
-    params?: Record<string, any>
-  ): Promise<any> {
-    const paramBag = params ?? {};
-    if (this.namespace.falkorGraph === DEFAULT_GRAPH_KEY) {
-      return this.db.falkordbQuery(query, paramBag);
-    }
-    return this.db.falkordbQuery(query, paramBag, {
-      graph: this.namespace.falkorGraph,
-    });
-  }
-
-  private async runTemporalTransaction(
-    steps: TemporalTransactionStep[],
-    options: { graphKey?: string } = {}
-  ): Promise<TemporalTransactionResult[]> {
-    if (!Array.isArray(steps) || steps.length === 0) {
-      return [];
-    }
-
-    const task = async (): Promise<TemporalTransactionResult[]> => {
-      const graphKey =
-        options.graphKey || this.namespace.falkorGraph || DEFAULT_GRAPH_KEY;
-
-      await this.db.falkordbCommand("MULTI");
-
-      try {
-        for (const step of steps) {
-          const params = step.params ?? {};
-          await this.db.falkordbCommand(
-            "GRAPH.QUERY",
-            graphKey,
-            step.query,
-            params
-          );
-        }
-
-        const execResult = await this.db.falkordbCommand("EXEC");
-        if (!Array.isArray(execResult)) {
-          throw new Error("FalkorDB EXEC returned unexpected result");
-        }
-        return execResult.map((raw) => this.parseGraphExecResult(raw));
-      } catch (error) {
-        try {
-          await this.db.falkordbCommand("DISCARD");
-        } catch (discardError) {
-          console.warn(
-            "runTemporalTransaction: failed to discard transaction",
-            discardError
-          );
-        }
-        throw error;
-      }
-    };
-
-    const resultPromise = this.temporalTransactionChain.then(task, task);
-    this.temporalTransactionChain = resultPromise.then(
-      () => undefined,
-      () => undefined
-    );
-    return resultPromise;
-  }
-
-  private parseGraphExecResult(raw: any): TemporalTransactionResult {
-    if (!raw) {
-      return { data: [], headers: [] };
-    }
-
-    if (typeof raw === "object" && raw !== null) {
-      if (Array.isArray((raw as any).data) && Array.isArray((raw as any).headers)) {
-        return {
-          data: (raw as any).data as Array<Record<string, any>>,
-          headers: ((raw as any).headers as any[]).map((h) => String(h)),
-        };
-      }
-    }
-
-    if (Array.isArray(raw)) {
-      if (raw.length === 3 && Array.isArray(raw[0]) && Array.isArray(raw[1])) {
-        const headers = (raw[0] as any[]).map((h) => String(h));
-        const rows = (raw[1] as any[]).map((row) =>
-          this.mapGraphRow(headers, row)
-        );
-        return { data: rows, headers };
-      }
-      if (raw.length === 1) {
-        return this.parseGraphExecResult(raw[0]);
-      }
-      if (raw.length === 0) {
-        return { data: [], headers: [] };
-      }
-    }
-
-    if (
-      typeof raw === "string" ||
-      typeof raw === "number" ||
-      typeof raw === "boolean"
-    ) {
-      return { data: [{ value: raw }], headers: ["value"] };
-    }
-
-    return { data: [], headers: [] };
-  }
-
-  private mapGraphRow(headers: string[], row: any): Record<string, any> {
-    const record: Record<string, any> = {};
-    if (!Array.isArray(headers) || !Array.isArray(row)) {
-      return record;
-    }
-    headers.forEach((header, index) => {
-      record[header] = this.decodeGraphValue(row[index]);
-    });
-    return record;
-  }
-
-  private decodeGraphValue(value: any): any {
-    if (value === null || value === undefined) return null;
-    if (Array.isArray(value)) return value.map((v) => this.decodeGraphValue(v));
-    if (typeof value === "object") {
-      const out: Record<string, any> = {};
-      for (const [k, v] of Object.entries(value)) {
-        out[k] = this.decodeGraphValue(v);
-      }
-      return out;
-    }
-    if (typeof value !== "string") return value;
-    const trimmed = value.trim();
-    if (trimmed === "null") return null;
-    if (trimmed === "true") return true;
-    if (trimmed === "false") return false;
-    if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
-    if (
-      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-      (trimmed.startsWith("[") && trimmed.endsWith("]"))
-    ) {
-      try {
-        return JSON.parse(trimmed);
-      } catch {
-        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-          const inner = trimmed.slice(1, -1).trim();
-          if (!inner) return [];
-          const parts = inner.split(",").map((p) => p.trim());
-          return parts.map((part) => {
-            const unquoted = part.replace(/^['"]|['"]$/g, "");
-            if (/^-?\d+(?:\.\d+)?$/.test(unquoted)) return Number(unquoted);
-            if (unquoted === "true") return true;
-            if (unquoted === "false") return false;
-            if (unquoted === "null") return null;
-            return unquoted;
-          });
-        }
-      }
-    }
-    return value;
-  }
-
-  private qdrantCollection(kind: "code" | "documentation"): string {
-    return this.namespaceScope.qdrantCollection(kind);
-  }
-
-  private namespaceId(id: string): string {
-    return this.namespaceScope.applyEntityPrefix(id);
-  }
-
-  private resolveEntityIdInput(entityId: string): string {
-    return this.namespaceScope.requireEntityId(entityId);
-  }
-
-  private resolveOptionalEntityId(entityId?: string | null): string | undefined {
-    return this.namespaceScope.optionalEntityId(entityId);
-  }
-
-  private resolveEntityIdArray(ids?: string[] | null): string[] | undefined {
-    return this.namespaceScope.entityIdArray(ids);
-  }
-
-  private resolveRelationshipIdInput(relationshipId: string): string {
-    return this.namespaceScope.requireRelationshipId(relationshipId);
-  }
-
-  private resolveOptionalRelationshipId(
-    relationshipId?: string | null
-  ): string | undefined {
-    return this.namespaceScope.optionalRelationshipId(relationshipId);
-  }
-
-  private relationshipIdCandidates(
-    ...ids: Array<string | null | undefined>
-  ): string[] {
-    const prefix = this.namespaceScope.entityPrefix;
-    const results = new Set<string>();
-    const ensure = (value: string) => {
-      if (typeof value !== "string" || value.length === 0) return;
-      if (!results.has(value)) {
-        results.add(value);
-      }
-      if (prefix && value.startsWith(prefix)) {
-        const without = value.slice(prefix.length);
-        if (!results.has(without)) results.add(without);
-      }
-    };
-    for (const id of ids) {
-      if (typeof id !== "string" || id.length === 0) continue;
-      ensure(id);
-      const withoutPrefix =
-        prefix && id.startsWith(prefix) ? id.slice(prefix.length) : id;
-      let counterpart: string | null = null;
-      if (withoutPrefix.startsWith("time-rel_")) {
-        counterpart = "rel_" + withoutPrefix.slice("time-rel_".length);
-      } else if (withoutPrefix.startsWith("rel_")) {
-        counterpart = "time-rel_" + withoutPrefix.slice("rel_".length);
-      }
-      if (counterpart) {
-        ensure(counterpart);
-        if (prefix) ensure(`${prefix}${counterpart}`);
-      }
-    }
-    return Array.from(results);
-  }
-
-  private stripEntityPrefix(id: string): string {
-    const prefix = this.namespaceScope.entityPrefix;
-    if (!prefix || !id) {
-      return id;
-    }
-    return id.startsWith(prefix) ? id.slice(prefix.length) : id;
-  }
-
-  private applyNamespaceToEntity(entity: Entity): void {
-    if (!entity || typeof entity !== "object") {
-      return;
-    }
-
-    const existingId = (entity as any).id;
-    if (typeof existingId === "string" && existingId.length > 0) {
-      (entity as any).id = this.namespaceScope.applyEntityPrefix(existingId);
-      return;
-    }
-
-    const prefix = this.namespaceScope.entityPrefix;
-    if (!prefix) {
-      return;
-    }
-
-    const typeSlug = String((entity as any).type || "entity");
-    const generated = `${typeSlug}_${crypto.randomUUID()}`;
-    (entity as any).id = this.namespaceScope.applyEntityPrefix(generated);
-  }
-
-  private generateCheckpointId(seed?: string): string {
-    const base = seed ?? `chk_${Date.now().toString(36)}`;
-    return this.namespaceId(base);
+    // Best-effort: initialize helpful indices (guarded)
+    try {
+      this.ensureIndices().catch(() => {});
+    } catch {}
   }
 
   // --- Phase 2: Dual-write auxiliary nodes for evidence, sites, candidates, and dataflow ---
@@ -721,18 +240,13 @@ export class KnowledgeGraphService extends EventEmitter {
             createdAt: nowISO,
             updatedAt: nowISO,
           } as any;
-          const params = {
-            ...props,
-          } as any;
-          params.rows = [{ ...props }];
-          await this.graphDbQuery(
-            `// UNWIND $rows AS row
-             MERGE (n:edge_evidence { id: $id })
+          await this.db.falkordbQuery(
+            `MERGE (n:edge_evidence { id: $id })
              ON CREATE SET n.createdAt = $createdAt
              SET n.edgeId = $edgeId, n.source = $source, n.confidence = $confidence,
                  n.path = $path, n.line = $line, n.column = $column, n.note = $note, n.extractorVersion = $extractorVersion,
                  n.updatedAt = $updatedAt`,
-            params
+            props
           );
         }
       }
@@ -742,30 +256,8 @@ export class KnowledgeGraphService extends EventEmitter {
     try {
       const siteHash = any.siteHash as string | undefined;
       if (siteHash) {
-        const params = {
-          id: siteHash,
-          edgeId,
-          siteId: any.siteId || null,
-          path: any.location?.path || any.metadata?.path || null,
-          line:
-            typeof any.location?.line === "number"
-              ? any.location.line
-              : typeof any.metadata?.line === "number"
-              ? any.metadata.line
-              : null,
-          column:
-            typeof any.location?.column === "number"
-              ? any.location.column
-              : typeof any.metadata?.column === "number"
-              ? any.metadata.column
-              : null,
-          accessPath: any.accessPath || any.metadata?.accessPath || null,
-          now: nowISO,
-        } as any;
-        params.rows = [{ ...params }];
-        await this.graphDbQuery(
-          `// UNWIND $rows AS row
-           MERGE (s:edge_site { id: $id })
+        await this.db.falkordbQuery(
+          `MERGE (s:edge_site { id: $id })
            SET s.edgeId = $edgeId,
                s.siteId = $siteId,
                s.path = $path,
@@ -773,7 +265,26 @@ export class KnowledgeGraphService extends EventEmitter {
                s.column = $column,
                s.accessPath = $accessPath,
                s.updatedAt = $now`,
-          params
+          {
+            id: siteHash,
+            edgeId,
+            siteId: any.siteId || null,
+            path: any.location?.path || any.metadata?.path || null,
+            line:
+              typeof any.location?.line === "number"
+                ? any.location.line
+                : typeof any.metadata?.line === "number"
+                ? any.metadata.line
+                : null,
+            column:
+              typeof any.location?.column === "number"
+                ? any.location.column
+                : typeof any.metadata?.column === "number"
+                ? any.metadata.column
+                : null,
+            accessPath: any.accessPath || any.metadata?.accessPath || null,
+            now: nowISO,
+          }
         );
       }
     } catch {}
@@ -795,30 +306,27 @@ export class KnowledgeGraphService extends EventEmitter {
               .update(cidBase)
               .digest("hex")
               .slice(0, 20);
-          const candParams = {
-            id: cid,
-            edgeId,
-            candId: c.id || null,
-            name: c.name || null,
-            path: c.path || null,
-            resolver: c.resolver || null,
-            score: typeof c.score === "number" ? c.score : null,
-            rank,
-            now: nowISO,
-          } as any;
-          candParams.rows = [{ ...candParams }];
-          await this.graphDbQuery(
-            `// UNWIND $rows AS row
-             MERGE (n:edge_candidate { id: $id })
+          await this.db.falkordbQuery(
+            `MERGE (n:edge_candidate { id: $id })
              ON CREATE SET n.createdAt = $now
              SET n.edgeId = $edgeId, n.candidateId = $candId, n.name = $name, n.path = $path,
                  n.resolver = $resolver, n.score = $score, n.rank = $rank, n.updatedAt = $now`,
-            candParams
+            {
+              id: cid,
+              edgeId,
+              candId: c.id || null,
+              name: c.name || null,
+              path: c.path || null,
+              resolver: c.resolver || null,
+              score: typeof c.score === "number" ? c.score : null,
+              rank,
+              now: nowISO,
+            }
           );
           // Optional: link to candidate entity if exists (guarded)
           try {
             if (c.id) {
-              await this.graphDbQuery(
+              await this.db.falkordbQuery(
                 `MATCH (cand:edge_candidate {id: $cid}), (e {id: $eid})
                  MERGE (cand)-[:CANDIDATE_ENTITY]->(e)`,
                 { cid, eid: c.id }
@@ -843,7 +351,7 @@ export class KnowledgeGraphService extends EventEmitter {
         if (dfId) {
           const fromId = rIn.fromEntityId;
           const toId = rIn.toEntityId;
-          await this.graphDbQuery(
+          await this.db.falkordbQuery(
             `MERGE (df:dataflow { id: $id })
              ON CREATE SET df.createdAt = $now
              SET df.var = $var, df.file = $file, df.updatedAt = $now
@@ -871,19 +379,18 @@ export class KnowledgeGraphService extends EventEmitter {
    * Phase 3: Compute and store lightweight materialized edge stats for an entity.
    */
   async computeAndStoreEdgeStats(entityId: string): Promise<void> {
-    const resolvedId = this.resolveEntityIdInput(entityId);
     try {
-      const byType = await this.graphDbQuery(
+      const byType = await this.db.falkordbQuery(
         `MATCH (a {id: $id})-[r]->()
          RETURN type(r) as t, count(r) as c`,
-        { id: resolvedId }
+        { id: entityId }
       );
-      const topSymbols = await this.graphDbQuery(
+      const topSymbols = await this.db.falkordbQuery(
         `MATCH (a {id: $id})-[r]->()
          WHERE r.to_ref_symbol IS NOT NULL
          RETURN r.to_ref_symbol as sym, count(*) as c
          ORDER BY c DESC LIMIT 10`,
-        { id: resolvedId }
+        { id: entityId }
       );
       const payload = {
         byType: (byType || []).map((row: any) => ({
@@ -896,12 +403,12 @@ export class KnowledgeGraphService extends EventEmitter {
         })),
         updatedAt: new Date().toISOString(),
       };
-      await this.graphDbQuery(
+      await this.db.falkordbQuery(
         `MERGE (s:edge_stats { id: $sid })
          SET s.entityId = $eid, s.payload = $payload, s.updatedAt = $now`,
         {
-          sid: `stats_${resolvedId}`,
-          eid: resolvedId,
+          sid: `stats_${entityId}`,
+          eid: entityId,
           payload: JSON.stringify(payload),
           now: new Date().toISOString(),
         }
@@ -959,7 +466,7 @@ export class KnowledgeGraphService extends EventEmitter {
       // Only unify for code-like edges and resolved targets
       const any: any = rel as any;
       const toKind = any.to_ref_kind as string | undefined;
-      const toId = this.stripEntityPrefix(String(rel.toEntityId || ""));
+      const toId = String(rel.toEntityId || "");
       const isResolved = toKind === "entity" || toId.startsWith("sym:");
       if (!isResolved) return;
 
@@ -996,7 +503,7 @@ export class KnowledgeGraphService extends EventEmitter {
         WHERE r.id <> $newId AND coalesce(r.active, true) = true
           AND r.to_ref_file = $file AND r.to_ref_symbol = $symbol
         RETURN r`;
-      const rows = await this.graphDbQuery(q, {
+      const rows = await this.db.falkordbQuery(q, {
         fromId,
         newId: rel.id,
         file,
@@ -1014,7 +521,7 @@ export class KnowledgeGraphService extends EventEmitter {
           WHERE r.id <> $newId AND coalesce(r.active, true) = true
             AND r.to_ref_kind = 'external' AND r.to_ref_name = $symbol
           RETURN r`;
-        const rowsExt = await this.graphDbQuery(qext, {
+        const rowsExt = await this.db.falkordbQuery(qext, {
           fromId,
           newId: rel.id,
           symbol,
@@ -1085,7 +592,7 @@ export class KnowledgeGraphService extends EventEmitter {
             r.locations = CASE WHEN $locations IS NULL THEN r.locations ELSE $locations END,
             r.sites = CASE WHEN $sites IS NULL THEN r.sites ELSE $sites END
       `;
-      await this.graphDbQuery(update, {
+      await this.db.falkordbQuery(update, {
         fromId,
         newId: rel.id,
         occTotalAdd,
@@ -1112,7 +619,7 @@ export class KnowledgeGraphService extends EventEmitter {
           SET r.active = false,
               r.validTo = coalesce(r.validTo, $now)
         `;
-        await this.graphDbQuery(retire, { ids: oldIds, now: nowISO });
+        await this.db.falkordbQuery(retire, { ids: oldIds, now: nowISO });
       }
     } catch {
       // best-effort; do not block
@@ -1124,21 +631,6 @@ export class KnowledgeGraphService extends EventEmitter {
     // Create a shallow copy we can mutate safely
     const rel: any = { ...(relIn as any) };
 
-    if (
-      typeof rel.id === "string" &&
-      rel.id.length > 0 &&
-      !isStructuralRelationshipType(rel.type)
-    ) {
-      rel.id = this.namespaceScope.applyRelationshipPrefix(rel.id);
-    }
-
-    if (typeof rel.fromEntityId === "string") {
-      rel.fromEntityId = this.namespaceId(rel.fromEntityId);
-    }
-    if (typeof rel.toEntityId === "string") {
-      rel.toEntityId = this.namespaceId(rel.toEntityId);
-    }
-
     // Ensure timestamps and version
     if (!(rel.created instanceof Date))
       rel.created = new Date(rel.created || Date.now());
@@ -1148,14 +640,6 @@ export class KnowledgeGraphService extends EventEmitter {
 
     this.harmonizeRefFields(rel);
 
-    if (isStructuralRelationshipType(rel.type)) {
-      Object.assign(rel, this.normalizeStructuralRelationship(rel));
-      if (typeof rel.id === "string" && rel.id.length > 0) {
-        rel.id = this.namespaceScope.applyRelationshipPrefix(rel.id);
-      }
-      this.harmonizeRefFields(rel);
-    }
-
     // Delegate code-edge normalization to shared normalizer to avoid drift
     if (isCodeRelationship(rel.type)) {
       Object.assign(rel, normalizeCodeEdge(rel));
@@ -1164,10 +648,6 @@ export class KnowledgeGraphService extends EventEmitter {
 
     if (isDocumentationRelationshipType(rel.type)) {
       Object.assign(rel, this.normalizeDocumentationEdge(rel));
-    }
-
-    if (isPerformanceRelationshipType(rel.type)) {
-      Object.assign(rel, this.normalizePerformanceRelationship(rel));
     }
 
     // Generate a human-readable why if missing
@@ -1187,369 +667,6 @@ export class KnowledgeGraphService extends EventEmitter {
     }
 
     return rel as GraphRelationship;
-  }
-
-  private normalizeStructuralRelationship(relIn: GraphRelationship): any {
-    return normalizeStructuralRelationshipExternal(relIn);
-  }
-
-  private normalizePerformanceRelationship(relIn: GraphRelationship): any {
-    const rel: any = relIn;
-    const md: Record<string, any> = { ...(rel.metadata || {}) };
-    rel.metadata = md;
-
-    const round = (value: number, precision = 4): number => {
-      const factor = Math.pow(10, precision);
-      return Math.round(value * factor) / factor;
-    };
-
-    const toNumber = (value: unknown): number | undefined => {
-      if (value === null || value === undefined) return undefined;
-      const num = Number(value);
-      return Number.isFinite(num) ? num : undefined;
-    };
-
-    const toPositiveInt = (value: unknown): number | undefined => {
-      const num = toNumber(value);
-      if (num === undefined) return undefined;
-      if (num < 0) return undefined;
-      return Math.round(num);
-    };
-
-    const sanitizeString = (value: unknown, max = 256): string | undefined => {
-      if (typeof value !== "string") return undefined;
-      const trimmed = value.trim();
-      if (!trimmed) return undefined;
-      return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
-    };
-
-    const sanitizeMetricId = (value: unknown): string | undefined => {
-      const raw = sanitizeString(value, 256);
-      if (!raw) return undefined;
-      const normalized = raw
-        .toLowerCase()
-        .replace(/[^a-z0-9/_\-]+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/\/+/g, "/")
-        .replace(/\/+$/g, "")
-        .replace(/^\/+/, "")
-        .slice(0, 256);
-      if (!normalized) return undefined;
-      if (!/[a-z0-9]/.test(normalized)) return undefined;
-      return normalized;
-    };
-
-    const sanitizeUnit = (value: unknown): string | undefined => {
-      const raw = sanitizeString(value, 32);
-      if (!raw) return undefined;
-      return raw.toLowerCase();
-    };
-
-    const normalizeTrend = (value: unknown, delta?: number): string | undefined => {
-      if (typeof delta === "number" && Number.isFinite(delta)) {
-        if (delta > 0) return "regression";
-        if (delta < 0) return "improvement";
-        return "neutral";
-      }
-      if (typeof value === "string") {
-        const normalized = value.trim().toLowerCase();
-        if (["regression", "improvement", "neutral"].includes(normalized)) {
-          return normalized;
-        }
-      }
-      if (typeof delta === "number") {
-        if (delta > 0) return "regression";
-        if (delta < 0) return "improvement";
-      }
-      return "neutral";
-    };
-
-    const severityOrder: Array<"critical" | "high" | "medium" | "low"> = [
-      "critical",
-      "high",
-      "medium",
-      "low",
-    ];
-
-    const sanitizeSeverity = (
-      value: unknown,
-      percentChange?: number,
-      delta?: number,
-      trend?: string
-    ): "critical" | "high" | "medium" | "low" => {
-      const normalizedInput =
-        typeof value === "string" ? value.trim().toLowerCase() : undefined;
-
-      const isImprovement = (() => {
-        if (typeof percentChange === "number" && percentChange < 0) return true;
-        if (typeof delta === "number" && delta < 0) return true;
-        if (trend === "improvement") return true;
-        return false;
-      })();
-
-      if (isImprovement) {
-        return "low";
-      }
-
-      if (normalizedInput && severityOrder.includes(normalizedInput as any)) {
-        return normalizedInput as any;
-      }
-
-      const percent = Math.abs(percentChange ?? 0);
-      if (percent >= 50) return "critical";
-      if (percent >= 25) return "high";
-      if (percent >= 10) return "medium";
-      if (percent >= 5) return "low";
-      const absDelta = Math.abs(delta ?? 0);
-      if (absDelta >= 2000) return "critical";
-      if (absDelta >= 1000) return "high";
-      if (absDelta >= 250) return "medium";
-      return "low";
-    };
-
-    const metricIdSource = rel.metricId ?? md.metricId;
-    const metricId = sanitizeMetricId(metricIdSource);
-    if (!metricId) {
-      throw new Error(
-        `Performance relationships require metricId (received: ${String(
-          metricIdSource
-        )})`
-      );
-    }
-    rel.metricId = metricId;
-    md.metricId = metricId;
-
-    const scenario = sanitizeString(rel.scenario ?? md.scenario, 128);
-    if (scenario) {
-      rel.scenario = scenario;
-      md.scenario = scenario;
-    }
-
-    const environment = sanitizeEnvironment(rel.environment ?? md.environment ?? "");
-    rel.environment = environment;
-    md.environment = environment;
-
-    const unit = sanitizeUnit(rel.unit ?? md.unit ?? "ms") ?? "ms";
-    rel.unit = unit;
-    md.unit = unit;
-
-    const historyRaw = Array.isArray(rel.metricsHistory)
-      ? rel.metricsHistory
-      : Array.isArray(md.metricsHistory)
-      ? md.metricsHistory
-      : [];
-
-    const metricsHistoryWithIndex = historyRaw
-      .map((entry: any, index: number) => {
-        if (!entry) return null;
-        const value = toNumber(entry.value);
-        if (value === undefined) return null;
-        const tsRaw = entry.timestamp ?? entry.time ?? entry.recordedAt;
-        const ts = tsRaw ? new Date(tsRaw) : undefined;
-        const timestamp = ts && !Number.isNaN(ts.valueOf()) ? ts : undefined;
-        const runId = sanitizeString(entry.runId ?? entry.id, 128);
-        const entryEnv = sanitizeEnvironment(entry.environment ?? environment ?? "");
-        const entryUnit = sanitizeUnit(entry.unit ?? unit);
-        return {
-          value: round(value),
-          timestamp,
-          runId,
-          environment: entryEnv,
-          unit: entryUnit ?? unit,
-          __index: index,
-        };
-      })
-      .filter(Boolean) as Array<
-      {
-        value: number;
-        timestamp?: Date;
-        runId?: string;
-        environment?: string;
-        unit?: string;
-        __index: number;
-      }
-    >;
-
-    const metricsHistory = metricsHistoryWithIndex
-      .sort((a, b) => {
-        const ta = a.timestamp?.valueOf();
-        const tb = b.timestamp?.valueOf();
-        if (ta !== undefined && tb !== undefined) {
-          if (ta === tb) return a.__index - b.__index;
-          return ta - tb;
-        }
-        if (ta === undefined && tb === undefined) {
-          return a.__index - b.__index;
-        }
-        return ta === undefined ? 1 : -1;
-      })
-      .map(({ __index, ...entry }) => entry);
-
-    if (metricsHistory.length > 0) {
-      rel.metricsHistory = metricsHistory;
-      md.metricsHistory = metricsHistory.map((entry: any) => ({
-        value: entry.value,
-        timestamp: entry.timestamp ? entry.timestamp.toISOString() : undefined,
-        runId: entry.runId,
-        environment: entry.environment,
-        unit: entry.unit,
-      }));
-    }
-
-    let baseline = toNumber(rel.baselineValue ?? md.baselineValue);
-    let current = toNumber(rel.currentValue ?? md.currentValue);
-
-    if (baseline === undefined && metricsHistory.length > 0) {
-      baseline = metricsHistory[0].value;
-    }
-    if (current === undefined && metricsHistory.length > 0) {
-      current = metricsHistory[metricsHistory.length - 1].value;
-    }
-
-    if (baseline !== undefined) {
-      rel.baselineValue = round(baseline);
-      md.baselineValue = rel.baselineValue;
-    }
-    if (current !== undefined) {
-      rel.currentValue = round(current);
-      md.currentValue = rel.currentValue;
-    }
-
-    let delta = toNumber(rel.delta ?? md.delta);
-    if (delta === undefined && baseline !== undefined && current !== undefined) {
-      delta = current - baseline;
-    }
-    if (delta !== undefined) {
-      rel.delta = round(delta);
-      md.delta = rel.delta;
-    }
-
-    let percentChange = toNumber(rel.percentChange ?? md.percentChange);
-    if (
-      percentChange === undefined &&
-      baseline !== undefined &&
-      baseline !== 0 &&
-      current !== undefined
-    ) {
-      percentChange = ((current - baseline) / baseline) * 100;
-    }
-    if (percentChange !== undefined) {
-      rel.percentChange = round(percentChange);
-      md.percentChange = rel.percentChange;
-    } else if (baseline === 0 && current !== undefined) {
-      md.percentChange = null;
-      md.percentChangeNote = "baseline-zero";
-    }
-
-    let sampleSize = toPositiveInt(rel.sampleSize ?? md.sampleSize);
-    if (sampleSize === undefined && metricsHistory.length > 0) {
-      sampleSize = metricsHistory.length;
-    }
-    rel.sampleSize = sampleSize ?? undefined;
-    if (sampleSize !== undefined) md.sampleSize = sampleSize;
-
-    const ciRaw = rel.confidenceInterval ?? md.confidenceInterval;
-    let confidenceInterval: any = null;
-    if (ciRaw && typeof ciRaw === "object") {
-      const lower = toNumber((ciRaw as any).lower);
-      const upper = toNumber((ciRaw as any).upper);
-      if (lower !== undefined || upper !== undefined) {
-        confidenceInterval = {
-          lower: lower !== undefined ? round(lower) : undefined,
-          upper: upper !== undefined ? round(upper) : undefined,
-        };
-      }
-    }
-    rel.confidenceInterval = confidenceInterval;
-    if (confidenceInterval) md.confidenceInterval = confidenceInterval;
-
-    const trend = normalizeTrend(rel.trend ?? md.trend, rel.delta ?? delta);
-    rel.trend = trend;
-    md.trend = trend;
-
-    const severity = sanitizeSeverity(
-      rel.severity ?? md.severity,
-      rel.percentChange ?? percentChange,
-      rel.delta ?? delta,
-      trend
-    );
-    rel.severity = severity;
-    md.severity = severity;
-
-    const severityWeight: Record<string, number> = {
-      critical: 4,
-      high: 3,
-      medium: 2,
-      low: 1,
-    };
-    const computedRisk = (() => {
-      const pctRaw = rel.percentChange ?? percentChange ?? 0;
-      const deltaRaw = rel.delta ?? delta ?? 0;
-      if (pctRaw <= 0 || deltaRaw < 0) return 0;
-      const pct = Math.abs(pctRaw) / 100;
-      const sz = sampleSize ?? 1;
-      const weight = severityWeight[severity] ?? 1;
-      if (!Number.isFinite(pct)) return undefined;
-      return round(pct * weight * Math.log2(sz + 1));
-    })();
-    const riskScore = toNumber(rel.riskScore ?? md.riskScore) ?? computedRisk;
-    if (riskScore !== undefined) {
-      rel.riskScore = round(riskScore);
-      md.riskScore = rel.riskScore;
-    }
-
-    const runId = sanitizeString(rel.runId ?? md.runId, 128);
-    if (runId) {
-      rel.runId = runId;
-      md.runId = runId;
-    }
-
-    const policyId = sanitizeString(rel.policyId ?? md.policyId, 128);
-    if (policyId) {
-      rel.policyId = policyId;
-      md.policyId = policyId;
-    }
-
-    const detectedAtRaw = rel.detectedAt ?? md.detectedAt;
-    if (detectedAtRaw) {
-      const detectedAt = new Date(detectedAtRaw);
-      if (!Number.isNaN(detectedAt.valueOf())) {
-        rel.detectedAt = detectedAt;
-        md.detectedAt = detectedAt.toISOString();
-      }
-    }
-
-    const resolvedAtRaw = rel.resolvedAt ?? md.resolvedAt;
-    if (resolvedAtRaw) {
-      const resolvedAt = new Date(resolvedAtRaw);
-      if (!Number.isNaN(resolvedAt.valueOf())) {
-        rel.resolvedAt = resolvedAt;
-        md.resolvedAt = resolvedAt.toISOString();
-      }
-    } else if (resolvedAtRaw === null) {
-      rel.resolvedAt = null;
-      md.resolvedAt = null;
-    }
-
-    const evidence = Array.isArray(rel.evidence)
-      ? rel.evidence
-      : Array.isArray(md.evidence)
-      ? md.evidence
-      : [];
-    rel.evidence = evidence.slice(0, 20);
-    if (rel.evidence.length > 0) {
-      md.evidence = rel.evidence.map((entry: any) => ({
-        ...entry,
-        note: sanitizeString(entry?.note, 512),
-      }));
-    }
-
-    if (Array.isArray((rel as any).metrics)) {
-      md.metrics = (rel as any).metrics;
-      delete (rel as any).metrics;
-    }
-
-    return rel;
   }
 
   private normalizeDocumentationEdge(relIn: any): any {
@@ -1938,46 +1055,6 @@ export class KnowledgeGraphService extends EventEmitter {
     return normalized;
   }
 
-  private normalizeModulePathFilter(value?: string | null): string | undefined {
-    if (typeof value !== "string") return undefined;
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-    let normalized = trimmed.replace(/\\+/g, "/");
-    normalized = normalized.replace(/\/{2,}/g, "/");
-    if (normalized.length > 1) {
-      normalized = normalized.replace(/\/+$/g, "");
-      if (!normalized) {
-        normalized = "/";
-      }
-    }
-    return normalized;
-  }
-
-  private normalizeModulePathFilterInput(
-    value?: string | string[] | null
-  ): string | string[] | undefined {
-    if (typeof value === "string") {
-      return this.normalizeModulePathFilter(value) ?? undefined;
-    }
-    if (Array.isArray(value)) {
-      const normalizedList = value
-        .map((entry) =>
-          typeof entry === "string"
-            ? this.normalizeModulePathFilter(entry)
-            : undefined
-        )
-        .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
-      if (normalizedList.length === 0) {
-        return undefined;
-      }
-      if (normalizedList.length === 1) {
-        return normalizedList[0];
-      }
-      return normalizedList;
-    }
-    return undefined;
-  }
-
   private normalizeSummary(value: any): string | undefined {
     if (!value) return undefined;
     const text = String(value).trim();
@@ -2065,14 +1142,6 @@ export class KnowledgeGraphService extends EventEmitter {
             ? (rel[`${scalarPrefix}name`] as string)
             : undefined,
       };
-      const hadScalarRef = Boolean(
-        scalars.file || scalars.symbol || scalars.name
-      );
-      const hadStructuredRef = Boolean(
-        existingRef &&
-          (existingRef.file || existingRef.symbol || existingRef.name)
-      );
-      const derivedFromIdOnly = !hadScalarRef && !hadStructuredRef && !!baseId;
 
       const ref: any = existingRef;
       if (!ref.id && baseId) ref.id = baseId;
@@ -2131,18 +1200,7 @@ export class KnowledgeGraphService extends EventEmitter {
       if (ref && typeof ref === "object") {
         const md: any = (rel.metadata = { ...(rel.metadata || {}) });
         if (md[mdKey] == null) {
-          const refForMetadata = { ...ref };
-          const hasScalarRef = Boolean(
-            scalars.file || scalars.symbol || scalars.name
-          );
-          const hasStructuredRef = Boolean(
-            existingRef &&
-              (existingRef.file || existingRef.symbol || existingRef.name)
-          );
-          if (derivedFromIdOnly) {
-            delete refForMetadata.id;
-          }
-          md[mdKey] = refForMetadata;
+          md[mdKey] = ref;
         }
       }
     };
@@ -2198,9 +1256,7 @@ export class KnowledgeGraphService extends EventEmitter {
       toEntityId: toId,
       type,
     } as GraphRelationship;
-    return this.namespaceScope.applyRelationshipPrefix(
-      canonicalRelationshipId(fromId, rel)
-    );
+    return canonicalRelationshipId(fromId, rel);
   }
 
   private directoryDistance(fromFile: string, candidatePath: string): number {
@@ -2239,133 +1295,10 @@ export class KnowledgeGraphService extends EventEmitter {
     }
   }
 
-  // --- History / Temporal operations ---
-  private emptyTemporalMetadata(): TemporalMetadataRecord {
-    return { segments: [], events: [] };
-  }
-
-  private normalizeTemporalSegment(
-    input: any
-  ): TemporalSegmentRecord | undefined {
-    if (!input || typeof input !== "object") return undefined;
-    const segmentId =
-      typeof input.segmentId === "string" && input.segmentId.length > 0
-        ? input.segmentId
-        : undefined;
-    const openedAt =
-      typeof input.openedAt === "string" && input.openedAt.length > 0
-        ? input.openedAt
-        : undefined;
-    if (!segmentId || !openedAt) return undefined;
-    const segment: TemporalSegmentRecord = {
-      segmentId,
-      openedAt,
-      closedAt:
-        typeof input.closedAt === "string" && input.closedAt.length > 0
-          ? input.closedAt
-          : undefined,
-      changeSetId:
-        typeof input.changeSetId === "string" && input.changeSetId.length > 0
-          ? input.changeSetId
-          : undefined,
-    };
-    return segment;
-  }
-
-  private normalizeTemporalMetadata(meta: any): TemporalMetadataRecord {
-    if (!meta || typeof meta !== "object") {
-      return this.emptyTemporalMetadata();
-    }
-    const normalized: TemporalMetadataRecord = {
-      changeSetId:
-        typeof meta.changeSetId === "string" && meta.changeSetId.length > 0
-          ? meta.changeSetId
-          : undefined,
-      current: this.normalizeTemporalSegment(meta.current),
-      segments: Array.isArray(meta.segments)
-        ? meta.segments
-            .map((segment: any) => this.normalizeTemporalSegment(segment))
-            .filter((segment): segment is TemporalSegmentRecord => Boolean(segment))
-        : [],
-      events: Array.isArray(meta.events)
-        ? meta.events
-            .filter(
-              (event: any) =>
-                event &&
-                (event.type === "opened" || event.type === "closed") &&
-                typeof event.at === "string"
-            )
-            .map((event: any) => ({
-              type: event.type as "opened" | "closed",
-              at: event.at,
-              changeSetId:
-                typeof event.changeSetId === "string" &&
-                event.changeSetId.length > 0
-                  ? event.changeSetId
-                  : undefined,
-              segmentId:
-                typeof event.segmentId === "string" && event.segmentId.length > 0
-                  ? event.segmentId
-                  : undefined,
-            }))
-        : [],
-    };
-    return normalized;
-  }
-
-  private parseTemporalMetadata(raw: any): TemporalMetadataRecord {
-    if (raw == null) {
-      return this.emptyTemporalMetadata();
-    }
-    if (typeof raw === "string") {
-      try {
-        const parsed = JSON.parse(raw);
-        return this.normalizeTemporalMetadata(parsed);
-      } catch {
-        return this.emptyTemporalMetadata();
-      }
-    }
-    if (typeof raw === "object") {
-      return this.normalizeTemporalMetadata(raw);
-    }
-    return this.emptyTemporalMetadata();
-  }
-
-  private serializeTemporalMetadata(meta: TemporalMetadataRecord): string {
-    return JSON.stringify(meta);
-  }
-
-  private pushTemporalSegment(
-    meta: TemporalMetadataRecord,
-    segment: TemporalSegmentRecord
-  ): void {
-    if (!segment.segmentId || !segment.openedAt) return;
-    const exists = meta.segments.some(
-      (existing) =>
-        existing.segmentId === segment.segmentId &&
-        existing.openedAt === segment.openedAt &&
-        (existing.closedAt ?? null) === (segment.closedAt ?? null)
-    );
-    if (!exists) {
-      meta.segments.push(segment);
-      if (meta.segments.length > 100) {
-        meta.segments = meta.segments.slice(-100);
-      }
-    }
-  }
-
-  private recordTemporalEvent(
-    meta: TemporalMetadataRecord,
-    event: TemporalEventRecord
-  ): void {
-    meta.events.push(event);
-    if (meta.events.length > 250) {
-      meta.events = meta.events.slice(-250);
-    }
-  }
-
+  // --- History/Checkpoint stubs (to be implemented) ---
   /**
    * Append a compact version snapshot for an entity when its content changes.
+   * Stub: returns a generated version id without writing to the graph.
    */
   async appendVersion(
     entity: Entity,
@@ -2380,9 +1313,8 @@ export class KnowledgeGraphService extends EventEmitter {
       );
       return vid;
     }
-    const entityIdRaw = (entity as any)?.id;
-    if (!entityIdRaw) throw new Error("appendVersion: entity.id is required");
-    const entityId = this.resolveEntityIdInput(entityIdRaw);
+    const entityId = (entity as any)?.id;
+    if (!entityId) throw new Error("appendVersion: entity.id is required");
     const ts = opts?.timestamp || new Date();
     const tsISO = ts.toISOString();
     const hash = (entity as any)?.hash || "";
@@ -2394,7 +1326,8 @@ export class KnowledgeGraphService extends EventEmitter {
     ) as string | undefined;
     const vid = `ver_${entityId}_${hash || Date.now().toString(36)}`;
 
-    const vprops: Record<string, any> = {
+    // Create/merge version node and OF relationship
+    const vprops: any = {
       id: vid,
       type: "version",
       entityId,
@@ -2405,275 +1338,44 @@ export class KnowledgeGraphService extends EventEmitter {
     if (language) vprops.language = language;
     if (opts?.changeSetId) vprops.changeSetId = opts.changeSetId;
 
-    const continuityRows = await this.graphDbQuery(
+    await this.db.falkordbQuery(
       `MATCH (e {id: $entityId})
-       OPTIONAL MATCH (e)<-[:OF]-(prev:version)
-       WHERE prev.timestamp <= $ts
-       WITH e, prev
-       ORDER BY prev.timestamp DESC
-       WITH e, collect(prev) AS prevs
-       OPTIONAL MATCH (e)<-[:OF]-(future:version)
-       WHERE future.timestamp > $ts
-       WITH e, prevs, collect(future) AS futures
-       RETURN
-         CASE WHEN size(prevs) = 0 THEN NULL ELSE prevs[0].id END AS prevId,
-         CASE WHEN size(prevs) = 0 THEN NULL ELSE prevs[0].timestamp END AS prevTimestamp,
-         size(futures) AS futureCount
+       MERGE (v:version { id: $vid })
+       SET v += $vprops
+       MERGE (v)-[of:OF { id: $ofId }]->(e)
+       ON CREATE SET of.created = $ts, of.version = 1, of.metadata = '{}'
+       SET of.lastModified = $ts
       `,
-      { entityId, ts: tsISO }
+      { entityId, vid, vprops, ts: tsISO, ofId: `rel_${vid}_${entityId}_OF` }
     );
 
-    const continuity =
-      Array.isArray(continuityRows) && continuityRows.length > 0
-        ? continuityRows[0]
-        : { prevId: null, prevTimestamp: null, futureCount: 0 };
-
-    const futureCount = Number(continuity.futureCount ?? 0);
-    if (futureCount > 0) {
-      throw new Error(
-        `appendVersion: refused to create version at ${tsISO} for ${entityId} because newer versions exist`
-      );
-    }
-
-    const prevIdRaw =
-      typeof continuity.prevId === "string" && continuity.prevId.length > 0
-        ? continuity.prevId
-        : null;
-    const prevId = prevIdRaw ? this.resolveEntityIdInput(prevIdRaw) : null;
-    const prevTimestamp =
-      typeof continuity.prevTimestamp === "string" &&
-      continuity.prevTimestamp.length > 0
-        ? continuity.prevTimestamp
-        : null;
-
-    const steps: TemporalTransactionStep[] = [];
-
-    steps.push({
-      query: `
-        MATCH (e {id: $entityId})
-        OPTIONAL MATCH (e)<-[:OF]-(future:version)
-        WHERE future.timestamp > $ts
-        WITH e, collect(future.id) AS futureVersions
-        WHERE size(futureVersions) = 0
-        OPTIONAL MATCH (e)<-[:OF]-(prevCandidate:version)
-        WHERE prevCandidate.timestamp <= $ts
-        WITH e, prevCandidate
-        ORDER BY prevCandidate.timestamp DESC
-        WITH e, collect(prevCandidate)[0] AS prev
-        WHERE ($prevId IS NULL AND prev IS NULL)
-           OR (prev IS NOT NULL AND prev.id = $prevId AND NOT EXISTS {
-             MATCH (e)<-[:OF]-(between:version)
-             WHERE between.timestamp > prev.timestamp AND between.timestamp < $ts
-           })
-        MERGE (v:version { id: $vid })
-        SET v += $vprops,
-            v.timestamp = $ts
-        WITH e, v, prev
-        MERGE (v)-[of:OF { id: $ofId }]->(e)
-        ON CREATE SET of.created = $ts, of.version = 1, of.metadata = '{}'
-        SET of.lastModified = $ts,
-            of.version = coalesce(of.version, 0) + 1
-        RETURN v.id AS versionId,
-               prev.id AS previousId
+    // Link to previous version if exists (chain among version nodes)
+    const prev = await this.db.falkordbQuery(
+      `MATCH (e {id: $entityId})<-[:OF]-(pv:version)
+       WHERE pv.id <> $vid AND pv.timestamp <= $ts
+       RETURN pv.id AS id, pv.timestamp AS ts
+       ORDER BY ts DESC LIMIT 1
       `,
-      params: {
-        entityId,
-        vid,
-        ts: tsISO,
-        vprops,
-        ofId: `rel_${vid}_${entityId}_OF`,
-        prevId,
-      },
-    });
-
-    if (prevId) {
-      steps.push({
-        query: `
-          MATCH (v:version { id: $vid })-[:OF]->(e {id: $entityId})
-          OPTIONAL MATCH (v)-[existing:PREVIOUS_VERSION]->(other:version)
-          WITH e, v, existing, other
-          MATCH (prev:version { id: $prevId })-[:OF]->(e)
-          WITH e, v, prev, existing, other
-          WHERE prev.timestamp <= $ts
-            AND (existing IS NULL OR other.id = $prevId)
-            AND NOT EXISTS {
-              MATCH (e)<-[:OF]-(between:version)
-              WHERE between.timestamp > prev.timestamp AND between.timestamp < $ts
-            }
-          MERGE (v)-[r:PREVIOUS_VERSION { id: $relId }]->(prev)
-          ON CREATE SET r.created = $ts, r.version = 0, r.metadata = '{}'
-          SET r.lastModified = $ts,
-              r.version = coalesce(r.version, 0) + 1
-          RETURN r.id AS relId
+      { entityId, vid, ts: tsISO }
+    );
+    if (prev && prev.length > 0) {
+      const prevId = prev[0].id;
+      await this.db.falkordbQuery(
+        `MATCH (v:version {id: $vid}), (pv:version {id: $prevId})
+         MERGE (v)-[r:PREVIOUS_VERSION { id: $rid }]->(pv)
+         ON CREATE SET r.created = $ts, r.version = 1, r.metadata = '{}'
+         SET r.lastModified = $ts
         `,
-        params: {
-          entityId,
-          vid,
-          prevId,
-          ts: tsISO,
-          relId: this.canonicalRelationshipId(
-            vid,
-            prevId,
-            RelationshipType.PREVIOUS_VERSION
-          ),
-        },
-      });
-    }
-
-    let changeStepIndex = -1;
-    let changeRelType = prevId
-      ? RelationshipType.MODIFIED_IN
-      : RelationshipType.CREATED_IN;
-
-    if (opts?.changeSetId) {
-      const changeId = this.namespaceId(opts.changeSetId);
-      const metadata = JSON.stringify({
-        entityId,
-        versionId: vid,
-        changeSetId: opts.changeSetId,
-        timestamp: tsISO,
-        previousVersionId: prevId ?? undefined,
-        previousTimestamp: prevTimestamp ?? undefined,
-      });
-      steps.push({
-        query: `
-          MATCH (v:version { id: $vid })-[:OF]->(e {id: $entityId})
-          MERGE (c:change { id: $changeId })
-          ON CREATE SET c.type = 'change', c.createdAt = $ts
-          SET c.timestamp = $ts,
-              c.lastSeenAt = $ts,
-              c.changeSetKey = $rawChangeId
-          MERGE (v)-[vc:${changeRelType} { id: $versionRelId }]->(c)
-          ON CREATE SET vc.created = $ts, vc.version = 0, vc.metadata = $metadata
-          SET vc.lastModified = $ts,
-              vc.version = coalesce(vc.version, 0) + 1,
-              vc.metadata = $metadata
-          MERGE (e)-[ec:${changeRelType} { id: $entityRelId }]->(c)
-          ON CREATE SET ec.created = $ts, ec.version = 0, ec.metadata = $metadata
-          SET ec.lastModified = $ts,
-              ec.version = coalesce(ec.version, 0) + 1,
-              ec.metadata = $metadata
-          RETURN c.id AS changeId
-        `,
-        params: {
-          entityId,
-          vid,
-          changeId,
-          rawChangeId: opts.changeSetId,
-          ts: tsISO,
-          metadata,
-          versionRelId: this.canonicalRelationshipId(
-            vid,
-            changeId,
-            changeRelType
-          ),
-          entityRelId: this.canonicalRelationshipId(
-            entityId,
-            changeId,
-            changeRelType
-          ),
-        },
-      });
-      changeStepIndex = steps.length - 1;
-    }
-
-    const txnResults = await this.runTemporalTransaction(steps);
-    if (txnResults.length === 0 || txnResults[0].data.length === 0) {
-      throw new Error(
-        `appendVersion: transactional insert failed for ${vid}; a newer version may have been written concurrently`
+        { vid, prevId, ts: tsISO, rid: `rel_${vid}_${prevId}_PREVIOUS_VERSION` }
       );
     }
-
-    if (prevId) {
-      const prevResult = txnResults[1];
-      if (!prevResult || prevResult.data.length === 0) {
-        throw new Error(
-          `appendVersion: continuity guard prevented linking ${vid} -> ${prevId}`
-        );
-      }
-    }
-
-    if (opts?.changeSetId && changeStepIndex >= 0) {
-      const changeResult = txnResults[changeStepIndex];
-      if (!changeResult || changeResult.data.length === 0) {
-        console.warn(
-          `⚠️ appendVersion: change linkage for ${opts.changeSetId} was skipped`
-        );
-      }
-    }
-
     console.log({
       event: "history.version_created",
       entityId,
       versionId: vid,
       timestamp: tsISO,
-      changeSetId: opts?.changeSetId,
     });
     return vid;
-  }
-
-  async repairPreviousVersionLink(
-    entityId: string,
-    currentVersionId: string,
-    previousVersionId: string,
-    options: { timestamp?: Date } = {}
-  ): Promise<boolean> {
-    if (!this.isHistoryEnabled()) {
-      return false;
-    }
-
-    const resolvedEntityId = this.resolveEntityIdInput(entityId);
-    const resolvedCurrentId = this.resolveEntityIdInput(currentVersionId);
-    const resolvedPrevId = this.resolveEntityIdInput(previousVersionId);
-    const tsISO = (options.timestamp || new Date()).toISOString();
-
-    const steps: TemporalTransactionStep[] = [
-      {
-        query: `
-          MATCH (current:version { id: $currentId })-[:OF]->(e {id: $entityId})
-          MATCH (prev:version { id: $prevId })-[:OF]->(e)
-          OPTIONAL MATCH (current)-[existing:PREVIOUS_VERSION]->(other:version)
-          WITH current, prev, existing, other, e
-          WHERE prev.timestamp <= current.timestamp
-            AND (existing IS NULL OR other.id = $prevId)
-            AND NOT EXISTS {
-              MATCH (e)<-[:OF]-(between:version)
-              WHERE between.timestamp > prev.timestamp
-                AND between.timestamp < current.timestamp
-            }
-          MERGE (current)-[r:PREVIOUS_VERSION { id: $relId }]->(prev)
-          ON CREATE SET r.created = $ts, r.version = 0, r.metadata = '{}'
-          SET r.lastModified = $ts,
-              r.version = coalesce(r.version, 0) + 1
-          RETURN r.id AS id
-        `,
-        params: {
-          entityId: resolvedEntityId,
-          currentId: resolvedCurrentId,
-          prevId: resolvedPrevId,
-          ts: tsISO,
-          relId: this.canonicalRelationshipId(
-            resolvedCurrentId,
-            resolvedPrevId,
-            RelationshipType.PREVIOUS_VERSION
-          ),
-        },
-      },
-    ];
-
-    const results = await this.runTemporalTransaction(steps);
-    const rows = results[0]?.data ?? [];
-    const repaired = rows.length > 0;
-    if (repaired) {
-      console.log({
-        event: "history.version_repaired",
-        entityId: resolvedEntityId,
-        versionId: resolvedCurrentId,
-        previousVersionId: resolvedPrevId,
-        timestamp: tsISO,
-      });
-    }
-    return repaired;
   }
 
   /**
@@ -2694,243 +1396,16 @@ export class KnowledgeGraphService extends EventEmitter {
       return;
     }
     const at = (ts || new Date()).toISOString();
-    const resolvedFrom = this.resolveEntityIdInput(fromId);
-    const resolvedTo = this.resolveEntityIdInput(toId);
-    const relationshipId = this.canonicalRelationshipId(
-      resolvedFrom,
-      resolvedTo,
-      type
-    );
-    const existingRows = await this.graphDbQuery(
-      `MATCH (a {id: $fromId})-[r:${type} { id: $id }]->(b {id: $toId})
-       RETURN r.validFrom AS validFrom,
-              r.validTo AS validTo,
-              r.temporal AS temporal,
-              r.segmentId AS segmentId,
-              r.lastChangeSetId AS lastChangeSetId,
-              r.version AS version,
-              r.lastModified AS lastModified
-      `,
-      { fromId: resolvedFrom, toId: resolvedTo, id: relationshipId }
-    );
-    const existing = existingRows && existingRows.length > 0 ? existingRows[0] : null;
-    const meta = this.parseTemporalMetadata(existing?.temporal);
-    const changeKey =
-      (changeSetId && changeSetId.length > 0 ? changeSetId : undefined) ||
-      meta.changeSetId ||
-      (existing?.lastChangeSetId as string | undefined);
-    if (changeKey) {
-      meta.changeSetId = changeKey;
-    }
-    const newSegmentId = `seg_${Date.now().toString(36)}_${Math.random()
-      .toString(36)
-      .slice(2, 6)}`;
-
-    if (!existing) {
-      const current: TemporalSegmentRecord = {
-        segmentId: newSegmentId,
-        openedAt: at,
-        changeSetId: changeKey,
-      };
-      meta.current = current;
-      this.recordTemporalEvent(meta, {
-        type: "opened",
-        at,
-        changeSetId: changeKey,
-        segmentId: current.segmentId,
-      });
-      const temporal = this.serializeTemporalMetadata(meta);
-      const params: Record<string, any> = {
-        fromId: resolvedFrom,
-        toId: resolvedTo,
-        id: relationshipId,
-        at,
-        segmentId: newSegmentId,
-        temporal,
-      };
-      if (changeKey) params.changeSetId = changeKey;
-      const changeClause = changeKey ? ", r.lastChangeSetId = $changeSetId" : "";
-      const transactionResults = await this.runTemporalTransaction([
-        {
-          query: `
-            MATCH (a {id: $fromId}), (b {id: $toId})
-            OPTIONAL MATCH (a)-[existing:${type} { id: $id }]->(b)
-            WITH a, b, existing
-            WHERE existing IS NULL
-            MERGE (a)-[r:${type} { id: $id }]->(b)
-            ON CREATE SET r.created = $at, r.version = 0
-            SET r.lastModified = $at,
-                r.version = coalesce(r.version, 0) + 1,
-                r.validFrom = $at,
-                r.validTo = NULL,
-                r.active = true,
-                r.segmentId = $segmentId,
-                r.temporal = $temporal${changeClause}
-            RETURN r.id AS id
-          `,
-          params,
-        },
-      ]);
-      const rows = transactionResults[0]?.data ?? [];
-      if (rows.length === 0) {
-        throw new Error(
-          `openEdge: relationship ${relationshipId} was created concurrently; please retry`
-        );
-      }
-      console.log({
-        event: "history.edge_opened",
-        id: relationshipId,
-        type,
-        fromId: resolvedFrom,
-        toId: resolvedTo,
-        at,
-        changeSetId: changeKey,
-        segmentId: newSegmentId,
-      });
-      return;
-    }
-
-    const wasActive = existing.validTo == null;
-    if (!wasActive) {
-      const priorSegment: TemporalSegmentRecord = {
-        segmentId:
-          (existing.segmentId as string | undefined) ||
-          meta.current?.segmentId ||
-          `seg_prev_${Math.random().toString(36).slice(2, 8)}`,
-        openedAt:
-          (existing.validFrom as string | undefined) ||
-          meta.current?.openedAt ||
-          at,
-        closedAt: existing.validTo as string | undefined,
-        changeSetId:
-          (existing.lastChangeSetId as string | undefined) ||
-          meta.current?.changeSetId ||
-          meta.changeSetId,
-      };
-      if (priorSegment.closedAt) {
-        this.pushTemporalSegment(meta, priorSegment);
-      }
-      const current: TemporalSegmentRecord = {
-        segmentId: newSegmentId,
-        openedAt: at,
-        changeSetId: changeKey ?? priorSegment.changeSetId,
-      };
-      meta.current = current;
-      this.recordTemporalEvent(meta, {
-        type: "opened",
-        at,
-        changeSetId: current.changeSetId,
-        segmentId: current.segmentId,
-      });
-      const temporal = this.serializeTemporalMetadata(meta);
-      const params: Record<string, any> = {
-        fromId: resolvedFrom,
-        toId: resolvedTo,
-        id: relationshipId,
-        at,
-        segmentId: newSegmentId,
-        temporal,
-        expectedValidTo: existing.validTo ?? null,
-        expectedVersion: Number(existing.version ?? 0),
-      };
-      if (current.changeSetId) params.changeSetId = current.changeSetId;
-      const changeClause = params.changeSetId
-        ? ", r.lastChangeSetId = $changeSetId"
-        : "";
-      const transactionResults = await this.runTemporalTransaction([
-        {
-          query: `
-            MATCH (a {id: $fromId})-[r:${type} { id: $id }]->(b {id: $toId})
-            WHERE r.validTo IS NOT NULL
-              AND (( $expectedValidTo IS NULL AND r.validTo IS NULL ) OR r.validTo = $expectedValidTo)
-              AND coalesce(r.version, 0) = $expectedVersion
-            SET r.lastModified = $at,
-                r.validFrom = $at,
-                r.validTo = NULL,
-                r.active = true,
-                r.segmentId = $segmentId,
-                r.version = coalesce(r.version, 0) + 1,
-                r.temporal = $temporal${changeClause}
-            RETURN r.id AS id
-          `,
-          params,
-        },
-      ]);
-      const rows = transactionResults[0]?.data ?? [];
-      if (rows.length === 0) {
-        throw new Error(
-          `openEdge: relationship ${relationshipId} state changed before reopen; retry`
-        );
-      }
-      console.log({
-        event: "history.edge_reopened",
-        id: relationshipId,
-        type,
-        fromId: resolvedFrom,
-        toId: resolvedTo,
-        at,
-        changeSetId: params.changeSetId,
-        segmentId: newSegmentId,
-      });
-      return;
-    }
-
-    const current = meta.current ?? {
-      segmentId:
-        (existing.segmentId as string | undefined) ||
-        `seg_active_${Math.random().toString(36).slice(2, 8)}`,
-      openedAt:
-        (existing.validFrom as string | undefined) ||
-        at,
-      changeSetId: changeKey,
-    };
-    if (changeKey) {
-      current.changeSetId = changeKey;
-    }
-    if (!meta.current) {
-      meta.current = current;
-    }
-    const temporal = this.serializeTemporalMetadata(meta);
-    const params: Record<string, any> = {
-      fromId: resolvedFrom,
-      toId: resolvedTo,
-      id: relationshipId,
-      at,
-      temporal,
-      expectedVersion: Number(existing.version ?? 0),
-    };
-    if (changeKey) params.changeSetId = changeKey;
-    const changeClause = changeKey ? ", r.lastChangeSetId = $changeSetId" : "";
-    const transactionResults = await this.runTemporalTransaction([
-      {
-        query: `
-          MATCH (a {id: $fromId})-[r:${type} { id: $id }]->(b {id: $toId})
-          WHERE r.validTo IS NULL
-            AND coalesce(r.version, 0) = $expectedVersion
-          SET r.lastModified = $at,
-              r.version = coalesce(r.version, 0) + 1,
-              r.temporal = $temporal${changeClause}
-          RETURN r.id AS id
-        `,
-        params,
-      },
-    ]);
-    const rows = transactionResults[0]?.data ?? [];
-    if (rows.length === 0) {
-      throw new Error(
-        `openEdge: relationship ${relationshipId} changed while updating metadata; retry`
-      );
-    }
-    console.log({
-      event: "history.edge_opened_refresh",
-      id: relationshipId,
-      type,
-      fromId: resolvedFrom,
-      toId: resolvedTo,
-      at,
-      changeSetId: changeKey,
-      segmentId: current.segmentId,
-    });
+    const id = `rel_${fromId}_${toId}_${type}`;
+    const meta = JSON.stringify(changeSetId ? { changeSetId } : {});
+    const query = `
+      MATCH (a {id: $fromId}), (b {id: $toId})
+      MERGE (a)-[r:${type} { id: $id }]->(b)
+      ON CREATE SET r.created = $at, r.version = 1, r.metadata = $meta, r.validFrom = $at, r.validTo = NULL
+      SET r.lastModified = $at, r.validTo = NULL, r.version = coalesce(r.version, 0) + 1
+    `;
+    await this.db.falkordbQuery(query, { fromId, toId, id, at, meta });
+    console.log({ event: "history.edge_opened", id, type, fromId, toId, at });
   }
 
   /**
@@ -2941,8 +1416,7 @@ export class KnowledgeGraphService extends EventEmitter {
     fromId: string,
     toId: string,
     type: RelationshipType,
-    ts?: Date,
-    changeSetId?: string
+    ts?: Date
   ): Promise<void> {
     if (!this.isHistoryEnabled()) {
       console.log(
@@ -2951,514 +1425,13 @@ export class KnowledgeGraphService extends EventEmitter {
       return;
     }
     const at = (ts || new Date()).toISOString();
-    const resolvedFrom = this.resolveEntityIdInput(fromId);
-    const resolvedTo = this.resolveEntityIdInput(toId);
-    const rows = await this.graphDbQuery(
-      `MATCH (a {id: $fromId})-[r:${type}]->(b {id: $toId})
-       RETURN r.id AS id,
-              r.validFrom AS validFrom,
-              r.validTo AS validTo,
-              r.temporal AS temporal,
-              r.segmentId AS segmentId,
-              r.lastChangeSetId AS lastChangeSetId,
-              r.version AS version,
-              r.lastModified AS lastModified
-       ORDER BY coalesce(r.lastModified, r.validFrom) DESC
-       LIMIT 1
-      `,
-      { fromId: resolvedFrom, toId: resolvedTo }
-    );
-    if (!rows || rows.length === 0) {
-      console.log({
-        event: "history.edge_closed_missing",
-        id: this.canonicalRelationshipId(resolvedFrom, resolvedTo, type),
-        type,
-        fromId: resolvedFrom,
-        toId: resolvedTo,
-        at,
-      });
-      return;
-    }
-    const row = rows[0];
-    const relationshipId =
-      (row.id as string | undefined) ||
-      this.canonicalRelationshipId(resolvedFrom, resolvedTo, type);
-    const meta = this.parseTemporalMetadata(row.temporal);
-    const changeKey =
-      (changeSetId && changeSetId.length > 0 ? changeSetId : undefined) ||
-      meta.changeSetId ||
-      (row.lastChangeSetId as string | undefined);
-    if (changeKey) {
-      meta.changeSetId = changeKey;
-    }
-    const current =
-      meta.current ||
-      this.normalizeTemporalSegment({
-        segmentId: row.segmentId,
-        openedAt: row.validFrom,
-        changeSetId: row.lastChangeSetId,
-      }) || {
-        segmentId: `seg_${Math.random().toString(36).slice(2, 8)}`,
-        openedAt: (row.validFrom as string | undefined) || at,
-        changeSetId: row.lastChangeSetId as string | undefined,
-      };
-    if (changeKey) {
-      current.changeSetId = changeKey;
-    }
-    current.closedAt = at;
-    this.pushTemporalSegment(meta, { ...current });
-    meta.current = { ...current };
-    this.recordTemporalEvent(meta, {
-      type: "closed",
-      at,
-      changeSetId: current.changeSetId,
-      segmentId: current.segmentId,
-    });
-    const temporal = this.serializeTemporalMetadata(meta);
-    const params: Record<string, any> = {
-      fromId: resolvedFrom,
-      toId: resolvedTo,
-      id: relationshipId,
-      at,
-      temporal,
-      expectedVersion: Number(row.version ?? 0),
-    };
-    if (changeKey) params.changeSetId = changeKey;
-    const changeClause = changeKey ? ", r.lastChangeSetId = $changeSetId" : "";
-    const transactionResults = await this.runTemporalTransaction([
-      {
-        query: `
-          MATCH (a {id: $fromId})-[r:${type} { id: $id }]->(b {id: $toId})
-          WHERE r.validTo IS NULL
-            AND coalesce(r.version, 0) = $expectedVersion
-          SET r.validTo = coalesce(r.validTo, $at),
-              r.lastModified = $at,
-              r.active = false,
-              r.version = coalesce(r.version, 0) + 1,
-              r.temporal = $temporal${changeClause}
-          RETURN r.id AS id
-        `,
-        params,
-      },
-    ]);
-    const rowsUpdated = transactionResults[0]?.data ?? [];
-    if (rowsUpdated.length === 0) {
-      throw new Error(
-        `closeEdge: relationship ${relationshipId} changed before close; retry`
-      );
-    }
-    console.log({
-      event: "history.edge_closed",
-      id: relationshipId,
-      type,
-      fromId: resolvedFrom,
-      toId: resolvedTo,
-      at,
-      changeSetId: changeKey,
-      segmentId: current.segmentId,
-    });
-  }
-
-  async getEntityTimeline(
-    entityId: string,
-    options?: {
-      includeRelationships?: boolean;
-      limit?: number;
-      offset?: number;
-      since?: Date | string;
-      until?: Date | string;
-    }
-  ): Promise<EntityTimelineResult> {
-    const resolvedId = this.resolveEntityIdInput(entityId);
-    const limitRaw = Number(options?.limit ?? 50);
-    const limit = Number.isFinite(limitRaw)
-      ? Math.max(1, Math.min(200, Math.floor(limitRaw)))
-      : 50;
-    const offsetRaw = Number(options?.offset ?? 0);
-    const offset = Number.isFinite(offsetRaw)
-      ? Math.max(0, Math.min(1000, Math.floor(offsetRaw)))
-      : 0;
-    const parseWindow = (value?: Date | string): string | undefined => {
-      if (!value) return undefined;
-      const date = new Date(value as any);
-      return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-    };
-    const since = parseWindow(options?.since);
-    const until = parseWindow(options?.until);
-
-    const versionRows = await this.graphDbQuery(
-      `MATCH (e {id: $entityId})<-[:OF]-(v:version)
-       WHERE ($since IS NULL OR v.timestamp >= $since)
-         AND ($until IS NULL OR v.timestamp <= $until)
-       OPTIONAL MATCH (v)-[:PREVIOUS_VERSION]->(prev:version)
-       RETURN v.id AS id,
-              v.hash AS hash,
-              v.timestamp AS timestamp,
-              v.path AS path,
-              v.language AS language,
-              v.changeSetId AS changeSetId,
-              prev.id AS previousId
-       ORDER BY v.timestamp DESC
-       SKIP $offset
-       LIMIT $limit
-      `,
-      { entityId: resolvedId, limit, offset, since, until }
-    );
-
-    const versions: EntityTimelineEntry[] = (versionRows || []).map(
-      (row: any) => {
-        const ts =
-          row.timestamp && typeof row.timestamp === "string"
-            ? new Date(row.timestamp)
-            : this.toDate(row.timestamp) || new Date();
-        const metadata: Record<string, any> = {};
-        if (row.path) metadata.path = row.path;
-        if (row.language) metadata.language = row.language;
-        const entry: EntityTimelineEntry = {
-          versionId: row.id,
-          hash: row.hash ?? undefined,
-          timestamp: ts,
-          path: row.path ?? undefined,
-          language: row.language ?? undefined,
-          changeSetId: row.changeSetId ?? undefined,
-          previousVersionId: row.previousId ?? null,
-          changes: [],
-          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-        };
-        return entry;
-      }
-    );
-
-    const versionIds = versions.map((entry) => entry.versionId);
-    if (versionIds.length > 0) {
-      const changeRows = await this.graphDbQuery(
-        `UNWIND $versionIds AS vid
-         MATCH (v:version {id: vid})-[rel]->(c:change)
-         WHERE type(rel) IN ['CREATED_IN','MODIFIED_IN','REMOVED_IN']
-         RETURN vid AS versionId,
-                type(rel) AS relType,
-                rel.metadata AS metadata,
-                rel.lastModified AS lastModified,
-                c AS change,
-                c.id AS changeId
-        `,
-        { versionIds }
-      );
-      const versionMap = new Map<string, EntityTimelineEntry>();
-      for (const entry of versions) {
-        versionMap.set(entry.versionId, entry);
-      }
-      for (const row of changeRows || []) {
-        const entry = versionMap.get(row.versionId);
-        if (!entry) continue;
-        let metadata: Record<string, any> | undefined;
-        if (typeof row.metadata === "string") {
-          try {
-            metadata = JSON.parse(row.metadata);
-          } catch {
-            metadata = undefined;
-          }
-        } else if (row.metadata && typeof row.metadata === "object") {
-          metadata = row.metadata;
-        }
-        const changeEntity = this.parseEntityFromGraph(row.change) as Change;
-        entry.changes.push({
-          changeId: row.changeId || changeEntity?.id,
-          type: row.relType as RelationshipType,
-          metadata,
-          change: changeEntity,
-        });
-        if (!entry.changeSetId) {
-          const changeSetKey = (changeEntity as any)?.changeSetKey;
-          if (typeof changeSetKey === "string" && changeSetKey.length > 0) {
-            entry.changeSetId = changeSetKey;
-          }
-        }
-      }
-    }
-
-    let relationships: RelationshipTimeline[] | undefined;
-    if (options?.includeRelationships) {
-      const relRows = await this.graphDbQuery(
-        `MATCH (a {id: $entityId})-[r]->(b)
-         WHERE r.temporal IS NOT NULL OR r.validFrom IS NOT NULL OR r.validTo IS NOT NULL
-         RETURN r.id AS id,
-                type(r) AS type,
-                a.id AS fromId,
-                b.id AS toId,
-                r.validFrom AS validFrom,
-                r.validTo AS validTo,
-                coalesce(r.active, r.validTo IS NULL) AS active,
-                r.lastModified AS lastModified,
-                r.temporal AS temporal,
-                r.segmentId AS segmentId,
-                r.lastChangeSetId AS lastChangeSetId
-         UNION ALL
-         MATCH (a)-[r]->(b {id: $entityId})
-         WHERE r.temporal IS NOT NULL OR r.validFrom IS NOT NULL OR r.validTo IS NOT NULL
-         RETURN r.id AS id,
-                type(r) AS type,
-                a.id AS fromId,
-                b.id AS toId,
-                r.validFrom AS validFrom,
-                r.validTo AS validTo,
-                coalesce(r.active, r.validTo IS NULL) AS active,
-                r.lastModified AS lastModified,
-                r.temporal AS temporal,
-                r.segmentId AS segmentId,
-                r.lastChangeSetId AS lastChangeSetId
-         LIMIT $relLimit
-        `,
-        { entityId: resolvedId, relLimit: Math.min(limit * 2, 200) }
-      );
-      relationships = (relRows || []).map((row: any) =>
-        this.buildRelationshipTimelineFromRow(row)
-      );
-    }
-
-    return {
-      entityId: resolvedId,
-      versions,
-      relationships,
-    };
-  }
-
-  private buildRelationshipTimelineFromRow(
-    row: any
-  ): RelationshipTimeline {
-    const temporal = this.parseTemporalMetadata(row.temporal);
-    if (!temporal.current && row.validFrom) {
-      temporal.current = this.normalizeTemporalSegment({
-        segmentId: row.segmentId,
-        openedAt: row.validFrom,
-        closedAt: row.validTo,
-        changeSetId: temporal.changeSetId || row.lastChangeSetId,
-      });
-    } else if (temporal.current) {
-      if (!temporal.current.openedAt && row.validFrom) {
-        temporal.current.openedAt = row.validFrom;
-      }
-      if (!temporal.current.closedAt && row.validTo) {
-        temporal.current.closedAt = row.validTo;
-      }
-      if (!temporal.current.changeSetId && row.lastChangeSetId) {
-        temporal.current.changeSetId = row.lastChangeSetId;
-      }
-    }
-    if (!temporal.changeSetId && row.lastChangeSetId) {
-      temporal.changeSetId = row.lastChangeSetId;
-    }
-
-    const convertSegment = (
-      segment?: TemporalSegmentRecord
-    ): RelationshipTimelineSegment | undefined => {
-      if (!segment || !segment.segmentId || !segment.openedAt) return undefined;
-      const opened = this.toDate(segment.openedAt);
-      if (!opened) return undefined;
-      const closed = this.toDate(segment.closedAt);
-      return {
-        segmentId: segment.segmentId,
-        openedAt: opened,
-        closedAt: closed ?? undefined,
-        changeSetId: segment.changeSetId,
-      };
-    };
-
-    const segments: RelationshipTimelineSegment[] = [];
-    const seen = new Set<string>();
-    const addSegment = (segment?: TemporalSegmentRecord) => {
-      const converted = convertSegment(segment);
-      if (!converted) return;
-      const key = `${converted.segmentId}|${converted.openedAt.toISOString()}|${
-        converted.closedAt ? converted.closedAt.toISOString() : ""
-      }`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      segments.push(converted);
-    };
-
-    for (const segment of temporal.segments) addSegment(segment);
-    addSegment(temporal.current);
-
-    segments.sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime());
-
-    const temporalInfo: Record<string, any> = {};
-    if (temporal.changeSetId) temporalInfo.changeSetId = temporal.changeSetId;
-    if (temporal.events.length > 0) {
-      temporalInfo.events = temporal.events.slice(-100);
-    }
-
-    const timeline: RelationshipTimeline = {
-      relationshipId: row.id,
-      type: row.type,
-      fromEntityId: row.fromId,
-      toEntityId: row.toId,
-      active: row.active === true || row.validTo == null,
-      current: convertSegment(temporal.current),
-      segments,
-      lastModified: this.toDate(row.lastModified) ?? undefined,
-      temporal: Object.keys(temporalInfo).length > 0 ? temporalInfo : undefined,
-    };
-
-    return timeline;
-  }
-
-  async getRelationshipTimeline(
-    relationshipId: string
-  ): Promise<RelationshipTimeline | null> {
-    const resolvedId = this.resolveRelationshipIdInput(relationshipId);
-    const rows = await this.graphDbQuery(
-      `MATCH (a)-[r { id: $id }]->(b)
-       RETURN r.id AS id,
-              type(r) AS type,
-              a.id AS fromId,
-              b.id AS toId,
-              r.validFrom AS validFrom,
-              r.validTo AS validTo,
-              coalesce(r.active, r.validTo IS NULL) AS active,
-              r.lastModified AS lastModified,
-              r.temporal AS temporal,
-              r.segmentId AS segmentId,
-              r.lastChangeSetId AS lastChangeSetId
-      `,
-      { id: resolvedId }
-    );
-    if (!rows || rows.length === 0) {
-      return null;
-    }
-    return this.buildRelationshipTimelineFromRow(rows[0]);
-  }
-
-  async getChangesForSession(
-    sessionId: string,
-    options?: { since?: Date | string; until?: Date | string; limit?: number }
-  ): Promise<SessionChangesResult> {
-    const resolvedSessionId = this.resolveEntityIdInput(sessionId);
-    const limitRaw = Number(options?.limit ?? 50);
-    const limit = Number.isFinite(limitRaw)
-      ? Math.max(1, Math.min(200, Math.floor(limitRaw)))
-      : 50;
-    const parseWindow = (value?: Date | string): string | undefined => {
-      if (!value) return undefined;
-      const date = new Date(value as any);
-      return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-    };
-    const since = parseWindow(options?.since);
-    const until = parseWindow(options?.until);
-
-    const baseParams: Record<string, any> = {
-      sessionId: resolvedSessionId,
-      since,
-      until,
-    };
-
-    const totalRes = await this.graphDbQuery(
-      `MATCH (s {id: $sessionId})-[:DEPENDS_ON_CHANGE|SESSION_MODIFIED|SESSION_IMPACTED]->(c:change)
-       WHERE ($since IS NULL OR c.timestamp >= $since) AND ($until IS NULL OR c.timestamp <= $until)
-       RETURN count(DISTINCT c) AS total
-      `,
-      baseParams
-    );
-    const total = totalRes?.[0]?.total ?? 0;
-
-    const rows = await this.graphDbQuery(
-      `MATCH (s {id: $sessionId})-[:DEPENDS_ON_CHANGE|SESSION_MODIFIED|SESSION_IMPACTED]->(c:change)
-       WHERE ($since IS NULL OR c.timestamp >= $since) AND ($until IS NULL OR c.timestamp <= $until)
-       RETURN DISTINCT c, c.timestamp AS timestamp
-       ORDER BY timestamp DESC
-       LIMIT $limit
-      `,
-      { ...baseParams, limit }
-    );
-
-    if (!rows || rows.length === 0) {
-      return { sessionId: resolvedSessionId, total, changes: [] };
-    }
-
-    const changes: SessionChangeSummary[] = [];
-    const changeIds: string[] = [];
-    for (const row of rows) {
-      const changeEntity = this.parseEntityFromGraph(row.c) as Change;
-      if (changeEntity?.id) {
-        changeIds.push(changeEntity.id);
-      }
-      changes.push({
-        change: changeEntity,
-        relationships: [],
-        versions: [],
-      });
-    }
-
-    if (changeIds.length > 0) {
-      const changeMap = new Map<string, SessionChangeSummary>();
-      for (const summary of changes) {
-        if (summary.change?.id) {
-          changeMap.set(summary.change.id, summary);
-        }
-      }
-
-      const relRows = await this.graphDbQuery(
-        `UNWIND $changeIds AS cid
-         MATCH (a)-[rel]->(b)
-         WHERE rel.id IS NOT NULL AND (a.id = cid OR b.id = cid)
-           AND type(rel) IN ['MODIFIED_IN','CREATED_IN','REMOVED_IN','MODIFIED_BY']
-         RETURN cid AS changeId,
-                type(rel) AS relType,
-                rel.id AS relId,
-                a.id AS fromId,
-                b.id AS toId
-        `,
-        { changeIds }
-      );
-      for (const row of relRows || []) {
-        const summary = changeMap.get(row.changeId);
-        if (!summary) continue;
-        let entityId: string | undefined;
-        let direction: "incoming" | "outgoing" = "outgoing";
-        if (row.changeId === row.fromId) {
-          entityId = row.toId;
-          direction = "outgoing";
-        } else if (row.changeId === row.toId) {
-          entityId = row.fromId;
-          direction = "incoming";
-        } else {
-          entityId = row.fromId;
-        }
-        summary.relationships.push({
-          relationshipId: row.relId,
-          type: row.relType as RelationshipType,
-          entityId,
-          direction,
-        });
-      }
-
-      const versionRows = await this.graphDbQuery(
-        `UNWIND $changeIds AS cid
-         MATCH (v:version)-[rel]->(c:change {id: cid})
-         WHERE type(rel) IN ['CREATED_IN','MODIFIED_IN','REMOVED_IN']
-         RETURN cid AS changeId,
-                v.id AS versionId,
-                coalesce(v.entityId, '') AS entityId,
-                type(rel) AS relType
-        `,
-        { changeIds }
-      );
-      for (const row of versionRows || []) {
-        const summary = changeMap.get(row.changeId);
-        if (!summary) continue;
-        summary.versions.push({
-          versionId: row.versionId,
-          entityId: row.entityId,
-          relationshipType: row.relType as RelationshipType,
-        });
-      }
-    }
-
-    return {
-      sessionId: resolvedSessionId,
-      total,
-      changes,
-    };
+    const id = `rel_${fromId}_${toId}_${type}`;
+    const query = `
+      MATCH (a {id: $fromId})-[r:${type} { id: $id }]->(b {id: $toId})
+      SET r.validTo = coalesce(r.validTo, $at), r.lastModified = $at, r.version = coalesce(r.version, 0) + 1
+    `;
+    await this.db.falkordbQuery(query, { fromId, toId, id, at });
+    console.log({ event: "history.edge_closed", id, type, fromId, toId, at });
   }
 
   /**
@@ -3472,7 +1445,7 @@ export class KnowledgeGraphService extends EventEmitter {
     window?: TimeRangeParams
   ): Promise<{ checkpointId: string }> {
     if (!this.isHistoryEnabled()) {
-      const checkpointId = this.generateCheckpointId();
+      const checkpointId = `chk_${Date.now().toString(36)}`;
       console.log(
         `📌 [history disabled] createCheckpoint skipped; returning ${checkpointId}`
       );
@@ -3482,13 +1455,13 @@ export class KnowledgeGraphService extends EventEmitter {
     const effectiveHops =
       Number.isFinite(envHops) && envHops > 0 ? envHops : hops || 2;
     const hopsClamped = Math.max(1, Math.min(effectiveHops, 5));
-    const checkpointId = this.generateCheckpointId();
+    const checkpointId = `chk_${Date.now().toString(36)}`;
     const ts = new Date().toISOString();
     const seeds = seedEntities || [];
     const metadata = { reason, window: window || {} };
 
     // Create checkpoint node
-    await this.graphDbQuery(
+    await this.db.falkordbQuery(
       `MERGE (c:checkpoint { id: $id })
        SET c.type = 'checkpoint', c.checkpointId = $id, c.timestamp = $ts, c.reason = $reason, c.hops = $hops, c.seedEntities = $seeds, c.metadata = $meta
       `,
@@ -3511,14 +1484,14 @@ export class KnowledgeGraphService extends EventEmitter {
       MATCH (s)-[*1..${hopsClamped}]-(n)
       RETURN DISTINCT n.id AS id
     `;
-    const res = await this.graphDbQuery(queryMembers, { seedIds: seeds });
+    const res = await this.db.falkordbQuery(queryMembers, { seedIds: seeds });
     const memberIds: string[] = (res || [])
       .map((row: any) => row.id)
       .filter(Boolean);
 
     if (memberIds.length > 0) {
       const ridPrefix = `rel_chk_${checkpointId}_includes_`;
-      await this.graphDbQuery(
+      await this.db.falkordbQuery(
         `UNWIND $members AS mid
          MATCH (n {id: mid}), (c:checkpoint {id: $cid})
          MERGE (c)-[r:CHECKPOINT_INCLUDES { id: $ridPrefix + mid }]->(n)
@@ -3534,7 +1507,7 @@ export class KnowledgeGraphService extends EventEmitter {
       (process.env.HISTORY_EMBED_VERSIONS || "false").toLowerCase() === "true";
     if (embedVersions && memberIds.length > 0) {
       try {
-        const nodes = await this.graphDbQuery(
+        const nodes = await this.db.falkordbQuery(
           `UNWIND $ids AS id MATCH (n {id: id}) RETURN n`,
           { ids: memberIds }
         );
@@ -3589,7 +1562,7 @@ export class KnowledgeGraphService extends EventEmitter {
     ): Promise<number> => {
       const query = dry ? dryQuery : mutateQuery;
       try {
-        const result = await this.graphDbQuery(query, { cutoff });
+        const result = await this.db.falkordbQuery(query, { cutoff });
         const row = Array.isArray(result) ? result[0] : undefined;
         const value = row?.count ?? row?.c ?? row?.size ?? 0;
         const numeric = Number(value) || 0;
@@ -3683,19 +1656,19 @@ export class KnowledgeGraphService extends EventEmitter {
       closedEdgesRow,
       cpMembersRows,
     ] = await Promise.all([
-      this.graphDbQuery(`MATCH (n) RETURN count(n) AS c`, {}),
-      this.graphDbQuery(`MATCH ()-[r]-() RETURN count(r) AS c`, {}),
-      this.graphDbQuery(`MATCH (v:version) RETURN count(v) AS c`, {}),
-      this.graphDbQuery(`MATCH (c:checkpoint) RETURN count(c) AS c`, {}),
-      this.graphDbQuery(
+      this.db.falkordbQuery(`MATCH (n) RETURN count(n) AS c`, {}),
+      this.db.falkordbQuery(`MATCH ()-[r]-() RETURN count(r) AS c`, {}),
+      this.db.falkordbQuery(`MATCH (v:version) RETURN count(v) AS c`, {}),
+      this.db.falkordbQuery(`MATCH (c:checkpoint) RETURN count(c) AS c`, {}),
+      this.db.falkordbQuery(
         `MATCH ()-[r]-() WHERE r.validFrom IS NOT NULL AND (r.validTo IS NULL) RETURN count(r) AS c`,
         {}
       ),
-      this.graphDbQuery(
+      this.db.falkordbQuery(
         `MATCH ()-[r]-() WHERE r.validTo IS NOT NULL RETURN count(r) AS c`,
         {}
       ),
-      this.graphDbQuery(
+      this.db.falkordbQuery(
         `MATCH (c:checkpoint) OPTIONAL MATCH (c)-[:CHECKPOINT_INCLUDES]->(n) RETURN c.id AS id, count(n) AS m`,
         {}
       ),
@@ -3750,7 +1723,7 @@ export class KnowledgeGraphService extends EventEmitter {
     ];
     const notes: string[] = [];
     try {
-      const rows = await this.graphDbQuery("CALL db.indexes()", {});
+      const rows = await this.db.falkordbQuery("CALL db.indexes()", {});
       const textDump = JSON.stringify(rows || []).toLowerCase();
       const has = (token: string) => textDump.includes(token.toLowerCase());
       const health = {
@@ -3813,12 +1786,12 @@ export class KnowledgeGraphService extends EventEmitter {
     const nodesRow = await time(
       "nodes.count",
       async () =>
-        await this.graphDbQuery(`MATCH (n) RETURN count(n) AS c`, {})
+        await this.db.falkordbQuery(`MATCH (n) RETURN count(n) AS c`, {})
     );
     const edgesRow = await time(
       "edges.count",
       async () =>
-        await this.graphDbQuery(`MATCH ()-[r]-() RETURN count(r) AS c`, {})
+        await this.db.falkordbQuery(`MATCH ()-[r]-() RETURN count(r) AS c`, {})
     );
     const nodes = nodesRow?.[0]?.c || 0;
     const edges = edgesRow?.[0]?.c || 0;
@@ -3827,7 +1800,7 @@ export class KnowledgeGraphService extends EventEmitter {
     const idRow = await time(
       "sample.id.fetch",
       async () =>
-        await this.graphDbQuery(`MATCH (n) RETURN n.id AS id LIMIT 1`, {})
+        await this.db.falkordbQuery(`MATCH (n) RETURN n.id AS id LIMIT 1`, {})
     );
     const sampleId: string | undefined = idRow?.[0]?.id;
     samples.entityId = sampleId || null;
@@ -3835,7 +1808,7 @@ export class KnowledgeGraphService extends EventEmitter {
       await time(
         "lookup.byId",
         async () =>
-          await this.graphDbQuery(`MATCH (n {id: $id}) RETURN n`, {
+          await this.db.falkordbQuery(`MATCH (n {id: $id}) RETURN n`, {
             id: sampleId,
           })
       );
@@ -3845,7 +1818,7 @@ export class KnowledgeGraphService extends EventEmitter {
     await time(
       "versions.count",
       async () =>
-        await this.graphDbQuery(
+        await this.db.falkordbQuery(
           `MATCH (v:version) RETURN count(v) AS c`,
           {}
         )
@@ -3853,7 +1826,7 @@ export class KnowledgeGraphService extends EventEmitter {
     const cpIdRow = await time(
       "checkpoint.sample",
       async () =>
-        await this.graphDbQuery(
+        await this.db.falkordbQuery(
           `MATCH (c:checkpoint) RETURN c.id AS id LIMIT 1`,
           {}
         )
@@ -3864,7 +1837,7 @@ export class KnowledgeGraphService extends EventEmitter {
       await time(
         "checkpoint.members",
         async () =>
-          await this.graphDbQuery(
+          await this.db.falkordbQuery(
             `MATCH (c:checkpoint {id: $id})-[:CHECKPOINT_INCLUDES]->(n) RETURN count(n) AS c`,
             { id: cpId }
           )
@@ -3875,7 +1848,7 @@ export class KnowledgeGraphService extends EventEmitter {
     await time(
       "temporal.open",
       async () =>
-        await this.graphDbQuery(
+        await this.db.falkordbQuery(
           `MATCH ()-[r]-() WHERE r.validFrom IS NOT NULL AND r.validTo IS NULL RETURN count(r) AS c`,
           {}
         )
@@ -3883,7 +1856,7 @@ export class KnowledgeGraphService extends EventEmitter {
     await time(
       "temporal.closed",
       async () =>
-        await this.graphDbQuery(
+        await this.db.falkordbQuery(
           `MATCH ()-[r]-() WHERE r.validTo IS NOT NULL RETURN count(r) AS c`,
           {}
         )
@@ -3908,7 +1881,7 @@ export class KnowledgeGraphService extends EventEmitter {
         await time(
           "neighbors.depth3",
           async () =>
-            await this.graphDbQuery(
+            await this.db.falkordbQuery(
               `MATCH (s {id: $id})-[:DEPENDS_ON|TYPE_USES*1..3]-(n) RETURN count(n) AS c`,
               { id: sampleId }
             )
@@ -3926,97 +1899,81 @@ export class KnowledgeGraphService extends EventEmitter {
 
   /** Ensure graph indexes for common queries (best-effort across dialects). */
   async ensureGraphIndexes(): Promise<void> {
-    const stats: Record<
-      "created" | "exists" | "deferred" | "failed",
-      number
-    > = {
-      created: 0,
-      exists: 0,
-      deferred: 0,
-      failed: 0,
+    const tries: string[] = [];
+    const run = async (query: string) => {
+      tries.push(query);
+      try {
+        await this.db.falkordbQuery(query, {});
+      } catch {}
     };
-    const bump = (outcome: keyof typeof stats) => {
-      stats[outcome] += 1;
-    };
-
-    const indexQueries = [
-      "CREATE INDEX ON :Entity(id)",
-      "CREATE INDEX ON :Entity(type)",
-      "CREATE INDEX ON :Entity(path)",
-      "CREATE INDEX ON :Entity(language)",
-      "CREATE INDEX ON :file(path)",
-      "CREATE INDEX ON :symbol(path)",
-      "CREATE INDEX ON :version(entityId)",
-      "CREATE INDEX ON :checkpoint(checkpointId)",
-    ];
-
-    for (const query of indexQueries) {
-      const outcome = await this.createIndexGuarded(query);
-      bump(outcome);
-      if (outcome === "deferred") {
-        console.log("graph.indexes.ensure halted", { outcome, query });
-        return;
-      }
-    }
-
+    // Neo4j 4+/5 style
+    await run("CREATE INDEX file_path IF NOT EXISTS FOR (n:file) ON (n.path)");
+    await run(
+      "CREATE INDEX symbol_path IF NOT EXISTS FOR (n:symbol) ON (n.path)"
+    );
+    await run(
+      "CREATE INDEX version_entity IF NOT EXISTS FOR (n:version) ON (n.entityId)"
+    );
+    await run(
+      "CREATE INDEX checkpoint_id IF NOT EXISTS FOR (n:checkpoint) ON (n.checkpointId)"
+    );
+    // Relationship property indexes (may be unsupported; best-effort)
+    await run(
+      "CREATE INDEX rel_valid_from IF NOT EXISTS FOR ()-[r]-() ON (r.validFrom)"
+    );
+    await run(
+      "CREATE INDEX rel_valid_to IF NOT EXISTS FOR ()-[r]-() ON (r.validTo)"
+    );
+    await run("CREATE INDEX rel_id IF NOT EXISTS FOR ()-[r]-() ON (r.id)");
+    await run(
+      "CREATE INDEX rel_confidence IF NOT EXISTS FOR ()-[r]-() ON (r.confidence)"
+    );
+    await run("CREATE INDEX rel_kind IF NOT EXISTS FOR ()-[r]-() ON (r.kind)");
+    await run(
+      "CREATE INDEX rel_source IF NOT EXISTS FOR ()-[r]-() ON (r.source)"
+    );
+    await run(
+      "CREATE INDEX rel_firstSeen IF NOT EXISTS FOR ()-[r]-() ON (r.firstSeenAt)"
+    );
+    await run(
+      "CREATE INDEX rel_lastSeen IF NOT EXISTS FOR ()-[r]-() ON (r.lastSeenAt)"
+    );
+    await run(
+      "CREATE INDEX rel_siteHash IF NOT EXISTS FOR ()-[r]-() ON (r.siteHash)"
+    );
+    await run(
+      "CREATE INDEX rel_active IF NOT EXISTS FOR ()-[r]-() ON (r.active)"
+    );
+    await run(
+      "CREATE INDEX rel_occ_total IF NOT EXISTS FOR ()-[r]-() ON (r.occurrencesTotal)"
+    );
+    await run(
+      "CREATE INDEX rel_to_ref_kind IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_kind)"
+    );
+    await run(
+      "CREATE INDEX rel_to_ref_file IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_file)"
+    );
+    await run(
+      "CREATE INDEX rel_to_ref_symbol IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_symbol)"
+    );
+    await run(
+      "CREATE INDEX rel_from_ref_kind IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_kind)"
+    );
+    await run(
+      "CREATE INDEX rel_from_ref_file IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_file)"
+    );
+    await run(
+      "CREATE INDEX rel_from_ref_symbol IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_symbol)"
+    );
+    // Fallback to legacy style
+    await run("CREATE INDEX ON :file(path)");
+    await run("CREATE INDEX ON :symbol(path)");
+    await run("CREATE INDEX ON :version(entityId)");
+    await run("CREATE INDEX ON :checkpoint(checkpointId)");
     console.log({
       event: "graph.indexes.ensure_attempted",
-      stats,
+      attempts: tries.length,
     });
-  }
-
-  private normalizeGraphError(error: unknown): string {
-    if (error instanceof Error && typeof error.message === "string") {
-      return error.message.toLowerCase();
-    }
-    if (typeof error === "string") {
-      return error.toLowerCase();
-    }
-    if (error && typeof error === "object") {
-      const candidate = (error as { message?: unknown }).message;
-      if (typeof candidate === "string") {
-        return candidate.toLowerCase();
-      }
-    }
-    return String(error ?? "").toLowerCase();
-  }
-
-  private isIndexAlreadyExistsError(error: unknown): boolean {
-    const message = this.normalizeGraphError(error);
-    return (
-      message.includes("already indexed") || message.includes("already exists")
-    );
-  }
-
-  private isGraphMissingError(error: unknown): boolean {
-    const message = this.normalizeGraphError(error);
-    if (!message) {
-      return false;
-    }
-    return (
-      (message.includes("graph") && message.includes("does not exist")) ||
-      message.includes("unknown graph") ||
-      message.includes("graph not found")
-    );
-  }
-
-  private async createIndexGuarded(
-    query: string
-  ): Promise<"created" | "exists" | "deferred" | "failed"> {
-    try {
-      const graphKey = this.namespace.falkorGraph || DEFAULT_GRAPH_KEY;
-      await this.db.falkordbCommand("GRAPH.QUERY", graphKey, query);
-      return "created";
-    } catch (error) {
-      if (this.isIndexAlreadyExistsError(error)) {
-        return "exists";
-      }
-      if (this.isGraphMissingError(error)) {
-        return "deferred";
-      }
-      console.warn("graph index creation failed", { query, error });
-      return "failed";
-    }
   }
 
   /**
@@ -4046,7 +2003,7 @@ export class KnowledgeGraphService extends EventEmitter {
         AND ($until IS NULL OR c.timestamp <= $until)
     `;
 
-    const totalRes = await this.graphDbQuery(
+    const totalRes = await this.db.falkordbQuery(
       `MATCH (c:checkpoint)
        ${where}
        RETURN count(c) AS total
@@ -4055,7 +2012,7 @@ export class KnowledgeGraphService extends EventEmitter {
     );
     const total = totalRes?.[0]?.total || 0;
 
-    const rows = await this.graphDbQuery(
+    const rows = await this.db.falkordbQuery(
       `MATCH (c:checkpoint)
        ${where}
        OPTIONAL MATCH (c)-[:CHECKPOINT_INCLUDES]->(n)
@@ -4077,7 +2034,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
   /** Get a checkpoint node by id. */
   async getCheckpoint(id: string): Promise<Entity | null> {
-    const rows = await this.graphDbQuery(
+    const rows = await this.db.falkordbQuery(
       `MATCH (c:checkpoint { id: $id })
        RETURN c AS n
        LIMIT 1
@@ -4099,7 +2056,7 @@ export class KnowledgeGraphService extends EventEmitter {
     );
     const offset = Math.max(0, Math.floor(options?.offset ?? 0));
 
-    const totalRes = await this.graphDbQuery(
+    const totalRes = await this.db.falkordbQuery(
       `MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n)
        RETURN count(n) AS total
       `,
@@ -4107,7 +2064,7 @@ export class KnowledgeGraphService extends EventEmitter {
     );
     const total = totalRes?.[0]?.total || 0;
 
-    const rows = await this.graphDbQuery(
+    const rows = await this.db.falkordbQuery(
       `MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n)
        RETURN n
        SKIP $offset LIMIT $limit
@@ -4149,7 +2106,7 @@ export class KnowledgeGraphService extends EventEmitter {
     const hasTypes = types.length > 0 ? 1 : 0;
 
     // Collect nodeIds reachable within depth under validity constraints
-    const nodeRows = await this.graphDbQuery(
+    const nodeRows = await this.db.falkordbQuery(
       `MATCH (start {id: $startId})
        MATCH path = (start)-[r*1..${depth}]-(n)
        WHERE ALL(rel IN r WHERE
@@ -4175,7 +2132,7 @@ export class KnowledgeGraphService extends EventEmitter {
     }
 
     // Fetch entities
-    const entityRows = await this.graphDbQuery(
+    const entityRows = await this.db.falkordbQuery(
       `UNWIND $ids AS id
        MATCH (n {id: id})
        RETURN n
@@ -4187,7 +2144,7 @@ export class KnowledgeGraphService extends EventEmitter {
     );
 
     // Fetch relationships among these nodes under the same validity constraint
-    const relRows = await this.graphDbQuery(
+    const relRows = await this.db.falkordbQuery(
       `UNWIND $ids AS idA
        MATCH (a {id: idA})-[r]->(b)
        WHERE b.id IN $ids AND (
@@ -4215,7 +2172,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
   /** Delete a checkpoint node and its include edges. */
   async deleteCheckpoint(id: string): Promise<boolean> {
-    const res = await this.graphDbQuery(
+    const res = await this.db.falkordbQuery(
       `MATCH (c:checkpoint { id: $id })
        WITH c LIMIT 1
        DETACH DELETE c
@@ -4236,7 +2193,7 @@ export class KnowledgeGraphService extends EventEmitter {
     const cp = await this.getCheckpoint(id);
     if (!cp) return null;
 
-    const memberCountRes = await this.graphDbQuery(
+    const memberCountRes = await this.db.falkordbQuery(
       `MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n)
        RETURN count(n) AS total
       `,
@@ -4244,7 +2201,7 @@ export class KnowledgeGraphService extends EventEmitter {
     );
     const totalMembers = memberCountRes?.[0]?.total || 0;
 
-    const typeRows = await this.graphDbQuery(
+    const typeRows = await this.db.falkordbQuery(
       `MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n)
        WITH coalesce(n.type, 'unknown') AS t
        RETURN t AS type, count(*) AS count
@@ -4257,7 +2214,7 @@ export class KnowledgeGraphService extends EventEmitter {
       count: row.count,
     }));
 
-    const relRows = await this.graphDbQuery(
+    const relRows = await this.db.falkordbQuery(
       `MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(a)
        MATCH (c)-[:CHECKPOINT_INCLUDES]->(b)
        MATCH (a)-[r]->(b)
@@ -4281,7 +2238,7 @@ export class KnowledgeGraphService extends EventEmitter {
     limit: number = 200
   ): Promise<string[]> {
     const iso = since.toISOString();
-    const rows = await this.graphDbQuery(
+    const rows = await this.db.falkordbQuery(
       `MATCH (n)
        WHERE n.lastModified IS NOT NULL AND n.lastModified >= $since
        RETURN n.id AS id
@@ -4311,7 +2268,7 @@ export class KnowledgeGraphService extends EventEmitter {
     let relationships: GraphRelationship[] | undefined;
     if (options?.includeRelationships !== false && members.length > 0) {
       const ids = members.map((m) => (m as any).id);
-      const rows = await this.graphDbQuery(
+      const rows = await this.db.falkordbQuery(
         `UNWIND $ids AS idA
          MATCH (a {id: idA})-[r]->(b)
          WHERE b.id IN $ids
@@ -4345,7 +2302,7 @@ export class KnowledgeGraphService extends EventEmitter {
     options?: { useOriginalId?: boolean }
   ): Promise<{ checkpointId: string; linked: number; missing: number }> {
     if (!this.isHistoryEnabled()) {
-      const fakeId = this.generateCheckpointId();
+      const fakeId = `chk_${Date.now().toString(36)}`;
       console.log(
         `📦 [history disabled] importCheckpoint skipped; returning ${fakeId}`
       );
@@ -4360,8 +2317,8 @@ export class KnowledgeGraphService extends EventEmitter {
     const providedId: string | undefined = original.id || original.checkpointId;
     const useOriginal = options?.useOriginalId === true && !!providedId;
     const checkpointId = useOriginal
-      ? this.namespaceId(String(providedId))
-      : this.generateCheckpointId();
+      ? String(providedId)
+      : `chk_${Date.now().toString(36)}`;
 
     const ts = original.timestamp
       ? new Date(original.timestamp).toISOString()
@@ -4373,7 +2330,7 @@ export class KnowledgeGraphService extends EventEmitter {
       : [];
     const meta = JSON.stringify(original.metadata || {});
 
-    await this.graphDbQuery(
+    await this.db.falkordbQuery(
       `MERGE (c:checkpoint { id: $id })
        SET c.type = 'checkpoint', c.checkpointId = $id, c.timestamp = $ts, c.reason = $reason, c.hops = $hops, c.seedEntities = $seeds, c.metadata = $meta
       `,
@@ -4387,7 +2344,7 @@ export class KnowledgeGraphService extends EventEmitter {
     let missing = 0;
     if (memberIds.length > 0) {
       // Check which members exist
-      const presentRows = await this.graphDbQuery(
+      const presentRows = await this.db.falkordbQuery(
         `UNWIND $ids AS id MATCH (n {id: id}) RETURN collect(n.id) AS present`,
         { ids: memberIds }
       );
@@ -4395,7 +2352,7 @@ export class KnowledgeGraphService extends EventEmitter {
       const existing = memberIds.filter((id) => present.has(id));
       missing = memberIds.length - existing.length;
       if (existing.length > 0) {
-        await this.graphDbQuery(
+        await this.db.falkordbQuery(
           `UNWIND $ids AS mid
            MATCH (n {id: mid}), (c:checkpoint {id: $cid})
            MERGE (c)-[r:CHECKPOINT_INCLUDES { id: $ridPrefix + mid }]->(n)
@@ -4421,50 +2378,27 @@ export class KnowledgeGraphService extends EventEmitter {
     // Ensure database is ready
     await this.db.initialize();
 
-    // Only create indexes once per instance
-    if (!this._indexesEnsured) {
-      try {
-        // Check if indexes already exist to avoid unnecessary creation
-        const indexCheck = await this.graphDbQuery("CALL db.indexes()", {});
+    // Verify graph indexes exist
+    try {
+      const indexCheck = await this.db.falkordbQuery("CALL db.indexes()", {});
 
-        if (indexCheck && indexCheck.length > 0) {
-          console.log(
-            `✅ Graph indexes verified: ${indexCheck.length} indexes found`
-          );
-          this._indexesEnsured = true;
-        } else {
-          console.log("📊 Creating graph indexes...");
-          const result = await this.bootstrapIndicesOnce();
-          if (result?.status === "completed") {
-            console.log("✅ Graph indexes created");
-          } else {
-            console.log(
-              "⚠️ Graph index creation deferred",
-              result ?? { reason: "unknown" }
-            );
-          }
-        }
-      } catch (error) {
-        // If index checking fails, try to create them anyway (best effort)
+      if (indexCheck && indexCheck.length > 0) {
         console.log(
-          "📊 Index verification failed, attempting to create indexes..."
+          `✅ Graph indexes verified: ${indexCheck.length} indexes found`
         );
-        try {
-          const result = await this.bootstrapIndicesOnce();
-          if (result?.status === "completed") {
-            console.log("✅ Graph indexes created");
-          } else {
-            console.warn(
-              "⚠️ Graph index creation deferred after verification failure",
-              result ?? { reason: "unknown" }
-            );
-          }
-        } catch (createError) {
-          console.warn("⚠️ Could not create graph indexes:", createError);
-          this._indexesEnsured = true; // Don't retry on subsequent calls
-        }
+      } else {
+        console.log(
+          "⚠️ No graph indexes found, they will be created on next setupDatabase call"
+        );
       }
+    } catch (error) {
+      // Indexes might not be queryable yet, this is okay
+      console.log("📊 Graph indexes will be verified on first query");
     }
+    // Best-effort ensure indexes for our common access patterns
+    try {
+      await this.ensureGraphIndexes();
+    } catch {}
   }
 
   private hasCodebaseProperties(entity: Entity): boolean {
@@ -4482,7 +2416,6 @@ export class KnowledgeGraphService extends EventEmitter {
     entity: Entity,
     options?: { skipEmbedding?: boolean }
   ): Promise<void> {
-    this.applyNamespaceToEntity(entity);
     const labels = this.getEntityLabels(entity);
     const properties = this.sanitizeProperties(entity);
 
@@ -4502,11 +2435,8 @@ export class KnowledgeGraphService extends EventEmitter {
     }
 
     // Choose merge key: prefer (type,path) for codebase entities, otherwise id
-    const entityType = (properties as any).type as string | undefined;
     const usePathKey =
-      this.hasCodebaseProperties(entity) &&
-      (properties as any).path &&
-      entityType?.toLowerCase() !== "test";
+      this.hasCodebaseProperties(entity) && (properties as any).path;
 
     const shouldEarlyEmit =
       process.env.NODE_ENV === "test" || process.env.RUN_INTEGRATION === "1";
@@ -4528,7 +2458,7 @@ export class KnowledgeGraphService extends EventEmitter {
         SET n += $props
         RETURN n.id AS id
       `;
-      result = await this.graphDbQuery(query, {
+      result = await this.db.falkordbQuery(query, {
         id: (properties as any).id,
         type: (properties as any).type,
         path: (properties as any).path,
@@ -4540,7 +2470,7 @@ export class KnowledgeGraphService extends EventEmitter {
         SET n += $props
         RETURN n.id AS id
       `;
-      result = await this.graphDbQuery(query, {
+      result = await this.db.falkordbQuery(query, {
         id: (properties as any).id,
         props: propsNoId,
       });
@@ -4600,7 +2530,6 @@ export class KnowledgeGraphService extends EventEmitter {
       const withoutPath: Array<{ id: string; props: any; type: string }> = [];
 
       for (const entity of list) {
-        this.applyNamespaceToEntity(entity);
         const properties = this.sanitizeProperties(entity);
         const propsNoId: Record<string, any> = {};
         for (const [key, value] of Object.entries(properties)) {
@@ -4637,7 +2566,7 @@ export class KnowledgeGraphService extends EventEmitter {
           ON CREATE SET n.id = row.id
           SET n += row.props
         `;
-        await this.graphDbQuery(queryWithPath, { rows: withPath });
+        await this.db.falkordbQuery(queryWithPath, { rows: withPath });
       }
 
       if (withoutPath.length > 0) {
@@ -4646,7 +2575,7 @@ export class KnowledgeGraphService extends EventEmitter {
           MERGE (n:${type} { id: row.id })
           SET n += row.props
         `;
-        await this.graphDbQuery(queryById, { rows: withoutPath });
+        await this.db.falkordbQuery(queryById, { rows: withoutPath });
       }
 
       // Align entity IDs in memory for items with path (to ensure embeddings reference persisted nodes)
@@ -4656,7 +2585,7 @@ export class KnowledgeGraphService extends EventEmitter {
           MATCH (n { type: row.type, path: row.path })
           RETURN row.type AS type, row.path AS path, n.id AS id
         `;
-        const idRows = await this.graphDbQuery(fetchIdsQuery, {
+        const idRows = await this.db.falkordbQuery(fetchIdsQuery, {
           rows: withPath.map((r) => ({ type: r.type, path: r.path })),
         });
         const idMap = new Map<string, string>();
@@ -4703,11 +2632,10 @@ export class KnowledgeGraphService extends EventEmitter {
   }
 
   async getEntity(entityId: string): Promise<Entity | null> {
-    const resolvedId = this.resolveEntityIdInput(entityId);
     // Check cache first
-    const cached = this.entityCache.get(resolvedId);
+    const cached = this.entityCache.get(entityId);
     if (cached) {
-      console.log(`🔍 Cache hit for entity: ${resolvedId}`);
+      console.log(`🔍 Cache hit for entity: ${entityId}`);
       return cached;
     }
 
@@ -4716,7 +2644,7 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN n
     `;
 
-    const result = await this.graphDbQuery(query, { id: resolvedId });
+    const result = await this.db.falkordbQuery(query, { id: entityId });
 
     if (!result || result.length === 0) {
       return null;
@@ -4725,8 +2653,8 @@ export class KnowledgeGraphService extends EventEmitter {
     const entity = this.parseEntityFromGraph(result[0]);
     if (entity) {
       // Cache the entity
-      this.entityCache.set(resolvedId, entity);
-      console.log(`🔍 Cached entity: ${resolvedId}`);
+      this.entityCache.set(entityId, entity);
+      console.log(`🔍 Cached entity: ${entityId}`);
     }
 
     return entity;
@@ -4737,7 +2665,6 @@ export class KnowledgeGraphService extends EventEmitter {
     updates: Partial<Entity>,
     options?: { skipEmbedding?: boolean }
   ): Promise<void> {
-    const resolvedId = this.resolveEntityIdInput(entityId);
     // Convert dates to ISO strings for FalkorDB
     const sanitizedUpdates = { ...updates };
     if (
@@ -4788,7 +2715,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
     // If no compatible updates, skip the database update
     if (Object.keys(falkorCompatibleUpdates).length === 0) {
-    console.warn(`No FalkorDB-compatible updates for entity ${resolvedId}`);
+      console.warn(`No FalkorDB-compatible updates for entity ${entityId}`);
       return;
     }
 
@@ -4802,21 +2729,21 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN n
     `;
 
-    const params = { id: resolvedId, ...falkorCompatibleUpdates };
-    await this.graphDbQuery(query, params);
+    const params = { id: entityId, ...falkorCompatibleUpdates };
+    await this.db.falkordbQuery(query, params);
 
     // Invalidate cache before fetching the updated entity to avoid stale reads
-    this.invalidateEntityCache(resolvedId);
+    this.invalidateEntityCache(entityId);
 
     if (!options?.skipEmbedding) {
       // Update vector embedding based on the freshly fetched entity
-      const updatedEntity = await this.getEntity(resolvedId);
+      const updatedEntity = await this.getEntity(entityId);
       if (updatedEntity) {
         await this.updateEmbedding(updatedEntity);
 
         // Emit event for real-time updates
         this.emit("entityUpdated", {
-          id: resolvedId,
+          id: entityId,
           updates: sanitizedUpdates,
           timestamp: new Date().toISOString(),
         });
@@ -4836,19 +2763,18 @@ export class KnowledgeGraphService extends EventEmitter {
   }
 
   async deleteEntity(entityId: string): Promise<void> {
-    const resolvedId = this.resolveEntityIdInput(entityId);
     // Get relationships before deletion for event emission
     const relationships = await this.getRelationships({
-      fromEntityId: resolvedId,
+      fromEntityId: entityId,
     });
 
     // Delete node and any attached relationships in one operation
-    await this.graphDbQuery(
+    await this.db.falkordbQuery(
       `
       MATCH (n {id: $id})
       DETACH DELETE n
     `,
-      { id: resolvedId }
+      { id: entityId }
     );
 
     // Emit events for deleted relationships
@@ -4857,33 +2783,27 @@ export class KnowledgeGraphService extends EventEmitter {
     }
 
     // Delete vector embedding
-    await this.deleteEmbedding(resolvedId);
+    await this.deleteEmbedding(entityId);
 
     // Invalidate cache
-    this.invalidateEntityCache(resolvedId);
+    this.invalidateEntityCache(entityId);
 
     // Emit event for real-time updates
-    this.emit("entityDeleted", resolvedId);
+    this.emit("entityDeleted", entityId);
   }
 
   async deleteRelationship(relationshipId: string): Promise<void> {
-    const resolvedId = this.resolveRelationshipIdInput(relationshipId);
-    const candidateIds = this.relationshipIdCandidates(
-      resolvedId,
-      relationshipId
-    );
-
-    await this.graphDbQuery(
+    // Delete relationship by ID
+    await this.db.falkordbQuery(
       `
-      MATCH ()-[r]-()
-      WHERE r.id IN $ids
+      MATCH ()-[r {id: $id}]-()
       DELETE r
     `,
-      { ids: candidateIds }
+      { id: relationshipId }
     );
 
-    // Emit event for real-time updates using canonical (namespaced) id
-    this.emit("relationshipDeleted", resolvedId);
+    // Emit event for real-time updates
+    this.emit("relationshipDeleted", relationshipId);
   }
 
   // Relationship operations
@@ -4940,23 +2860,7 @@ export class KnowledgeGraphService extends EventEmitter {
     }
 
     // Optionally validate existence (default true)
-    // For integration tests, validation should work normally
-    // For unit tests, validation can be skipped by setting validate: false
-    const isIntegrationTest = process.env.RUN_INTEGRATION === "1";
-    const shouldValidate =
-      options?.validate !== false &&
-      (isIntegrationTest || process.env.NODE_ENV !== "test");
-
-    const resolvedFromId = this.resolveEntityIdInput(
-      relationshipObj.fromEntityId as string
-    );
-    const resolvedToId = this.resolveEntityIdInput(
-      relationshipObj.toEntityId as string
-    );
-    relationshipObj.fromEntityId = resolvedFromId;
-    relationshipObj.toEntityId = resolvedToId;
-
-    if (shouldValidate) {
+    if (options?.validate !== false) {
       const fromEntity = await this.getEntity(relationshipObj.fromEntityId);
       if (!fromEntity) {
         throw new Error(
@@ -4999,45 +2903,6 @@ export class KnowledgeGraphService extends EventEmitter {
       }
     } catch {}
 
-    const incomingIdRaw =
-      typeof (relationshipObj as any).id === "string"
-        ? (relationshipObj as any).id
-        : undefined;
-    const canonicalIdRaw = canonicalRelationshipId(
-      relationshipObj.fromEntityId,
-      relationshipObj
-    );
-    const canonicalIdNamespaced = this.namespaceScope.applyRelationshipPrefix(
-      canonicalIdRaw
-    );
-    relationshipObj.id = canonicalIdNamespaced;
-    const normalizedType = relationshipObj.type;
-    const idCandidates = [canonicalIdNamespaced];
-    const legacyIdRaw = legacyStructuralRelationshipId(
-      canonicalIdRaw,
-      relationshipObj
-    );
-    if (legacyIdRaw && legacyIdRaw !== canonicalIdRaw) {
-      const legacyNamespaced = this.namespaceScope.applyRelationshipPrefix(
-        legacyIdRaw
-      );
-      idCandidates.push(legacyNamespaced);
-      try {
-        await this.graphDbQuery(
-          `MATCH ()-[legacy:${normalizedType} { id: $legacyId }]->()
-           SET legacy.id = $id`,
-          { legacyId: legacyNamespaced, id: canonicalIdNamespaced }
-        );
-      } catch {}
-    }
-    if (
-      incomingIdRaw &&
-      incomingIdRaw !== canonicalIdRaw &&
-      incomingIdRaw !== canonicalIdNamespaced
-    ) {
-      idCandidates.push(incomingIdRaw);
-    }
-
     // Best-effort: backfill to_ref_* scalars for resolved targets using the entity's path/name
     try {
       const anyRel: any = relationshipObj as any;
@@ -5064,14 +2929,6 @@ export class KnowledgeGraphService extends EventEmitter {
                 symbol: name,
                 name,
               };
-            const md = (anyRel.metadata = { ...(anyRel.metadata || {}) });
-            md.toRef = {
-              kind: "fileSymbol",
-              file: fileRel,
-              symbol: name,
-              name,
-            };
-            anyRel.__backfilledToRef = true;
           }
         }
       }
@@ -5121,16 +2978,10 @@ export class KnowledgeGraphService extends EventEmitter {
 
     // Fetch existing to merge evidence (best-effort)
     try {
-      let existingRows = await this.graphDbQuery(
-        `MATCH ()-[r]->() WHERE r.id IN $ids RETURN r LIMIT 1`,
-        { ids: idCandidates }
+      const existingRows = await this.db.falkordbQuery(
+        `MATCH ()-[r]->() WHERE r.id = $id RETURN r LIMIT 1`,
+        { id: relationshipObj.id }
       );
-      if ((!existingRows || existingRows.length === 0) && incomingIdRaw) {
-        existingRows = await this.graphDbQuery(
-          `MATCH ()-[r]->() WHERE r.id = $id RETURN r LIMIT 1`,
-          { id: incomingIdRaw }
-        ).catch(() => []);
-      }
       if (existingRows && existingRows[0] && existingRows[0].r) {
         const relData = existingRows[0].r;
         const props: any = {};
@@ -5162,17 +3013,7 @@ export class KnowledgeGraphService extends EventEmitter {
             : undefined;
         const oldCtx =
           typeof props.context === "string" ? props.context : undefined;
-        const incomingConf =
-          typeof incoming.confidence === "number"
-            ? incoming.confidence
-            : undefined;
-        const oldConfNumeric =
-          typeof oldConf === "number" ? oldConf : undefined;
-        if (oldConfNumeric != null && incomingConf != null) {
-          confidence = Math.max(oldConfNumeric, incomingConf);
-        } else {
-          confidence = oldConfNumeric ?? incomingConf;
-        }
+        confidence = Math.max(oldConf || 0, incoming.confidence || 0);
         inferred =
           incoming.inferred ??
           (typeof mdOld.inferred === "boolean" ? mdOld.inferred : undefined);
@@ -5282,103 +3123,21 @@ export class KnowledgeGraphService extends EventEmitter {
       if (mergedEvidence || evIn.length > 0) {
         md.evidence = mergedEvidence || evIn;
       }
-      if ((mergedLocations && mergedLocations.length > 0) || locIn.length > 0) {
-        const candidateLocations =
-          mergedLocations && mergedLocations.length > 0
-            ? mergedLocations
-            : locIn;
-        const collapsed = collapseLocationsToEarliest(candidateLocations, 20);
-        if (collapsed.length > 0) {
-          md.locations = collapsed;
-          (relationshipObj as any).locations = collapsed;
-        }
-      }
-      if (!context) {
-        const locationCandidates: Array<{ path?: string; line?: number }> = [];
-        if (Array.isArray(mergedLocations)) locationCandidates.push(...mergedLocations);
-        if (locIn.length > 0) locationCandidates.push(...locIn);
-        if (Array.isArray((relationshipObj as any).locations)) {
-          locationCandidates.push(...((relationshipObj as any).locations ?? []));
-        }
-        const firstLocation = locationCandidates
-          .filter((loc) => loc && typeof loc.path === "string")
-          .reduce<{ path: string; line?: number } | null>((best, loc) => {
-            if (!best) return { path: loc.path as string, line: loc.line };
-            const bestLine =
-              typeof best.line === "number" ? best.line : Number.POSITIVE_INFINITY;
-            const locLine =
-              typeof loc.line === "number" ? loc.line : Number.POSITIVE_INFINITY;
-            if (locLine < bestLine) {
-              return { path: loc.path as string, line: loc.line };
-            }
-            if (locLine === bestLine && typeof loc.path === "string") {
-              return best; // keep existing ordering when tied
-            }
-            return best;
-          }, null);
-        if (firstLocation) {
-          const linePart =
-            typeof firstLocation.line === "number"
-              ? `:${firstLocation.line}`
-              : "";
-          context = `${firstLocation.path}${linePart}`;
-        }
-      }
-      {
-        const evidenceCandidates = (mergedEvidence || evIn).filter(
-          (entry: any) =>
-            entry &&
-            entry.location &&
-            typeof entry.location.path === "string"
-        );
-        const earliestEvidence = evidenceCandidates.reduce<
-          { path: string; line?: number } | null
-        >((best, entry: any) => {
-          const path = entry.location.path as string;
-          const line = entry.location.line;
-          if (!best) return { path, line };
-          const bestLine =
-            typeof best.line === "number"
-              ? best.line
-              : Number.POSITIVE_INFINITY;
-          const entryLine =
-            typeof line === "number"
-              ? line
-              : Number.POSITIVE_INFINITY;
-          if (entryLine < bestLine) return { path, line };
-          return best;
-        }, null);
-        if (earliestEvidence) {
-          const linePart =
-            typeof earliestEvidence.line === "number"
-              ? `:${earliestEvidence.line}`
-              : "";
-          const evidenceContext = `${earliestEvidence.path}${linePart}`;
-          if (!context) {
-            context = evidenceContext;
-          } else {
-            const parseLine = (value: string): number => {
-              const parts = value.split(":");
-              const candidate = Number(parts[parts.length - 1]);
-              return Number.isFinite(candidate) ? candidate : Number.POSITIVE_INFINITY;
-            };
-            if (parseLine(evidenceContext) < parseLine(context)) {
-              context = evidenceContext;
-            }
-          }
-        }
+      if (mergedLocations || locIn.length > 0) {
+        md.locations = mergedLocations || locIn;
       }
       relationshipObj.metadata = md;
     } catch {}
 
     // Canonicalize relationship id using canonical target key for stability
-    (relationshipObj as any).id = canonicalIdNamespaced;
+    (relationshipObj as any).id = canonicalRelationshipId(
+      relationshipObj.fromEntityId,
+      relationshipObj
+    );
 
-    // Ensure we use the normalized type in the query
     const query = `
-      // UNWIND $rows AS row
       MATCH (a {id: $fromId}), (b {id: $toId})
-      MERGE (a)-[r:${normalizedType} { id: $id }]->(b)
+      MERGE (a)-[r:${relationshipObj.type} { id: $id }]->(b)
       ON CREATE SET r.created = $created, r.version = $version
       SET r.lastModified = $lastModified,
           r.metadata = $metadata,
@@ -5402,14 +3161,6 @@ export class KnowledgeGraphService extends EventEmitter {
           r.callee = $callee,
           r.paramName = $paramName,
           r.importAlias = $importAlias,
-          r.importType = $importType,
-          r.isNamespace = $isNamespace,
-          r.isReExport = $isReExport,
-          r.reExportTarget = $reExportTarget,
-          r.language = $language,
-          r.symbolKind = $symbolKind,
-          r.modulePath = $modulePath,
-          r.resolutionState = $resolutionState,
           r.receiverType = $receiverType,
           r.dynamicDispatch = $dynamicDispatch,
           r.overloadIndex = $overloadIndex,
@@ -5438,9 +3189,6 @@ export class KnowledgeGraphService extends EventEmitter {
           r.firstSeenAt = coalesce(r.firstSeenAt, $firstSeenAt),
           r.lastSeenAt = $lastSeenAt,
           r.validFrom = coalesce(r.validFrom, $firstSeenAt),
-          r.segmentId = CASE WHEN $segmentId IS NULL THEN r.segmentId ELSE coalesce(r.segmentId, $segmentId) END,
-          r.temporal = CASE WHEN $temporal IS NULL THEN r.temporal ELSE coalesce(r.temporal, $temporal) END,
-          r.lastChangeSetId = CASE WHEN $changeSetId IS NULL THEN r.lastChangeSetId ELSE $changeSetId END,
           r.sectionAnchor = $sectionAnchor,
           r.sectionTitle = $sectionTitle,
           r.summary = $summary,
@@ -5464,38 +3212,11 @@ export class KnowledgeGraphService extends EventEmitter {
           r.relationshipType = coalesce($relationshipType, r.relationshipType),
           r.docLocale = coalesce($docLocale, r.docLocale),
           r.tags = CASE WHEN $tags IS NULL THEN r.tags ELSE $tags END,
-          r.stakeholders = CASE WHEN $stakeholders IS NULL THEN r.stakeholders ELSE $stakeholders END,
-          r.metricId = $metricId,
-          r.scenario = $scenario,
-          r.environment = $environment,
-          r.unit = $unit,
-          r.baselineValue = $baselineValue,
-          r.currentValue = $currentValue,
-          r.delta = $delta,
-          r.percentChange = $percentChange,
-          r.sampleSize = $sampleSize,
-          r.confidenceInterval = $confidenceInterval,
-          r.trend = $trend,
-          r.severity = $severity,
-          r.riskScore = $riskScore,
-          r.runId = $runId,
-          r.policyId = coalesce($policyId, r.policyId),
-          r.detectedAt = $detectedAt,
-          r.resolvedAt = CASE WHEN $resolvedAt_is_set THEN $resolvedAt ELSE r.resolvedAt END,
-          r.metricsHistory = $metricsHistory,
-          r.metrics = $metrics
+          r.stakeholders = CASE WHEN $stakeholders IS NULL THEN r.stakeholders ELSE $stakeholders END
     `;
 
     const mdAll: any = (relationshipObj as any).metadata || {};
-    if (
-      (relationshipObj as any).__backfilledToRef &&
-      mdAll.toRef &&
-      typeof mdAll.toRef === "object"
-    ) {
-      mdAll.toRef = { ...mdAll.toRef };
-      delete mdAll.toRef.id;
-    }
-    // Persist structured refs for auditability before serialization
+    // Persist structured refs for auditability
     try {
       const topAllAny: any = relationshipObj as any;
       if (topAllAny.fromRef && mdAll.fromRef == null)
@@ -5503,124 +3224,6 @@ export class KnowledgeGraphService extends EventEmitter {
       if (topAllAny.toRef && mdAll.toRef == null) mdAll.toRef = topAllAny.toRef;
     } catch {}
     const topAll: any = relationshipObj as any;
-
-    const toNonEmptyString = (value: unknown, limit = 256): string | null => {
-      if (typeof value !== "string") return null;
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      return limit > 0 ? trimmed.slice(0, limit) : trimmed;
-    };
-
-    const changeSetIdEff =
-      toNonEmptyString((relationshipObj as any).changeSetId) ??
-      toNonEmptyString(topAll.changeSetId) ??
-      toNonEmptyString(mdAll.changeSetId) ??
-      toNonEmptyString((relationshipObj as any).lastChangeSetId) ??
-      toNonEmptyString(topAll.lastChangeSetId) ??
-      toNonEmptyString(mdAll.lastChangeSetId) ??
-      null;
-
-    const toISO = (value: any) => {
-      if (value === null) return null;
-      if (value instanceof Date) return value.toISOString();
-      if (typeof value === "string") {
-        const dt = new Date(value);
-        return Number.isNaN(dt.getTime()) ? value : dt.toISOString();
-      }
-      return null;
-    };
-
-    const historyEnabled = this.isHistoryEnabled();
-    const structuralProps = extractStructuralPersistenceFields(topAll, mdAll);
-    const scopeEff =
-      typeof topAll.scope === "string"
-        ? topAll.scope
-        : typeof mdAll.scope === "string"
-        ? mdAll.scope
-        : structuralProps.scope;
-    const firstSeenAtEff =
-      toISO(
-        (relationshipObj as any).firstSeenAt ??
-          structuralProps.firstSeenAt ??
-          topAll.firstSeenAt ??
-          mdAll.firstSeenAt ??
-          null
-      ) ?? relationshipObj.created.toISOString();
-    const lastSeenAtEff =
-      toISO(
-        (relationshipObj as any).lastSeenAt ??
-          structuralProps.lastSeenAt ??
-          topAll.lastSeenAt ??
-          mdAll.lastSeenAt ??
-          null
-      ) ?? relationshipObj.lastModified.toISOString();
-
-    let segmentIdEff: string | null = null;
-    let temporalEff: string | null = null;
-
-    if (historyEnabled) {
-      segmentIdEff =
-        toNonEmptyString(topAll.segmentId) ??
-        toNonEmptyString((relationshipObj as any).segmentId) ??
-        toNonEmptyString(mdAll.segmentId) ??
-        null;
-
-      const incomingTemporalRaw = (() => {
-        const fromTop =
-          typeof topAll.temporal === "string" ? topAll.temporal.trim() : "";
-        if (fromTop) return fromTop;
-        const fromMetadata =
-          typeof mdAll.temporal === "string" ? mdAll.temporal.trim() : "";
-        return fromMetadata || null;
-      })();
-
-      if (incomingTemporalRaw) {
-        temporalEff = incomingTemporalRaw;
-        if (!segmentIdEff) {
-          try {
-            const parsed = JSON.parse(incomingTemporalRaw);
-            const currentSeg = parsed?.current;
-            if (
-              currentSeg &&
-              typeof currentSeg.segmentId === "string" &&
-              currentSeg.segmentId.trim()
-            ) {
-              segmentIdEff = currentSeg.segmentId.trim();
-            }
-          } catch {}
-        }
-      }
-
-      if (!temporalEff) {
-        const openedAt = firstSeenAtEff || relationshipObj.created.toISOString();
-        const generatedSegment =
-          segmentIdEff ??
-          `seg_${Date.now().toString(36)}_${Math.random()
-            .toString(36)
-            .slice(2, 8)}`;
-        segmentIdEff = generatedSegment;
-        const temporalMeta = this.emptyTemporalMetadata();
-        if (changeSetIdEff) temporalMeta.changeSetId = changeSetIdEff;
-        const currentSegment: TemporalSegmentRecord = {
-          segmentId: generatedSegment,
-          openedAt,
-          changeSetId: changeSetIdEff ?? undefined,
-        };
-        temporalMeta.current = currentSegment;
-        this.recordTemporalEvent(temporalMeta, {
-          type: "opened",
-          at: openedAt,
-          changeSetId: currentSegment.changeSetId,
-          segmentId: currentSegment.segmentId,
-        });
-        temporalEff = this.serializeTemporalMetadata(temporalMeta);
-      }
-
-      if (temporalEff) {
-        temporalEff = temporalEff.slice(0, 200000);
-      }
-    }
-
     const evidenceArr = Array.isArray(topAll.evidence)
       ? topAll.evidence
       : Array.isArray(mdAll.evidence)
@@ -5660,6 +3263,15 @@ export class KnowledgeGraphService extends EventEmitter {
             .digest("hex")
             .slice(0, 12)
         : null;
+    const toISO = (value: any) => {
+      if (value === null) return null;
+      if (value instanceof Date) return value.toISOString();
+      if (typeof value === "string") {
+        const dt = new Date(value);
+        return Number.isNaN(dt.getTime()) ? value : dt.toISOString();
+      }
+      return null;
+    };
     const sectionAnchorEff =
       typeof topAll.sectionAnchor === "string"
         ? topAll.sectionAnchor
@@ -5792,133 +3404,14 @@ export class KnowledgeGraphService extends EventEmitter {
       : Array.isArray(mdAll.stakeholders)
       ? mdAll.stakeholders
       : null;
-    const metadataJson = JSON.stringify(mdAll);
-    const isPerfRelationship = isPerformanceRelationshipType(
-      relationshipObj.type as RelationshipType
-    );
-    const pickString = (value: unknown, limit?: number): string | null => {
-      if (typeof value !== "string") return null;
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      return typeof limit === "number" && limit > 0
-        ? trimmed.slice(0, limit)
-        : trimmed;
-    };
-    const toFiniteNumber = (value: unknown): number | null => {
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-      if (typeof value === "string" && value.trim() !== "") {
-        const num = Number(value);
-        if (Number.isFinite(num)) return num;
-      }
-      return null;
-    };
-    const metricIdEff = isPerfRelationship
-      ? pickString(topAll.metricId ?? mdAll.metricId ?? null)
-      : null;
-    const scenarioEff = isPerfRelationship
-      ? pickString(topAll.scenario ?? mdAll.scenario ?? null)
-      : null;
-    const environmentEff = isPerfRelationship
-      ? pickString(topAll.environment ?? mdAll.environment ?? null)
-      : null;
-    const unitEff = isPerfRelationship
-      ? pickString(topAll.unit ?? mdAll.unit ?? null, 32)
-      : null;
-    const baselineEff = isPerfRelationship
-      ? toFiniteNumber(topAll.baselineValue ?? mdAll.baselineValue)
-      : null;
-    const currentEff = isPerfRelationship
-      ? toFiniteNumber(topAll.currentValue ?? mdAll.currentValue)
-      : null;
-    const deltaEff = isPerfRelationship
-      ? toFiniteNumber(topAll.delta ?? mdAll.delta)
-      : null;
-    const percentEff = isPerfRelationship
-      ? toFiniteNumber(topAll.percentChange ?? mdAll.percentChange)
-      : null;
-    const sampleSizeEff = isPerfRelationship
-      ? toFiniteNumber(topAll.sampleSize ?? mdAll.sampleSize)
-      : null;
-    const rawConfidence = isPerfRelationship
-      ? topAll.confidenceInterval ?? mdAll.confidenceInterval
-      : null;
-    const confidenceIntervalEff = (() => {
-      if (!rawConfidence || typeof rawConfidence !== "object") return null;
-      const lower = toFiniteNumber((rawConfidence as any).lower);
-      const upper = toFiniteNumber((rawConfidence as any).upper);
-      if (lower == null && upper == null) return null;
-      return {
-        ...(lower != null ? { lower } : {}),
-        ...(upper != null ? { upper } : {}),
-      };
-    })();
-    const confidenceIntervalJson = confidenceIntervalEff
-      ? JSON.stringify(confidenceIntervalEff).slice(0, 200000)
-      : null;
-    const trendEff = isPerfRelationship
-      ? pickString(topAll.trend ?? mdAll.trend ?? null)
-      : null;
-    const severityEff = isPerfRelationship
-      ? pickString(topAll.severity ?? mdAll.severity ?? null)
-      : null;
-    const riskScoreEff = isPerfRelationship
-      ? toFiniteNumber(topAll.riskScore ?? mdAll.riskScore)
-      : null;
-    const runIdEff = isPerfRelationship
-      ? pickString(topAll.runId ?? mdAll.runId ?? null)
-      : null;
-    const policyIdEff = isPerfRelationship
-      ? pickString(topAll.policyId ?? mdAll.policyId ?? null)
-      : null;
-    const detectedAtEff = isPerfRelationship
-      ? toISO(topAll.detectedAt ?? mdAll.detectedAt)
-      : null;
-    const resolvedAtCandidate = isPerfRelationship
-      ? Object.prototype.hasOwnProperty.call(topAll, "resolvedAt")
-        ? topAll.resolvedAt
-        : Object.prototype.hasOwnProperty.call(mdAll, "resolvedAt")
-        ? mdAll.resolvedAt
-        : undefined
-      : undefined;
-    const resolvedAtEff =
-      resolvedAtCandidate === undefined
-        ? null
-        : resolvedAtCandidate === null
-        ? null
-        : toISO(resolvedAtCandidate);
-    const resolvedAtIsSet = resolvedAtCandidate !== undefined;
-    const metricsHistoryArray = (() => {
-      if (!isPerfRelationship) return null;
-      if (Array.isArray(topAll.metricsHistory)) return topAll.metricsHistory;
-      if (Array.isArray(mdAll.metricsHistory)) return mdAll.metricsHistory;
-      return null;
-    })();
-    const metricsHistoryEff = (() => {
-      if (!metricsHistoryArray || metricsHistoryArray.length === 0) return null;
-      return JSON.stringify(
-        metricsHistoryArray.map((entry: any) => ({
-          ...entry,
-          timestamp: toISO(entry?.timestamp ?? entry?.time ?? entry?.recordedAt),
-        }))
-      ).slice(0, 200000);
-    })();
-    const metricsEff = (() => {
-      if (!isPerfRelationship) return null;
-      const arr = Array.isArray(mdAll.metrics) ? mdAll.metrics : [];
-      if (arr.length === 0) return null;
-      return JSON.stringify(arr).slice(0, 200000);
-    })();
-    const params: any = {
+    const result = await this.db.falkordbQuery(query, {
       fromId: relationshipObj.fromEntityId,
       toId: relationshipObj.toEntityId,
       id: relationshipObj.id,
       created: relationshipObj.created.toISOString(),
       lastModified: relationshipObj.lastModified.toISOString(),
       version: relationshipObj.version,
-      metadata: metadataJson,
-      segmentId: segmentIdEff,
-      temporal: temporalEff,
-      changeSetId: changeSetIdEff,
+      metadata: JSON.stringify(relationshipObj.metadata || {}),
       occurrencesScan:
         typeof topAll.occurrencesScan === "number"
           ? topAll.occurrencesScan
@@ -5940,7 +3433,12 @@ export class KnowledgeGraphService extends EventEmitter {
           : typeof mdAll.resolution === "string"
           ? mdAll.resolution
           : null,
-      scope: scopeEff ?? null,
+      scope:
+        typeof topAll.scope === "string"
+          ? topAll.scope
+          : typeof mdAll.scope === "string"
+          ? mdAll.scope
+          : null,
       arity:
         typeof topAll.arity === "number"
           ? topAll.arity
@@ -5959,7 +3457,12 @@ export class KnowledgeGraphService extends EventEmitter {
           : typeof mdAll.operator === "string"
           ? mdAll.operator
           : null,
-      importDepth: structuralProps.importDepth,
+      importDepth:
+        typeof topAll.importDepth === "number"
+          ? topAll.importDepth
+          : typeof mdAll.importDepth === "number"
+          ? mdAll.importDepth
+          : null,
       usedTypeChecker:
         typeof topAll.usedTypeChecker === "boolean"
           ? topAll.usedTypeChecker
@@ -5990,15 +3493,12 @@ export class KnowledgeGraphService extends EventEmitter {
           : typeof mdAll.param === "string"
           ? mdAll.param
           : null,
-      importAlias: structuralProps.importAlias,
-      importType: structuralProps.importType,
-      isNamespace: structuralProps.isNamespace,
-      isReExport: structuralProps.isReExport,
-      reExportTarget: structuralProps.reExportTarget,
-      language: structuralProps.language,
-      symbolKind: structuralProps.symbolKind,
-      modulePath: structuralProps.modulePath,
-      resolutionState: structuralProps.resolutionState,
+      importAlias:
+        typeof topAll.importAlias === "string"
+          ? topAll.importAlias
+          : typeof mdAll.importAlias === "string"
+          ? mdAll.importAlias
+          : null,
       receiverType:
         typeof topAll.receiverType === "string"
           ? topAll.receiverType
@@ -6089,8 +3589,10 @@ export class KnowledgeGraphService extends EventEmitter {
           ? mdAll.candidateCount
           : null,
       isMethod: typeof topAll.isMethod === "boolean" ? topAll.isMethod : null,
-      firstSeenAt: firstSeenAtEff,
-      lastSeenAt: lastSeenAtEff,
+      firstSeenAt:
+        toISO((relationshipObj as any).firstSeenAt) || new Date().toISOString(),
+      lastSeenAt:
+        toISO((relationshipObj as any).lastSeenAt) || new Date().toISOString(),
       sectionAnchor: sectionAnchorEff,
       sectionTitle: sectionTitleEff,
       summary: summaryEff,
@@ -6116,32 +3618,7 @@ export class KnowledgeGraphService extends EventEmitter {
       docLocale: docLocaleEff,
       tags: tagsEff,
       stakeholders: stakeholdersEff,
-      metricId: metricIdEff,
-      scenario: scenarioEff,
-      environment: environmentEff,
-      unit: unitEff,
-      baselineValue: baselineEff,
-      currentValue: currentEff,
-      delta: deltaEff,
-      percentChange: percentEff,
-      sampleSize: sampleSizeEff,
-      confidenceInterval: confidenceIntervalJson,
-      trend: trendEff,
-      severity: severityEff,
-      riskScore: riskScoreEff,
-      runId: runIdEff,
-      policyId: policyIdEff,
-      detectedAt: detectedAtEff,
-      resolvedAt: resolvedAtEff,
-      resolvedAt_is_set: resolvedAtIsSet,
-      metricsHistory: metricsHistoryEff,
-      metrics: metricsEff,
-    };
-    delete (relationshipObj as any).__backfilledToRef;
-    const debugRow = { ...params };
-    params.rows = [debugRow];
-
-    const result = await this.graphDbQuery(query, params);
+    });
 
     // Phase 1: Unify resolved edge with any prior placeholders pointing to same symbol
     try {
@@ -6161,20 +3638,6 @@ export class KnowledgeGraphService extends EventEmitter {
       toEntityId: relationshipObj.toEntityId,
       timestamp: new Date().toISOString(),
     });
-
-    if (!this._indexesEnsured) {
-      this.bootstrapIndicesOnce().catch(() => undefined);
-    }
-  }
-
-  async upsertRelationship(relationship: GraphRelationship): Promise<void> {
-    const normalized: any = { ...(relationship as any) };
-    normalized.fromEntityId =
-      normalized.fromEntityId ?? (normalized.sourceId as string | undefined);
-    normalized.toEntityId =
-      normalized.toEntityId ?? (normalized.targetId as string | undefined);
-
-    await this.createRelationship(normalized as GraphRelationship);
   }
 
   /**
@@ -6199,7 +3662,7 @@ export class KnowledgeGraphService extends EventEmitter {
           r.validTo = coalesce(r.validTo, $cutoff)
       RETURN count(r) AS updated
     `;
-    const rows = await this.graphDbQuery(query, {
+    const rows = await this.db.falkordbQuery(query, {
       cutoff: cutoffISO,
       toRefFile: opts?.toRefFile || null,
     });
@@ -6214,7 +3677,6 @@ export class KnowledgeGraphService extends EventEmitter {
       updatedFromDocAt?: Date;
     }
   ): Promise<number> {
-    const resolvedDocId = this.resolveEntityIdInput(docId);
     const lastValidatedISO = opts.lastValidated.toISOString();
     const updatedFromDocAtISO = opts.updatedFromDocAt
       ? opts.updatedFromDocAt.toISOString()
@@ -6238,8 +3700,8 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN count(r) AS updated
     `;
     try {
-      const rows = await this.graphDbQuery(query, {
-        docId: resolvedDocId,
+      const rows = await this.db.falkordbQuery(query, {
+        docId,
         docTypes,
         lastValidated: lastValidatedISO,
         updatedFromDocAt: updatedFromDocAtISO,
@@ -6260,8 +3722,6 @@ export class KnowledgeGraphService extends EventEmitter {
     excludeDocIds: string[] = []
   ): Promise<number> {
     const cutoffISO = cutoff.toISOString();
-    const resolvedExclude =
-      this.resolveEntityIdArray(excludeDocIds) ?? [];
     const docTypes = DOCUMENTATION_RELATIONSHIP_TYPES.map(
       (t) => t as unknown as string
     );
@@ -6277,9 +3737,9 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN count(r) AS updated
     `;
     try {
-      const rows = await this.graphDbQuery(query, {
+      const rows = await this.db.falkordbQuery(query, {
         cutoff: cutoffISO,
-        exclude: resolvedExclude,
+        exclude: excludeDocIds,
         docTypes,
       });
       return rows?.[0]?.updated || 0;
@@ -6296,7 +3756,6 @@ export class KnowledgeGraphService extends EventEmitter {
     entityId: string,
     opts: { reason?: string; staleSince?: Date } = {}
   ): Promise<number> {
-    const resolvedId = this.resolveEntityIdInput(entityId);
     const reason = opts.reason || null;
     const staleSinceISO = (opts.staleSince || new Date()).toISOString();
     const query = `
@@ -6310,8 +3769,8 @@ export class KnowledgeGraphService extends EventEmitter {
     `;
 
     try {
-      const rows = await this.graphDbQuery(query, {
-        entityId: resolvedId,
+      const rows = await this.db.falkordbQuery(query, {
+        entityId,
         reason,
         staleSince: staleSinceISO,
       });
@@ -6325,102 +3784,134 @@ export class KnowledgeGraphService extends EventEmitter {
     }
   }
 
-  private async bootstrapIndicesOnce(): Promise<EnsureIndicesResult | null> {
-    if (this._indexesEnsured) {
-      return {
-        status: "completed",
-        stats: { created: 0, exists: 0, deferred: 0, failed: 0 },
-      };
-    }
-
-    if (this._indexEnsureInFlight) {
-      return this._indexEnsureInFlight;
-    }
-
-    const promise = (async () => {
-      try {
-        const result = await this.ensureIndices();
-        if (result.status === "completed") {
-          this._indexesEnsured = true;
-        } else if (result.status === "failed") {
-          console.warn("graph.indices.ensure failed", result);
-        }
-        return result;
-      } finally {
-        this._indexEnsureInFlight = null;
-      }
-    })();
-
-    this._indexEnsureInFlight = promise;
-    return promise;
-  }
-
   /**
    * Best-effort index creation to accelerate common queries.
    * Guarded to avoid failures on engines that do not support these syntaxes.
    */
-  async ensureIndices(): Promise<EnsureIndicesResult> {
-    const stats: EnsureIndicesStats = {
-      created: 0,
-      exists: 0,
-      deferred: 0,
-      failed: 0,
-    };
-    const bump = (outcome: keyof EnsureIndicesStats) => {
-      stats[outcome] += 1;
-    };
-    let status: EnsureIndicesResult["status"] = "completed";
-
-    const runGroup = async (queries: string[]) => {
-      for (const query of queries) {
-        const outcome = await this.createIndexGuarded(query);
-        bump(outcome);
-        if (outcome === "deferred") {
-          status = status === "failed" ? status : "deferred";
-          console.log("graph.indices.ensure halted", { outcome, query });
-          return false;
-        }
-        if (outcome === "failed") {
-          status = "failed";
-          console.log("graph.indices.ensure halted", { outcome, query });
-          return false;
-        }
-      }
-      return true;
-    };
-
-    const nodeIndexQueries = [
-      "CREATE INDEX ON :Entity(id)",
-      "CREATE INDEX ON :Entity(type)",
-      "CREATE INDEX ON :Entity(path)",
-    ];
-    const additionalNodeIndexes = [
-      "CREATE INDEX ON :Entity(name)",
-      "CREATE INDEX ON :Entity(lastModified)",
-      "CREATE INDEX ON :Entity(created)",
-    ];
-    const relationshipIndexQueries = [
-      "CREATE INDEX ON :file(path)",
-      "CREATE INDEX ON :symbol(path)",
-      "CREATE INDEX ON :version(entityId)",
-      "CREATE INDEX ON :checkpoint(checkpointId)",
-    ];
-
-    const groups = [
-      nodeIndexQueries,
-      additionalNodeIndexes,
-      relationshipIndexQueries,
-    ];
-    for (const group of groups) {
-      const proceed = await runGroup(group);
-      if (!proceed) {
-        console.log("graph.indices.ensure summary", { stats, status });
-        return { status, stats };
-      }
-    }
-
-    console.log({ event: "graph.indices.ensure_attempted", stats });
-    return { status, stats };
+  async ensureIndices(): Promise<void> {
+    try {
+      // Neo4j-style index creation (if supported)
+      await this.db.falkordbQuery(
+        `CREATE INDEX node_type IF NOT EXISTS FOR (n) ON (n.type)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX node_name IF NOT EXISTS FOR (n) ON (n.name)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX node_path IF NOT EXISTS FOR (n) ON (n.path)`,
+        {}
+      );
+    } catch {}
+    // Relationship property indices may not be supported; attempt guarded
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_type IF NOT EXISTS FOR ()-[r]-() ON (type(r))`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_kind IF NOT EXISTS FOR ()-[r]-() ON (r.kind)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_source IF NOT EXISTS FOR ()-[r]-() ON (r.source)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_confidence IF NOT EXISTS FOR ()-[r]-() ON (r.confidence)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_firstSeen IF NOT EXISTS FOR ()-[r]-() ON (r.firstSeenAt)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_lastSeen IF NOT EXISTS FOR ()-[r]-() ON (r.lastSeenAt)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_siteHash IF NOT EXISTS FOR ()-[r]-() ON (r.siteHash)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_active IF NOT EXISTS FOR ()-[r]-() ON (r.active)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_occ_total IF NOT EXISTS FOR ()-[r]-() ON (r.occurrencesTotal)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_to_ref_kind IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_kind)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_to_ref_file IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_file)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_to_ref_symbol IF NOT EXISTS FOR ()-[r]-() ON (r.to_ref_symbol)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_from_ref_kind IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_kind)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_from_ref_file IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_file)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_from_ref_symbol IF NOT EXISTS FOR ()-[r]-() ON (r.from_ref_symbol)`,
+        {}
+      );
+    } catch {}
+    // Composite indices (guarded; may be unsupported depending on backend)
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_type_to_symbol IF NOT EXISTS FOR ()-[r]-() ON (type(r), r.to_ref_symbol)`,
+        {}
+      );
+    } catch {}
+    try {
+      await this.db.falkordbQuery(
+        `CREATE INDEX rel_active_lastSeen IF NOT EXISTS FOR ()-[r]-() ON (r.active, r.lastSeenAt)`,
+        {}
+      );
+    } catch {}
   }
 
   /**
@@ -6437,30 +3928,17 @@ export class KnowledgeGraphService extends EventEmitter {
         const normalized = this.normalizeRelationship(rIn as GraphRelationship);
         const topIn: any = normalized as any;
         const mdIn: any = topIn.metadata || {};
-        const baseRid =
-          (typeof topIn.id === "string" && topIn.id.length > 0
-            ? topIn.id
-            : canonicalRelationshipId(topIn.fromEntityId, normalized)) ?? "";
-        const rid = this.namespaceScope.applyRelationshipPrefix(baseRid);
-        topIn.id = rid;
-        const candidateIds = this.relationshipIdCandidates(rid, baseRid);
+        const rid =
+          topIn.id || canonicalRelationshipId(topIn.fromEntityId, normalized);
         // Fetch existing
         let props: any = null;
         try {
-          const rows = await this.graphDbQuery(
+          const rows = await this.db.falkordbQuery(
             `MATCH ()-[r]->() WHERE r.id = $id RETURN r LIMIT 1`,
             { id: rid }
           );
-          const fallbackRows =
-            (!rows || rows.length === 0) && candidateIds.length > 1
-              ? await this.graphDbQuery(
-                  `MATCH ()-[r]->() WHERE r.id IN $ids RETURN r LIMIT 1`,
-                  { ids: candidateIds }
-                )
-              : null;
-          const rowSource = rows && rows[0] ? rows[0] : fallbackRows?.[0];
-          if (rowSource && rowSource.r) {
-            const relData = rowSource.r;
+          if (rows && rows[0] && rows[0].r) {
+            const relData = rows[0].r;
             props = {};
             if (Array.isArray(relData)) {
               for (const [k, v] of relData) {
@@ -6605,8 +4083,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
         // Update relationship row
         const q = `
-          MATCH ()-[r]-()
-          WHERE r.id IN $ids
+          MATCH ()-[r { id: $id }]-()
           SET r.lastModified = $now,
               r.version = coalesce(r.version, 0) + 1,
               r.occurrencesScan = coalesce(r.occurrencesScan, 0) + $occurrencesScan,
@@ -6631,8 +4108,7 @@ export class KnowledgeGraphService extends EventEmitter {
           : Array.isArray(mdIn.locations)
           ? mdIn.locations
           : [];
-        await this.graphDbQuery(q, {
-          ids: candidateIds,
+        await this.db.falkordbQuery(q, {
           id: rid,
           now: nowISO,
           occurrencesScan:
@@ -6670,16 +4146,14 @@ export class KnowledgeGraphService extends EventEmitter {
     const whereClause: string[] = [];
     const params: any = {};
 
-    const fromEntityId = this.resolveOptionalEntityId(query.fromEntityId);
-    if (fromEntityId) {
+    if (query.fromEntityId) {
       whereClause.push("a.id = $fromId");
-      params.fromId = fromEntityId;
+      params.fromId = query.fromEntityId;
     }
 
-    const toEntityId = this.resolveOptionalEntityId(query.toEntityId);
-    if (toEntityId) {
+    if (query.toEntityId) {
       whereClause.push("b.id = $toId");
-      params.toId = toEntityId;
+      params.toId = query.toEntityId;
     }
 
     if (query.type && query.type.length > 0) {
@@ -6763,35 +4237,6 @@ export class KnowledgeGraphService extends EventEmitter {
     );
     applyEnumFilter(qAny.clusterVersion, "r.clusterVersion", "clusterVersion");
     applyEnumFilter(qAny.docLocale, "r.docLocale", "docLocale");
-    applyEnumFilter(qAny.importAlias, "r.importAlias", "importAlias");
-    applyEnumFilter(qAny.importType, "r.importType", "importType");
-    const languageFiltersList = coerceStringList(qAny.language).map((value) =>
-      value.toLowerCase()
-    );
-    if (languageFiltersList.length === 1) {
-      whereClause.push(
-        "((r.language IS NOT NULL AND toLower(r.language) = $languageFilter) OR toLower(coalesce(b.language, '')) = $languageFilter)"
-      );
-      params.languageFilter = languageFiltersList[0];
-    } else if (languageFiltersList.length > 1) {
-      whereClause.push(
-        "((r.language IS NOT NULL AND toLower(r.language) IN $languageFilterList) OR toLower(coalesce(b.language, '')) IN $languageFilterList)"
-      );
-      params.languageFilterList = languageFiltersList;
-    }
-    applyEnumFilter(qAny.symbolKind, "r.symbolKind", "symbolKind");
-    applyEnumFilter(qAny.modulePath, "r.modulePath", "modulePathFilter");
-    if (typeof qAny.isNamespace === "boolean") {
-      whereClause.push("r.isNamespace = $isNamespace");
-      params.isNamespace = qAny.isNamespace;
-    }
-    if (
-      typeof qAny.modulePathPrefix === "string" &&
-      qAny.modulePathPrefix.trim().length > 0
-    ) {
-      whereClause.push("r.modulePath STARTS WITH $modulePathPrefix");
-      params.modulePathPrefix = qAny.modulePathPrefix.trim();
-    }
     if (typeof qAny.confidenceMin === "number") {
       whereClause.push("r.confidence >= $cmin");
       params.cmin = qAny.confidenceMin;
@@ -6939,105 +4384,6 @@ export class KnowledgeGraphService extends EventEmitter {
       params.lastValidatedBefore = qAny.lastValidatedBefore.toISOString();
     }
 
-    const normalizeMetricIdForFilter = (value: string): string | null => {
-      if (typeof value !== "string") return null;
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      const normalized = trimmed
-        .toLowerCase()
-        .replace(/[^a-z0-9/_\-]+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/\/+/g, "/")
-        .replace(/\/+$/g, "")
-        .replace(/^\/+/, "")
-        .slice(0, 256);
-      return normalized || "unknown";
-    };
-
-    const metricFilters = coerceStringList(qAny.metricId)
-      .map(normalizeMetricIdForFilter)
-      .filter((value): value is string => Boolean(value));
-    if (metricFilters.length === 1) {
-      whereClause.push("r.metricId = $metricIdFilter");
-      params.metricIdFilter = metricFilters[0];
-    } else if (metricFilters.length > 1) {
-      whereClause.push("r.metricId IN $metricIdList");
-      params.metricIdList = metricFilters;
-    }
-
-    const environmentFilters = coerceStringList(qAny.environment)
-      .map((value) => sanitizeEnvironment(value))
-      .filter((value) => typeof value === "string" && value.length > 0);
-    if (environmentFilters.length === 1) {
-      whereClause.push("r.environment = $environmentFilter");
-      params.environmentFilter = environmentFilters[0];
-    } else if (environmentFilters.length > 1) {
-      whereClause.push("r.environment IN $environmentFilterList");
-      params.environmentFilterList = environmentFilters;
-    }
-
-    const severityAllowed = new Set(["critical", "high", "medium", "low"]);
-    const severityFilters = coerceStringList(qAny.severity)
-      .map((value) => value.toLowerCase())
-      .filter((value) => severityAllowed.has(value));
-    if (severityFilters.length === 1) {
-      whereClause.push("r.severity = $severityFilter");
-      params.severityFilter = severityFilters[0];
-    } else if (severityFilters.length > 1) {
-      whereClause.push("r.severity IN $severityFilterList");
-      params.severityFilterList = severityFilters;
-    }
-
-    const trendAllowed = new Set(["regression", "improvement", "neutral"]);
-    const trendFilters = coerceStringList(qAny.trend)
-      .map((value) => value.toLowerCase())
-      .filter((value) => trendAllowed.has(value));
-    if (trendFilters.length === 1) {
-      whereClause.push("r.trend = $trendFilter");
-      params.trendFilter = trendFilters[0];
-    } else if (trendFilters.length > 1) {
-      whereClause.push("r.trend IN $trendFilterList");
-      params.trendFilterList = trendFilters;
-    }
-
-    const toIsoDate = (value: unknown): string | null => {
-      if (!value) return null;
-      if (value instanceof Date) return value.toISOString();
-      if (typeof value === "string") {
-        const parsed = new Date(value);
-        if (!Number.isNaN(parsed.valueOf())) return parsed.toISOString();
-      }
-      return null;
-    };
-
-    const detectedAfterISO = toIsoDate(qAny.detectedAfter);
-    if (detectedAfterISO) {
-      whereClause.push(
-        "coalesce(r.detectedAt, r.created) >= $detectedAfter"
-      );
-      params.detectedAfter = detectedAfterISO;
-    }
-
-    const detectedBeforeISO = toIsoDate(qAny.detectedBefore);
-    if (detectedBeforeISO) {
-      whereClause.push(
-        "coalesce(r.detectedAt, r.created) <= $detectedBefore"
-      );
-      params.detectedBefore = detectedBeforeISO;
-    }
-
-    const resolvedAfterISO = toIsoDate(qAny.resolvedAfter);
-    if (resolvedAfterISO) {
-      whereClause.push("r.resolvedAt IS NOT NULL AND r.resolvedAt >= $resolvedAfter");
-      params.resolvedAfter = resolvedAfterISO;
-    }
-
-    const resolvedBeforeISO = toIsoDate(qAny.resolvedBefore);
-    if (resolvedBeforeISO) {
-      whereClause.push("r.resolvedAt IS NOT NULL AND r.resolvedAt <= $resolvedBefore");
-      params.resolvedBefore = resolvedBeforeISO;
-    }
-
     applyArrayContainsFilter(qAny.stakeholder, "r.stakeholders", "stakeholder");
     applyArrayContainsFilter(qAny.tag, "r.tags", "tag");
     // Filters on promoted to_ref_* scalars and siteHash
@@ -7113,14 +4459,14 @@ export class KnowledgeGraphService extends EventEmitter {
       ${matchClause}
       ${whereClause.length > 0 ? "WHERE " + whereClause.join(" AND ") : ""}
       RETURN r, a.id as fromId, b.id as toId
-      ${query.offset ? "SKIP $offset" : ""}
       ${query.limit ? "LIMIT $limit" : ""}
+      ${query.offset ? "SKIP $offset" : ""}
     `;
 
     if (query.limit) params.limit = query.limit;
     if (query.offset) params.offset = query.offset;
 
-    const result = await this.graphDbQuery(fullQuery, params);
+    const result = await this.db.falkordbQuery(fullQuery, params);
     return result.map((row: any) => this.parseRelationshipFromGraph(row));
   }
 
@@ -7133,7 +4479,7 @@ export class KnowledgeGraphService extends EventEmitter {
     const cutoff = scanStartedAt.toISOString();
     let deactivated = 0;
     try {
-      const res = await this.graphDbQuery(
+      const res = await this.db.falkordbQuery(
         `MATCH ()-[r]-()
          WHERE r.lastSeenAt < $cutoff AND coalesce(r.active, true) = true
          WITH collect(r) AS rs
@@ -7146,7 +4492,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
     // Best-effort: proactively retire unresolved external placeholders that haven't been seen since cutoff
     try {
-      const res2 = await this.graphDbQuery(
+      const res2 = await this.db.falkordbQuery(
         `MATCH ()-[r]-()
          WHERE coalesce(r.active, true) = true AND r.to_ref_kind = 'external'
            AND coalesce(r.lastSeenAt, r.created) < $cutoff
@@ -7161,7 +4507,7 @@ export class KnowledgeGraphService extends EventEmitter {
     // If temporal history is enabled, set validTo for edges that transitioned inactive
     try {
       if (this.isHistoryEnabled()) {
-        await this.graphDbQuery(
+        await this.db.falkordbQuery(
           `MATCH ()-[r]-()
            WHERE r.lastSeenAt < $cutoff AND coalesce(r.active, false) = false AND r.validFrom IS NOT NULL AND r.validTo IS NULL
            SET r.validTo = $cutoff`,
@@ -7182,19 +4528,14 @@ export class KnowledgeGraphService extends EventEmitter {
   async getRelationshipById(
     relationshipId: string
   ): Promise<GraphRelationship | null> {
-    const resolvedId = this.resolveRelationshipIdInput(relationshipId);
-    const candidateIds = this.relationshipIdCandidates(
-      resolvedId,
-      relationshipId
-    );
     const query = `
       MATCH (a)-[r]->(b)
-      WHERE r.id IN $ids
+      WHERE r.id = $id
       RETURN r, a.id as fromId, b.id as toId
       LIMIT 1
     `;
 
-    const result = await this.graphDbQuery(query, { ids: candidateIds });
+    const result = await this.db.falkordbQuery(query, { id: relationshipId });
     if (!result || result.length === 0) return null;
 
     const relationship = this.parseRelationshipFromGraph(result[0]);
@@ -7202,35 +4543,7 @@ export class KnowledgeGraphService extends EventEmitter {
       ...relationship,
       fromEntityId: result[0].fromId,
       toEntityId: result[0].toId,
-      id: this.namespaceScope.applyRelationshipPrefix(relationship.id),
     } as GraphRelationship;
-  }
-
-  canonicalizeRelationship(
-    relationship: GraphRelationship
-  ): GraphRelationship {
-    const normalized = { ...(relationship as any) } as GraphRelationship;
-
-    if (!normalized.fromEntityId || !normalized.toEntityId || !normalized.type) {
-      return normalized;
-    }
-
-    try {
-      normalized.fromEntityId = this.resolveEntityIdInput(
-        normalized.fromEntityId
-      );
-      normalized.toEntityId = this.resolveEntityIdInput(normalized.toEntityId);
-    } catch {
-      return normalized;
-    }
-
-    const canonicalId = canonicalRelationshipId(
-      normalized.fromEntityId,
-      normalized
-    );
-    normalized.id = this.namespaceScope.applyRelationshipPrefix(canonicalId);
-
-    return normalized;
   }
 
   /**
@@ -7290,7 +4603,7 @@ export class KnowledgeGraphService extends EventEmitter {
         const ids = Array.from(
           new Set(listEff.flatMap((r) => [r.fromEntityId, r.toEntityId]))
         );
-        const result = await this.graphDbQuery(
+        const result = await this.db.falkordbQuery(
           `UNWIND $ids AS id MATCH (n {id: id}) RETURN collect(n.id) as present`,
           { ids }
         );
@@ -7317,7 +4630,7 @@ export class KnowledgeGraphService extends EventEmitter {
         }
         const uniq = Array.from(new Set(candidates));
         if (uniq.length > 0) {
-          const rows = await this.graphDbQuery(
+          const rows = await this.db.falkordbQuery(
             `UNWIND $ids AS id MATCH (n {id: id}) RETURN n.id as id, n.path as path, n.name as name`,
             { ids: uniq }
           );
@@ -7454,118 +4767,6 @@ export class KnowledgeGraphService extends EventEmitter {
             : typeof md.why === "string"
             ? md.why
             : null;
-        const isPerfRelationship = isPerformanceRelationshipType(
-          r.type as RelationshipType
-        );
-        const pickString = (value: unknown, limit?: number): string | null => {
-          if (typeof value !== "string") return null;
-          const trimmed = value.trim();
-          if (!trimmed) return null;
-          return typeof limit === "number" && limit > 0
-            ? trimmed.slice(0, limit)
-            : trimmed;
-        };
-        const toFiniteNumber = (value: unknown): number | null => {
-          if (typeof value === "number" && Number.isFinite(value)) return value;
-          if (typeof value === "string" && value.trim() !== "") {
-            const num = Number(value);
-            if (Number.isFinite(num)) return num;
-          }
-          return null;
-        };
-        const metricIdEff = isPerfRelationship
-          ? pickString(top.metricId ?? md.metricId ?? null)
-          : null;
-        const scenarioEff = isPerfRelationship
-          ? pickString(top.scenario ?? md.scenario ?? null)
-          : null;
-        const environmentEff = isPerfRelationship
-          ? pickString(top.environment ?? md.environment ?? null)
-          : null;
-        const unitEff = isPerfRelationship
-          ? pickString(top.unit ?? md.unit ?? null, 32)
-          : null;
-        const baselineEff = isPerfRelationship
-          ? toFiniteNumber(top.baselineValue ?? md.baselineValue)
-          : null;
-        const currentEff = isPerfRelationship
-          ? toFiniteNumber(top.currentValue ?? md.currentValue)
-          : null;
-        const deltaEff = isPerfRelationship
-          ? toFiniteNumber(top.delta ?? md.delta)
-          : null;
-        const percentEff = isPerfRelationship
-          ? toFiniteNumber(top.percentChange ?? md.percentChange)
-          : null;
-        const sampleSizeEff = isPerfRelationship
-          ? toFiniteNumber(top.sampleSize ?? md.sampleSize)
-          : null;
-        const rawConfidence = isPerfRelationship
-          ? top.confidenceInterval ?? md.confidenceInterval
-          : null;
-        const confidenceIntervalEff = (() => {
-          if (!rawConfidence || typeof rawConfidence !== "object") return null;
-          const lower = toFiniteNumber((rawConfidence as any).lower);
-          const upper = toFiniteNumber((rawConfidence as any).upper);
-          if (lower == null && upper == null) return null;
-          return {
-            ...(lower != null ? { lower } : {}),
-            ...(upper != null ? { upper } : {}),
-          };
-        })();
-        const trendEff = isPerfRelationship
-          ? pickString(top.trend ?? md.trend ?? null)
-          : null;
-        const severityEff = isPerfRelationship
-          ? pickString(top.severity ?? md.severity ?? null)
-          : null;
-        const riskScoreEff = isPerfRelationship
-          ? toFiniteNumber(top.riskScore ?? md.riskScore)
-          : null;
-        const runIdEff = isPerfRelationship
-          ? pickString(top.runId ?? md.runId ?? null)
-          : null;
-        const policyIdEff = isPerfRelationship
-          ? pickString(top.policyId ?? md.policyId ?? null)
-          : null;
-        const detectedAtEff = isPerfRelationship
-          ? toISO(top.detectedAt ?? md.detectedAt)
-          : null;
-        const resolvedAtCandidate = isPerfRelationship
-          ? Object.prototype.hasOwnProperty.call(top, "resolvedAt")
-            ? top.resolvedAt
-            : Object.prototype.hasOwnProperty.call(md, "resolvedAt")
-            ? md.resolvedAt
-            : undefined
-          : undefined;
-        const resolvedAtEff =
-          resolvedAtCandidate === undefined
-            ? null
-            : resolvedAtCandidate === null
-            ? null
-            : toISO(resolvedAtCandidate);
-        const resolvedAtIsSet = resolvedAtCandidate !== undefined;
-        const metricsHistoryArray = (() => {
-          if (!isPerfRelationship) return null;
-          if (Array.isArray(top.metricsHistory)) return top.metricsHistory;
-          if (Array.isArray(md.metricsHistory)) return md.metricsHistory;
-          return null;
-        })();
-        const metricsHistoryEff = (() => {
-          if (!metricsHistoryArray || metricsHistoryArray.length === 0) return null;
-          return JSON.stringify(
-            metricsHistoryArray.map((entry: any) => ({
-              ...entry,
-              timestamp: toISO(entry?.timestamp ?? entry?.time ?? entry?.recordedAt),
-            }))
-          ).slice(0, 200000);
-        })();
-        const metricsEff = (() => {
-          if (!isPerfRelationship) return null;
-          const arr = Array.isArray(md.metrics) ? md.metrics : [];
-          if (arr.length === 0) return null;
-          return JSON.stringify(arr).slice(0, 200000);
-        })();
         const createdISO = (
           r.created instanceof Date ? r.created : new Date(r.created as any)
         ).toISOString();
@@ -7575,6 +4776,12 @@ export class KnowledgeGraphService extends EventEmitter {
             : new Date(r.lastModified as any)
         ).toISOString();
         // Canonical id by final from/to/type (fallback if not provided by upstream)
+        const id =
+          top.id ||
+          canonicalRelationshipId(r.fromEntityId, {
+            toEntityId: r.toEntityId,
+            type,
+          } as any);
         const toISO = (value: any): string | null => {
           if (value === null) return null;
           if (value === undefined) return null;
@@ -7585,19 +4792,6 @@ export class KnowledgeGraphService extends EventEmitter {
           }
           return null;
         };
-        const canonicalBaseId =
-          canonicalRelationshipId(r.fromEntityId, r as GraphRelationship) ??
-          "";
-        const id = this.namespaceScope.applyRelationshipPrefix(canonicalBaseId);
-        top.id = id;
-        const legacyBaseId = legacyStructuralRelationshipId(
-          canonicalBaseId,
-          r as GraphRelationship
-        );
-        const legacyId =
-          legacyBaseId && legacyBaseId !== canonicalBaseId
-            ? this.namespaceScope.applyRelationshipPrefix(legacyBaseId)
-            : null;
         const updatedFromDocAtISO = toISO(
           top.updatedFromDocAt ?? md.updatedFromDocAt
         );
@@ -7618,27 +4812,6 @@ export class KnowledgeGraphService extends EventEmitter {
           : undefined;
         const expiresAtIsSet = expiresAtProvidedTop || expiresAtProvidedMeta;
         const expiresAtISO = expiresAtRaw === null ? null : toISO(expiresAtRaw);
-        const structuralProps = extractStructuralPersistenceFields(top, md);
-        const scopeValue =
-          typeof top.scope === "string"
-            ? top.scope
-            : typeof md.scope === "string"
-            ? md.scope
-            : structuralProps.scope;
-        const firstSeenAtISO =
-          toISO(
-            (top as any).firstSeenAt ??
-              structuralProps.firstSeenAt ??
-              md.firstSeenAt ??
-              createdISO
-          ) ?? createdISO;
-        const lastSeenAtISO =
-          toISO(
-            (top as any).lastSeenAt ??
-              structuralProps.lastSeenAt ??
-              md.lastSeenAt ??
-              lastISO
-          ) ?? lastISO;
         return {
           fromId: r.fromEntityId,
           toId: r.toEntityId,
@@ -7678,7 +4851,12 @@ export class KnowledgeGraphService extends EventEmitter {
               : typeof md.resolution === "string"
               ? md.resolution
               : null,
-          scope: scopeValue,
+          scope:
+            typeof top.scope === "string"
+              ? top.scope
+              : typeof md.scope === "string"
+              ? md.scope
+              : null,
           arity:
             typeof top.arity === "number"
               ? top.arity
@@ -7697,7 +4875,12 @@ export class KnowledgeGraphService extends EventEmitter {
               : typeof md.operator === "string"
               ? md.operator
               : null,
-          importDepth: structuralProps.importDepth,
+          importDepth:
+            typeof top.importDepth === "number"
+              ? top.importDepth
+              : typeof md.importDepth === "number"
+              ? md.importDepth
+              : null,
           usedTypeChecker:
             typeof top.usedTypeChecker === "boolean"
               ? top.usedTypeChecker
@@ -7728,15 +4911,12 @@ export class KnowledgeGraphService extends EventEmitter {
               : typeof md.param === "string"
               ? md.param
               : null,
-          importAlias: structuralProps.importAlias,
-          importType: structuralProps.importType,
-          isNamespace: structuralProps.isNamespace,
-          isReExport: structuralProps.isReExport,
-          reExportTarget: structuralProps.reExportTarget,
-          language: structuralProps.language,
-          symbolKind: structuralProps.symbolKind,
-          modulePath: structuralProps.modulePath,
-          resolutionState: structuralProps.resolutionState,
+          importAlias:
+            typeof top.importAlias === "string"
+              ? top.importAlias
+              : typeof md.importAlias === "string"
+              ? md.importAlias
+              : null,
           receiverType:
             typeof top.receiverType === "string"
               ? top.receiverType
@@ -7806,9 +4986,8 @@ export class KnowledgeGraphService extends EventEmitter {
               ? md.candidateCount
               : null,
           isMethod: typeof top.isMethod === "boolean" ? top.isMethod : null,
-          firstSeenAt: firstSeenAtISO,
-          lastSeenAt: lastSeenAtISO,
-          legacyId,
+          firstSeenAt: createdISO,
+          lastSeenAt: lastISO,
           loc_path: (top.location && top.location.path) ?? md.path ?? null,
           loc_line:
             top.location && typeof top.location.line === "number"
@@ -7950,63 +5129,10 @@ export class KnowledgeGraphService extends EventEmitter {
             : Array.isArray(md.stakeholders)
             ? md.stakeholders
             : null,
-          metricId: metricIdEff,
-          scenario: scenarioEff,
-          environment: environmentEff,
-          unit: unitEff,
-          baselineValue: baselineEff,
-          currentValue: currentEff,
-          delta: deltaEff,
-          percentChange: percentEff,
-          sampleSize: sampleSizeEff,
-          confidenceInterval: confidenceIntervalEff,
-          trend: trendEff,
-          severity: severityEff,
-          riskScore: riskScoreEff,
-          runId: runIdEff,
-          policyId: policyIdEff,
-          detectedAt: detectedAtEff,
-          resolvedAt: resolvedAtEff,
-          resolvedAt_is_set: resolvedAtIsSet,
-          metricsHistory: metricsHistoryEff,
-          metrics: metricsEff,
         };
       });
 
       // Pre-dedupe rows by id: merge occurrencesScan (sum), and merge evidence/locations/sites/context conservatively
-      const toMillis = (value: unknown): number | null => {
-        if (value instanceof Date) {
-          const ts = value.getTime();
-          return Number.isNaN(ts) ? null : ts;
-        }
-        if (typeof value === "string") {
-          const ts = Date.parse(value);
-          return Number.isNaN(ts) ? null : ts;
-        }
-        if (typeof value === "number" && Number.isFinite(value)) {
-          return value;
-        }
-        return null;
-      };
-      const computeFreshnessScore = (candidate: Record<string, any>): number => {
-        if (!candidate || typeof candidate !== "object") return 0;
-        const sources = [
-          candidate.lastModified,
-          candidate.lastSeenAt,
-          candidate.updatedFromDocAt,
-          candidate.lastValidated,
-          candidate.detectedAt,
-          candidate.resolvedAt,
-          candidate.created,
-          candidate.firstSeenAt,
-        ];
-        let freshest = Number.NEGATIVE_INFINITY;
-        for (const source of sources) {
-          const ts = toMillis(source);
-          if (ts !== null && ts > freshest) freshest = ts;
-        }
-        return freshest === Number.NEGATIVE_INFINITY ? 0 : freshest;
-      };
       const mergeArrJson = (
         a: string | null,
         b: string | null,
@@ -8037,23 +5163,16 @@ export class KnowledgeGraphService extends EventEmitter {
       for (const row of rowsRaw) {
         const prev = dedup.get(row.id);
         if (!prev) {
-          (row as any).__freshness = computeFreshnessScore(row);
           dedup.set(row.id, row);
           continue;
         }
-        const prevFreshness =
-          typeof (prev as any).__freshness === "number"
-            ? (prev as any).__freshness
-            : computeFreshnessScore(prev);
-        const rowFreshness = computeFreshnessScore(row);
-        const rowIsFresher = rowFreshness > prevFreshness;
         // Merge counts
         const occA =
           typeof prev.occurrencesScan === "number" ? prev.occurrencesScan : 0;
         const occB =
           typeof row.occurrencesScan === "number" ? row.occurrencesScan : 0;
         prev.occurrencesScan = occA + occB;
-        // Keep earliest created, latest lastModified/lastSeenAt
+        // Keep earliest created, latest lastModified
         try {
           if (new Date(row.created) < new Date(prev.created))
             prev.created = row.created;
@@ -8061,14 +5180,6 @@ export class KnowledgeGraphService extends EventEmitter {
         try {
           if (new Date(row.lastModified) > new Date(prev.lastModified))
             prev.lastModified = row.lastModified;
-        } catch {}
-        try {
-          if (
-            row.lastSeenAt &&
-            (!prev.lastSeenAt || new Date(row.lastSeenAt) > new Date(prev.lastSeenAt))
-          ) {
-            prev.lastSeenAt = row.lastSeenAt;
-          }
         } catch {}
         // Merge context (keep earliest line; prefer existing if set)
         if (!prev.context && row.context) prev.context = row.context;
@@ -8092,18 +5203,8 @@ export class KnowledgeGraphService extends EventEmitter {
         // Preserve stronger confidence
         if (typeof row.confidence === "number")
           prev.confidence = Math.max(prev.confidence ?? 0, row.confidence);
-        if (row.dataFlowId) {
-          if (rowIsFresher || !prev.dataFlowId) {
-            prev.dataFlowId = row.dataFlowId;
-          }
-        }
-        if (row.resolved === true) {
-          prev.resolved = true;
-        } else if (row.resolved === false && rowIsFresher) {
-          prev.resolved = false;
-        } else if (prev.resolved == null && row.resolved != null) {
-          prev.resolved = row.resolved;
-        }
+        if (!prev.dataFlowId && row.dataFlowId)
+          prev.dataFlowId = row.dataFlowId;
         // Combine candidate count
         if (typeof row.candidateCount === "number") {
           const a = prev.candidateCount ?? 0;
@@ -8127,60 +5228,27 @@ export class KnowledgeGraphService extends EventEmitter {
             prev.similarityScore = row.similarityScore;
           }
         }
-        const updateIfFresher = (field: string) => {
-          const incoming = (row as any)[field];
-          if (incoming === undefined || incoming === null) return;
-          const prevValue = (prev as any)[field];
-          if (rowIsFresher || prevValue === undefined || prevValue === null) {
-            (prev as any)[field] = incoming;
+        const assignIfMissing = (field: string) => {
+          if ((prev as any)[field] == null && (row as any)[field] != null) {
+            (prev as any)[field] = (row as any)[field];
           }
         };
-        updateIfFresher("importAlias");
-        updateIfFresher("importType");
-        updateIfFresher("reExportTarget");
-        updateIfFresher("language");
-        updateIfFresher("symbolKind");
-        updateIfFresher("modulePath");
-        updateIfFresher("resolutionState");
-        updateIfFresher("scope");
-        if (typeof row.importDepth === "number") {
-          if (
-            rowIsFresher ||
-            typeof (prev as any).importDepth !== "number"
-          ) {
-            (prev as any).importDepth = row.importDepth;
-          }
-        }
-        const mergeBooleanField = (field: "isNamespace" | "isReExport") => {
-          const rowVal = (row as any)[field];
-          if (rowVal === true) {
-            (prev as any)[field] = true;
-            return;
-          }
-          if (rowVal === false) {
-            if (rowIsFresher || (prev as any)[field] == null) {
-              (prev as any)[field] = false;
-            }
-          }
-        };
-        mergeBooleanField("isNamespace");
-        mergeBooleanField("isReExport");
-        updateIfFresher("sectionAnchor");
-        updateIfFresher("sectionTitle");
-        updateIfFresher("summary");
-        updateIfFresher("docVersion");
-        updateIfFresher("docHash");
-        updateIfFresher("documentationQuality");
-        updateIfFresher("coverageScope");
-        updateIfFresher("domainPath");
-        updateIfFresher("taxonomyVersion");
-        updateIfFresher("clusterVersion");
-        updateIfFresher("role");
-        updateIfFresher("docIntent");
-        updateIfFresher("embeddingVersion");
-        updateIfFresher("policyType");
-        updateIfFresher("relationshipType");
-        updateIfFresher("docLocale");
+        assignIfMissing("sectionAnchor");
+        assignIfMissing("sectionTitle");
+        assignIfMissing("summary");
+        assignIfMissing("docVersion");
+        assignIfMissing("docHash");
+        assignIfMissing("documentationQuality");
+        assignIfMissing("coverageScope");
+        assignIfMissing("domainPath");
+        assignIfMissing("taxonomyVersion");
+        assignIfMissing("clusterVersion");
+        assignIfMissing("role");
+        assignIfMissing("docIntent");
+        assignIfMissing("embeddingVersion");
+        assignIfMissing("policyType");
+        assignIfMissing("relationshipType");
+        assignIfMissing("docLocale");
         if (
           row.updatedFromDocAt &&
           (!prev.updatedFromDocAt ||
@@ -8204,302 +5272,108 @@ export class KnowledgeGraphService extends EventEmitter {
           prev.expiresAt_is_set = true;
           prev.expiresAt = row.expiresAt;
         }
-        if (row.metricId) prev.metricId = row.metricId;
-        if (row.scenario) prev.scenario = row.scenario;
-        if (row.environment) prev.environment = row.environment;
-        if (row.unit) prev.unit = row.unit;
-        if (row.baselineValue != null) prev.baselineValue = row.baselineValue;
-        if (row.currentValue != null) prev.currentValue = row.currentValue;
-        if (row.delta != null) prev.delta = row.delta;
-        if (row.percentChange != null) prev.percentChange = row.percentChange;
-        if (row.sampleSize != null) prev.sampleSize = row.sampleSize;
-        if (row.confidenceInterval) prev.confidenceInterval = row.confidenceInterval;
-        if (row.trend) prev.trend = row.trend;
-        if (row.severity) prev.severity = row.severity;
-        if (row.riskScore != null) prev.riskScore = row.riskScore;
-        if (row.runId) prev.runId = row.runId;
-        if (row.policyId) prev.policyId = row.policyId;
-        if (row.detectedAt) prev.detectedAt = row.detectedAt;
-        if (row.resolvedAt_is_set) {
-          prev.resolvedAt_is_set = true;
-          prev.resolvedAt = row.resolvedAt;
-        } else if (prev.resolvedAt_is_set !== true && row.resolvedAt === null) {
-          prev.resolvedAt = row.resolvedAt;
-        }
-        if (row.metricsHistory) prev.metricsHistory = row.metricsHistory;
-        if (row.metrics) prev.metrics = row.metrics;
         const mergeStringArray = (field: "tags" | "stakeholders") => {
-          const rowArr = Array.isArray((row as any)[field])
-            ? ((row as any)[field] as string[])
-            : [];
-          if (rowArr.length === 0) return;
-          if (rowIsFresher) {
-            (prev as any)[field] = Array.from(new Set(rowArr));
-            return;
-          }
           const prevArr = Array.isArray((prev as any)[field])
             ? ((prev as any)[field] as string[])
             : [];
-          const merged = new Set<string>(prevArr);
-          for (const item of rowArr) {
-            merged.add(item);
+          const rowArr = Array.isArray((row as any)[field])
+            ? ((row as any)[field] as string[])
+            : [];
+          if (rowArr.length > 0) {
+            const merged = new Set<string>(prevArr);
+            for (const item of rowArr) {
+              merged.add(item);
+            }
+            (prev as any)[field] = Array.from(merged);
           }
-          (prev as any)[field] = Array.from(merged);
         };
         mergeStringArray("tags");
         mergeStringArray("stakeholders");
-        if (rowIsFresher && typeof row.metadata === "string" && row.metadata) {
-          prev.metadata = row.metadata;
-        } else if (
-          (prev.metadata == null || prev.metadata === "") &&
-          typeof row.metadata === "string" &&
-          row.metadata
-        ) {
-          prev.metadata = row.metadata;
-        }
-        (prev as any).__freshness = Math.max(prevFreshness, rowFreshness);
       }
       const rows = Array.from(dedup.values());
 
-      // FalkorDB has issues with complex UNWIND parameters, so use individual queries
-      // TODO: Optimize this later with better parameter handling
-      for (const row of rows) {
-        if ((row as any).__freshness !== undefined) {
-          delete (row as any).__freshness;
-        }
-        if (typeof row.legacyId === "string" && row.legacyId !== row.id) {
-          try {
-            await this.graphDbQuery(
-              `MATCH ()-[legacy:${type} { id: $legacyId }]->()
-               SET legacy.id = $id`,
-              { legacyId: row.legacyId, id: row.id }
-            );
-          } catch {}
-        }
-        const query = `
-          // UNWIND $rows AS row
-          MATCH (a {id: $fromId}), (b {id: $toId})
-          MERGE (a)-[r:${type} { id: $id }]->(b)
-          ON CREATE SET r.created = $created, r.version = $version
-          SET r.lastModified = $lastModified,
-              r.metadata = $metadata,
-              r.occurrencesScan = $occurrencesScan,
-              r.occurrencesTotal = coalesce(r.occurrencesTotal, 0) + coalesce($occurrencesScan, 0),
-              r.confidence = $confidence,
-              r.inferred = $inferred,
-              r.resolved = $resolved,
-              r.source = $source,
-              r.context = $context,
-              r.kind = $kind,
-              r.resolution = $resolution,
-              r.scope = $scope,
-              r.arity = $arity,
-              r.awaited = $awaited,
-              r.operator = $operator,
-              r.importDepth = $importDepth,
-              r.usedTypeChecker = $usedTypeChecker,
-              r.isExported = $isExported,
-              r.accessPath = $accessPath,
-              r.callee = $callee,
-              r.paramName = $paramName,
-              r.importAlias = $importAlias,
-              r.importType = $importType,
-              r.isNamespace = $isNamespace,
-              r.isReExport = $isReExport,
-              r.reExportTarget = $reExportTarget,
-              r.language = $language,
-              r.symbolKind = $symbolKind,
-              r.modulePath = $modulePath,
-              r.resolutionState = $resolutionState,
-              r.receiverType = $receiverType,
-              r.dynamicDispatch = $dynamicDispatch,
-              r.overloadIndex = $overloadIndex,
-              r.genericArguments = $genericArguments,
-              r.siteHash = $siteHash,
-              r.location_path = $loc_path,
-              r.location_line = $loc_line,
-              r.location_col = $loc_col,
-              r.evidence = $evidence,
-              r.locations = $locations,
-              r.siteId = $siteId,
-              r.sites = $sites,
-              r.dataFlowId = $dataFlowId,
-              r.why = $why,
-              r.to_ref_kind = $to_ref_kind,
-              r.to_ref_file = $to_ref_file,
-              r.to_ref_symbol = $to_ref_symbol,
-              r.to_ref_name = $to_ref_name,
-              r.from_ref_kind = $from_ref_kind,
-              r.from_ref_file = $from_ref_file,
-              r.from_ref_symbol = $from_ref_symbol,
-              r.from_ref_name = $from_ref_name,
-              r.ambiguous = $ambiguous,
-              r.candidateCount = $candidateCount,
-              r.isMethod = $isMethod,
-              r.active = true,
-              r.firstSeenAt = coalesce(r.firstSeenAt, $firstSeenAt),
-              r.lastSeenAt = $lastSeenAt,
-              r.validFrom = coalesce(r.validFrom, $firstSeenAt),
-              r.sectionAnchor = $sectionAnchor,
-              r.sectionTitle = $sectionTitle,
-              r.summary = $summary,
-              r.docVersion = $docVersion,
-              r.docHash = $docHash,
-              r.documentationQuality = $documentationQuality,
-              r.coverageScope = $coverageScope,
-              r.domainPath = $domainPath,
-              r.taxonomyVersion = $taxonomyVersion,
-              r.updatedFromDocAt = $updatedFromDocAt,
-              r.lastValidated = $lastValidated,
-              r.strength = coalesce($strength, r.strength),
-              r.similarityScore = coalesce($similarityScore, r.similarityScore),
-              r.clusterVersion = coalesce($clusterVersion, r.clusterVersion),
-              r.role = coalesce($role, r.role),
-              r.docIntent = $docIntent,
-          r.embeddingVersion = coalesce($embeddingVersion, r.embeddingVersion),
-          r.policyType = coalesce($policyType, r.policyType),
-          r.effectiveFrom = coalesce($effectiveFrom, r.effectiveFrom),
-          r.expiresAt = CASE WHEN $expiresAt_is_set THEN $expiresAt ELSE r.expiresAt END,
-          r.relationshipType = coalesce($relationshipType, r.relationshipType),
-          r.docLocale = coalesce($docLocale, r.docLocale),
-          r.tags = CASE WHEN $tags IS NULL THEN r.tags ELSE $tags END,
-          r.stakeholders = CASE WHEN $stakeholders IS NULL THEN r.stakeholders ELSE $stakeholders END,
-          r.metricId = $metricId,
-          r.scenario = $scenario,
-          r.environment = $environment,
-          r.unit = $unit,
-          r.baselineValue = $baselineValue,
-          r.currentValue = $currentValue,
-          r.delta = $delta,
-          r.percentChange = $percentChange,
-          r.sampleSize = $sampleSize,
-          r.confidenceInterval = $confidenceInterval,
-          r.trend = $trend,
-          r.severity = $severity,
-          r.riskScore = $riskScore,
-          r.runId = $runId,
-          r.policyId = coalesce($policyId, r.policyId),
-          r.detectedAt = $detectedAt,
-          r.resolvedAt = CASE WHEN $resolvedAt_is_set THEN $resolvedAt ELSE r.resolvedAt END,
-          r.metricsHistory = $metricsHistory,
-          r.metrics = $metrics
-        `;
-
-        // Use the same parameter mapping as single relationship creation
-        const params = {
-          fromId: row.fromId,
-          toId: row.toId,
-          id: row.id,
-          created: row.created,
-          lastModified: row.lastModified,
-          version: row.version,
-          metadata: row.metadata,
-          occurrencesScan: row.occurrencesScan,
-          confidence: row.confidence,
-          inferred: row.inferred,
-          resolved: row.resolved,
-          source: row.source,
-          context: row.context,
-          kind: row.kind,
-          resolution: row.resolution,
-          scope: row.scope,
-          arity: row.arity,
-          awaited: row.awaited,
-          operator: row.operator,
-          importDepth: row.importDepth,
-          usedTypeChecker: row.usedTypeChecker,
-          isExported: row.isExported,
-          accessPath: row.accessPath,
-          callee: row.callee,
-          paramName: row.paramName,
-          importAlias: row.importAlias,
-          importType: row.importType,
-          isNamespace: row.isNamespace,
-          isReExport: row.isReExport,
-          reExportTarget: row.reExportTarget,
-          language: row.language,
-          symbolKind: row.symbolKind,
-          modulePath: row.modulePath,
-          resolutionState: row.resolutionState,
-          receiverType: row.receiverType,
-          dynamicDispatch: row.dynamicDispatch,
-          overloadIndex: row.overloadIndex,
-          genericArguments: row.genericArguments,
-          siteHash: row.siteHash,
-          loc_path: row.loc_path,
-          loc_line: row.loc_line,
-          loc_col: row.loc_col,
-          evidence: row.evidence,
-          locations: row.locations,
-          siteId: row.siteId,
-          sites: row.sites,
-          dataFlowId: row.dataFlowId,
-          why: row.why,
-          to_ref_kind: row.to_ref_kind,
-          to_ref_file: row.to_ref_file,
-          to_ref_symbol: row.to_ref_symbol,
-          to_ref_name: row.to_ref_name,
-          from_ref_kind: row.from_ref_kind,
-          from_ref_file: row.from_ref_file,
-          from_ref_symbol: row.from_ref_symbol,
-          from_ref_name: row.from_ref_name,
-          ambiguous: row.ambiguous,
-          candidateCount: row.candidateCount,
-          isMethod: row.isMethod,
-          firstSeenAt: row.firstSeenAt,
-          lastSeenAt: row.lastSeenAt,
-          sectionAnchor: row.sectionAnchor,
-          sectionTitle: row.sectionTitle,
-          summary: row.summary,
-          docVersion: row.docVersion,
-          docHash: row.docHash,
-          documentationQuality: row.documentationQuality,
-          coverageScope: row.coverageScope,
-          domainPath: row.domainPath,
-          taxonomyVersion: row.taxonomyVersion,
-          updatedFromDocAt: row.updatedFromDocAt,
-          lastValidated: row.lastValidated,
-          strength: row.strength,
-          similarityScore: row.similarityScore,
-          clusterVersion: row.clusterVersion,
-          role: row.role,
-          docIntent: row.docIntent,
-          embeddingVersion: row.embeddingVersion,
-          policyType: row.policyType,
-          effectiveFrom: row.effectiveFrom,
-          expiresAt: row.expiresAt,
-          expiresAt_is_set: row.expiresAt_is_set,
-          relationshipType: row.relationshipType,
-          docLocale: row.docLocale,
-          tags: row.tags,
-          stakeholders: row.stakeholders,
-          metricId: row.metricId,
-          scenario: row.scenario,
-          environment: row.environment,
-          unit: row.unit,
-          baselineValue: row.baselineValue,
-          currentValue: row.currentValue,
-          delta: row.delta,
-          percentChange: row.percentChange,
-          sampleSize: row.sampleSize,
-          confidenceInterval: row.confidenceInterval,
-          trend: row.trend,
-          severity: row.severity,
-          riskScore: row.riskScore,
-          runId: row.runId,
-          policyId: row.policyId,
-          detectedAt: row.detectedAt,
-          resolvedAt: row.resolvedAt,
-          resolvedAt_is_set: row.resolvedAt_is_set,
-          metricsHistory: row.metricsHistory,
-          metrics: row.metrics,
-        };
-
-        const debugRow = { ...params };
-        params.rows = [debugRow];
-
-        await this.graphDbQuery(query, params);
-      }
+      const query = `
+        UNWIND $rows AS row
+        MATCH (a {id: row.fromId}), (b {id: row.toId})
+        MERGE (a)-[r:${type} { id: row.id }]->(b)
+        ON CREATE SET r.created = row.created, r.version = row.version, r.metadata = row.metadata
+        SET r.lastModified = row.lastModified,
+            r.metadata = row.metadata,
+            r.occurrencesScan = row.occurrencesScan,
+            r.occurrencesTotal = coalesce(r.occurrencesTotal, 0) + coalesce(row.occurrencesScan, 0),
+            r.confidence = row.confidence,
+            r.inferred = row.inferred,
+            r.resolved = row.resolved,
+            r.source = row.source,
+            r.context = row.context,
+            r.kind = row.kind,
+            r.resolution = row.resolution,
+            r.scope = row.scope,
+            r.arity = row.arity,
+            r.awaited = row.awaited,
+            r.operator = row.operator,
+            r.importDepth = row.importDepth,
+            r.usedTypeChecker = row.usedTypeChecker,
+            r.isExported = row.isExported,
+            r.accessPath = row.accessPath,
+            r.callee = row.callee,
+            r.paramName = row.paramName,
+            r.importAlias = row.importAlias,
+            r.receiverType = row.receiverType,
+            r.dynamicDispatch = row.dynamicDispatch,
+            r.overloadIndex = row.overloadIndex,
+            r.genericArguments = row.genericArguments,
+            r.siteHash = row.siteHash,
+            r.location_path = row.loc_path,
+            r.location_line = row.loc_line,
+            r.location_col = row.loc_col,
+            r.evidence = row.evidence,
+            r.locations = row.locations,
+            r.siteId = row.siteId,
+            r.sites = row.sites,
+            r.dataFlowId = row.dataFlowId,
+            r.why = row.why,
+            r.to_ref_kind = row.to_ref_kind,
+            r.to_ref_file = row.to_ref_file,
+            r.to_ref_symbol = row.to_ref_symbol,
+            r.to_ref_name = row.to_ref_name,
+            r.from_ref_kind = row.from_ref_kind,
+            r.from_ref_file = row.from_ref_file,
+            r.from_ref_symbol = row.from_ref_symbol,
+            r.from_ref_name = row.from_ref_name,
+            r.ambiguous = row.ambiguous,
+            r.candidateCount = row.candidateCount,
+            r.isMethod = row.isMethod,
+            r.active = true,
+            r.firstSeenAt = coalesce(r.firstSeenAt, row.firstSeenAt),
+            r.lastSeenAt = row.lastSeenAt,
+            r.validFrom = coalesce(r.validFrom, row.firstSeenAt),
+            r.sectionAnchor = row.sectionAnchor,
+            r.sectionTitle = row.sectionTitle,
+            r.summary = row.summary,
+            r.docVersion = row.docVersion,
+            r.docHash = row.docHash,
+            r.documentationQuality = row.documentationQuality,
+            r.coverageScope = row.coverageScope,
+            r.domainPath = row.domainPath,
+            r.taxonomyVersion = row.taxonomyVersion,
+            r.updatedFromDocAt = row.updatedFromDocAt,
+            r.lastValidated = row.lastValidated,
+            r.strength = coalesce(row.strength, r.strength),
+            r.similarityScore = coalesce(row.similarityScore, r.similarityScore),
+            r.clusterVersion = coalesce(row.clusterVersion, r.clusterVersion),
+            r.role = coalesce(row.role, r.role),
+            r.docIntent = row.docIntent,
+            r.embeddingVersion = coalesce(row.embeddingVersion, r.embeddingVersion),
+            r.policyType = coalesce(row.policyType, r.policyType),
+            r.effectiveFrom = coalesce(row.effectiveFrom, r.effectiveFrom),
+            r.expiresAt = CASE WHEN row.expiresAt_is_set THEN row.expiresAt ELSE r.expiresAt END,
+            r.relationshipType = coalesce(row.relationshipType, r.relationshipType),
+            r.docLocale = coalesce(row.docLocale, r.docLocale),
+            r.tags = CASE WHEN row.tags IS NULL THEN r.tags ELSE row.tags END,
+            r.stakeholders = CASE WHEN row.stakeholders IS NULL THEN r.stakeholders ELSE row.stakeholders END
+      `;
+      await this.db.falkordbQuery(query, { rows });
 
       // Batched unification: only one unifier call per unique (fromId,type,file,symbol)
       try {
@@ -8579,10 +5453,6 @@ export class KnowledgeGraphService extends EventEmitter {
         }
       } catch {}
     }
-
-    if (!this._indexesEnsured) {
-      this.bootstrapIndicesOnce().catch(() => undefined);
-    }
   }
 
   // Phase 1+: grouped unifier to reduce duplicate scans per batch
@@ -8649,7 +5519,7 @@ export class KnowledgeGraphService extends EventEmitter {
     }>
   > {
     try {
-      const rows = await this.graphDbQuery(
+      const rows = await this.db.falkordbQuery(
         `MATCH (n:edge_evidence) WHERE n.edgeId = $edgeId
          RETURN n.id AS id, n.edgeId AS edgeId, n.source AS source, n.confidence AS confidence,
                 n.path AS path, n.line AS line, n.column AS column, n.note AS note,
@@ -8679,7 +5549,7 @@ export class KnowledgeGraphService extends EventEmitter {
     }>
   > {
     try {
-      const rows = await this.graphDbQuery(
+      const rows = await this.db.falkordbQuery(
         `MATCH (s:edge_site) WHERE s.edgeId = $edgeId
          RETURN s.id AS id, s.edgeId AS edgeId, s.siteId AS siteId, s.path AS path, s.line AS line, s.column AS column, s.accessPath AS accessPath, s.updatedAt AS updatedAt
          ORDER BY s.updatedAt DESC LIMIT $limit`,
@@ -8708,7 +5578,7 @@ export class KnowledgeGraphService extends EventEmitter {
     }>
   > {
     try {
-      const rows = await this.graphDbQuery(
+      const rows = await this.db.falkordbQuery(
         `MATCH (c:edge_candidate) WHERE c.edgeId = $edgeId
          RETURN c.id AS id, c.edgeId AS edgeId, c.candidateId AS candidateId, c.name AS name, c.path AS path,
                 c.resolver AS resolver, c.score AS score, c.rank AS rank, c.updatedAt AS updatedAt
@@ -8798,38 +5668,6 @@ export class KnowledgeGraphService extends EventEmitter {
   }
 
   /**
-   * Reset all in-memory caches maintained by the service.
-   */
-  resetCaches(): void {
-    this.entityCache.clear();
-    this.searchCache.clear();
-    console.log("🧹 KnowledgeGraphService caches cleared");
-  }
-
-  /**
-   * Invalidate cache entries whose key (entity id or search payload) matches a prefix.
-   */
-  invalidateCachesByPrefix(prefix: string): void {
-    if (!prefix) {
-      return;
-    }
-    const normalizedPrefix = this.namespaceId(prefix);
-    const matcher = (rawKey: string): boolean => {
-      try {
-        const parsed = JSON.parse(rawKey);
-        if (typeof parsed === "string") {
-          return parsed.startsWith(normalizedPrefix);
-        }
-      } catch {
-        // Ignore JSON parse errors and fall through
-      }
-      return rawKey.includes(normalizedPrefix);
-    };
-    this.entityCache.invalidate(matcher);
-    this.searchCache.invalidate(matcher);
-  }
-
-  /**
    * Clear search cache
    */
   private clearSearchCache(): void {
@@ -8841,39 +5679,13 @@ export class KnowledgeGraphService extends EventEmitter {
    * Invalidate cache entries related to an entity
    */
   private invalidateEntityCache(entityId: string): void {
-    const resolvedId = this.namespaceId(entityId);
     // Remove the specific entity from cache
-    this.entityCache.invalidateKey(resolvedId);
+    this.entityCache.invalidateKey(entityId);
 
     // Also clear search cache as searches might be affected
     // This could be optimized to only clear relevant searches
     this.clearSearchCache();
-    console.log(`🔄 Invalidated cache for entity: ${resolvedId}`);
-  }
-
-  async shutdown(options: { resetCaches?: boolean; preserveListeners?: boolean } = {}): Promise<void> {
-    if (options.resetCaches !== false) {
-      this.resetCaches();
-    }
-    if (!options.preserveListeners) {
-      this.removeAllListeners();
-    }
-  }
-
-  static async withScopedInstance<T>(
-    db: DatabaseService,
-    options: { namespace?: GraphNamespaceConfig; initialize?: boolean } = {},
-    handler: (service: KnowledgeGraphService) => Promise<T>
-  ): Promise<T> {
-    const service = new KnowledgeGraphService(db, options.namespace);
-    try {
-      if (options.initialize !== false) {
-        await service.initialize();
-      }
-      return await handler(service);
-    } finally {
-      await service.shutdown();
-    }
+    console.log(`🔄 Invalidated cache for entity: ${entityId}`);
   }
 
   /**
@@ -8898,7 +5710,7 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN n
       LIMIT $limit
     `;
-    const result = await this.graphDbQuery(query, {
+    const result = await this.db.falkordbQuery(query, {
       type: "symbol",
       name,
       limit,
@@ -8920,7 +5732,7 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN n
       LIMIT $limit
     `;
-    const result = await this.graphDbQuery(query, {
+    const result = await this.db.falkordbQuery(query, {
       type: "symbol",
       name,
       kind,
@@ -8944,7 +5756,7 @@ export class KnowledgeGraphService extends EventEmitter {
     `;
     // Symbol entities store path as `${filePath}:${name}`
     const compositePath = `${filePath}:${name}`;
-    const result = await this.graphDbQuery(query, {
+    const result = await this.db.falkordbQuery(query, {
       type: "symbol",
       path: compositePath,
     });
@@ -8972,7 +5784,7 @@ export class KnowledgeGraphService extends EventEmitter {
         LIMIT $limit
       `;
       // Fetch more and rank in memory by directory distance
-      const raw = await this.graphDbQuery(query, {
+      const raw = await this.db.falkordbQuery(query, {
         type: "symbol",
         name,
         dirPrefix,
@@ -9004,7 +5816,7 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN n
       LIMIT 1
     `;
-    const result = await this.graphDbQuery(query, { type: "file", path });
+    const result = await this.db.falkordbQuery(query, { type: "file", path });
     return result[0] ? this.parseEntityFromGraph(result[0]) : null;
   }
 
@@ -9041,7 +5853,7 @@ export class KnowledgeGraphService extends EventEmitter {
         };
       }
       const searchResult = await this.db.qdrant.search(
-        this.qdrantCollection("code"),
+        "code_embeddings",
         qdrantOptions
       );
 
@@ -9317,13 +6129,13 @@ export class KnowledgeGraphService extends EventEmitter {
     if (request.limit) params.limit = request.limit;
 
     try {
-      const result = await this.graphDbQuery(fullQuery, params);
+      const result = await this.db.falkordbQuery(fullQuery, params);
       let entities = result.map((row: any) => this.parseEntityFromGraph(row));
       // Optional checkpoint filter: restrict to checkpoint members
       const checkpointId = request.filters?.checkpointId;
       if (checkpointId) {
         try {
-          const rows = await this.graphDbQuery(
+          const rows = await this.db.falkordbQuery(
             `MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n) RETURN n.id AS id`,
             { id: checkpointId }
           );
@@ -9358,7 +6170,7 @@ export class KnowledgeGraphService extends EventEmitter {
           `;
 
           try {
-            const result = await this.graphDbQuery(
+            const result = await this.db.falkordbQuery(
               simpleFullQuery,
               simpleParams
             );
@@ -9368,7 +6180,7 @@ export class KnowledgeGraphService extends EventEmitter {
             const checkpointId = request.filters?.checkpointId;
             if (checkpointId) {
               try {
-                const rows = await this.graphDbQuery(
+                const rows = await this.db.falkordbQuery(
                   `MATCH (c:checkpoint { id: $id })-[:CHECKPOINT_INCLUDES]->(n) RETURN n.id AS id`,
                   { id: checkpointId }
                 );
@@ -9621,103 +6433,40 @@ export class KnowledgeGraphService extends EventEmitter {
   }
 
   private async getEntitiesByIds(ids: string[]): Promise<Map<string, Entity>> {
-    const normalizedIds = ids
-      .map((id) => this.resolveOptionalEntityId(id))
-      .filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+    const uniqueIds = Array.from(
+      new Set(
+        ids.filter(
+          (id): id is string => typeof id === "string" && id.trim().length > 0
+        )
+      )
+    );
 
-    if (normalizedIds.length === 0) {
+    if (uniqueIds.length === 0) {
       return new Map();
     }
 
-    const uniqueIds: string[] = [];
-    const seen = new Set<string>();
-    for (const id of normalizedIds) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      uniqueIds.push(id);
-    }
-
-    const entities = new Map<string, Entity>();
-    const missing: string[] = [];
-
-    for (const id of uniqueIds) {
-      const cached = this.entityCache.get(id);
-      if (cached) {
-        entities.set(id, cached);
-      } else {
-        missing.push(id);
-      }
-    }
-
-    if (missing.length > 0) {
-      const chunkSize = 200;
-      for (let i = 0; i < missing.length; i += chunkSize) {
-        const chunk = missing.slice(i, i + chunkSize);
+    const pairs = await Promise.all(
+      uniqueIds.map(async (id) => {
         try {
-          const rows = await this.graphDbQuery(
-            `
-              UNWIND $ids AS requestedId
-              MATCH (n { id: requestedId })
-              RETURN requestedId AS id, n
-            `,
-            { ids: chunk }
-          );
-
-          for (const row of rows || []) {
-            try {
-              const graphNode = row?.n ?? row?.node ?? row;
-              const entity = this.parseEntityFromGraph(graphNode);
-              if (!entity?.id) {
-                continue;
-              }
-              const resolvedId =
-                typeof row?.id === "string"
-                  ? this.resolveOptionalEntityId(row.id) ?? row.id
-                  : this.resolveOptionalEntityId(entity.id) ?? entity.id;
-              if (!resolvedId) {
-                continue;
-              }
-              this.entityCache.set(resolvedId, entity);
-              entities.set(resolvedId, entity);
-            } catch (error) {
-              console.error(
-                "[KnowledgeGraphService] Failed to parse entity from bulk fetch:",
-                error
-              );
-            }
-          }
+          const entity = await this.getEntity(id);
+          return entity ? ([id, entity] as const) : null;
         } catch (error) {
           console.error(
-            "[KnowledgeGraphService] Bulk entity fetch failed:",
+            `[ImpactAnalysis] Failed to fetch entity ${id}:`,
             error
           );
-
-          const fallbackResults = await Promise.all(
-            chunk.map(async (id) => {
-              try {
-                const entity = await this.getEntity(id);
-                return entity ? ([id, entity] as const) : null;
-              } catch (err) {
-                console.error(
-                  `[KnowledgeGraphService] Failed to fetch entity ${id} in fallback:`,
-                  err
-                );
-                return null;
-              }
-            })
-          );
-
-          for (const entry of fallbackResults) {
-            if (!entry) continue;
-            const [id, entity] = entry;
-            this.entityCache.set(id, entity);
-            entities.set(id, entity);
-          }
+          return null;
         }
-      }
-    }
+      })
+    );
 
-    return entities;
+    const map = new Map<string, Entity>();
+    for (const pair of pairs) {
+      if (!pair) continue;
+      const [id, entity] = pair;
+      map.set(id, entity);
+    }
+    return map;
   }
 
   private determineDirectSeverity(
@@ -10740,7 +7489,7 @@ export class KnowledgeGraphService extends EventEmitter {
       params.endId = query.endEntityId;
     }
 
-    const result = await this.graphDbQuery(cypherQuery, params);
+    const result = await this.db.falkordbQuery(cypherQuery, params);
     // Expect rows like: { nodeIds: ["id1","id2",...] }
     return result.map((row: any) => {
       // Ensure we always return an array of node IDs
@@ -10776,7 +7525,7 @@ export class KnowledgeGraphService extends EventEmitter {
       `;
     }
 
-    const result = await this.graphDbQuery(cypherQuery, params);
+    const result = await this.db.falkordbQuery(cypherQuery, params);
     return result.map((row: any) => this.parseEntityFromGraph(row));
   }
 
@@ -10889,30 +7638,26 @@ export class KnowledgeGraphService extends EventEmitter {
   }
 
   private async deleteEmbedding(entityId: string): Promise<void> {
-    const resolvedId = this.resolveEntityIdInput(entityId);
     // Use the same filter for both collections to delete by entityId in payload
     const filter = {
       filter: {
         must: [
           {
             key: "entityId",
-            match: { value: resolvedId },
+            match: { value: entityId },
           },
         ],
       },
     };
 
     try {
-      await this.db.qdrant.delete(this.qdrantCollection("code"), filter);
+      await this.db.qdrant.delete("code_embeddings", filter);
     } catch (error) {
       // Collection might not exist or no matching points
     }
 
     try {
-      await this.db.qdrant.delete(
-        this.qdrantCollection("documentation"),
-        filter
-      );
+      await this.db.qdrant.delete("documentation_embeddings", filter);
     } catch (error) {
       // Collection might not exist or no matching points
     }
@@ -10931,7 +7676,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
   // Helper methods
   private getEntityLabels(entity: Entity): string[] {
-    const labels = ["Entity", entity.type];
+    const labels = [entity.type];
 
     // Add specific labels based on entity type
     if (entity.type === "file") {
@@ -10944,226 +7689,12 @@ export class KnowledgeGraphService extends EventEmitter {
   }
 
   private sanitizeProperties(entity: Entity): Record<string, any> {
-    const props: Record<string, any> = {};
-
-    // Copy all properties with proper type conversion
-    for (const [key, value] of Object.entries(entity)) {
-      if (key === "metadata") {
-        // Store metadata as JSON string
-        if (value && typeof value === "object") {
-          props[key] = JSON.stringify(value);
-        }
-        continue;
-      }
-
-      if (value instanceof Date) {
-        // Convert dates to ISO strings
-        props[key] = value.toISOString();
-      } else if (value === null || value === undefined) {
-        // Skip null/undefined values
-        continue;
-      } else if (typeof value === "object" && value !== null) {
-        // Convert complex objects to JSON strings
-        try {
-          props[key] = JSON.stringify(value);
-        } catch {
-          // Skip objects that can't be serialized
-          continue;
-        }
-      } else {
-        // Copy primitive values directly
-        props[key] = value;
-      }
+    const props = { ...entity };
+    // Remove complex objects that can't be stored in graph database
+    if ("metadata" in props) {
+      delete props.metadata;
     }
-
     return props;
-  }
-
-  private hydrateEntityProperties(properties: Record<string, any>): Entity {
-    if (!properties || typeof properties !== "object") {
-      return properties as Entity;
-    }
-
-    const dateFields = [
-      "lastModified",
-      "created",
-      "lastIndexed",
-      "lastAnalyzed",
-      "lastValidated",
-      "snapshotCreated",
-      "snapshotTakenAt",
-      "updated",
-      "updatedAt",
-      "firstSeenAt",
-      "lastSeenAt",
-    ];
-    for (const field of dateFields) {
-      const value = (properties as any)[field];
-      if (typeof value === "string") {
-        const parsedDate = new Date(value);
-        if (!Number.isNaN(parsedDate.valueOf())) {
-          (properties as any)[field] = parsedDate;
-        }
-      }
-    }
-
-    const jsonFields = [
-      "metadata",
-      "dependencies",
-      "businessDomains",
-      "stakeholders",
-      "technologies",
-      "memberEntities",
-      "extractedFrom",
-      "keyProcesses",
-      "coverage",
-      "executionHistory",
-      "performanceMetrics",
-    ];
-    for (const field of jsonFields) {
-      const value = (properties as any)[field];
-      if (typeof value === "string") {
-        const trimmed = value.trim();
-        if (
-          (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-          (trimmed.startsWith("[") && trimmed.endsWith("]"))
-        ) {
-          try {
-            (properties as any)[field] = JSON.parse(trimmed);
-          } catch {
-            // Keep original string if parsing fails
-          }
-        }
-      }
-    }
-
-    const numericFields = ["size", "lines", "version"];
-    for (const field of numericFields) {
-      const value = (properties as any)[field];
-      if (typeof value === "string") {
-        const parsed = Number(value);
-        if (!Number.isNaN(parsed)) {
-          (properties as any)[field] = parsed;
-        }
-      }
-    }
-
-    const coerceNumber = (value: unknown): number | undefined => {
-      if (typeof value === "number") return value;
-      if (typeof value === "string") {
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed : undefined;
-      }
-      return undefined;
-    };
-
-    const coerceDate = (value: unknown): Date | undefined => {
-      if (value instanceof Date) return value;
-      if (typeof value === "string") {
-        const parsed = new Date(value);
-        return Number.isNaN(parsed.valueOf()) ? undefined : parsed;
-      }
-      return undefined;
-    };
-
-    const coverage = (properties as any).coverage;
-    if (coverage && typeof coverage === "object") {
-      for (const key of ["lines", "branches", "functions", "statements"]) {
-        const coerced = coerceNumber((coverage as any)[key]);
-        if (coerced !== undefined) (coverage as any)[key] = coerced;
-      }
-    }
-
-    const executionHistory = (properties as any).executionHistory;
-    if (Array.isArray(executionHistory)) {
-      (properties as any).executionHistory = executionHistory.map((entry: any) => {
-        if (!entry || typeof entry !== "object") return entry;
-        const normalized: any = { ...entry };
-        const ts = coerceDate(normalized.timestamp);
-        if (ts) normalized.timestamp = ts;
-        const duration = coerceNumber(normalized.duration);
-        if (duration !== undefined) normalized.duration = duration;
-        if (normalized.coverage && typeof normalized.coverage === "object") {
-          for (const key of ["lines", "branches", "functions", "statements"]) {
-            const coerced = coerceNumber(normalized.coverage[key]);
-            if (coerced !== undefined) normalized.coverage[key] = coerced;
-          }
-        }
-        return normalized;
-      });
-    }
-
-    const perfMetrics = (properties as any).performanceMetrics;
-    if (perfMetrics && typeof perfMetrics === "object") {
-      const numericPerfFields = [
-        "averageExecutionTime",
-        "p95ExecutionTime",
-        "successRate",
-        "baselineExecutionTime",
-        "minExecutionTime",
-        "maxExecutionTime",
-      ];
-      for (const field of numericPerfFields) {
-        const coerced = coerceNumber(perfMetrics[field]);
-        if (coerced !== undefined) perfMetrics[field] = coerced;
-      }
-      if (Array.isArray(perfMetrics.benchmarkComparisons)) {
-        perfMetrics.benchmarkComparisons = perfMetrics.benchmarkComparisons.map(
-          (benchmark: any) => {
-            if (!benchmark || typeof benchmark !== "object") return benchmark;
-            const normalized: any = { ...benchmark };
-            const threshold = coerceNumber(normalized.threshold);
-            if (threshold !== undefined) normalized.threshold = threshold;
-            const value = coerceNumber(normalized.value);
-            if (value !== undefined) normalized.value = value;
-            return normalized;
-          }
-        );
-      }
-      if (Array.isArray(perfMetrics.historicalData)) {
-        perfMetrics.historicalData = perfMetrics.historicalData.map((entry: any) => {
-          if (!entry || typeof entry !== "object") return entry;
-          const normalized: any = { ...entry };
-          const ts =
-            coerceDate(normalized.timestamp) ||
-            coerceDate(normalized.time) ||
-            coerceDate(normalized.recordedAt);
-          if (ts) normalized.timestamp = ts;
-          const execTime = coerceNumber(normalized.executionTime);
-          if (execTime !== undefined) normalized.executionTime = execTime;
-          const avgExec = coerceNumber(normalized.averageExecutionTime);
-          if (avgExec !== undefined) normalized.averageExecutionTime = avgExec;
-          else if (
-            normalized.averageExecutionTime === undefined &&
-            execTime !== undefined
-          ) {
-            normalized.averageExecutionTime = execTime;
-          }
-          const p95Exec = coerceNumber(normalized.p95ExecutionTime);
-          if (p95Exec !== undefined) normalized.p95ExecutionTime = p95Exec;
-          const effectiveExec =
-            normalized.executionTime ??
-            normalized.averageExecutionTime ??
-            normalized.p95ExecutionTime;
-          if (
-            normalized.executionTime === undefined &&
-            typeof effectiveExec === "number"
-          ) {
-            normalized.executionTime = effectiveExec;
-          }
-          const success = coerceNumber(normalized.successRate);
-          if (success !== undefined) normalized.successRate = success;
-          const coveragePct = coerceNumber(normalized.coveragePercentage);
-          if (coveragePct !== undefined) normalized.coveragePercentage = coveragePct;
-          if (normalized.runId != null && typeof normalized.runId !== "string") {
-            normalized.runId = String(normalized.runId);
-          }
-          return normalized;
-        });
-      }
-    }
-
-    return properties as Entity;
   }
 
   private parseEntityFromGraph(graphNode: any): Entity {
@@ -11214,19 +7745,114 @@ export class KnowledgeGraphService extends EventEmitter {
       const properties = toPropsFromPairs(graphNode.n);
 
       // Convert date strings back to Date objects
-      return this.hydrateEntityProperties(properties);
+      if (
+        properties.lastModified &&
+        typeof properties.lastModified === "string"
+      ) {
+        properties.lastModified = new Date(properties.lastModified);
+      }
+      if (properties.created && typeof properties.created === "string") {
+        properties.created = new Date(properties.created);
+      }
+
+      // Parse JSON strings back to their original types
+      const jsonFields = ["metadata", "dependencies"];
+      for (const field of jsonFields) {
+        if (properties[field] && typeof properties[field] === "string") {
+          try {
+            properties[field] = JSON.parse(properties[field]);
+          } catch (e) {
+            // If parsing fails, keep as string
+          }
+        }
+      }
+
+      // Convert numeric fields from strings back to numbers
+      const numericFields = ["size", "lines", "version"];
+      for (const field of numericFields) {
+        if (properties[field] && typeof properties[field] === "string") {
+          const parsed = parseFloat(properties[field]);
+          if (!isNaN(parsed)) {
+            properties[field] = parsed;
+          }
+        }
+      }
+
+      return properties as Entity;
     }
 
     // Case 2: explicit 'connected' alias
     if (graphNode && graphNode.connected && isPairArray(graphNode.connected)) {
       const properties = toPropsFromPairs(graphNode.connected);
-      return this.hydrateEntityProperties(properties);
+
+      if (
+        properties.lastModified &&
+        typeof properties.lastModified === "string"
+      ) {
+        properties.lastModified = new Date(properties.lastModified);
+      }
+      if (properties.created && typeof properties.created === "string") {
+        properties.created = new Date(properties.created);
+      }
+
+      const jsonFields = ["metadata", "dependencies"];
+      for (const field of jsonFields) {
+        if (properties[field] && typeof properties[field] === "string") {
+          try {
+            properties[field] = JSON.parse(properties[field]);
+          } catch {}
+        }
+      }
+
+      // Convert numeric fields from strings back to numbers
+      const numericFields = ["size", "lines", "version"];
+      for (const field of numericFields) {
+        if (properties[field] && typeof properties[field] === "string") {
+          const parsed = parseFloat(properties[field]);
+          if (!isNaN(parsed)) {
+            properties[field] = parsed;
+          }
+        }
+      }
+
+      return properties as Entity;
     }
 
     // Case 3: node returned directly as array-of-pairs
     if (isPairArray(graphNode)) {
       const properties = toPropsFromPairs(graphNode);
-      return this.hydrateEntityProperties(properties);
+
+      if (
+        properties.lastModified &&
+        typeof properties.lastModified === "string"
+      ) {
+        properties.lastModified = new Date(properties.lastModified);
+      }
+      if (properties.created && typeof properties.created === "string") {
+        properties.created = new Date(properties.created);
+      }
+
+      const jsonFields = ["metadata", "dependencies"];
+      for (const field of jsonFields) {
+        if (properties[field] && typeof properties[field] === "string") {
+          try {
+            properties[field] = JSON.parse(properties[field]);
+          } catch {}
+        }
+      }
+
+      // Convert numeric fields from strings back to numbers
+      const numericFields = ["size", "lines", "version"];
+      for (const field of numericFields) {
+        if (properties[field] && typeof properties[field] === "string") {
+          const parsed = parseFloat(properties[field]);
+          if (!isNaN(parsed)) {
+            properties[field] = parsed;
+          }
+        }
+      }
+
+      return properties as Entity;
     }
 
     // Case 4: already an object with id
@@ -11235,11 +7861,11 @@ export class KnowledgeGraphService extends EventEmitter {
       typeof graphNode === "object" &&
       typeof graphNode.id === "string"
     ) {
-      return this.hydrateEntityProperties({ ...(graphNode as any) });
+      return graphNode as Entity;
     }
 
     // Fallback for other formats
-    return this.hydrateEntityProperties(graphNode as Record<string, any>);
+    return graphNode as Entity;
   }
 
   private parseRelationshipFromGraph(graphResult: any): GraphRelationship {
@@ -11322,35 +7948,6 @@ export class KnowledgeGraphService extends EventEmitter {
               (properties as any).locations = JSON.parse(locs);
             } catch {}
           }
-          const conf = (properties as any).confidenceInterval;
-          if (typeof conf === "string") {
-            try {
-              (properties as any).confidenceInterval = JSON.parse(conf);
-            } catch {}
-          }
-          const metricsHistory = (properties as any).metricsHistory;
-          if (typeof metricsHistory === "string") {
-            try {
-              const parsed = JSON.parse(metricsHistory);
-              if (Array.isArray(parsed)) {
-                (properties as any).metricsHistory = parsed.map((entry: any) => {
-                  if (entry && typeof entry === "object" && entry.timestamp) {
-                    const ts = new Date(entry.timestamp);
-                    if (!Number.isNaN(ts.valueOf())) entry.timestamp = ts;
-                  }
-                  return entry;
-                });
-              }
-            } catch {}
-          } else if (Array.isArray(metricsHistory)) {
-            (properties as any).metricsHistory = metricsHistory.map((entry: any) => {
-              if (entry && typeof entry === "object" && entry.timestamp) {
-                const ts = new Date(entry.timestamp);
-                if (!Number.isNaN(ts.valueOf())) entry.timestamp = ts;
-              }
-              return entry;
-            });
-          }
           // genericArguments may be stored as JSON string
           const gargs = (properties as any).genericArguments;
           if (typeof gargs === "string") {
@@ -11379,33 +7976,14 @@ export class KnowledgeGraphService extends EventEmitter {
               );
             } catch {}
           }
-          const detectedAtRaw = (properties as any).detectedAt;
-          if (typeof detectedAtRaw === "string") {
-            const detectedAt = new Date(detectedAtRaw);
-            if (!Number.isNaN(detectedAt.valueOf())) {
-              (properties as any).detectedAt = detectedAt;
-            }
-          }
-          const resolvedAtRaw = (properties as any).resolvedAt;
-          if (typeof resolvedAtRaw === "string") {
-            const resolvedAt = new Date(resolvedAtRaw);
-            if (!Number.isNaN(resolvedAt.valueOf())) {
-              (properties as any).resolvedAt = resolvedAt;
-            }
-          }
         } catch {}
 
-        // Apply normalization when parsing from database to ensure consistency
-        const normalized = this.normalizeRelationship(
-          properties as GraphRelationship
-        );
-        return normalized;
+        return properties as GraphRelationship;
       }
     }
 
-    // Fallback to original format - also normalize
-    const fallback = graphResult.r as GraphRelationship;
-    return this.normalizeRelationship(fallback);
+    // Fallback to original format
+    return graphResult.r as GraphRelationship;
   }
 
   private getEntityContentForEmbedding(entity: Entity): string {
@@ -11414,8 +7992,8 @@ export class KnowledgeGraphService extends EventEmitter {
 
   private getEmbeddingCollection(entity: Entity): string {
     return entity.type === "documentation"
-      ? this.qdrantCollection("documentation")
-      : this.qdrantCollection("code");
+      ? "documentation_embeddings"
+      : "code_embeddings";
   }
 
   private getEntitySignature(entity: Entity): string {
@@ -11438,7 +8016,6 @@ export class KnowledgeGraphService extends EventEmitter {
   async listEntities(
     options: {
       type?: string;
-      kind?: string;
       language?: string;
       path?: string;
       tags?: string[];
@@ -11446,29 +8023,16 @@ export class KnowledgeGraphService extends EventEmitter {
       offset?: number;
     } = {}
   ): Promise<{ entities: Entity[]; total: number }> {
-    const {
-      type,
-      kind,
-      language,
-      path,
-      tags,
-      limit = 50,
-      offset = 0,
-    } = options;
+    const { type, language, path, tags, limit = 50, offset = 0 } = options;
 
     let query = "MATCH (n)";
     const whereClause: string[] = [];
-    const params: Record<string, unknown> = {};
+    const params: any = {};
 
     // Add type filter
     if (type) {
       whereClause.push("n.type = $type");
       params.type = type;
-    }
-
-    if (kind) {
-      whereClause.push("n.kind = $kind");
-      params.kind = kind;
     }
 
     // Add language filter
@@ -11500,7 +8064,7 @@ export class KnowledgeGraphService extends EventEmitter {
     params.offset = offset;
     params.limit = limit;
 
-    const result = await this.graphDbQuery(fullQuery, params);
+    const result = await this.db.falkordbQuery(fullQuery, params);
     const entities = result.map((row: any) => this.parseEntityFromGraph(row));
 
     // Get total count
@@ -11510,7 +8074,7 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN count(n) as total
     `;
 
-    const countResult = await this.graphDbQuery(countQuery, params);
+    const countResult = await this.db.falkordbQuery(countQuery, params);
     const total = countResult[0]?.total || 0;
 
     return { entities, total };
@@ -11540,7 +8104,7 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN n
     `;
 
-    const rows = await this.graphDbQuery(query, {
+    const rows = await this.db.falkordbQuery(query, {
       filePath: normalized,
       fileId,
       symbolPrefix,
@@ -11611,7 +8175,7 @@ export class KnowledgeGraphService extends EventEmitter {
     params.offset = offset;
     params.limit = limit;
 
-    const result = await this.graphDbQuery(fullQuery, params);
+    const result = await this.db.falkordbQuery(fullQuery, params);
     const relationships = result.map((row: any) => {
       const relationship = this.parseRelationshipFromGraph(row);
       return {
@@ -11628,577 +8192,10 @@ export class KnowledgeGraphService extends EventEmitter {
       RETURN count(r) as total
     `;
 
-    const countResult = await this.graphDbQuery(countQuery, params);
+    const countResult = await this.db.falkordbQuery(countQuery, params);
     const total = countResult[0]?.total || 0;
 
     return { relationships, total };
-  }
-
-  async listModuleChildren(
-    modulePath: string,
-    options: ModuleChildrenOptions = {}
-  ): Promise<ModuleChildrenResult> {
-    if (typeof modulePath !== "string") {
-      return { modulePath: "", children: [] };
-    }
-
-    const originalInput = modulePath.trim();
-    const normalizedPath = originalInput.replace(/\\/g, "/");
-    if (normalizedPath.length === 0) {
-      return { modulePath: "", children: [] };
-    }
-
-    const entityPrefix = this.namespaceScope.entityPrefix || "";
-    const rawIdCandidate = originalInput;
-    const prefixedIdCandidate = this.namespaceScope.applyEntityPrefix(
-      rawIdCandidate
-    );
-    const parentRows = await this.graphDbQuery(
-      `MATCH (n)
-       WHERE ($entityPrefix = "" OR n.id STARTS WITH $entityPrefix)
-         AND (
-           n.path = $path
-           OR n.modulePath = $path
-           OR n.id = $rawId
-           OR n.id = $prefixedId
-         )
-       RETURN n
-       ORDER BY
-         CASE
-           WHEN n.type IN ['module', 'directory', 'file'] THEN 0
-           WHEN n.type IN ['symbol'] THEN 1
-           ELSE 2
-         END,
-         CASE
-           WHEN n.id = $prefixedId THEN 0
-           WHEN n.id = $rawId THEN 1
-           WHEN n.path = $path THEN 2
-           ELSE 3
-         END
-       LIMIT 1`,
-      {
-        path: normalizedPath,
-        rawId: rawIdCandidate,
-        prefixedId: prefixedIdCandidate,
-        entityPrefix,
-      }
-    );
-
-    const parentEntity =
-      parentRows && parentRows[0]
-        ? this.parseEntityFromGraph(parentRows[0])
-        : null;
-    if (!parentEntity?.id) {
-      return { modulePath: normalizedPath, children: [] };
-    }
-
-    const includeFiles = options.includeFiles !== false;
-    const includeSymbols = options.includeSymbols !== false;
-    const limit = Math.min(Math.max(options.limit ?? 50, 1), 500);
-
-    const toStringList = (value?: string | string[]): string[] => {
-      if (!value) return [];
-      const raw = Array.isArray(value) ? value : [value];
-      const flattened = raw.flatMap((entry) =>
-        typeof entry === "string" ? entry.split(",") : []
-      );
-      return flattened
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0);
-    };
-
-    const languageFilters = toStringList(options.language).map((entry) =>
-      entry.toLowerCase()
-    );
-    const symbolKindFilters = toStringList(options.symbolKind).map((entry) =>
-      entry.toLowerCase()
-    );
-    const modulePathPrefixRaw =
-      typeof options.modulePathPrefix === "string"
-        ? options.modulePathPrefix.trim()
-        : undefined;
-    const modulePathPrefix =
-      modulePathPrefixRaw && modulePathPrefixRaw.length > 0
-        ? this.normalizeModulePathFilter(modulePathPrefixRaw)
-        : undefined;
-
-    const filters: string[] = [
-      "coalesce(r.active, true) = true",
-      "coalesce(child.active, true) = true",
-    ];
-    if (!includeFiles) filters.push("child.type <> 'file'");
-    if (!includeSymbols) filters.push("child.type <> 'symbol'");
-    if (languageFilters.length === 1) {
-      filters.push(
-        "(child.type IN ['module', 'directory']"
-          + " OR (r.language IS NOT NULL AND toLower(r.language) = $languageFilter)"
-          + " OR (toLower(coalesce(child.language, '')) = $languageFilter))"
-      );
-    } else if (languageFilters.length > 1) {
-      filters.push(
-        "(child.type IN ['module', 'directory']"
-          + " OR (r.language IS NOT NULL AND toLower(r.language) IN $languageFilterList)"
-          + " OR (toLower(coalesce(child.language, '')) IN $languageFilterList))"
-      );
-    }
-    if (symbolKindFilters.length === 1) {
-      filters.push(
-        "(child.type <> 'symbol' OR toLower(coalesce(child.kind, '')) = $symbolKindFilter)"
-      );
-    } else if (symbolKindFilters.length > 1) {
-      filters.push(
-        "(child.type <> 'symbol' OR toLower(coalesce(child.kind, '')) IN $symbolKindFilterList)"
-      );
-    }
-    if (modulePathPrefix) {
-      filters.push(
-        "coalesce(child.modulePath, child.path, '') STARTS WITH $modulePathPrefix"
-      );
-    }
-    const whereClause = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
-
-    const params: Record<string, any> = {
-      parentId: parentEntity.id,
-      limit,
-    };
-    if (languageFilters.length === 1) params.languageFilter = languageFilters[0];
-    if (languageFilters.length > 1) params.languageFilterList = languageFilters;
-    if (symbolKindFilters.length === 1)
-      params.symbolKindFilter = symbolKindFilters[0];
-    if (symbolKindFilters.length > 1)
-      params.symbolKindFilterList = symbolKindFilters;
-    if (modulePathPrefix) params.modulePathPrefix = modulePathPrefix;
-
-    const rows = await this.graphDbQuery(
-      `
-        MATCH (parent {id: $parentId})-[r:CONTAINS]->(child)
-        ${whereClause}
-        RETURN child, r
-        ORDER BY child.type, coalesce(child.name, child.id)
-        LIMIT $limit
-      `,
-      params
-    );
-
-    const children = (rows || []).map((row: any) => {
-      const entity = this.parseEntityFromGraph(row.child);
-      if (!entity?.id) {
-        return null;
-      }
-      const relationship = this.parseRelationshipFromGraph({
-        r: row.r,
-        fromId: parentEntity.id,
-        toId: entity.id,
-      });
-      return { entity, relationship } as StructuralNavigationEntry;
-    }).filter(Boolean) as StructuralNavigationEntry[];
-
-    return {
-      modulePath: parentEntity.path || normalizedPath,
-      parentId: parentEntity.id,
-      children,
-    };
-  }
-
-  async getModuleHistory(
-    modulePath: string,
-    options: ModuleHistoryOptions = {}
-  ): Promise<ModuleHistoryResult> {
-    const normalizedPath =
-      typeof modulePath === "string"
-        ? modulePath.trim().replace(/\\/g, "/")
-        : "";
-    const generatedAt = new Date();
-
-    if (normalizedPath.length === 0) {
-      return {
-        moduleId: null,
-        modulePath: "",
-        moduleType: undefined,
-        generatedAt,
-        versions: [],
-        relationships: [],
-      };
-    }
-
-    let moduleEntity: Entity | null = null;
-
-    try {
-      const candidate = await this.getEntity(normalizedPath);
-      if (candidate?.id) moduleEntity = candidate;
-    } catch {}
-
-    if (!moduleEntity?.id) {
-      const moduleRows = await this.graphDbQuery(
-        `MATCH (m)
-         WHERE (m.path = $path OR m.modulePath = $path)
-            OR m.id = $path
-         RETURN m
-         ORDER BY CASE
-           WHEN m.type = 'module' THEN 0
-           WHEN m.type = 'file' THEN 1
-           ELSE 2
-         END
-         LIMIT 1
-        `,
-        { path: normalizedPath }
-      );
-
-      if (moduleRows && moduleRows[0]) {
-        const row = moduleRows[0];
-        moduleEntity = this.parseEntityFromGraph((row as any).m ?? row);
-      }
-    }
-
-    if (!moduleEntity?.id) {
-      return {
-        moduleId: null,
-        modulePath: normalizedPath,
-        moduleType: undefined,
-        generatedAt,
-        versions: [],
-        relationships: [],
-      };
-    }
-
-    const structuralTypes: string[] = [
-      RelationshipType.CONTAINS,
-      RelationshipType.DEFINES,
-      RelationshipType.EXPORTS,
-      RelationshipType.IMPORTS,
-    ];
-
-    const limitRaw = Number.isFinite(options.limit)
-      ? Number(options.limit)
-      : 200;
-    const limit = Math.max(1, Math.min(500, Math.floor(limitRaw)));
-    const includeInactive = options.includeInactive !== false;
-
-    const relationshipRows = await this.graphDbQuery(
-      `
-        MATCH (m {id: $moduleId})-[r]->(other)
-        WHERE type(r) IN $types
-        RETURN r,
-               r.id AS id,
-               type(r) AS type,
-               m.id AS fromId,
-               other.id AS toId,
-               other AS other,
-               r.validFrom AS validFrom,
-               r.validTo AS validTo,
-               coalesce(r.active, r.validTo IS NULL) AS active,
-               r.lastModified AS lastModified,
-               r.temporal AS temporal,
-               r.segmentId AS segmentId,
-               r.lastChangeSetId AS lastChangeSetId,
-               r.firstSeenAt AS firstSeenAt,
-               r.lastSeenAt AS lastSeenAt,
-               r.scope AS scope,
-               r.confidence AS confidence,
-               r.metadata AS metadata,
-               coalesce(r.lastModified, r.firstSeenAt, r.validFrom) AS sortKey
-        UNION ALL
-        MATCH (other)-[r]->(m {id: $moduleId})
-        WHERE type(r) IN $types
-        RETURN r,
-               r.id AS id,
-               type(r) AS type,
-               other.id AS fromId,
-               m.id AS toId,
-               other AS other,
-               r.validFrom AS validFrom,
-               r.validTo AS validTo,
-               coalesce(r.active, r.validTo IS NULL) AS active,
-               r.lastModified AS lastModified,
-               r.temporal AS temporal,
-               r.segmentId AS segmentId,
-               r.lastChangeSetId AS lastChangeSetId,
-               r.firstSeenAt AS firstSeenAt,
-               r.lastSeenAt AS lastSeenAt,
-               r.scope AS scope,
-               r.confidence AS confidence,
-               r.metadata AS metadata,
-               coalesce(r.lastModified, r.firstSeenAt, r.validFrom) AS sortKey
-        ORDER BY sortKey DESC
-        LIMIT $limit
-      `,
-      {
-        moduleId: moduleEntity.id,
-        types: structuralTypes,
-        limit,
-      }
-    );
-
-    const moduleSummary = this.toModuleHistorySummary(moduleEntity);
-    const relationships: ModuleHistoryRelationship[] = [];
-    const seen = new Set<string>();
-
-    for (const row of relationshipRows || []) {
-      if (!row || !row.id) continue;
-      if (seen.has(row.id)) continue;
-      const timeline = this.buildRelationshipTimelineFromRow(row);
-      if (!timeline) continue;
-      seen.add(row.id);
-
-      const parsedRelationship = this.parseRelationshipFromGraph({
-        r: row.r,
-        fromId: row.fromId,
-        toId: row.toId,
-      });
-
-      const otherEntity = row.other
-        ? this.parseEntityFromGraph(row.other)
-        : null;
-      const direction: "outgoing" | "incoming" =
-        row.fromId === moduleEntity.id ? "outgoing" : "incoming";
-
-      const fromSummary =
-        direction === "outgoing"
-          ? moduleSummary
-          : this.toModuleHistorySummary(otherEntity, row.fromId);
-      const toSummary =
-        direction === "outgoing"
-          ? this.toModuleHistorySummary(otherEntity, row.toId)
-          : moduleSummary;
-
-      let metadata: Record<string, any> | undefined;
-      if (
-        parsedRelationship.metadata &&
-        typeof parsedRelationship.metadata === "object"
-      ) {
-        metadata = parsedRelationship.metadata as Record<string, any>;
-      } else if (typeof row.metadata === "string") {
-        try {
-          metadata = JSON.parse(row.metadata);
-        } catch {
-          metadata = undefined;
-        }
-      } else if (row.metadata && typeof row.metadata === "object") {
-        metadata = row.metadata as Record<string, any>;
-      }
-
-      const toFiniteNumber = (value: unknown): number | null => {
-        if (typeof value === "number" && Number.isFinite(value)) {
-          return value;
-        }
-        if (typeof value === "string") {
-          const parsed = Number(value);
-          return Number.isFinite(parsed) ? parsed : null;
-        }
-        return null;
-      };
-
-      const toNonEmptyString = (value: unknown): string | null => {
-        if (typeof value !== "string") return null;
-        const trimmed = value.trim();
-        return trimmed.length > 0 ? trimmed : null;
-      };
-
-      const confidenceValue =
-        toFiniteNumber(row.confidence) ??
-        toFiniteNumber((parsedRelationship as any).confidence) ??
-        toFiniteNumber(metadata?.confidence) ??
-        null;
-
-      const scopeValue =
-        toNonEmptyString(row.scope) ??
-        toNonEmptyString((parsedRelationship as any).scope) ??
-        toNonEmptyString(metadata?.scope) ??
-        null;
-
-      const firstSeenAt =
-        this.toDate(row.firstSeenAt) ||
-        this.toDate((parsedRelationship as any).firstSeenAt) ||
-        null;
-      const lastSeenAt =
-        this.toDate(row.lastSeenAt) ||
-        this.toDate((parsedRelationship as any).lastSeenAt) ||
-        null;
-      const lastModified =
-        this.toDate(row.lastModified) ||
-        this.toDate((parsedRelationship as any).lastModified) ||
-        undefined;
-
-      relationships.push({
-        relationshipId: timeline.relationshipId,
-        type: timeline.type,
-        direction,
-        from: fromSummary,
-        to: toSummary,
-        active: timeline.active,
-        current: timeline.current,
-        segments: timeline.segments,
-        firstSeenAt,
-        lastSeenAt,
-        confidence: confidenceValue,
-        scope: scopeValue,
-        metadata,
-        temporal: timeline.temporal,
-        lastModified,
-      });
-      if (process.env.DEBUG_MODULE_HISTORY === "1") {
-        console.log(
-          "moduleHistory.timeline",
-          timeline.relationshipId,
-          timeline.active,
-          timeline.segments
-        );
-      }
-    }
-
-    const filteredRelationships = includeInactive
-      ? relationships
-      : relationships.filter((rel) => rel.active);
-
-    const sortValue = (rel: ModuleHistoryRelationship): number => {
-      const candidates: Array<Date | null | undefined> = [
-        rel.lastModified,
-        rel.lastSeenAt ?? undefined,
-        rel.firstSeenAt ?? undefined,
-      ];
-      for (const candidate of candidates) {
-        if (candidate instanceof Date && !Number.isNaN(candidate.getTime())) {
-          return candidate.getTime();
-        }
-      }
-      return 0;
-    };
-
-    filteredRelationships.sort((a, b) => sortValue(b) - sortValue(a));
-
-    const versionLimitRaw = Number.isFinite(options.versionLimit)
-      ? Number(options.versionLimit)
-      : Number.isFinite(options.limit)
-      ? Number(options.limit)
-      : 50;
-    const versionLimit = Math.max(1, Math.min(200, Math.floor(versionLimitRaw)));
-    const versionsTimeline = await this.getEntityTimeline(moduleEntity.id, {
-      includeRelationships: false,
-      limit: versionLimit,
-    });
-
-    return {
-      moduleId: moduleEntity.id,
-      modulePath: moduleEntity.path || normalizedPath,
-      moduleType: moduleEntity.type,
-      generatedAt,
-      versions: versionsTimeline.versions,
-      relationships: filteredRelationships,
-    };
-  }
-
-  private toModuleHistorySummary(
-    entity: Entity | null | undefined,
-    fallbackId?: string
-  ): ModuleHistoryEntitySummary {
-    const summary: ModuleHistoryEntitySummary = {
-      id: entity?.id ?? fallbackId ?? "unknown",
-    };
-    if (entity) {
-      const candidate: any = entity;
-      if (typeof candidate.type === "string") summary.type = candidate.type;
-      if (typeof candidate.name === "string") summary.name = candidate.name;
-      if (typeof candidate.path === "string") summary.path = candidate.path;
-      if (typeof candidate.language === "string")
-        summary.language = candidate.language;
-    }
-    return summary;
-  }
-
-  async listImports(
-    entityId: string,
-    options: ListImportsOptions = {}
-  ): Promise<ListImportsResult> {
-    const resolvedId = this.resolveEntityIdInput(entityId);
-    const limit = Math.min(Math.max(options.limit ?? 200, 1), 1000);
-    const modulePathFilter = this.normalizeModulePathFilterInput(
-      options.modulePath as string | string[] | undefined
-    );
-    const modulePathPrefixFilter =
-      typeof options.modulePathPrefix === "string"
-        ? this.normalizeModulePathFilter(options.modulePathPrefix)
-        : undefined;
-
-    const relationshipQuery: RelationshipQuery = {
-      fromEntityId: resolvedId,
-      type: RelationshipType.IMPORTS,
-      limit,
-    } as RelationshipQuery;
-
-    if (options.language) {
-      (relationshipQuery as any).language = options.language;
-    }
-    if (options.symbolKind) {
-      (relationshipQuery as any).symbolKind = options.symbolKind;
-    }
-    if (options.importAlias) {
-      (relationshipQuery as any).importAlias = options.importAlias;
-    }
-    if (options.importType) {
-      (relationshipQuery as any).importType = options.importType;
-    }
-    if (typeof options.isNamespace === "boolean") {
-      (relationshipQuery as any).isNamespace = options.isNamespace;
-    }
-    if (modulePathFilter !== undefined) {
-      (relationshipQuery as any).modulePath = modulePathFilter;
-    }
-    if (modulePathPrefixFilter) {
-      (relationshipQuery as any).modulePathPrefix = modulePathPrefixFilter;
-    }
-
-    const relationships = await this.getRelationships(relationshipQuery);
-    const activeRelationships = relationships.filter(
-      (rel) => (rel as any).active !== false
-    );
-    const filtered = options.resolvedOnly
-      ? activeRelationships.filter(
-          (rel) =>
-            rel.resolutionState === "resolved" ||
-            (rel as any).resolved === true
-        )
-      : activeRelationships;
-
-    const resolvedTargetIds = filtered
-      .map((rel) => this.resolveOptionalEntityId(rel.toEntityId))
-      .filter((id): id is string => typeof id === "string" && id.length > 0);
-
-    const targetsMap: Map<string, Entity> = resolvedTargetIds.length
-      ? await this.getEntitiesByIds(resolvedTargetIds)
-      : new Map();
-
-    const imports: ImportEntry[] = filtered.map((rel) => {
-      const resolvedId = this.resolveOptionalEntityId(rel.toEntityId);
-      const target = resolvedId ? targetsMap.get(resolvedId) ?? null : null;
-      return { relationship: rel, target };
-    });
-
-    return { entityId: resolvedId, imports };
-  }
-
-  async findDefinition(symbolId: string): Promise<DefinitionLookupResult> {
-    const resolvedId = this.resolveEntityIdInput(symbolId);
-    const relationships = await this.getRelationships({
-      toEntityId: resolvedId,
-      type: RelationshipType.DEFINES,
-      limit: 1,
-    });
-
-    const relationship = relationships[0] ?? null;
-    let source: Entity | null = null;
-    if (relationship?.fromEntityId) {
-      try {
-        source = await this.getEntity(relationship.fromEntityId);
-      } catch {
-        source = null;
-      }
-    }
-
-    return {
-      symbolId: resolvedId,
-      relationship,
-      source,
-    };
   }
 
   private stringToNumericId(stringId: string): number {

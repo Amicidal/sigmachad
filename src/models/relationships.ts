@@ -155,6 +155,27 @@ export const isPerformanceRelationshipType = (
 ): type is PerformanceRelationshipType =>
   PERFORMANCE_RELATIONSHIP_TYPE_SET.has(type);
 
+export const SESSION_RELATIONSHIP_TYPES = [
+  RelationshipType.SESSION_MODIFIED,
+  RelationshipType.SESSION_IMPACTED,
+  RelationshipType.SESSION_CHECKPOINT,
+  RelationshipType.BROKE_IN,
+  RelationshipType.FIXED_IN,
+  RelationshipType.DEPENDS_ON_CHANGE,
+] as const;
+
+const SESSION_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
+  SESSION_RELATIONSHIP_TYPES
+);
+
+export type SessionRelationshipType =
+  (typeof SESSION_RELATIONSHIP_TYPES)[number];
+
+export const isSessionRelationshipType = (
+  type: RelationshipType
+): type is SessionRelationshipType =>
+  SESSION_RELATIONSHIP_TYPE_SET.has(type);
+
 // Normalized code-edge source and kind enums (string unions)
 // Tightened to a known set to avoid downstream drift; map producer-specific tags to these centrally.
 export type CodeEdgeSource = 'ast' | 'type-checker' | 'heuristic' | 'index' | 'runtime' | 'lsp';
@@ -455,6 +476,22 @@ export interface SessionRelationship extends Relationship {
   sessionId: string;
   timestamp: Date; // Precise timestamp of the event
   sequenceNumber: number; // Order within session
+  eventId?: string;
+  actor?: string;
+  annotations?: string[];
+  impactSeverity?: 'critical' | 'high' | 'medium' | 'low';
+  stateTransitionTo?: 'working' | 'broken' | 'unknown';
+  checkpointId?: string;
+  checkpointStatus?: 'pending' | 'completed' | 'failed' | 'manual_intervention';
+  checkpointDetails?: {
+    reason?: 'daily' | 'incident' | 'manual';
+    hopCount?: number;
+    attempts?: number;
+    seedEntityIds?: string[];
+    jobId?: string;
+    error?: string;
+    updatedAt?: Date;
+  };
   
   // Semantic change information (for SESSION_MODIFIED)
   changeInfo?: {
@@ -574,6 +611,26 @@ export interface RelationshipQuery {
   symbolKind?: string | string[];
   modulePath?: string | string[];
   modulePathPrefix?: string;
+  // Session relationship filters
+  sessionId?: string | string[];
+  sessionIds?: string[];
+  sequenceNumber?: number | number[];
+  sequenceNumberMin?: number;
+  sequenceNumberMax?: number;
+  timestampFrom?: Date | string;
+  timestampTo?: Date | string;
+  actor?: string | string[];
+  impactSeverity?:
+    | 'critical'
+    | 'high'
+    | 'medium'
+    | 'low'
+    | Array<'critical' | 'high' | 'medium' | 'low'>;
+  stateTransitionTo?:
+    | 'working'
+    | 'broken'
+    | 'unknown'
+    | Array<'working' | 'broken' | 'unknown'>;
 }
 
 export interface RelationshipFilter {

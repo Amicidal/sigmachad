@@ -225,6 +225,60 @@ export async function registerAdminRoutes(
     }
   });
 
+  registerWithAdminAliases('get', '/checkpoint-metrics', async (_request, reply) => {
+    try {
+      const snapshot = typeof syncMonitor?.getCheckpointMetricsSnapshot === 'function'
+        ? syncMonitor.getCheckpointMetricsSnapshot()
+        : null;
+
+      if (snapshot) {
+        reply.send({
+          success: true,
+          data: {
+            source: 'monitor',
+            updatedAt: snapshot.timestamp.toISOString(),
+            event: snapshot.event,
+            metrics: snapshot.metrics,
+            deadLetters: snapshot.deadLetters,
+            context: snapshot.context ?? undefined,
+          },
+        });
+        return;
+      }
+
+      if (syncCoordinator) {
+        const fallback = syncCoordinator.getCheckpointMetrics();
+        reply.send({
+          success: true,
+          data: {
+            source: 'coordinator',
+            updatedAt: new Date().toISOString(),
+            event: 'on_demand_snapshot',
+            metrics: fallback.metrics,
+            deadLetters: fallback.deadLetters,
+          },
+        });
+        return;
+      }
+
+      reply.status(503).send({
+        success: false,
+        error: {
+          code: 'CHECKPOINT_METRICS_UNAVAILABLE',
+          message: 'Checkpoint metrics are not available; coordinator/monitor not configured',
+        },
+      });
+    } catch (error) {
+      reply.status(500).send({
+        success: false,
+        error: {
+          code: 'CHECKPOINT_METRICS_ERROR',
+          message: error instanceof Error ? error.message : 'Failed to retrieve checkpoint metrics',
+        },
+      });
+    }
+  });
+
   registerWithAdminAliases('get', '/sync-status', async (_request, reply) => {
     try {
       const getSyncMetrics = (syncMonitor as unknown as { getSyncMetrics?: Function })?.getSyncMetrics;

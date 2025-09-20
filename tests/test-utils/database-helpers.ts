@@ -68,6 +68,7 @@ const DEFAULT_POSTGRES_TABLES = [
   "test_suites",
   "flaky_test_analyses",
   "changes",
+  "scm_commits",
   "sessions",
   "documents",
   "performance_metric_snapshots",

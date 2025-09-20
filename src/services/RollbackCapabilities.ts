@@ -36,6 +36,17 @@ export interface RollbackRelationship {
   newState?: GraphRelationship;
 }
 
+export interface SessionCheckpointRecord {
+  checkpointId: string;
+  sessionId: string;
+  reason: "daily" | "incident" | "manual";
+  hopCount: number;
+  attempts: number;
+  seedEntityIds: string[];
+  jobId?: string;
+  recordedAt: Date;
+}
+
 export interface RollbackResult {
   success: boolean;
   rolledBackEntities: number;
@@ -55,6 +66,7 @@ export interface RollbackError {
 export class RollbackCapabilities {
   private rollbackPoints = new Map<string, RollbackPoint>();
   private maxRollbackPoints = 50; // Keep last 50 rollback points
+  private sessionCheckpointLinks = new Map<string, SessionCheckpointRecord[]>();
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -103,6 +115,68 @@ export class RollbackCapabilities {
     this.cleanupOldRollbackPoints();
 
     return rollbackId;
+  }
+
+  registerCheckpointLink(
+    sessionId: string,
+    record: {
+      checkpointId: string;
+      reason: "daily" | "incident" | "manual";
+      hopCount: number;
+      attempts: number;
+      seedEntityIds?: string[];
+      jobId?: string;
+      timestamp?: Date;
+    }
+  ): void {
+    if (!sessionId || !record?.checkpointId) {
+      return;
+    }
+
+    const seeds = Array.isArray(record.seedEntityIds)
+      ? Array.from(
+          new Set(
+            record.seedEntityIds.filter(
+              (value) => typeof value === "string" && value.length > 0
+            )
+          )
+        )
+      : [];
+    const history = this.sessionCheckpointLinks.get(sessionId) ?? [];
+    const entry: SessionCheckpointRecord = {
+      sessionId,
+      checkpointId: record.checkpointId,
+      reason: record.reason,
+      hopCount: Math.max(1, Math.min(record.hopCount, 10)),
+      attempts: Math.max(1, record.attempts),
+      seedEntityIds: seeds,
+      jobId: record.jobId,
+      recordedAt:
+        record.timestamp instanceof Date ? new Date(record.timestamp) : new Date(),
+    };
+
+    history.push(entry);
+    history.sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime());
+    const trimmed = history.slice(-25);
+    this.sessionCheckpointLinks.set(sessionId, trimmed);
+  }
+
+  getSessionCheckpointHistory(
+    sessionId: string,
+    options: { limit?: number } = {}
+  ): SessionCheckpointRecord[] {
+    const list = this.sessionCheckpointLinks.get(sessionId) ?? [];
+    const limitRaw = options.limit;
+    if (typeof limitRaw === "number" && limitRaw > 0) {
+      return list.slice(Math.max(0, list.length - Math.floor(limitRaw)));
+    }
+    return [...list];
+  }
+
+  getLatestSessionCheckpoint(sessionId: string): SessionCheckpointRecord | undefined {
+    const list = this.sessionCheckpointLinks.get(sessionId) ?? [];
+    if (list.length === 0) return undefined;
+    return list[list.length - 1];
   }
 
   /**

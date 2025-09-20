@@ -9,6 +9,7 @@ import {
   CODE_RELATIONSHIP_TYPES,
   isDocumentationRelationshipType,
   isPerformanceRelationshipType,
+  isSessionRelationshipType,
   isStructuralRelationshipType,
 } from "../models/relationships.js";
 import { sanitizeEnvironment } from "./environment.js";
@@ -614,6 +615,29 @@ export function canonicalRelationshipId(
     const baseTarget = canonicalTargetKeyFor(rel);
     const base = `${fromId}|${baseTarget}|${rel.type}`;
     return "time-rel_" + crypto.createHash("sha1").update(base).digest("hex");
+  }
+
+  if (isSessionRelationshipType(rel.type)) {
+    const anyRel: any = rel as any;
+    const sessionIdSource =
+      anyRel.sessionId ??
+      anyRel.metadata?.sessionId ??
+      (typeof rel.fromEntityId === "string" && rel.fromEntityId
+        ? rel.fromEntityId
+        : "");
+    const sessionId = String(sessionIdSource || "")
+      .trim()
+      .toLowerCase();
+    const sequenceSource =
+      anyRel.sequenceNumber ?? anyRel.metadata?.sequenceNumber ?? 0;
+    const sequenceNumber = Number.isFinite(Number(sequenceSource))
+      ? Math.max(0, Math.floor(Number(sequenceSource)))
+      : 0;
+    const base = `${sessionId}|${sequenceNumber}|${rel.type}`;
+    return (
+      "rel_session_" +
+      crypto.createHash("sha1").update(base).digest("hex")
+    );
   }
 
   if (isPerformanceRelationshipType(rel.type)) {

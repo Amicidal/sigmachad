@@ -4,8 +4,18 @@
  */
 
 import { EventEmitter } from 'events';
-import { SyncOperation, SyncError, SyncConflict } from './SynchronizationCoordinator.js';
+import {
+  SyncOperation,
+  SyncError,
+  SyncConflict,
+  type CheckpointMetricsSnapshot,
+} from './SynchronizationCoordinator.js';
+import { RelationshipType } from '../models/relationships.js';
 import { Conflict } from './ConflictResolution.js';
+import type {
+  SessionCheckpointJobMetrics,
+  SessionCheckpointJobSnapshot,
+} from '../jobs/SessionCheckpointJob.js';
 
 export interface SyncMetrics {
   operationsTotal: number;
@@ -54,6 +64,17 @@ export interface SyncLogEntry {
   data?: any;
 }
 
+export interface SessionSequenceAnomaly {
+  sessionId: string;
+  type: RelationshipType | string;
+  sequenceNumber: number;
+  previousSequence: number | null;
+  reason: 'duplicate' | 'out_of_order';
+  eventId?: string;
+  timestamp?: Date;
+  previousType?: RelationshipType | string | null;
+}
+
 export class SynchronizationMonitoring extends EventEmitter {
   private operations = new Map<string, SyncOperation>();
   private metrics: SyncMetrics;
@@ -62,6 +83,18 @@ export class SynchronizationMonitoring extends EventEmitter {
   private logs: SyncLogEntry[] = [];
   private healthCheckInterval?: NodeJS.Timeout;
   private opPhases: Map<string, { phase: string; progress: number; timestamp: Date }> = new Map();
+  private sessionSequenceStats = {
+    duplicates: 0,
+    outOfOrder: 0,
+    events: [] as SessionSequenceAnomaly[],
+  };
+  private checkpointMetricsSnapshot: {
+    event: string;
+    metrics: SessionCheckpointJobMetrics;
+    deadLetters: SessionCheckpointJobSnapshot[];
+    context?: Record<string, unknown>;
+    timestamp: Date;
+  } | null = null;
 
   constructor() {
     super();
@@ -88,6 +121,63 @@ export class SynchronizationMonitoring extends EventEmitter {
 
     this.setupEventHandlers();
     this.startHealthMonitoring();
+  }
+
+  recordCheckpointMetrics(snapshot: CheckpointMetricsSnapshot): void {
+    const normalizedContext = snapshot.context
+      ? { ...snapshot.context }
+      : undefined;
+    const cloneDeadLetters = snapshot.deadLetters.map((job) => ({
+      ...job,
+      payload: { ...job.payload },
+    }));
+
+    this.checkpointMetricsSnapshot = {
+      event: snapshot.event,
+      metrics: { ...snapshot.metrics },
+      deadLetters: cloneDeadLetters,
+      context: normalizedContext,
+      timestamp: snapshot.timestamp
+        ? new Date(snapshot.timestamp)
+        : new Date(),
+    };
+
+    const operationId =
+      typeof normalizedContext?.jobId === 'string'
+        ? (normalizedContext.jobId as string)
+        : 'checkpoint-metrics';
+    this.log('info', operationId, 'Checkpoint metrics updated', {
+      event: snapshot.event,
+      metrics: snapshot.metrics,
+      deadLetters: snapshot.deadLetters.length,
+      context: normalizedContext,
+    });
+
+    this.emit('checkpointMetricsUpdated', this.checkpointMetricsSnapshot);
+  }
+
+  getCheckpointMetricsSnapshot(): {
+    event: string;
+    metrics: SessionCheckpointJobMetrics;
+    deadLetters: SessionCheckpointJobSnapshot[];
+    context?: Record<string, unknown>;
+    timestamp: Date;
+  } | null {
+    if (!this.checkpointMetricsSnapshot) {
+      return null;
+    }
+    return {
+      event: this.checkpointMetricsSnapshot.event,
+      metrics: { ...this.checkpointMetricsSnapshot.metrics },
+      deadLetters: this.checkpointMetricsSnapshot.deadLetters.map((job) => ({
+        ...job,
+        payload: { ...job.payload },
+      })),
+      context: this.checkpointMetricsSnapshot.context
+        ? { ...this.checkpointMetricsSnapshot.context }
+        : undefined,
+      timestamp: new Date(this.checkpointMetricsSnapshot.timestamp),
+    };
   }
 
   private setupEventHandlers(): void {
@@ -219,6 +309,29 @@ export class SynchronizationMonitoring extends EventEmitter {
     this.emit('conflictDetected', conflict as Conflict);
   }
 
+  recordSessionSequenceAnomaly(anomaly: SessionSequenceAnomaly): void {
+    const entry: SessionSequenceAnomaly = {
+      ...anomaly,
+      timestamp: anomaly.timestamp ?? new Date(),
+    };
+    if (entry.reason === 'duplicate') {
+      this.sessionSequenceStats.duplicates += 1;
+    } else {
+      this.sessionSequenceStats.outOfOrder += 1;
+    }
+    this.sessionSequenceStats.events.push(entry);
+    if (this.sessionSequenceStats.events.length > 100) {
+      this.sessionSequenceStats.events.shift();
+    }
+    this.log('warn', entry.sessionId, 'Session sequence anomaly detected', {
+      type: entry.type,
+      sequenceNumber: entry.sequenceNumber,
+      previousSequence: entry.previousSequence,
+      reason: entry.reason,
+      eventId: entry.eventId,
+    });
+  }
+
   recordError(operationId: string, error: SyncError | string | unknown): void {
     // Coerce non-object inputs into a SyncError-like shape for robustness in tests
     const normalized: SyncError = ((): SyncError => {
@@ -312,6 +425,18 @@ export class SynchronizationMonitoring extends EventEmitter {
 
   getPerformanceMetrics(): PerformanceMetrics {
     return { ...this.performanceMetrics };
+  }
+
+  getSessionSequenceStats(): {
+    duplicates: number;
+    outOfOrder: number;
+    recent: SessionSequenceAnomaly[];
+  } {
+    return {
+      duplicates: this.sessionSequenceStats.duplicates,
+      outOfOrder: this.sessionSequenceStats.outOfOrder,
+      recent: [...this.sessionSequenceStats.events],
+    };
   }
 
   getHealthMetrics(): HealthMetrics {

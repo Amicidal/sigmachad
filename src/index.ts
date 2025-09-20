@@ -82,6 +82,18 @@ async function main() {
     syncCoordinator.on('conflictDetected', (conflict) => {
       syncMonitor.recordConflict(conflict as any);
     });
+    syncCoordinator.on('sessionSequenceAnomaly', (anomaly: any) => {
+      try {
+        syncMonitor.recordSessionSequenceAnomaly(anomaly);
+      } catch {}
+    });
+    syncCoordinator.on('checkpointMetricsUpdated', (snapshot) => {
+      try {
+        syncMonitor.recordCheckpointMetrics(snapshot);
+      } catch (error) {
+        console.warn('[monitor] failed to record checkpoint metrics', error);
+      }
+    });
 
     conflictResolver.addConflictListener((conflict) => {
       syncMonitor.recordConflict(conflict as any);

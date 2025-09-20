@@ -10,6 +10,7 @@ import type {
   IQdrantService,
   IPostgreSQLService,
   IRedisService,
+  BulkQueryMetrics,
 } from "../../src/services/database/interfaces";
 import type {
   PerformanceHistoryOptions,
@@ -78,6 +79,20 @@ export function createLightweightDatabaseMocks(): LightweightDatabaseMocks {
     query: vi.fn().mockResolvedValue([]),
     bulkQuery: vi.fn().mockResolvedValue([]),
     getPool: vi.fn().mockReturnValue({}),
+    getBulkWriterMetrics: vi.fn().mockReturnValue({
+      activeBatches: 0,
+      maxConcurrentBatches: 0,
+      totalBatches: 0,
+      totalQueries: 0,
+      totalDurationMs: 0,
+      maxBatchSize: 0,
+      maxQueueDepth: 0,
+      maxDurationMs: 0,
+      averageDurationMs: 0,
+      lastBatch: null,
+      history: [],
+      slowBatches: [],
+    } satisfies BulkQueryMetrics),
     transaction: vi.fn().mockImplementation(async (callback) => {
       return callback({
         query: vi.fn().mockResolvedValue([]),
@@ -928,6 +943,33 @@ export class RealisticPostgreSQLMock implements IPostgreSQLService {
 
   getQueryLog(): string[] {
     return this.queryLog;
+  }
+
+  getBulkWriterMetrics(): BulkQueryMetrics {
+    const totalQueries = this.queryLog.length;
+    const totalBatches = Math.max(
+      this.transactionCount,
+      totalQueries > 0 ? 1 : 0
+    );
+    const unitDuration = this.config.latencyMs ?? 0;
+    const totalDurationMs = totalQueries * unitDuration;
+    const averageDurationMs =
+      totalBatches > 0 ? totalDurationMs / totalBatches : 0;
+
+    return {
+      activeBatches: 0,
+      maxConcurrentBatches: 1,
+      totalBatches,
+      totalQueries,
+      totalDurationMs,
+      maxBatchSize: totalQueries,
+      maxQueueDepth: 0,
+      maxDurationMs: unitDuration,
+      averageDurationMs,
+      lastBatch: null,
+      history: [],
+      slowBatches: [],
+    };
   }
 
   async recordPerformanceMetricSnapshot(

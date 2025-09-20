@@ -1984,6 +1984,72 @@ describe('KnowledgeGraphService', () => {
         );
       });
 
+      it('respects noiseConfig severity thresholds when deriving severity', () => {
+        const originalCritical = noiseConfig.PERF_SEVERITY_PERCENT_CRITICAL;
+        const originalHigh = noiseConfig.PERF_SEVERITY_PERCENT_HIGH;
+        try {
+          (noiseConfig as any).PERF_SEVERITY_PERCENT_CRITICAL = 30;
+          (noiseConfig as any).PERF_SEVERITY_PERCENT_HIGH = 20;
+
+          const raw = {
+            id: '',
+            fromEntityId: 'test-entity',
+            toEntityId: 'sym:src/service.ts#Foo@hash',
+            type: RelationshipType.PERFORMANCE_REGRESSION,
+            created: new Date('2024-05-07T00:00:00Z'),
+            lastModified: new Date('2024-05-07T00:00:00Z'),
+            version: 1,
+            metricId: 'Test/Threshold',
+            baselineValue: 100,
+            currentValue: 135,
+          } as unknown as GraphRelationship;
+
+          const normalized = (knowledgeGraphService as any).normalizeRelationship(raw);
+
+          expect(normalized.severity).toBe('critical');
+          expect((normalized.metadata as any).severityDerived).toBe('critical');
+        } finally {
+          (noiseConfig as any).PERF_SEVERITY_PERCENT_CRITICAL = originalCritical;
+          (noiseConfig as any).PERF_SEVERITY_PERCENT_HIGH = originalHigh;
+        }
+      });
+
+      it('warns when provided severity conflicts with derived tier', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          const raw = {
+            id: '',
+            fromEntityId: 'test-entity',
+            toEntityId: 'sym:src/service.ts#Foo@hash',
+            type: RelationshipType.PERFORMANCE_IMPACT,
+            created: new Date('2024-05-08T00:00:00Z'),
+            lastModified: new Date('2024-05-08T00:00:00Z'),
+            version: 1,
+            metricId: 'Test/Conflict',
+            baselineValue: 100,
+            currentValue: 115,
+            severity: 'critical',
+          } as unknown as GraphRelationship;
+
+          const normalized = (knowledgeGraphService as any).normalizeRelationship(raw);
+
+          expect(normalized.severity).toBe('medium');
+          expect((normalized.metadata as any).severity).toBe('medium');
+          expect((normalized.metadata as any).severityDerived).toBe('medium');
+          expect((normalized.metadata as any).severityProvided).toBe('critical');
+          expect(warnSpy).toHaveBeenCalledWith(
+            '⚠️ Performance severity mismatch',
+            expect.objectContaining({
+              metricId: 'test/conflict',
+              provided: 'critical',
+              derived: 'medium',
+            }),
+          );
+        } finally {
+          warnSpy.mockRestore();
+        }
+      });
+
       it('sorts metrics history chronologically before deriving deltas', () => {
         const raw = {
           id: '',
@@ -2016,6 +2082,87 @@ describe('KnowledgeGraphService', () => {
         expect(normalized.currentValue).toBe(200);
         expect(normalized.delta).toBe(50);
         expect(normalized.trend).toBe('regression');
+      });
+
+      it('normalizes session relationships and computes stable site hash', () => {
+        const raw = {
+          id: '',
+          fromEntityId: 'session_RAW',
+          toEntityId: 'entity-42',
+          type: RelationshipType.SESSION_MODIFIED,
+          created: new Date('2024-06-01T10:00:00Z'),
+          lastModified: new Date('2024-06-01T10:00:00Z'),
+          version: 1,
+          sessionId: 'SESSION_RAW',
+          sequenceNumber: 4.8,
+          timestamp: '2024-06-01T10:00:01Z',
+          actor: ' Agent-X ',
+          annotations: ['  review ', 'review', ''],
+          changeInfo: {
+            elementType: 'FILE',
+            elementName: 'src/app.ts ',
+            operation: 'MODIFIED',
+            semanticHash: ' ABC123 ',
+          },
+          stateTransition: {
+            from: 'Unknown',
+            to: 'Working',
+            verifiedBy: 'Manual',
+            confidence: 2,
+          },
+          impact: {
+            severity: 'HIGH',
+            buildError: '  lint failed ',
+          },
+        } as unknown as GraphRelationship;
+
+        const normalized = (knowledgeGraphService as any).normalizeRelationship(raw);
+
+        expect(normalized.sessionId).toBeDefined();
+        expect((normalized.sessionId as string).toLowerCase()).toBe('session_raw');
+        expect(normalized.sequenceNumber).toBe(4);
+        expect(normalized.timestamp).toBeInstanceOf(Date);
+        expect(normalized.actor).toBe('Agent-X');
+        expect(normalized.annotations).toEqual(['review']);
+        expect(normalized.changeInfo).toEqual({
+          elementType: 'file',
+          elementName: 'src/app.ts',
+          operation: 'modified',
+          semanticHash: 'abc123',
+        });
+        expect(normalized.stateTransition?.verifiedBy).toBe('manual');
+        expect(normalized.stateTransition?.confidence).toBe(1);
+        expect(normalized.impact?.severity).toBe('high');
+        expect(normalized.impact?.buildError).toBe('lint failed');
+        expect(normalized.siteHash).toMatch(/^sh_[0-9a-f]{16}$/);
+      });
+
+      it('throws when session relationships omit required metadata', () => {
+        const raw = {
+          id: '',
+          fromEntityId: 'entity-1',
+          toEntityId: 'entity-1',
+          type: RelationshipType.SESSION_MODIFIED,
+          created: new Date('2024-06-01T10:00:00Z'),
+          lastModified: new Date('2024-06-01T10:00:00Z'),
+          version: 1,
+          sequenceNumber: 1,
+        } as unknown as GraphRelationship;
+
+        expect(() => (knowledgeGraphService as any).normalizeRelationship(raw)).toThrow(
+          /sessionId/i
+        );
+
+        const missingSequence = {
+          ...raw,
+          sessionId: 'session_missing',
+        } as GraphRelationship;
+
+        delete (missingSequence as any).sequenceNumber;
+
+        expect(() => (knowledgeGraphService as any).normalizeRelationship(missingSequence)).toThrow(
+          /sequenceNumber/i
+        );
       });
     });
 
@@ -2087,6 +2234,110 @@ describe('KnowledgeGraphService', () => {
         expect(params.language).toBe('typescript');
         expect(params.symbolKind).toBe('module');
         expect(params.resolutionState).toBe('partial');
+      });
+
+      it('persists session relationship metadata during bulk ingestion', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const createdAt = new Date('2024-06-10T12:00:00Z');
+        const relationship: GraphRelationship = {
+          fromEntityId: 'session_alpha',
+          toEntityId: 'entity_beta',
+          type: RelationshipType.SESSION_MODIFIED,
+          created: createdAt,
+          lastModified: createdAt,
+          version: 1,
+          sessionId: 'session_alpha',
+          sequenceNumber: 5,
+          timestamp: createdAt,
+          actor: 'agent-42',
+          annotations: ['triaged'],
+          changeInfo: {
+            elementType: 'file',
+            elementName: 'src/foo.ts',
+            operation: 'modified',
+          },
+          stateTransition: {
+            from: 'unknown',
+            to: 'working',
+            verifiedBy: 'manual',
+            confidence: 0.75,
+          },
+          metadata: { file: 'src/foo.ts' },
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([relationship]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find(({ query }) =>
+          typeof query === 'string' && query.includes('MERGE (a)-[r:SESSION_MODIFIED')
+        );
+        expect(mergeCall).toBeDefined();
+        const params = mergeCall!.params;
+        expect(params.sessionId).toBe('session_alpha');
+        expect(params.sequenceNumber).toBe(5);
+        expect(params.sessionTimestamp).toBe('2024-06-10T12:00:00.000Z');
+        expect(params.sessionActor).toBe('agent-42');
+        expect(params.sessionAnnotations).toEqual(['triaged']);
+        expect(params.sessionChangeInfo).toEqual({
+          elementType: 'file',
+          elementName: 'src/foo.ts',
+          operation: 'modified',
+        });
+        expect(params.sessionStateTransition).toMatchObject({
+          from: 'unknown',
+          to: 'working',
+          verifiedBy: 'manual',
+          confidence: 0.75,
+        });
+        expect(params.sessionImpact).toBeNull();
+        expect(params.eventId === null || typeof params.eventId === 'string').toBe(true);
+      });
+
+      it('allows metadata refresh when the same eventId is replayed', async () => {
+        const calls: Array<{ query: string; params: any }> = [];
+        const originalQuery = mockDb.falkordbQuery;
+        mockDb.falkordbQuery = vi.fn(async (query: string, params: any) => {
+          calls.push({ query, params });
+          return [];
+        });
+
+        const createdAt = new Date('2024-06-10T12:00:00Z');
+        const relationship: GraphRelationship = {
+          fromEntityId: 'session_beta',
+          toEntityId: 'entity_gamma',
+          type: RelationshipType.SESSION_MODIFIED,
+          created: createdAt,
+          lastModified: createdAt,
+          version: 1,
+          sessionId: 'session_beta',
+          sequenceNumber: 7,
+          timestamp: createdAt,
+          eventId: 'evt-session-7',
+        } as GraphRelationship;
+
+        try {
+          await knowledgeGraphService.createRelationshipsBulk([relationship]);
+        } finally {
+          mockDb.falkordbQuery = originalQuery;
+        }
+
+        const mergeCall = calls.find(({ query }) =>
+          typeof query === 'string' && query.includes('MERGE (a)-[r:SESSION_MODIFIED')
+        );
+
+        expect(mergeCall).toBeDefined();
+        expect(mergeCall?.query).toContain(
+          "coalesce(existingEventId, '') = coalesce($eventId, '')"
+        );
       });
 
       it('dedupes by canonical id and backfills missing toRef metadata', async () => {

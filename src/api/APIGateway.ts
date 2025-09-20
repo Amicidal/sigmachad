@@ -192,7 +192,8 @@ export class APIGateway {
     this.wsRouter = new WebSocketRouter(
       this.kgService,
       this.dbService,
-      this.fileWatcher
+      this.fileWatcher,
+      this.syncServices?.syncCoordinator
     );
 
     // Initialize Admin Services

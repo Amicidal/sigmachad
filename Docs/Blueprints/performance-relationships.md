@@ -4,11 +4,11 @@
 Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) capture how code changes affect benchmarks, latency budgets, and resource usage. They serve incident analysis, regression prevention, and optimization prioritization.
 
 ## 2. Current Gaps
-- **Instrumentation depth**: Relationship ingestion, canonical IDs, metrics history, and the `/api/tests/performance/:entityId` endpoint are wired end-to-end, but we still lack operational insight (batch timings, queue pressure, failure telemetry) when large performance batches arrive. Extend `PostgreSQLService.bulkQuery` instrumentation and expose request-level logging so regression hunts remain debuggable under load.
-- **Backpressure & sizing**: The current snapshot writer happily accepts 50-row batches, yet we have no adaptive throttling once runs cross that threshold. Add configuration knobs (max batch size, retry budget, queue length) and document the policy to prevent runaway ingestion loops.
+- **Instrumentation depth**: Relationship ingestion now emits timing/backpressure telemetry through `PostgreSQLService.bulkQuery`. Capture `lastBatch`, `slowBatches`, and queue-depth metrics (see §14) so regression hunts remain debuggable under load.
+- **Backpressure & sizing**: Batch ingestion exposes tuning knobs (`warnOnLargeBatchSize`, `slowBatchThresholdMs`, `queueDepthWarningThreshold`, `historyLimit`) but we still need adaptive throttling once load characteristics settle. Document the rollout policy and revisit dynamic control loops as production data arrives.
 - **Data lifecycle**: Temporal edges now persist with provenance, but we still need archival/retention guidance for high-volume metrics. Define rotation or downsampling strategies before perf dashboards grow beyond manageable storage size.
 - **JSON/JSONB contracts**: API responses now surface parsed JSON objects for `metadata` and `metricsHistory`. Document how callers can opt into raw strings (if required) and keep the contract in sync across unit/integration suites.
-- **Fixtures & load coverage**: Integration datasets should seed at least 50 snapshot rows so `DatabaseService` load tests reflect real ingestion behaviour. Track follow-up scenarios where higher-volume fixtures or pagination exercises the same code paths.
+- **Fixtures & load coverage**: Integration datasets seed 60+ snapshot rows (`tests/integration/services/TestEngine.integration.test.ts`) to reflect load-test behaviour; expand to >100 rows when stress-testing queue length and pagination paths.
 
 ## 3. Desired Capabilities
 1. Define a robust ingestion contract representing benchmarks, scenarios, and statistical metrics.
@@ -97,3 +97,9 @@ Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) captu
 - Do we need environment-specific nodes or metadata suffices?
 - How will we manage baselines—per branch, per release, per environment?
 - What retention/archival policy should apply to historical performance data to keep graph manageable?
+
+## 14. Telemetry & Backpressure Configuration
+- `PostgreSQLService.bulkQuery` now records per-batch telemetry (duration, batch size, queue depth, success state) and aggregates (`totalBatches`, `totalQueries`, rolling `history`, `slowBatches`). Access these snapshots via `DatabaseService.getPostgresBulkWriterMetrics()` or directly from the PostgreSQL service for observability tooling.
+- Default thresholds: `warnOnLargeBatchSize = 50`, `slowBatchThresholdMs = 750`, `queueDepthWarningThreshold = 3`, `historyLimit = 10`. Override them by supplying `bulkConfig` when constructing `PostgreSQLService` (and therefore `DatabaseService`).
+- `slowBatches` captures any batch that exceeds thresholds or fails; use it for alert routing and throttling decisions. `history` is capped to `historyLimit` entries to avoid unbounded growth.
+- The high-volume integration scenario (`tests/integration/services/TestEngine.integration.test.ts`) inserts 60 performance snapshots via `postgresBulkQuery`, ensuring telemetry and throttling safeguards stay regression-tested.

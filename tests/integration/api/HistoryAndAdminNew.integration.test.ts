@@ -89,6 +89,24 @@ describe('History/Admin new endpoints + tRPC parity', () => {
       expect(body.data).toHaveProperty('mode');
     });
 
+    it('GET /api/v1/admin/checkpoint-metrics returns snapshot data', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/admin/checkpoint-metrics', headers: { 'x-api-key': adminToken } });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.success).toBe(true);
+      expect(body.data).toMatchObject({
+        source: expect.stringMatching(/monitor|coordinator/),
+        metrics: expect.objectContaining({
+          enqueued: expect.any(Number),
+          completed: expect.any(Number),
+          failed: expect.any(Number),
+          retries: expect.any(Number),
+        }),
+        deadLetters: expect.any(Array),
+      });
+      expect(typeof body.data.updatedAt).toBe('string');
+    });
+
     it('POST /api/v1/history/prune supports dryRun', async () => {
       const res = await app.inject({
         method: 'POST',

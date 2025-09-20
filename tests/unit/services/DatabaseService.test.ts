@@ -25,6 +25,7 @@ interface ServiceMocks {
   storeFlakyTestAnalyses?: ReturnType<typeof vi.fn>;
   getTestExecutionHistory?: ReturnType<typeof vi.fn>;
   getPerformanceMetricsHistory?: ReturnType<typeof vi.fn>;
+  getBulkWriterMetrics?: ReturnType<typeof vi.fn>;
 }
 
 const baseConfig: DatabaseConfig = {
@@ -76,6 +77,20 @@ function createServiceMocks() {
     storeFlakyTestAnalyses: vi.fn().mockResolvedValue(undefined),
     getTestExecutionHistory: vi.fn().mockResolvedValue([]),
     getPerformanceMetricsHistory: vi.fn().mockResolvedValue([]),
+    getBulkWriterMetrics: vi.fn().mockReturnValue({
+      activeBatches: 0,
+      maxConcurrentBatches: 0,
+      totalBatches: 0,
+      totalQueries: 0,
+      totalDurationMs: 0,
+      maxBatchSize: 0,
+      maxQueueDepth: 0,
+      maxDurationMs: 0,
+      averageDurationMs: 0,
+      lastBatch: null,
+      history: [],
+      slowBatches: [],
+    }),
   };
 
   const redis = {

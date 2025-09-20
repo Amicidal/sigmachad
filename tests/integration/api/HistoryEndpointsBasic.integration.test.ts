@@ -13,7 +13,7 @@ import {
   clearTestData,
   checkDatabaseHealth,
 } from '../../test-utils/database-helpers.js';
-import { RelationshipType } from '../../../src/models/relationships.js';
+import { RelationshipType, type GraphRelationship } from '../../../src/models/relationships.js';
 
 describe('History API (basic)', () => {
   let dbService: DatabaseService;
@@ -153,5 +153,162 @@ describe('History API (basic)', () => {
     expect(relationshipBody.data.active).toBe(false);
     expect(relationshipBody.data.segments.length).toBeGreaterThan(0);
     expect(relationshipBody.data.segments[0].changeSetId).toBe('change_close');
+  });
+
+  it('exposes session timeline, impacts, and entity aggregations with filters', async () => {
+    const sessionId = 'session:test-session-123';
+    const sessionEntity = {
+      id: sessionId,
+      type: 'session' as const,
+      startTime: new Date('2024-01-02T09:00:00Z'),
+      endTime: new Date('2024-01-02T11:00:00Z'),
+      agentType: 'cli',
+      userId: 'tester',
+      changes: [],
+      specs: [],
+      status: 'completed' as const,
+      metadata: {},
+    };
+
+    const entityModified = {
+      id: 'file:src/sessions/modified.ts',
+      type: 'file' as const,
+      path: 'src/sessions/modified.ts',
+      language: 'typescript',
+      hash: 'hash_mod',
+      lastModified: new Date('2024-01-02T09:30:00Z'),
+      created: new Date('2024-01-01T08:00:00Z'),
+      size: 20,
+      lines: 12,
+      isTest: false,
+      isConfig: false,
+      dependencies: [],
+    };
+
+    const entityImpacted = {
+      id: 'file:src/sessions/impacted.ts',
+      type: 'file' as const,
+      path: 'src/sessions/impacted.ts',
+      language: 'typescript',
+      hash: 'hash_imp',
+      lastModified: new Date('2024-01-02T09:40:00Z'),
+      created: new Date('2024-01-01T08:05:00Z'),
+      size: 18,
+      lines: 10,
+      isTest: false,
+      isConfig: false,
+      dependencies: [],
+    };
+
+    await kgService.createEntity(sessionEntity, { skipEmbedding: true });
+    await kgService.createEntity(entityModified, { skipEmbedding: true });
+    await kgService.createEntity(entityImpacted, { skipEmbedding: true });
+
+    const baseTime = new Date('2024-01-02T10:00:00Z');
+
+    const relationships: GraphRelationship[] = [
+      {
+        id: 'rel-temp-session-modified',
+        fromEntityId: sessionEntity.id,
+        toEntityId: entityModified.id,
+        type: RelationshipType.SESSION_MODIFIED,
+        created: baseTime,
+        lastModified: baseTime,
+        version: 1,
+        sessionId,
+        timestamp: baseTime,
+        sequenceNumber: 1,
+        actor: 'agent-1',
+        impactSeverity: 'high',
+        stateTransitionTo: 'broken',
+        changeInfo: {
+          elementType: 'function',
+          elementName: 'applyUpdate',
+          operation: 'modified',
+        },
+        stateTransition: {
+          from: 'working',
+          to: 'broken',
+          verifiedBy: 'test',
+          confidence: 0.8,
+        },
+        impact: { severity: 'high' },
+        metadata: {},
+      },
+      {
+        id: 'rel-temp-session-impacted',
+        fromEntityId: sessionEntity.id,
+        toEntityId: entityImpacted.id,
+        type: RelationshipType.SESSION_IMPACTED,
+        created: new Date(baseTime.getTime() + 60_000),
+        lastModified: new Date(baseTime.getTime() + 60_000),
+        version: 1,
+        sessionId,
+        timestamp: new Date(baseTime.getTime() + 60_000),
+        sequenceNumber: 2,
+        actor: 'agent-1',
+        impactSeverity: 'low',
+        stateTransitionTo: 'working',
+        stateTransition: {
+          from: 'broken',
+          to: 'working',
+          verifiedBy: 'test',
+          confidence: 0.9,
+        },
+        impact: {
+          severity: 'low',
+          testsFailed: ['tests/unit/sample.test.ts'],
+        },
+        metadata: {},
+      },
+    ];
+
+    for (const rel of relationships) {
+      await kgService.createRelationship(rel);
+    }
+
+    const timelineSeverityRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/history/sessions/${encodeURIComponent(sessionEntity.id)}/timeline?impactSeverity=high&limit=10`,
+    });
+    expect(timelineSeverityRes.statusCode).toBe(200);
+    const timelineSeverityBody = JSON.parse(timelineSeverityRes.payload);
+    expect(timelineSeverityBody.success).toBe(true);
+    expect(timelineSeverityBody.data.events).toHaveLength(1);
+    expect(timelineSeverityBody.data.events[0].impactSeverity).toBe('high');
+    expect(timelineSeverityBody.data.events[0].stateTransitionTo).toBe('broken');
+
+    const timelineStateRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/history/sessions/${encodeURIComponent(sessionEntity.id)}/timeline?stateTransitionTo=working`,
+    });
+    expect(timelineStateRes.statusCode).toBe(200);
+    const timelineStateBody = JSON.parse(timelineStateRes.payload);
+    expect(timelineStateBody.success).toBe(true);
+    expect(timelineStateBody.data.events).toHaveLength(1);
+    expect(timelineStateBody.data.events[0].stateTransitionTo).toBe('working');
+    expect(timelineStateBody.data.events[0].impactSeverity).toBe('low');
+
+    const impactsRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/history/sessions/${encodeURIComponent(sessionEntity.id)}/impacts?impactSeverity=low`,
+    });
+    expect(impactsRes.statusCode).toBe(200);
+    const impactsBody = JSON.parse(impactsRes.payload);
+    expect(impactsBody.success).toBe(true);
+    expect(impactsBody.data.impacts).toHaveLength(1);
+    expect(impactsBody.data.impacts[0].latestSeverity).toBe('low');
+    expect(impactsBody.data.impacts[0].relationshipIds.length).toBeGreaterThan(0);
+
+    const entitySessionsRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/history/entities/${encodeURIComponent(entityImpacted.id)}/sessions?impactSeverity=low`,
+    });
+    expect(entitySessionsRes.statusCode).toBe(200);
+    const entitySessionsBody = JSON.parse(entitySessionsRes.payload);
+    expect(entitySessionsBody.success).toBe(true);
+    expect(entitySessionsBody.data.sessions).toHaveLength(1);
+    expect(entitySessionsBody.data.sessions[0].severities.low).toBe(1);
+    expect(entitySessionsBody.data.sessions[0].actors).toContain('agent-1');
   });
 });

@@ -571,8 +571,10 @@ export async function registerTestRoutes(
 
           reply.send({
             success: true,
-            data: metrics ?? createEmptyPerformanceMetrics(),
-            history,
+            data: {
+              metrics: metrics ?? createEmptyPerformanceMetrics(),
+              history,
+            },
           });
           return;
         }
@@ -742,8 +744,10 @@ export async function registerTestRoutes(
 
         reply.send({
           success: true,
-          data: aggregatePerformanceMetrics(aggregatedMetrics),
-          history: combinedHistory,
+          data: {
+            metrics: aggregatePerformanceMetrics(aggregatedMetrics),
+            history: combinedHistory,
+          },
         });
       } catch (error) {
         reply.status(500).send({

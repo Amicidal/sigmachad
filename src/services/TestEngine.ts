@@ -103,6 +103,7 @@ export class TestEngine {
   private parser: TestResultParser;
   private perfRelBuffer: import("../models/relationships.js").GraphRelationship[] = [];
   private perfIncidentSeeds: Set<string> = new Set();
+  private testSessionSequences: Map<string, number> = new Map();
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -365,29 +366,46 @@ export class TestEngine {
       const prev = priorStatus;
       const target = testEntity.targetSymbol;
       if (target) {
-        if ((prev === 'passed' || prev === 'skipped' || prev === undefined) && curr === 'failed') {
-          await this.kgService.createRelationship({
-            id: `rel_${testEntity.id}_${target}_BROKE_IN`,
-            fromEntityId: testEntity.id,
+        const eventBase = execution.id;
+        if ((prev === "passed" || prev === "skipped" || prev === undefined) && curr === "failed") {
+          await this.emitTestSessionRelationship({
+            testEntity,
+            timestamp,
+            type: RelationshipType.BROKE_IN,
             toEntityId: target,
-            type: RelationshipType.BROKE_IN as any,
-            created: timestamp,
-            lastModified: timestamp,
-            version: 1,
-            metadata: { verifiedBy: 'test' },
-          } as any, undefined, undefined, { validate: false });
+            eventBase,
+            actor: "test-engine",
+            impact: { severity: "high", testsFailed: [testEntity.id] },
+            impactSeverity: "high",
+            stateTransition: {
+              from: "working",
+              to: "broken",
+              verifiedBy: "test",
+              confidence: 1,
+            },
+            metadata: { verifiedBy: "test", runId: execution.id },
+            annotations: ["test-run", "failed"],
+          });
         }
-        if (prev === 'failed' && curr === 'passed') {
-          await this.kgService.createRelationship({
-            id: `rel_${testEntity.id}_${target}_FIXED_IN`,
-            fromEntityId: testEntity.id,
+        if (prev === "failed" && curr === "passed") {
+          await this.emitTestSessionRelationship({
+            testEntity,
+            timestamp,
+            type: RelationshipType.FIXED_IN,
             toEntityId: target,
-            type: RelationshipType.FIXED_IN as any,
-            created: timestamp,
-            lastModified: timestamp,
-            version: 1,
-            metadata: { verifiedBy: 'test' },
-          } as any, undefined, undefined, { validate: false });
+            eventBase,
+            actor: "test-engine",
+            impact: { severity: "low", testsFixed: [testEntity.id] },
+            impactSeverity: "low",
+            stateTransition: {
+              from: "broken",
+              to: "working",
+              verifiedBy: "test",
+              confidence: 1,
+            },
+            metadata: { verifiedBy: "test", runId: execution.id },
+            annotations: ["test-run", "resolved"],
+          });
         }
       }
     } catch {}
@@ -403,6 +421,94 @@ export class TestEngine {
     } else {
       console.log(`⚠️ No coverage data for test ${testEntity.id}`);
     }
+  }
+
+  private nextTestSessionSequence(sessionId: string): number {
+    const next = (this.testSessionSequences.get(sessionId) ?? -1) + 1;
+    this.testSessionSequences.set(sessionId, next);
+    return next;
+  }
+
+  private async emitTestSessionRelationship(options: {
+    testEntity: Test;
+    timestamp: Date;
+    type: RelationshipType;
+    toEntityId: string;
+    eventBase: string;
+    actor?: string;
+    metadata?: Record<string, any>;
+    annotations?: string[];
+    stateTransition?: {
+      from?: "working" | "broken" | "unknown";
+      to?: "working" | "broken" | "unknown";
+      verifiedBy?: "test" | "build" | "manual";
+      confidence?: number;
+      criticalChange?: Record<string, any>;
+    };
+    impact?: {
+      severity?: "high" | "medium" | "low";
+      testsFailed?: string[];
+      testsFixed?: string[];
+      buildError?: string;
+      performanceImpact?: number;
+    };
+    impactSeverity?: "critical" | "high" | "medium" | "low";
+  }): Promise<void> {
+    const sessionId = `test-session:${options.testEntity.id.toLowerCase()}`;
+    const sequenceNumber = this.nextTestSessionSequence(sessionId);
+    const eventId = `${options.eventBase}:${options.type}:${sequenceNumber}`;
+
+    const annotations = Array.from(
+      new Set(
+        (options.annotations || [])
+          .map((value) => (typeof value === "string" ? value.trim() : ""))
+          .filter((value) => value.length > 0)
+      )
+    );
+
+    const metadata: Record<string, any> = {
+      sessionId,
+      source: "test-engine",
+      testId: options.testEntity.id,
+      targetEntityId: options.toEntityId,
+      ...options.metadata,
+    };
+
+    const relationship: any = {
+      fromEntityId: options.testEntity.id,
+      toEntityId: options.toEntityId,
+      type: options.type,
+      created: options.timestamp,
+      lastModified: options.timestamp,
+      version: 1,
+      sessionId,
+      sequenceNumber,
+      timestamp: options.timestamp,
+      eventId,
+      actor: options.actor ?? "test-engine",
+      metadata,
+    };
+
+    if (annotations.length > 0) {
+      relationship.annotations = annotations;
+    }
+    if (options.stateTransition) {
+      relationship.stateTransition = options.stateTransition;
+      const toState = options.stateTransition.to;
+      if (toState) {
+        relationship.stateTransitionTo = toState;
+      }
+    }
+    if (options.impact) {
+      relationship.impact = options.impact;
+    }
+    if (options.impactSeverity) {
+      relationship.impactSeverity = options.impactSeverity;
+    }
+
+    await this.kgService.createRelationship(relationship, undefined, undefined, {
+      validate: false,
+    });
   }
 
   private buildExecutionEnvironment(
