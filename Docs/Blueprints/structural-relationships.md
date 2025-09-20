@@ -3,20 +3,18 @@
 ## 1. Overview
 Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionally `BELONGS_TO`) encode the static architecture of the codebase—module hierarchies, symbol definitions, and import/export dependencies. They serve as the backbone for navigation, dependency analysis, and change impact scoping.
 
-## 2. Current Gaps
-- AST parser emits rich metadata (aliases, namespace imports, re-export info, language-specific details), but persistence only stores minimal fields (context/path/line) that piggyback on code-edge schema.
-- Queries lack dedicated filters for structural attributes, forcing clients to rely on manual parsing or additional data sources.
-- Temporal handling is inconsistent; structural edges are not tracked when files move or exports change.
-- Multi-language support is limited; metadata is TypeScript-centric and not normalized for other languages.
-- Integration tests (`FalkorDBService.integration`) now pass after hardening `FalkorDBService.setupGraph` for missing graphs and duplicate index DDL. We still need an explicit bootstrap path (or first-write hook) that guarantees index creation without relying on retries once data exists.
-- Parameter handling for nested objects fails with "Property values can only be of primitive types or arrays of primitive types" when inserting JSON metadata into nodes; we need a safe serialization strategy (likely JSON string storage + decode in `decodeGraphValue`) that still supports `SET n += $props` flows.
-- Falkor index bootstrap now issues guarded `CREATE INDEX` statements (without `IF NOT EXISTS`) and tolerates existing definitions; monitor for additional composite index coverage as query workloads evolve.
-- Relationship normalization still stores code edges with raw `USES` types and missing `resolved` flags; `canonicalRelationshipId` is also diverging from the expected `time-rel-*` style IDs. The normalization layer needs to map inferred types (`TYPE_USES`, etc.) and ensure canonical IDs/timestamps align with blueprint contracts (`KnowledgeGraphService Integration > Relationship Operations > normalizes code edges...`).
-- Bulk creation previously failed (`KnowledgeGraphService Integration > Relationship Operations > bulk merges code edges when using createRelationshipsBulk`) because serialized payloads dropped metadata (e.g., `resolved`, secondary locations). Merge pipeline now shares the single-edge normalization path and preserves evidence/locations, but we must keep this guard to avoid future regressions when adjusting bulk ingestion.
-- The MCP `graph.dependencies.analyze` tool currently returns an empty entity list even after recording specs and source files. Dependency edges are not persisted or indexed in a way that the analyzer can traverse, so integration tests expecting at least one dependent entity fail. We need to persist dependency relationships (and expose them via the MCP tool) before claiming graph analysis coverage.
-- The vector search API (`POST /api/v1/vdb/search`) is missing entirely; the handler returns HTTP 404, so semantic search scenarios (type filtering, metadata queries, concurrency) all short-circuit. We need to surface the vector-store client through this route (or provide a meaningful stub) before integration tests can validate search behaviour.
-- Confidence metadata for dependency edges now differentiates local (0.9), file-resolved (0.6), and unresolved external (0.4) references at parse time, and the persistence layer hoists both `confidence` and `scope` for structural edges; analytics consumers should continue to respect the configurable minimum confidence thresholds when interpreting outcomes.
-- Entity listing previously ignored symbol-kind filters (e.g., `type=function`); the latest integration fix maps REST `type` parameters onto graph symbol kinds, but we still need a canonical taxonomy shared between Fastify schemas and graph queries so future clients and tooling stay aligned.
+## 2. Status Summary
+### Completed Improvements
+- Structural metadata is now promoted to first-class Falkor properties (alias, import type, namespace flags, module path, temporal fields) during ingestion via `extractStructuralPersistenceFields` and the write pipeline, instead of living solely in `r.metadata` (`src/services/relationships/structuralPersistence.ts:8`, `src/services/KnowledgeGraphService.ts:5380`).
+- `normalizeStructuralRelationship` canonicalizes import/export metadata, resolution state, confidence defaults, and `time-rel_*` IDs while language adapters populate cross-language fields (`src/services/relationships/RelationshipNormalizer.ts:208`, `src/services/relationships/RelationshipNormalizer.ts:348`).
+- Graph APIs expose structural filters and navigation helpers—`getRelationships` accepts alias/module filters, `finalizeScan` retires stale edges, `listModuleChildren`/`listImports` power module navigation, and `getModuleHistory` surfaces temporal context (`src/services/KnowledgeGraphService.ts:6740`, `src/services/KnowledgeGraphService.ts:7132`, `src/services/KnowledgeGraphService.ts:11637`, `src/services/KnowledgeGraphService.ts:11803`).
+- Falkor command serialization now handles nested objects and arrays without hitting the "primitive types only" error, allowing structured metadata to flow through `SET n += $props` operations (`src/services/database/FalkorDBService.ts:384`).
+
+### Outstanding Gaps
+- Guarantee Falkor index bootstrap on first graph creation: `setupGraph` still defers when the graph key is missing, so an initial write can occur without indexes. Add a first-write hook or bootstrap task to create indexes immediately (`src/services/database/FalkorDBService.ts:279`).
+- Restore vector search endpoints by wiring the Fastify router to the vector-store implementation; `registerVDBRoutes` remains commented out so `/api/v1/vdb/search` responds 404 (`src/api/APIGateway.ts:27`).
+- Codify a canonical symbol-kind taxonomy shared by REST schemas and graph queries—the current lookup tables keep behaviour working but remain ad-hoc (`src/api/routes/graph.ts:20`).
+- Ensure dependency ingestion surfaces meaningful results for `graph.dependencies.analyze`; the MCP tool currently replays whatever `CALLS`/`REFERENCES`/`DEPENDS_ON` edges exist, so we still need fixtures and parser coverage to guarantee non-empty responses (`src/services/KnowledgeGraphService.ts:9480`).
 
 ## 3. Desired Capabilities
 1. Persist structural metadata that supports multi-language ingestion—import alias, import type (default/named/wildcard), namespace flags, re-export targets, symbol kind, and module path.
@@ -73,7 +71,7 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
 - The backfill normalizes aliases, import types, namespace flags, language/symbol kind casing, and module paths before writing them to Falkor properties. It also rewrites the metadata JSON with the normalized values so ingestion and read paths stay consistent.
 - Schedule the migration after deploying parser or normalization changes so existing edges immediately benefit from the richer query filters (`importAlias`, `modulePath`, `symbolKind`, etc.).
 
-## 9. Temporal & History Integration
+## 10. Temporal & History Integration
 1. Use history pipeline to track structural changes: when symbol moves, close old `DEFINES` edge and open new one with `validFrom/validTo`.
 2. For `IMPORTS`, mark edges inactive when dependency removed; track `lastSeenAt` from parser scans.
 3. Provide timeline queries for module evolution (e.g., `getModuleHistory(modulePath)`).
@@ -87,13 +85,13 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
 - The helper accepts `{ includeInactive?: boolean, limit?: number, versionLimit?: number }` so callers can scope the response for dashboards versus deep dives.
 - Structural relationship persistence hoists `confidence`/`scope` and keeps `firstSeenAt`/`lastSeenAt` updated, ensuring timeline queries, analytics, and downstream tooling consume consistent metadata.
 
-## 10. Migration & Backfill Plan
+## 11. Migration & Backfill Plan
 1. Expand schema to include new fields and indexes; ensure safe defaults for existing edges.
 2. Re-run AST parser to repopulate structural edges with enriched metadata; verify counts remain consistent.
 3. For languages beyond TypeScript, document ingestion requirements and plan incremental rollout.
 4. Provide audit reports comparing before/after metadata to ensure no regressions in import/export detection.
 
-## 11. Risks & Mitigations
+## 12. Risks & Mitigations
 | Risk | Mitigation |
 | --- | --- |
 | Metadata explosion for multi-language support | Use generic fields plus namespaced metadata; keep core schema lean. |
@@ -101,14 +99,14 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
 | Query performance degrade with new filters | Add targeted indexes and query caching; measure using benchmarks. |
 | Temporal updates increasing ingestion workload | Optimize parser diffing to emit only changed edges; batch history updates. |
 
-## 12. Implementation Milestones
+## 13. Implementation Milestones
 1. Implement normalization helper & language adapters.
 2. Update persistence/query layers and add indexes.
 3. Reingest structural data; validate with integration tests.
 4. Integrate temporal tracking and update history APIs.
 5. Roll out navigation improvements (IDE, UI) leveraging new metadata.
 
-## 13. Open Questions
+## 14. Open Questions
 - Should we introduce dedicated `MODULE` nodes to represent directories/packages more explicitly?
 - How do we model multi-language modules (e.g., TS + JS + wasm) sharing imports/exports?
 - Do we need to track wildcard imports’ expanded symbol sets, or rely on runtime resolution? Could this be metadata referencing derived edges?

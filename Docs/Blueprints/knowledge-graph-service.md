@@ -1,44 +1,49 @@
 # Knowledge Graph Service Blueprint
 
 ## 1. Overview
-`KnowledgeGraphService` orchestrates graph persistence across FalkorDB, Qdrant, PostgreSQL, and Redis while normalising code/documentation relationships and caching hot queries. It is the primary entry point for CRUD operations on graph entities, relationship enrichment, and downstream analyses such as impact or traversal queries.
+`KnowledgeGraphService` orchestrates graph persistence across FalkorDB and Qdrant while maintaining in-memory caches for entity lookups and search. Each instance derives a `NamespaceScope` so every CRUD path consistently applies the active namespace prefix, normalises relationship identifiers, and targets the correct Qdrant collections. Although the wider `DatabaseService` can supply PostgreSQL and Redis clients, the current implementation does not issue calls to those stores; they remain expansion points for future features.
 
-## 2. Current Gaps
-- **Inbound namespace application is inconsistent.** Write paths prefix entity IDs with the active namespace, but many read/update/delete entrypoints (e.g. `getEntity`, `getRelationships`, `deleteEntity`, Qdrant deletes) expect callers to pass already-prefixed IDs. Test helpers mutate fixtures in-place so suites pass, yet any caller that builds IDs ad-hoc or stores raw identifiers will miss records silently.
-- **Relationship fetches bypass namespace helpers.** `deleteRelationship` and `getRelationshipById` forward the raw ID directly to FalkorDB, so mixed callers (prefixed + raw) surface 404-like behaviour even after entity ID fixes land.
-- **Redis namespace is unused.** `GraphNamespaceConfig.redisPrefix` is derived but never threaded into cache key generation or Redis lookups. If left idle it creates dead configuration surface; if retained it should drive deterministic key computation for any Redis-backed features.
+## 2. Current State
+- Namespaces are applied automatically on every entity and relationship read/write/delete path. Callers can provide raw IDs or pre-prefixed values and always hit the canonically namespaced records.
+- Relationship canonicalisation now threads through FalkorDB operations, event payloads, and vector clean-up, so either legacy `rel_` or temporal `time-rel_` identifiers resolve to the same record.
+- Entity upserts assign a common `Entity` label alongside specialised types, enabling FalkorDB queries that span code, documentation, and semantic clusters without schema drift.
+- Temporal lifecycle helpers and embedding maintenance reuse the scoped namespace, ensuring Qdrant deletes operate on the same namespaced identifiers as graph mutations.
 
-## 3. Desired Capabilities
-1. Make namespace-aware lookups transparent so callers can pass either raw or prefixed entity IDs and always hit the correct graph/vector records.
-2. Thread namespace metadata through secondary stores (Redis, future Postgres helpers) with a single source of truth for key/collection generation.
-3. Keep lifecycle ergonomics (`shutdown`, `withScopedInstance`, cache controls) simple enough that harnesses never need to new-up extra instances just to reset state.
-4. Canonicalise relationship identifiers (including cache/event payloads) so deduping and deletes survive namespace expansion.
+## 3. Known Gaps
+- Redis namespace bindings exist (`GraphNamespaceConfig.redisPrefix` and `NamespaceScope.qualifyRedisKey`), but no cache keys are generated yet. We need either an integration plan for Redis-backed features or a decision to drop the surface area.
+- Service consumers still rely on tribal knowledge for namespace expectations. We owe them explicit guidance on valid inputs, emitted IDs, and cache semantics.
+- Namespace-aware tests cover entity fetches, but relationship pathways and Qdrant clean-up with mixed ID formats remain thin.
 
-## 4. Immediate Follow-ups
-- Add internal helpers to normalize entity and relationship IDs with the active namespace before every read/update/delete execution path.
-- Extend vector cleanup and relationship deletion (graph + vector) to call the new helpers so Falkor/Qdrant deletes target the namespaced records.
-- Decide whether `redisPrefix` should be wired into cache key calculations or trimmed from the API to avoid misleading consumers.
-- Capture the namespace contract (inputs, outputs, cache behaviour) in developer docs so service consumers stop hard-coding prefixes.
+## 4. Desired Capabilities
+1. Make namespace behaviour self-service: callers should never care whether IDs are raw or prefixed and should have documentation that reflects that guarantee.
+2. Thread namespace metadata through secondary stores (Redis, future PostgreSQL helpers) from a single source of truth, or intentionally trim unused configuration.
+3. Keep lifecycle utilities (`initialize`, `shutdown`, scoped helpers) straightforward so harnesses do not need to instantiate multiple services to flush state.
+4. Ensure relationship canonicalisation and cache invalidation stay resilient as new edge types, temporal states, or aggregation jobs are introduced.
 
-_(Added: 2025-09-19 after resolving KnowledgeGraphService relationship test contamination.)_
+## 5. Immediate Follow-ups
+- Decide on the Redis story: either wire `namespaceScope.qualifyRedisKey()` into the caches we plan to keep warm, or remove the prefix fields and document the rationale.
+- Publish namespace contract documentation that explains caller expectations (input shapes, ID normalisation, cache behaviour) and link it from service entry points.
+- Add regression coverage for relationship reads/deletes via raw IDs and ensure Qdrant deletions honour both raw and prefixed identifiers.
 
-## 5. Recent Fixes
-- **2025-09-19:** All nodes now receive a shared `Entity` label alongside their specific type. Database integration searches rely on this base label when correlating relational fixtures with graph fixtures; without it Falkor queries returned zero rows even though typed labels existed, masking cross-database drift.
+_(Updated: 2025-09-23 to reflect NamespaceScope rollout and resolved namespace gaps.)_
 
-## 6. Backlog
-- [ ] **Namespace scope utilities**: introduce a `NamespaceScope` helper (or equivalent module) that exposes `resolveEntityId`, `resolveRelationshipId`, `qualifyRedisKey`, and `qdrantCollectionFor(kind)` so all call sites consume the same contract.
-- [ ] **Relationship operations alignment**: refactor `deleteRelationship`, `getRelationshipById`, relationship cache invalidation, and event payloads to rely on `resolveRelationshipId` before touching FalkorDB or Redis.
-- [ ] **Query normalization sweep**: apply the namespace helpers across `getRelationships`, traversal/impact queries, ingestion validation, and bulk upsert code paths to eliminate ad-hoc prefix checks.
-- [ ] **Redis strategy decision**: either drive cache key generation off `namespace.qualifyRedisKey()` (including warm-path caches and invalidation) or remove `redisPrefix` from `GraphNamespaceConfig` and document the rationale.
-- [ ] **Consistency guards**: add unit + integration coverage that exercises reads/deletes with raw and prefixed IDs, validates Qdrant payload cleanup, and asserts cache key derivation per namespace.
-- [ ] **Namespace contract docs**: publish developer guidance outlining caller expectations (inputs, outputs, cache semantics, migration playbook) once helpers ship.
+## 6. Recent Fixes
+- **2025-09-19:** All nodes now receive a shared `Entity` label alongside their specific type. Database integration searches rely on this base label when correlating relational fixtures with graph fixtures.
+- **2025-09-22:** Introduced `NamespaceScope` and routed every read/update/delete path through it, eliminating the need for callers to pre-prefix IDs.
 
-## 7. Test Coverage Notes
-- Add unit coverage for the new namespace helper to assert that raw IDs, already-prefixed inputs, and empty strings resolve deterministically.
-- Extend integration tests to create entities/relationships via raw IDs, read/delete them using mixed input formats, and assert Qdrant as well as FalkorDB state is updated.
-- Exercise Redis-backed features (once implemented) to confirm keys segregate by namespace and invalidation honours the helper contract.
+## 7. Backlog
+- [x] **Namespace scope utilities**: expose helpers (`resolveEntityId`, `resolveRelationshipId`, `qualifyRedisKey`, `qdrantCollectionFor`) and consume them across CRUD paths.
+- [x] **Relationship operations alignment**: ensure `deleteRelationship`, `getRelationshipById`, cache invalidation, and event payloads use canonical namespaced IDs.
+- [x] **Query normalisation sweep**: migrate `getRelationships`, traversal/impact queries, ingestion validation, and bulk upsert code paths to the namespace helpers.
+- [ ] **Redis strategy decision**: drive cache key generation off `namespaceScope.qualifyRedisKey()` (including warm-path caches and invalidation) or remove the Redis prefix from `GraphNamespaceConfig` and document the migration.
+- [ ] **Consistency guards**: extend unit + integration coverage for relationship reads/deletes and Qdrant payload clean-up using mixed ID formats.
+- [ ] **Namespace contract docs**: publish developer guidance outlining caller expectations (inputs, outputs, cache semantics, migration playbook) and reference it from onboarding materials.
 
-## 8. Open Questions
-- Should relationship identifiers embed the same namespace prefix as entities (e.g., `${entityPrefix}rel_*`) or derive from hashed inputs to avoid double-prefixing? Current implementations generate canonical IDs without a namespace component.
-- Do we need backward compatibility shims for persisted Redis keys if we start applying `redisPrefix`, or can we force a cache bust/migration window?
-- Where should the namespace helper live (`GraphNamespaceConfig`, a standalone util, or as part of the service constructor) so it is accessible to other services that need the same behaviour?
+## 8. Test Coverage Notes
+- Integration tests already validate entity CRUD via both raw and namespaced IDs; reuse those patterns for relationships, embeddings, and cache invalidation events.
+- Add unit tests for `NamespaceScope` that cover relationship ID helpers and Redis key qualification, including empty inputs and already-prefixed values.
+- Introduce Qdrant integration smoke tests that assert deletes succeed when triggered with raw IDs, proving the namespace helpers resolve to the stored payloads.
+
+## 9. Open Questions
+- When Redis-backed features arrive, do we need a cache-busting window for any existing keys, or can we safely assume new namespaces and key derivations? (Currently moot while Redis remains unused.)
+- Should we continue deriving canonical relationship IDs from `from/to/type`, or move to hashed identifiers to guarantee stability if namespace prefixes change again?

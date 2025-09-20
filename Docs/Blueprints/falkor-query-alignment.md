@@ -1,11 +1,10 @@
 # Falkor Query Alignment Blueprint
 
 ## 1. Overview
-Knowledge graph queries now support richer symbol taxonomy (graph node `type` versus `kind`) and enhanced evidence metadata, but downstream services and tests still assume the previous parameter contract. This drift surfaced as failing Falkor-facing tests: REST graph routes, MCP tooling, and direct `KnowledgeGraphService` calls assert against outdated payloads. The goal of this blueprint is to realign the query/persistence layer with client expectations so that filtering, payload shaping, and metadata merging behave consistently across the stack.
+Knowledge graph queries now support richer symbol taxonomy (graph node `type` versus `kind`) and enhanced evidence metadata. The REST layer and unit tests already translate legacy inputs such as `type=function` into the `{ type: 'symbol', kind: 'function' }` shape that `KnowledgeGraphService.listEntities` consumes, so baseline filtering paths have stabilised. The remaining work focuses on consolidating that mapping logic, documenting the contract, and finishing the surrounding consistency fixes (metadata, counters, error contracts) so every Falkor-facing surface behaves predictably.
 
 ## 2. Current Gaps
-- `KnowledgeGraphService.listEntities` (src/services/KnowledgeGraphService.ts:8221-8234) emits Cypher params `entityType`/`entityKind`, while mocks and REST handlers still expect `type`/`kind`. The mismatch makes tests assert on the wrong payload and risks breaking real integrations that replay recorded traffic.
-- REST graph entities route (src/api/routes/graph.ts:712-733) maps `type=function` to `{ type: 'symbol', kind: 'function' }` but downstream tests still expect the legacy `{ type: 'function' }` contract. We need an explicit compatibility layer and documentation so clients understand the new taxonomy.
+- `KnowledgeGraphService.listEntities` (src/services/KnowledgeGraphService.ts:11438-11516) now accepts `type`/`kind`, but the translation from legacy query params lives in two places: the REST handler (`src/api/routes/graph.ts:1080-1116`) and several test helpers. Without a shared helper or documented mapping table, future changes risk reintroducing drift.
 - Relationship merge pipeline (src/services/KnowledgeGraphService.ts:3120-3184) now feeds `mergeEdgeLocations` with concatenated history, so `metadata.locations` returns multiple path/line entries. Legacy callers (e.g., unit test `createRelationship > merges incoming code edges…`) assume a single canonical location (earliest line). We need to define whether metadata should surface primary-only, multi-location, or both representations.
 - MCP `graph.examples` handler (src/api/mcp-router.ts:1067-1114) reports `totalExamples` as usage + test counts, but tests assume it only reflects `usageExamples`. Clarify the intended semantics and update clients/tests accordingly.
 - Test fixtures for Falkor-adjacent services (graph routes, MCP router, Backup restore dry-run) stub out database interactions with the old resolve/throw contract. Implementation now prefers structured error objects. Without harmonising these expectations, unit tests will continue failing even after code fixes.
@@ -18,9 +17,9 @@ Knowledge graph queries now support richer symbol taxonomy (graph node `type` ve
 
 ## 4. Workstreams
 ### 4.1 Filter & Parameter Normalisation
-- Extract a helper (e.g., `mapEntityFilters`) that receives REST/MCP inputs and returns `{ type, kind, language, tags }` along with the exact Cypher parameter names. Use it inside `KnowledgeGraphService.listEntities` and REST/MCP handlers.
-- Decide on parameter naming (`type` vs `entityType`) and update Cypher queries to match. Propagate changes to mocks (`tests/test-utils/mock-db-service.ts`, etc.) and adjust assertions accordingly.
-- Update documentation (`Docs/KnowledgeGraphDesign.md`) describing the type/kind taxonomy and the mapping table used by clients.
+- Extract a shared helper (e.g., `mapEntityFilters`) that receives REST/MCP inputs and returns `{ type, kind, language, tags }`, replacing the ad-hoc translation in `graph.ts` and duplicated test utilities.
+- Publish a mapping table (in docs and shared types) so SDKs know how legacy inputs such as `type=function` map to `{ type: 'symbol', kind: 'function' }` and keep it versioned.
+- Patch mocks (`tests/test-utils/mock-db-service.ts`, etc.) to call the helper so fixtures mirror production behaviour when new taxonomy values land.
 
 ### 4.2 Relationship Metadata Strategy
 - Define desired shape: (a) keep earliest location as `metadata.primaryLocation`, (b) expose historical array under `metadata.locations`, and (c) keep `evidence` unchanged.
@@ -42,7 +41,7 @@ Knowledge graph queries now support richer symbol taxonomy (graph node `type` ve
 ## 5. Risks & Mitigations
 | Risk | Mitigation |
 | --- | --- |
-| Breaking existing clients that rely on legacy `type=function` contract | Provide compatibility shim + deprecation notice, ensure REST handler translates old inputs transparently. |
+| Breaking existing clients that rely on legacy `type=function` contract | Keep the translation helper accepting legacy strings, document the new taxonomy, and advertise a deprecation window before removing shims. |
 | Confusion over location metadata semantics | Document primary vs historical fields and keep tests asserting both. |
 | Touching multiple modules increases regression surface | Incremental workstream rollout with dedicated test coverage per subsystem (service, REST, MCP, backup). |
 | Mock/test drift recurring | Centralise shared helpers for mapping and error handling used by both production code and test doubles. |
