@@ -3,6 +3,12 @@
  * Manages graph operations, vector embeddings, and entity relationships
  */
 
+const process = globalThis.process || { env: {} };
+const console = globalThis.console || {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
 import { DatabaseService } from "./DatabaseService.js";
 import {
   Entity,

@@ -9,7 +9,10 @@ import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
 import { ASTParser } from "./ASTParser.js";
 import { DatabaseService } from "./DatabaseService.js";
 import { FileChange } from "./FileWatcher.js";
-import { GraphRelationship, RelationshipType } from "../models/relationships.js";
+import {
+  GraphRelationship,
+  RelationshipType,
+} from "../models/relationships.js";
 import { TimeRangeParams } from "../models/types.js";
 import { GitService } from "./GitService.js";
 import {
@@ -46,7 +49,14 @@ export interface SyncOperation {
 
 export interface SyncError {
   file: string;
-  type: "parse" | "database" | "conflict" | "unknown" | "rollback" | "cancelled" | "capability";
+  type:
+    | "parse"
+    | "database"
+    | "conflict"
+    | "unknown"
+    | "rollback"
+    | "cancelled"
+    | "capability";
   message: string;
   timestamp: Date;
   recoverable: boolean;
@@ -82,7 +92,12 @@ export interface SessionStreamPayload {
   }>;
   checkpointId?: string;
   seeds?: string[];
-  status?: SyncOperation["status"] | "failed" | "cancelled" | "queued" | "manual_intervention";
+  status?:
+    | SyncOperation["status"]
+    | "failed"
+    | "cancelled"
+    | "queued"
+    | "manual_intervention";
   errors?: SyncError[];
   processedChanges?: number;
   totalChanges?: number;
@@ -145,7 +160,10 @@ export class SynchronizationCoordinator extends EventEmitter {
   private activeSessionIds = new Map<string, string>();
 
   // Runtime tuning knobs per operation (can be updated during sync)
-  private tuning = new Map<string, { maxConcurrency?: number; batchSize?: number }>();
+  private tuning = new Map<
+    string,
+    { maxConcurrency?: number; batchSize?: number }
+  >();
 
   // Local symbol index to speed up same-file relationship resolution
   private localSymbolIndex: Map<string, string> = new Map();
@@ -156,6 +174,10 @@ export class SynchronizationCoordinator extends EventEmitter {
   private sessionSequence = new Map<string, number>();
 
   private checkpointJobRunner: SessionCheckpointJobRunner;
+
+  private anomalyResolutionMode = (
+    process.env.ANOMALY_RESOLUTION_MODE ?? "warn"
+  ).toLowerCase() as "skip" | "warn" | "process";
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -204,20 +226,22 @@ export class SynchronizationCoordinator extends EventEmitter {
     try {
       const postgresService = this.dbService.getPostgreSQLService();
       if (postgresService && typeof postgresService.query === "function") {
-        options.persistence = new PostgresSessionCheckpointJobStore(postgresService);
+        options.persistence = new PostgresSessionCheckpointJobStore(
+          postgresService
+        );
       }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error);
-      console.warn(
-        `⚠️ Unable to configure checkpoint persistence: ${message}`
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`⚠️ Unable to configure checkpoint persistence: ${message}`);
     }
     return options;
   }
 
   private async ensureCheckpointPersistence(): Promise<void> {
-    if (!this.checkpointJobRunner || this.checkpointJobRunner.hasPersistence()) {
+    if (
+      !this.checkpointJobRunner ||
+      this.checkpointJobRunner.hasPersistence()
+    ) {
       return;
     }
     if (!this.dbService || typeof this.dbService.isInitialized !== "function") {
@@ -240,9 +264,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(
-        `⚠️ Failed to attach checkpoint persistence: ${message}`
-      );
+      console.warn(`⚠️ Failed to attach checkpoint persistence: ${message}`);
     }
   }
 
@@ -296,7 +318,9 @@ export class SynchronizationCoordinator extends EventEmitter {
       return { success: true, jobId, sequenceNumber };
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : `Unknown error: ${String(error)}`;
+        error instanceof Error
+          ? error.message
+          : `Unknown error: ${String(error)}`;
       console.warn(
         `⚠️ Failed to enqueue session checkpoint job for ${sessionId}: ${message}`
       );
@@ -346,7 +370,8 @@ export class SynchronizationCoordinator extends EventEmitter {
       return;
     }
 
-    const errorMessage = checkpointResult.error || "Failed to schedule checkpoint";
+    const errorMessage =
+      checkpointResult.error || "Failed to schedule checkpoint";
     try {
       await this.kgService.annotateSessionRelationshipsWithCheckpoint(
         params.sessionId,
@@ -397,13 +422,16 @@ export class SynchronizationCoordinator extends EventEmitter {
       });
     });
 
-    this.checkpointJobRunner.on("jobStarted", ({ jobId, attempts, payload }) => {
-      this.emitCheckpointMetrics("job_started", {
-        jobId,
-        attempts,
-        sessionId: payload?.sessionId,
-      });
-    });
+    this.checkpointJobRunner.on(
+      "jobStarted",
+      ({ jobId, attempts, payload }) => {
+        this.emitCheckpointMetrics("job_started", {
+          jobId,
+          attempts,
+          sessionId: payload?.sessionId,
+        });
+      }
+    );
 
     this.checkpointJobRunner.on(
       "jobAttemptFailed",
@@ -505,15 +533,27 @@ export class SynchronizationCoordinator extends EventEmitter {
     const op = this.activeOperations.get(operationId);
     if (!op) return false;
     const current = this.tuning.get(operationId) || {};
-    const merged = { ...current } as { maxConcurrency?: number; batchSize?: number };
-    if (typeof tuning.maxConcurrency === 'number' && isFinite(tuning.maxConcurrency)) {
-      merged.maxConcurrency = Math.max(1, Math.min(Math.floor(tuning.maxConcurrency), 64));
+    const merged = { ...current } as {
+      maxConcurrency?: number;
+      batchSize?: number;
+    };
+    if (
+      typeof tuning.maxConcurrency === "number" &&
+      isFinite(tuning.maxConcurrency)
+    ) {
+      merged.maxConcurrency = Math.max(
+        1,
+        Math.min(Math.floor(tuning.maxConcurrency), 64)
+      );
     }
-    if (typeof tuning.batchSize === 'number' && isFinite(tuning.batchSize)) {
-      merged.batchSize = Math.max(1, Math.min(Math.floor(tuning.batchSize), 5000));
+    if (typeof tuning.batchSize === "number" && isFinite(tuning.batchSize)) {
+      merged.batchSize = Math.max(
+        1,
+        Math.min(Math.floor(tuning.batchSize), 5000)
+      );
     }
     this.tuning.set(operationId, merged);
-    this.emit('syncProgress', op, { phase: 'tuning_updated', progress: 0 });
+    this.emit("syncProgress", op, { phase: "tuning_updated", progress: 0 });
     return true;
   }
 
@@ -529,7 +569,8 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   private ensureDatabaseReady(): void {
-    const hasChecker = typeof (this.dbService as any)?.isInitialized === 'function';
+    const hasChecker =
+      typeof (this.dbService as any)?.isInitialized === "function";
     if (!hasChecker || !this.dbService.isInitialized()) {
       throw new Error("Database not initialized");
     }
@@ -541,7 +582,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     sequenceNumber: number,
     eventId: string,
     timestamp: Date
-  ): void {
+  ): { shouldSkip: boolean; reason?: string } {
     let state = this.sessionSequenceState.get(sessionId);
     if (!state) {
       state = {
@@ -592,6 +633,11 @@ export class SynchronizationCoordinator extends EventEmitter {
         timestamp,
         previousType: previousType ?? null,
       });
+
+      const skipModes = ["duplicate", "out_of_order"];
+      if (this.anomalyResolutionMode === "skip" && skipModes.includes(reason)) {
+        return { shouldSkip: true, reason };
+      }
     }
 
     state.perType.set(type, sequenceNumber);
@@ -603,6 +649,8 @@ export class SynchronizationCoordinator extends EventEmitter {
     const lastRecorded =
       state.lastSequence === null ? sequenceNumber : state.lastSequence;
     this.sessionSequence.set(sessionId, lastRecorded);
+
+    return { shouldSkip: false };
   }
 
   private clearSessionTracking(sessionId: string): void {
@@ -807,7 +855,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     };
 
     // Attach options to the operation so workers can consult them
-    ;(operation as any).options = options;
+    (operation as any).options = options;
 
     this.activeOperations.set(operation.id, operation);
 
@@ -905,7 +953,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     };
 
     // Store options and changes for processing
-    ;(operation as any).options = options;
+    (operation as any).options = options;
     (operation as any).changes = changes;
 
     this.activeOperations.set(operation.id, operation);
@@ -1005,7 +1053,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Store updates for processing
     (operation as any).updates = updates;
-    ;(operation as any).options = options;
+    (operation as any).options = options;
 
     this.activeOperations.set(operation.id, operation);
 
@@ -1280,7 +1328,9 @@ export class SynchronizationCoordinator extends EventEmitter {
     this.paused = false;
     const waiters = this.resumeWaiters.splice(0);
     for (const w of waiters) {
-      try { w(); } catch {}
+      try {
+        w();
+      } catch {}
     }
     // If there are queued operations and not currently processing, resume processing
     if (!this.isProcessing && this.operationQueue.length > 0) {
@@ -1299,7 +1349,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Ensure a Module entity exists for the root package if applicable (best-effort)
     try {
-      const { ModuleIndexer } = await import('./ModuleIndexer.js');
+      const { ModuleIndexer } = await import("./ModuleIndexer.js");
       const mi = new ModuleIndexer(this.kgService);
       await mi.indexRootPackage().catch(() => {});
     } catch {}
@@ -1326,66 +1376,76 @@ export class SynchronizationCoordinator extends EventEmitter {
       try {
         const result = await this.astParser.parseFile(file);
 
-          // Build local index for this file's symbols to avoid DB lookups
-          for (const ent of result.entities) {
-            if ((ent as any)?.type === 'symbol') {
-              const nm = (ent as any).name as string | undefined;
-              const p = (ent as any).path as string | undefined;
-              if (nm && p) {
-                const filePath = p.includes(":") ? p.split(":")[0] : p;
-                this.localSymbolIndex.set(`${filePath}:${nm}`, ent.id);
-              }
+        // Build local index for this file's symbols to avoid DB lookups
+        for (const ent of result.entities) {
+          if ((ent as any)?.type === "symbol") {
+            const nm = (ent as any).name as string | undefined;
+            const p = (ent as any).path as string | undefined;
+            if (nm && p) {
+              const filePath = p.includes(":") ? p.split(":")[0] : p;
+              this.localSymbolIndex.set(`${filePath}:${nm}`, ent.id);
             }
           }
-
-          // Detect and handle conflicts before creating entities
-          if (result.entities.length > 0 || result.relationships.length > 0) {
-            try {
-              const conflicts = await this.detectConflicts(
-                result.entities,
-                result.relationships,
-                opts
-              );
-              if (conflicts.length > 0) {
-                this.logConflicts(conflicts, operation, file, opts);
-              }
-            } catch (conflictError) {
-              operation.errors.push({
-                file,
-                type: "conflict",
-                message:
-                  conflictError instanceof Error
-                    ? conflictError.message
-                    : "Conflict detection failed",
-                timestamp: new Date(),
-                recoverable: true,
-              });
-            }
-          }
-
-          // Accumulate entities and relationships for batch processing
-          (operation as any)._batchEntities = ((operation as any)._batchEntities || []).concat(result.entities);
-          const relsWithSource = result.relationships.map(r => ({ ...(r as any), __sourceFile: file }));
-          (operation as any)._batchRelationships = ((operation as any)._batchRelationships || []).concat(relsWithSource as any);
-
-          operation.filesProcessed++;
-        } catch (error) {
-          operation.errors.push({
-            file,
-            type: "parse",
-            message: error instanceof Error ? error.message : "Parse error",
-            timestamp: new Date(),
-            recoverable: true,
-          });
         }
-      };
+
+        // Detect and handle conflicts before creating entities
+        if (result.entities.length > 0 || result.relationships.length > 0) {
+          try {
+            const conflicts = await this.detectConflicts(
+              result.entities,
+              result.relationships,
+              opts
+            );
+            if (conflicts.length > 0) {
+              this.logConflicts(conflicts, operation, file, opts);
+            }
+          } catch (conflictError) {
+            operation.errors.push({
+              file,
+              type: "conflict",
+              message:
+                conflictError instanceof Error
+                  ? conflictError.message
+                  : "Conflict detection failed",
+              timestamp: new Date(),
+              recoverable: true,
+            });
+          }
+        }
+
+        // Accumulate entities and relationships for batch processing
+        (operation as any)._batchEntities = (
+          (operation as any)._batchEntities || []
+        ).concat(result.entities);
+        const relsWithSource = result.relationships.map((r) => ({
+          ...(r as any),
+          __sourceFile: file,
+        }));
+        (operation as any)._batchRelationships = (
+          (operation as any)._batchRelationships || []
+        ).concat(relsWithSource as any);
+
+        operation.filesProcessed++;
+      } catch (error) {
+        operation.errors.push({
+          file,
+          type: "parse",
+          message: error instanceof Error ? error.message : "Parse error",
+          timestamp: new Date(),
+          recoverable: true,
+        });
+      }
+    };
 
     for (let i = 0; i < files.length; ) {
       const tn = this.tuning.get(operation.id) || {};
       const bsRaw = tn.batchSize ?? (opts as any).batchSize ?? 60;
       const batchSize = Math.max(1, Math.min(Math.floor(bsRaw), 1000));
       const mcRaw = tn.maxConcurrency ?? opts.maxConcurrency ?? 12;
-      const maxConcurrency = Math.max(1, Math.min(Math.floor(mcRaw), batchSize));
+      const maxConcurrency = Math.max(
+        1,
+        Math.min(Math.floor(mcRaw), batchSize)
+      );
 
       const batch = files.slice(i, i + batchSize);
       i += batchSize;
@@ -1400,19 +1460,25 @@ export class SynchronizationCoordinator extends EventEmitter {
           await processFile(batch[current]);
         }
       };
-      const workers = Array.from({ length: Math.min(maxConcurrency, batch.length) }, () => worker());
+      const workers = Array.from(
+        { length: Math.min(maxConcurrency, batch.length) },
+        () => worker()
+      );
       await Promise.allSettled(workers);
 
       // After parsing a batch of files, write entities in bulk, then relationships
       const batchEntities: any[] = (operation as any)._batchEntities || [];
-      const batchRelationships: any[] = (operation as any)._batchRelationships || [];
+      const batchRelationships: any[] =
+        (operation as any)._batchRelationships || [];
       (operation as any)._batchEntities = [];
       (operation as any)._batchRelationships = [];
       this.ensureNotCancelled(operation);
 
       if (batchEntities.length > 0) {
         try {
-          await this.kgService.createEntitiesBulk(batchEntities, { skipEmbedding: true });
+          await this.kgService.createEntitiesBulk(batchEntities, {
+            skipEmbedding: true,
+          });
           operation.entitiesCreated += batchEntities.length;
         } catch (e) {
           // Fallback to per-entity creation
@@ -1422,9 +1488,11 @@ export class SynchronizationCoordinator extends EventEmitter {
               operation.entitiesCreated++;
             } catch (err) {
               operation.errors.push({
-                file: (ent as any).path || 'unknown',
+                file: (ent as any).path || "unknown",
                 type: "database",
-                message: `Entity create failed: ${err instanceof Error ? err.message : 'unknown'}`,
+                message: `Entity create failed: ${
+                  err instanceof Error ? err.message : "unknown"
+                }`,
                 timestamp: new Date(),
                 recoverable: true,
               });
@@ -1439,7 +1507,9 @@ export class SynchronizationCoordinator extends EventEmitter {
         for (const relationship of batchRelationships) {
           try {
             // Fast path: if toEntityId points to an existing node, accept; else try to resolve
-            const toEntity = await this.kgService.getEntity((relationship as any).toEntityId);
+            const toEntity = await this.kgService.getEntity(
+              (relationship as any).toEntityId
+            );
             if (toEntity) {
               resolved.push(relationship);
               continue;
@@ -1451,7 +1521,10 @@ export class SynchronizationCoordinator extends EventEmitter {
               (relationship as any).__sourceFile || undefined
             );
             if (resolvedId) {
-              resolved.push({ ...(relationship as any), toEntityId: resolvedId });
+              resolved.push({
+                ...(relationship as any),
+                toEntityId: resolvedId,
+              });
             } else if (relationship.toEntityId) {
               resolved.push({ ...(relationship as any) });
             } else {
@@ -1474,19 +1547,28 @@ export class SynchronizationCoordinator extends EventEmitter {
         }
         if (resolved.length > 0) {
           try {
-            await this.kgService.createRelationshipsBulk(resolved as any, { validate: false });
+            await this.kgService.createRelationshipsBulk(resolved as any, {
+              validate: false,
+            });
             operation.relationshipsCreated += resolved.length;
           } catch (e) {
             // Fallback to per-relationship creation if bulk fails
             for (const r of resolved) {
               try {
-                await this.kgService.createRelationship(r as any, undefined, undefined, { validate: false });
+                await this.kgService.createRelationship(
+                  r as any,
+                  undefined,
+                  undefined,
+                  { validate: false }
+                );
                 operation.relationshipsCreated++;
               } catch (err) {
                 operation.errors.push({
                   file: "coordinator",
                   type: "database",
-                  message: `Failed to create relationship: ${err instanceof Error ? err.message : 'unknown'}`,
+                  message: `Failed to create relationship: ${
+                    err instanceof Error ? err.message : "unknown"
+                  }`,
                   timestamp: new Date(),
                   recoverable: true,
                 });
@@ -1498,14 +1580,18 @@ export class SynchronizationCoordinator extends EventEmitter {
 
       // Batch embeddings after entities to avoid per-entity overhead
       if (includeEmbeddings && batchEntities.length > 0) {
-        if (typeof (this.kgService as any).createEmbeddingsBatch === "function") {
+        if (
+          typeof (this.kgService as any).createEmbeddingsBatch === "function"
+        ) {
           try {
             await this.kgService.createEmbeddingsBatch(batchEntities);
           } catch (e) {
             operation.errors.push({
               file: "coordinator",
               type: "database",
-              message: `Batch embedding failed: ${e instanceof Error ? e.message : 'unknown'}`,
+              message: `Batch embedding failed: ${
+                e instanceof Error ? e.message : "unknown"
+              }`,
               timestamp: new Date(),
               recoverable: true,
             });
@@ -1514,14 +1600,17 @@ export class SynchronizationCoordinator extends EventEmitter {
           operation.errors.push({
             file: "coordinator",
             type: "capability",
-            message: "Embedding batch API unavailable; skipping inline embedding",
+            message:
+              "Embedding batch API unavailable; skipping inline embedding",
             timestamp: new Date(),
             recoverable: true,
           });
         }
       } else if (!includeEmbeddings && batchEntities.length > 0) {
         // Accumulate for background embedding after sync completes
-        (operation as any)._embedQueue = ((operation as any)._embedQueue || []).concat(batchEntities);
+        (operation as any)._embedQueue = (
+          (operation as any)._embedQueue || []
+        ).concat(batchEntities);
       }
 
       const progress = 0.2 + (i / files.length) * 0.8;
@@ -1533,13 +1622,18 @@ export class SynchronizationCoordinator extends EventEmitter {
     await this.runPostResolution(operation);
 
     // Deactivate edges not seen during this scan window (best-effort)
-    try { await this.kgService.finalizeScan(scanStart); } catch {}
+    try {
+      await this.kgService.finalizeScan(scanStart);
+    } catch {}
 
     this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
 
     // Fire-and-forget background embeddings if they were skipped during full sync
     const pendingToEmbed: any[] = (operation as any)._embedQueue || [];
-    if (pendingToEmbed.length > 0 && typeof (this.kgService as any).createEmbeddingsBatch === "function") {
+    if (
+      pendingToEmbed.length > 0 &&
+      typeof (this.kgService as any).createEmbeddingsBatch === "function"
+    ) {
       // Run in background without blocking completion
       const chunks: any[][] = [];
       const chunkSize = 200;
@@ -1552,10 +1646,16 @@ export class SynchronizationCoordinator extends EventEmitter {
             await this.kgService.createEmbeddingsBatch(c);
           } catch (e) {
             // log and continue
-            try { console.warn("Background embedding batch failed:", e); } catch {}
+            try {
+              console.warn("Background embedding batch failed:", e);
+            } catch {}
           }
         }
-        try { console.log(`✅ Background embeddings created for ${pendingToEmbed.length} entities`); } catch {}
+        try {
+          console.log(
+            `✅ Background embeddings created for ${pendingToEmbed.length} entities`
+          );
+        } catch {}
       })().catch(() => {});
     } else if (pendingToEmbed.length > 0) {
       operation.errors.push({
@@ -1615,7 +1715,9 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Track entities to embed in batch and session relationships buffer
     const toEmbed: any[] = [];
-    const sessionRelBuffer: Array<import("../models/relationships.js").GraphRelationship> = [];
+    const sessionRelBuffer: Array<
+      import("../models/relationships.js").GraphRelationship
+    > = [];
     const sessionSequenceLocal = new Map<string, number>();
     const allocateSessionSequence = () => {
       const next = sessionSequenceLocal.get(sessionId) ?? 0;
@@ -1630,7 +1732,9 @@ export class SynchronizationCoordinator extends EventEmitter {
       const batch = sessionRelBuffer.slice();
 
       try {
-        await this.kgService.createRelationshipsBulk(batch, { validate: false });
+        await this.kgService.createRelationshipsBulk(batch, {
+          validate: false,
+        });
         sessionRelBuffer.splice(0, batch.length);
         const relationships = batch.map((rel) =>
           this.serializeSessionRelationship(rel)
@@ -1677,6 +1781,19 @@ export class SynchronizationCoordinator extends EventEmitter {
           )
           .digest("hex")
           .slice(0, 16);
+      const sequenceCheck = this.recordSessionSequence(
+        sessionId,
+        type,
+        sequenceNumber,
+        eventId,
+        timestamp
+      );
+      if (sequenceCheck.shouldSkip) {
+        console.warn(
+          `⚠️ Skipping session relationship due to sequence anomaly: ${sequenceCheck.reason} for ${sessionId}:${type}:${sequenceNumber}`
+        );
+        return { sequenceNumber, eventId, timestamp, skipped: true };
+      }
       const metadata = { ...(options.metadata ?? {}) };
       if (metadata.source === undefined) metadata.source = "sync";
       if (metadata.sessionId === undefined) metadata.sessionId = sessionId;
@@ -1699,9 +1816,20 @@ export class SynchronizationCoordinator extends EventEmitter {
         metadata,
       };
       const graphRelationship = relationship as GraphRelationship;
-      graphRelationship.id = canonicalRelationshipId(sessionId, graphRelationship);
-      sessionRelBuffer.push(relationship as import("../models/relationships.js").GraphRelationship);
-      this.recordSessionSequence(sessionId, type, sequenceNumber, eventId, timestamp);
+      graphRelationship.id = canonicalRelationshipId(
+        sessionId,
+        graphRelationship
+      );
+      sessionRelBuffer.push(
+        relationship as import("../models/relationships.js").GraphRelationship
+      );
+      this.recordSessionSequence(
+        sessionId,
+        type,
+        sequenceNumber,
+        eventId,
+        timestamp
+      );
       return { sequenceNumber, eventId, timestamp };
     };
     // Track changed entities for checkpointing and change metadata
@@ -1801,167 +1929,83 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     try {
       for (const change of changes) {
-      await awaitIfPaused();
-      this.ensureNotCancelled(operation);
-      try {
-        this.emit("syncProgress", operation, {
-          phase: "processing_changes",
-          progress: (processedChanges / totalChanges) * 0.8,
-        });
+        await awaitIfPaused();
+        this.ensureNotCancelled(operation);
+        try {
+          this.emit("syncProgress", operation, {
+            phase: "processing_changes",
+            progress: (processedChanges / totalChanges) * 0.8,
+          });
 
-        switch (change.type) {
-          case "create":
-          case "modify":
-            // Parse the file and update graph
-            let parseResult;
-            try {
-              parseResult = await this.astParser.parseFileIncremental(
-                change.path
-              );
-            } catch (error) {
-              // Handle parsing errors (e.g., invalid file paths)
-              operation.errors.push({
-                file: change.path,
-                type: "parse",
-                message: `Failed to parse file: ${
-                  error instanceof Error ? error.message : "Unknown error"
-                }`,
-                timestamp: new Date(),
-                recoverable: false,
-              });
-              processedChanges++;
-              continue; // Skip to next change
-            }
-
-            // Detect conflicts before applying changes
-            if (
-              parseResult.entities.length > 0 ||
-              parseResult.relationships.length > 0
-            ) {
-              const conflicts = await this.detectConflicts(
-                parseResult.entities,
-                parseResult.relationships,
-                syncOptions
-              );
-
-              if (conflicts.length > 0) {
-                this.logConflicts(conflicts, operation, change.path, syncOptions);
-              }
-            }
-
-            // Apply entities
-            for (const entity of parseResult.entities) {
+          switch (change.type) {
+            case "create":
+            case "modify":
+              // Parse the file and update graph
+              let parseResult;
               try {
-                if (
-                  parseResult.isIncremental &&
-                  parseResult.updatedEntities?.includes(entity)
-                ) {
-                  await this.kgService.updateEntity(entity.id, entity, { skipEmbedding: true });
-                  operation.entitiesUpdated++;
-                  toEmbed.push(entity);
-                } else {
-                  await this.kgService.createEntity(entity, { skipEmbedding: true });
-                  operation.entitiesCreated++;
-                  toEmbed.push(entity);
-                }
-              } catch (error) {
-                operation.errors.push({
-                  file: change.path,
-                  type: "database",
-                  message: `Failed to process entity ${entity.id}: ${
-                    error instanceof Error ? error.message : "Unknown"
-                  }`,
-                  timestamp: new Date(),
-                  recoverable: true,
-                });
-              }
-            }
-
-            // Apply relationships (current layer). Keep for idempotency; uses MERGE semantics downstream.
-            for (const relationship of parseResult.relationships) {
-              try {
-                const created = await this.resolveAndCreateRelationship(
-                  relationship,
+                parseResult = await this.astParser.parseFileIncremental(
                   change.path
                 );
-                if (created) {
-                  operation.relationshipsCreated++;
-                } else {
-                  this.unresolvedRelationships.push({
-                    relationship,
-                    sourceFilePath: change.path,
-                  });
-                }
               } catch (error) {
+                // Handle parsing errors (e.g., invalid file paths)
                 operation.errors.push({
                   file: change.path,
-                  type: "database",
-                  message: `Failed to create relationship: ${
-                    error instanceof Error ? error.message : "Unknown"
+                  type: "parse",
+                  message: `Failed to parse file: ${
+                    error instanceof Error ? error.message : "Unknown error"
                   }`,
                   timestamp: new Date(),
-                  recoverable: true,
+                  recoverable: false,
                 });
-                // Defer for post-pass resolution
-                this.unresolvedRelationships.push({
-                  relationship,
-                  sourceFilePath: change.path,
-                });
+                processedChanges++;
+                continue; // Skip to next change
               }
-            }
 
-            // Handle removed entities if incremental
-            if (parseResult.isIncremental && parseResult.removedEntities) {
-              for (const entity of parseResult.removedEntities) {
+              // Detect conflicts before applying changes
+              if (
+                parseResult.entities.length > 0 ||
+                parseResult.relationships.length > 0
+              ) {
+                const conflicts = await this.detectConflicts(
+                  parseResult.entities,
+                  parseResult.relationships,
+                  syncOptions
+                );
+
+                if (conflicts.length > 0) {
+                  this.logConflicts(
+                    conflicts,
+                    operation,
+                    change.path,
+                    syncOptions
+                  );
+                }
+              }
+
+              // Apply entities
+              for (const entity of parseResult.entities) {
                 try {
-                  // Before deletion, attach temporal relationship to change and session impact
-                  const now2 = new Date();
-                  try {
-                    await this.kgService.createRelationship({
-                      id: `rel_${entity.id}_${changeId}_REMOVED_IN`,
-                      fromEntityId: entity.id,
-                      toEntityId: changeId,
-                      type: RelationshipType.REMOVED_IN as any,
-                      created: now2,
-                      lastModified: now2,
-                      version: 1,
-                    } as any, undefined, undefined, { validate: false });
-                  } catch {}
-                  // Attach MODIFIED_BY with git metadata (best-effort)
-                  try {
-                    const git = new GitService();
-                    const info = await git.getLastCommitInfo(change.path);
-                    await this.kgService.createRelationship({
-                      id: `rel_${entity.id}_${sessionId}_MODIFIED_BY`,
-                      fromEntityId: entity.id,
-                      toEntityId: sessionId,
-                      type: RelationshipType.MODIFIED_BY as any,
-                      created: now2,
-                      lastModified: now2,
-                      version: 1,
-                      metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
-                    } as any, undefined, undefined, { validate: false });
-                  } catch {}
-                  try {
-                    enqueueSessionRelationship(
-                      RelationshipType.SESSION_IMPACTED,
-                      entity.id,
-                      {
-                        timestamp: now2,
-                        metadata: { severity: 'high', file: change.path },
-                        impact: { severity: 'high' },
-                      }
-                    );
-                  } catch {}
-                  changedSeeds.add(entity.id);
-                  await this.kgService.deleteEntity(entity.id);
-                  operation.entitiesDeleted++;
+                  if (
+                    parseResult.isIncremental &&
+                    parseResult.updatedEntities?.includes(entity)
+                  ) {
+                    await this.kgService.updateEntity(entity.id, entity, {
+                      skipEmbedding: true,
+                    });
+                    operation.entitiesUpdated++;
+                    toEmbed.push(entity);
+                  } else {
+                    await this.kgService.createEntity(entity, {
+                      skipEmbedding: true,
+                    });
+                    operation.entitiesCreated++;
+                    toEmbed.push(entity);
+                  }
                 } catch (error) {
-                  const label = (entity as any).path || (entity as any).name || (entity as any).title || entity.id;
                   operation.errors.push({
                     file: change.path,
                     type: "database",
-                    message: `Failed to delete entity ${label}: ${
+                    message: `Failed to process entity ${entity.id}: ${
                       error instanceof Error ? error.message : "Unknown"
                     }`,
                     timestamp: new Date(),
@@ -1969,370 +2013,555 @@ export class SynchronizationCoordinator extends EventEmitter {
                   });
                 }
               }
-            }
 
-            // History layer (versions + validity intervals) when incremental
-            if (parseResult.isIncremental) {
-              const now = new Date();
-
-              // Append versions for updated entities
-              if (Array.isArray(parseResult.updatedEntities)) {
-                for (const ent of parseResult.updatedEntities) {
-                  try {
-                    await this.kgService.appendVersion(ent, {
-                      timestamp: now,
-                      changeSetId: changeId,
+              // Apply relationships (current layer). Keep for idempotency; uses MERGE semantics downstream.
+              for (const relationship of parseResult.relationships) {
+                try {
+                  const created = await this.resolveAndCreateRelationship(
+                    relationship,
+                    change.path
+                  );
+                  if (created) {
+                    operation.relationshipsCreated++;
+                  } else {
+                    this.unresolvedRelationships.push({
+                      relationship,
+                      sourceFilePath: change.path,
                     });
-                    operation.entitiesUpdated++;
-                    const operationKind =
-                      change.type === "create"
-                        ? "added"
-                        : change.type === "delete"
-                        ? "deleted"
-                        : "modified";
-                    const changeInfo = {
-                      elementType: "file",
-                      elementName: change.path,
-                      operation: operationKind,
-                    };
-                    let stateTransition: Record<string, any> | undefined = {
-                      from: "unknown",
-                      to: "working",
-                      verifiedBy: "manual",
-                      confidence: 0.5,
-                    };
-                    try {
-                      const git = new GitService();
-                      const diff = await git.getUnifiedDiff(change.path, 3);
-                      let beforeSnippet = "";
-                      let afterSnippet = "";
-                      if (diff) {
-                        const lines = diff.split("\n");
-                        for (const ln of lines) {
-                          if (ln.startsWith("---") || ln.startsWith("+++") || ln.startsWith("@@")) continue;
-                          if (ln.startsWith("-") && beforeSnippet.length < 400)
-                            beforeSnippet += ln.substring(1) + "\n";
-                          if (ln.startsWith("+") && afterSnippet.length < 400)
-                            afterSnippet += ln.substring(1) + "\n";
-                          if (beforeSnippet.length >= 400 && afterSnippet.length >= 400) break;
-                        }
-                      }
-                      const criticalChange: Record<string, any> = { entityId: ent.id };
-                      if (beforeSnippet.trim()) criticalChange.beforeSnippet = beforeSnippet.trim();
-                      if (afterSnippet.trim()) criticalChange.afterSnippet = afterSnippet.trim();
-                      if (Object.keys(criticalChange).length > 1) {
-                        stateTransition = {
-                          ...stateTransition,
-                          criticalChange,
-                        };
-                      }
-                    } catch {
-                      // best-effort; keep default stateTransition
-                    }
-                    try {
-                      enqueueSessionRelationship(
-                        RelationshipType.SESSION_MODIFIED,
-                        ent.id,
-                        {
-                          timestamp: now,
-                          metadata: { file: change.path },
-                          changeInfo,
-                          stateTransition,
-                        }
-                      );
-                    } catch {}
-                    // Also mark session impacted and link entity to the change
-                    try {
-                      enqueueSessionRelationship(
-                        RelationshipType.SESSION_IMPACTED,
-                        ent.id,
-                        {
-                          timestamp: now,
-                          metadata: { severity: 'medium', file: change.path },
-                          impact: { severity: 'medium' },
-                        }
-                      );
-                    } catch {}
+                  }
+                } catch (error) {
+                  operation.errors.push({
+                    file: change.path,
+                    type: "database",
+                    message: `Failed to create relationship: ${
+                      error instanceof Error ? error.message : "Unknown"
+                    }`,
+                    timestamp: new Date(),
+                    recoverable: true,
+                  });
+                  // Defer for post-pass resolution
+                  this.unresolvedRelationships.push({
+                    relationship,
+                    sourceFilePath: change.path,
+                  });
+                }
+              }
 
+              // Handle removed entities if incremental
+              if (parseResult.isIncremental && parseResult.removedEntities) {
+                for (const entity of parseResult.removedEntities) {
+                  try {
+                    // Before deletion, attach temporal relationship to change and session impact
+                    const now2 = new Date();
                     try {
-                      await this.kgService.createRelationship({
-                        id: `rel_${ent.id}_${changeId}_MODIFIED_IN`,
-                        fromEntityId: ent.id,
-                        toEntityId: changeId,
-                        type: RelationshipType.MODIFIED_IN as any,
-                        created: now,
-                        lastModified: now,
-                        version: 1,
-                      } as any, undefined, undefined, { validate: false });
+                      await this.kgService.createRelationship(
+                        {
+                          id: `rel_${entity.id}_${changeId}_REMOVED_IN`,
+                          fromEntityId: entity.id,
+                          toEntityId: changeId,
+                          type: RelationshipType.REMOVED_IN as any,
+                          created: now2,
+                          lastModified: now2,
+                          version: 1,
+                        } as any,
+                        undefined,
+                        undefined,
+                        { validate: false }
+                      );
                     } catch {}
                     // Attach MODIFIED_BY with git metadata (best-effort)
                     try {
                       const git = new GitService();
                       const info = await git.getLastCommitInfo(change.path);
-                      await this.kgService.createRelationship({
-                        id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
-                        fromEntityId: ent.id,
-                        toEntityId: sessionId,
-                        type: RelationshipType.MODIFIED_BY as any,
-                        created: now,
-                        lastModified: now,
-                        version: 1,
-                        metadata: info
-                          ? {
-                              author: info.author,
-                              email: info.email,
-                              commitHash: info.hash,
-                              date: info.date,
-                            }
-                          : { source: "sync" },
-                      } as any, undefined, undefined, { validate: false });
-                    } catch {}
-                    changedSeeds.add(ent.id);
-                  } catch (err) {
-                    operation.errors.push({
-                      file: change.path,
-                      type: "database",
-                      message: `appendVersion failed for ${ent.id}: ${err instanceof Error ? err.message : 'unknown'}`,
-                      timestamp: new Date(),
-                      recoverable: true,
-                    });
-                  }
-                }
-              }
-
-              // Open edges for added relationships (with resolution)
-              if (Array.isArray((parseResult as any).addedRelationships)) {
-                for (const rel of (parseResult as any).addedRelationships as GraphRelationship[]) {
-                  try {
-                    let toId = rel.toEntityId;
-                    // Resolve placeholder targets like kind:name or import:module:symbol
-                    if (!toId || String(toId).includes(":")) {
-                      const resolved = await (this as any).resolveRelationshipTarget(rel, change.path);
-                      if (resolved) toId = resolved;
-                    }
-                    if (toId && rel.fromEntityId) {
-                      await this.kgService.openEdge(
-                        rel.fromEntityId,
-                        toId as any,
-                        rel.type,
-                        now,
-                        changeId
+                      await this.kgService.createRelationship(
+                        {
+                          id: `rel_${entity.id}_${sessionId}_MODIFIED_BY`,
+                          fromEntityId: entity.id,
+                          toEntityId: sessionId,
+                          type: RelationshipType.MODIFIED_BY as any,
+                          created: now2,
+                          lastModified: now2,
+                          version: 1,
+                          metadata: info
+                            ? {
+                                author: info.author,
+                                email: info.email,
+                                commitHash: info.hash,
+                                date: info.date,
+                              }
+                            : { source: "sync" },
+                        } as any,
+                        undefined,
+                        undefined,
+                        { validate: false }
                       );
-                      // Keep edge evidence/properties in sync during incremental updates
-                      try {
-                        const enriched = { ...rel, toEntityId: toId } as GraphRelationship;
-                        await this.kgService.upsertEdgeEvidenceBulk([enriched]);
-                      } catch {}
-                      operation.relationshipsUpdated++;
-                    }
-                  } catch (err) {
-                    operation.errors.push({
-                      file: change.path,
-                      type: "database",
-                      message: `openEdge failed: ${err instanceof Error ? err.message : 'unknown'}`,
-                      timestamp: new Date(),
-                      recoverable: true,
-                    });
-                  }
-                }
-              }
-
-              // Close edges for removed relationships (with resolution)
-              if (Array.isArray((parseResult as any).removedRelationships)) {
-                for (const rel of (parseResult as any).removedRelationships as GraphRelationship[]) {
-                  try {
-                    let toId = rel.toEntityId;
-                    if (!toId || String(toId).includes(":")) {
-                      const resolved = await (this as any).resolveRelationshipTarget(rel, change.path);
-                      if (resolved) toId = resolved;
-                    }
-                    if (toId && rel.fromEntityId) {
-                      await this.kgService.closeEdge(
-                        rel.fromEntityId,
-                        toId as any,
-                        rel.type,
-                        now,
-                        changeId
-                      );
-                      operation.relationshipsUpdated++;
-                    }
-                  } catch (err) {
-                    operation.errors.push({
-                      file: change.path,
-                      type: "database",
-                      message: `closeEdge failed: ${err instanceof Error ? err.message : 'unknown'}`,
-                      timestamp: new Date(),
-                      recoverable: true,
-                    });
-                  }
-                }
-              }
-
-              // Created entities: attach CREATED_IN and mark impacted
-              if (Array.isArray((parseResult as any).addedEntities)) {
-                for (const ent of (parseResult as any).addedEntities as any[]) {
-                  try {
-                    const now3 = new Date();
-                    await this.kgService.createRelationship({
-                      id: `rel_${ent.id}_${changeId}_CREATED_IN`,
-                      fromEntityId: ent.id,
-                      toEntityId: changeId,
-                      type: RelationshipType.CREATED_IN as any,
-                      created: now3,
-                      lastModified: now3,
-                      version: 1,
-                    } as any, undefined, undefined, { validate: false });
-                    // Also MODIFIED_BY with git metadata (best-effort)
-                    try {
-                      const git = new GitService();
-                      const info = await git.getLastCommitInfo(change.path);
-                      await this.kgService.createRelationship({
-                        id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
-                        fromEntityId: ent.id,
-                        toEntityId: sessionId,
-                        type: RelationshipType.MODIFIED_BY as any,
-                        created: now3,
-                        lastModified: now3,
-                        version: 1,
-                        metadata: info ? { author: info.author, email: info.email, commitHash: info.hash, date: info.date } : { source: 'sync' },
-                      } as any, undefined, undefined, { validate: false });
                     } catch {}
-                    let stateTransitionNew: Record<string, any> | undefined = {
-                      from: "unknown",
-                      to: "working",
-                      verifiedBy: "manual",
-                      confidence: 0.4,
-                    };
-                    try {
-                      const git = new GitService();
-                      const diff = await git.getUnifiedDiff(change.path, 2);
-                      let afterSnippet = "";
-                      if (diff) {
-                        const lines = diff.split("\n");
-                        for (const ln of lines) {
-                          if (ln.startsWith("+++") || ln.startsWith("---") || ln.startsWith("@@")) continue;
-                          if (ln.startsWith("+") && afterSnippet.length < 300)
-                            afterSnippet += ln.substring(1) + "\n";
-                          if (afterSnippet.length >= 300) break;
-                        }
-                      }
-                      if (afterSnippet.trim()) {
-                        stateTransitionNew = {
-                          ...stateTransitionNew,
-                          criticalChange: {
-                            entityId: ent.id,
-                            afterSnippet: afterSnippet.trim(),
-                          },
-                        };
-                      }
-                    } catch {
-                      // ignore diff errors
-                    }
                     try {
                       enqueueSessionRelationship(
                         RelationshipType.SESSION_IMPACTED,
-                        ent.id,
+                        entity.id,
                         {
-                          timestamp: now3,
-                          metadata: { severity: 'low', file: change.path },
-                          stateTransition: stateTransitionNew,
-                          impact: { severity: 'low' },
+                          timestamp: now2,
+                          metadata: { severity: "high", file: change.path },
+                          impact: { severity: "high" },
                         }
                       );
                     } catch {}
-                    changedSeeds.add(ent.id);
-                  } catch {}
+                    changedSeeds.add(entity.id);
+                    await this.kgService.deleteEntity(entity.id);
+                    operation.entitiesDeleted++;
+                  } catch (error) {
+                    const label =
+                      (entity as any).path ||
+                      (entity as any).name ||
+                      (entity as any).title ||
+                      entity.id;
+                    operation.errors.push({
+                      file: change.path,
+                      type: "database",
+                      message: `Failed to delete entity ${label}: ${
+                        error instanceof Error ? error.message : "Unknown"
+                      }`,
+                      timestamp: new Date(),
+                      recoverable: true,
+                    });
+                  }
                 }
               }
-            }
-            break;
 
-          case "delete":
-            // Handle file deletion
-            try {
-              const fileEntities = await this.kgService.getEntitiesByFile(
-                change.path,
-                { includeSymbols: true }
-              );
+              // History layer (versions + validity intervals) when incremental
+              if (parseResult.isIncremental) {
+                const now = new Date();
 
-              for (const entity of fileEntities) {
-                await this.kgService.deleteEntity(entity.id);
-                operation.entitiesDeleted++;
+                // Append versions for updated entities
+                if (Array.isArray(parseResult.updatedEntities)) {
+                  for (const ent of parseResult.updatedEntities) {
+                    try {
+                      await this.kgService.appendVersion(ent, {
+                        timestamp: now,
+                        changeSetId: changeId,
+                      });
+                      operation.entitiesUpdated++;
+                      const operationKind =
+                        change.type === "create"
+                          ? "added"
+                          : change.type === "delete"
+                          ? "deleted"
+                          : "modified";
+                      const changeInfo = {
+                        elementType: "file",
+                        elementName: change.path,
+                        operation: operationKind,
+                      };
+                      let stateTransition: Record<string, any> | undefined = {
+                        from: "unknown",
+                        to: "working",
+                        verifiedBy: "manual",
+                        confidence: 0.5,
+                      };
+                      try {
+                        const git = new GitService();
+                        const diff = await git.getUnifiedDiff(change.path, 3);
+                        let beforeSnippet = "";
+                        let afterSnippet = "";
+                        if (diff) {
+                          const lines = diff.split("\n");
+                          for (const ln of lines) {
+                            if (
+                              ln.startsWith("---") ||
+                              ln.startsWith("+++") ||
+                              ln.startsWith("@@")
+                            )
+                              continue;
+                            if (
+                              ln.startsWith("-") &&
+                              beforeSnippet.length < 400
+                            )
+                              beforeSnippet += ln.substring(1) + "\n";
+                            if (ln.startsWith("+") && afterSnippet.length < 400)
+                              afterSnippet += ln.substring(1) + "\n";
+                            if (
+                              beforeSnippet.length >= 400 &&
+                              afterSnippet.length >= 400
+                            )
+                              break;
+                          }
+                        }
+                        const criticalChange: Record<string, any> = {
+                          entityId: ent.id,
+                        };
+                        if (beforeSnippet.trim())
+                          criticalChange.beforeSnippet = beforeSnippet.trim();
+                        if (afterSnippet.trim())
+                          criticalChange.afterSnippet = afterSnippet.trim();
+                        if (Object.keys(criticalChange).length > 1) {
+                          stateTransition = {
+                            ...stateTransition,
+                            criticalChange,
+                          };
+                        }
+                      } catch {
+                        // best-effort; keep default stateTransition
+                      }
+                      try {
+                        enqueueSessionRelationship(
+                          RelationshipType.SESSION_MODIFIED,
+                          ent.id,
+                          {
+                            timestamp: now,
+                            metadata: { file: change.path },
+                            changeInfo,
+                            stateTransition,
+                          }
+                        );
+                      } catch {}
+                      // Also mark session impacted and link entity to the change
+                      try {
+                        enqueueSessionRelationship(
+                          RelationshipType.SESSION_IMPACTED,
+                          ent.id,
+                          {
+                            timestamp: now,
+                            metadata: { severity: "medium", file: change.path },
+                            impact: { severity: "medium" },
+                          }
+                        );
+                      } catch {}
+
+                      try {
+                        await this.kgService.createRelationship(
+                          {
+                            id: `rel_${ent.id}_${changeId}_MODIFIED_IN`,
+                            fromEntityId: ent.id,
+                            toEntityId: changeId,
+                            type: RelationshipType.MODIFIED_IN as any,
+                            created: now,
+                            lastModified: now,
+                            version: 1,
+                          } as any,
+                          undefined,
+                          undefined,
+                          { validate: false }
+                        );
+                      } catch {}
+                      // Attach MODIFIED_BY with git metadata (best-effort)
+                      try {
+                        const git = new GitService();
+                        const info = await git.getLastCommitInfo(change.path);
+                        await this.kgService.createRelationship(
+                          {
+                            id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
+                            fromEntityId: ent.id,
+                            toEntityId: sessionId,
+                            type: RelationshipType.MODIFIED_BY as any,
+                            created: now,
+                            lastModified: now,
+                            version: 1,
+                            metadata: info
+                              ? {
+                                  author: info.author,
+                                  email: info.email,
+                                  commitHash: info.hash,
+                                  date: info.date,
+                                }
+                              : { source: "sync" },
+                          } as any,
+                          undefined,
+                          undefined,
+                          { validate: false }
+                        );
+                      } catch {}
+                      changedSeeds.add(ent.id);
+                    } catch (err) {
+                      operation.errors.push({
+                        file: change.path,
+                        type: "database",
+                        message: `appendVersion failed for ${ent.id}: ${
+                          err instanceof Error ? err.message : "unknown"
+                        }`,
+                        timestamp: new Date(),
+                        recoverable: true,
+                      });
+                    }
+                  }
+                }
+
+                // Open edges for added relationships (with resolution)
+                if (Array.isArray((parseResult as any).addedRelationships)) {
+                  for (const rel of (parseResult as any)
+                    .addedRelationships as GraphRelationship[]) {
+                    try {
+                      let toId = rel.toEntityId;
+                      // Resolve placeholder targets like kind:name or import:module:symbol
+                      if (!toId || String(toId).includes(":")) {
+                        const resolved = await (
+                          this as any
+                        ).resolveRelationshipTarget(rel, change.path);
+                        if (resolved) toId = resolved;
+                      }
+                      if (toId && rel.fromEntityId) {
+                        await this.kgService.openEdge(
+                          rel.fromEntityId,
+                          toId as any,
+                          rel.type,
+                          now,
+                          changeId
+                        );
+                        // Keep edge evidence/properties in sync during incremental updates
+                        try {
+                          const enriched = {
+                            ...rel,
+                            toEntityId: toId,
+                          } as GraphRelationship;
+                          await this.kgService.upsertEdgeEvidenceBulk([
+                            enriched,
+                          ]);
+                        } catch {}
+                        operation.relationshipsUpdated++;
+                      }
+                    } catch (err) {
+                      operation.errors.push({
+                        file: change.path,
+                        type: "database",
+                        message: `openEdge failed: ${
+                          err instanceof Error ? err.message : "unknown"
+                        }`,
+                        timestamp: new Date(),
+                        recoverable: true,
+                      });
+                    }
+                  }
+                }
+
+                // Close edges for removed relationships (with resolution)
+                if (Array.isArray((parseResult as any).removedRelationships)) {
+                  for (const rel of (parseResult as any)
+                    .removedRelationships as GraphRelationship[]) {
+                    try {
+                      let toId = rel.toEntityId;
+                      if (!toId || String(toId).includes(":")) {
+                        const resolved = await (
+                          this as any
+                        ).resolveRelationshipTarget(rel, change.path);
+                        if (resolved) toId = resolved;
+                      }
+                      if (toId && rel.fromEntityId) {
+                        await this.kgService.closeEdge(
+                          rel.fromEntityId,
+                          toId as any,
+                          rel.type,
+                          now,
+                          changeId
+                        );
+                        operation.relationshipsUpdated++;
+                      }
+                    } catch (err) {
+                      operation.errors.push({
+                        file: change.path,
+                        type: "database",
+                        message: `closeEdge failed: ${
+                          err instanceof Error ? err.message : "unknown"
+                        }`,
+                        timestamp: new Date(),
+                        recoverable: true,
+                      });
+                    }
+                  }
+                }
+
+                // Created entities: attach CREATED_IN and mark impacted
+                if (Array.isArray((parseResult as any).addedEntities)) {
+                  for (const ent of (parseResult as any)
+                    .addedEntities as any[]) {
+                    try {
+                      const now3 = new Date();
+                      await this.kgService.createRelationship(
+                        {
+                          id: `rel_${ent.id}_${changeId}_CREATED_IN`,
+                          fromEntityId: ent.id,
+                          toEntityId: changeId,
+                          type: RelationshipType.CREATED_IN as any,
+                          created: now3,
+                          lastModified: now3,
+                          version: 1,
+                        } as any,
+                        undefined,
+                        undefined,
+                        { validate: false }
+                      );
+                      // Also MODIFIED_BY with git metadata (best-effort)
+                      try {
+                        const git = new GitService();
+                        const info = await git.getLastCommitInfo(change.path);
+                        await this.kgService.createRelationship(
+                          {
+                            id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
+                            fromEntityId: ent.id,
+                            toEntityId: sessionId,
+                            type: RelationshipType.MODIFIED_BY as any,
+                            created: now3,
+                            lastModified: now3,
+                            version: 1,
+                            metadata: info
+                              ? {
+                                  author: info.author,
+                                  email: info.email,
+                                  commitHash: info.hash,
+                                  date: info.date,
+                                }
+                              : { source: "sync" },
+                          } as any,
+                          undefined,
+                          undefined,
+                          { validate: false }
+                        );
+                      } catch {}
+                      let stateTransitionNew: Record<string, any> | undefined =
+                        {
+                          from: "unknown",
+                          to: "working",
+                          verifiedBy: "manual",
+                          confidence: 0.4,
+                        };
+                      try {
+                        const git = new GitService();
+                        const diff = await git.getUnifiedDiff(change.path, 2);
+                        let afterSnippet = "";
+                        if (diff) {
+                          const lines = diff.split("\n");
+                          for (const ln of lines) {
+                            if (
+                              ln.startsWith("+++") ||
+                              ln.startsWith("---") ||
+                              ln.startsWith("@@")
+                            )
+                              continue;
+                            if (ln.startsWith("+") && afterSnippet.length < 300)
+                              afterSnippet += ln.substring(1) + "\n";
+                            if (afterSnippet.length >= 300) break;
+                          }
+                        }
+                        if (afterSnippet.trim()) {
+                          stateTransitionNew = {
+                            ...stateTransitionNew,
+                            criticalChange: {
+                              entityId: ent.id,
+                              afterSnippet: afterSnippet.trim(),
+                            },
+                          };
+                        }
+                      } catch {
+                        // ignore diff errors
+                      }
+                      try {
+                        enqueueSessionRelationship(
+                          RelationshipType.SESSION_IMPACTED,
+                          ent.id,
+                          {
+                            timestamp: now3,
+                            metadata: { severity: "low", file: change.path },
+                            stateTransition: stateTransitionNew,
+                            impact: { severity: "low" },
+                          }
+                        );
+                      } catch {}
+                      changedSeeds.add(ent.id);
+                    } catch {}
+                  }
+                }
               }
+              break;
 
-              console.log(
-                `🗑️ Removed ${fileEntities.length} entities from deleted file ${change.path}`
-              );
-            } catch (error) {
-              operation.errors.push({
-                file: change.path,
-                type: "database",
-                message: `Failed to handle file deletion: ${
-                  error instanceof Error ? error.message : "Unknown"
-                }`,
-                timestamp: new Date(),
-                recoverable: false,
-              });
-            }
-            break;
+            case "delete":
+              // Handle file deletion
+              try {
+                const fileEntities = await this.kgService.getEntitiesByFile(
+                  change.path,
+                  { includeSymbols: true }
+                );
+
+                for (const entity of fileEntities) {
+                  await this.kgService.deleteEntity(entity.id);
+                  operation.entitiesDeleted++;
+                }
+
+                console.log(
+                  `🗑️ Removed ${fileEntities.length} entities from deleted file ${change.path}`
+                );
+              } catch (error) {
+                operation.errors.push({
+                  file: change.path,
+                  type: "database",
+                  message: `Failed to handle file deletion: ${
+                    error instanceof Error ? error.message : "Unknown"
+                  }`,
+                  timestamp: new Date(),
+                  recoverable: false,
+                });
+              }
+              break;
+          }
+
+          operation.filesProcessed++;
+          processedChanges++;
+        } catch (error) {
+          operation.errors.push({
+            file: change.path,
+            type: "parse",
+            message: error instanceof Error ? error.message : "Unknown error",
+            timestamp: new Date(),
+            recoverable: true,
+          });
         }
 
-        operation.filesProcessed++;
-        processedChanges++;
-      } catch (error) {
-        operation.errors.push({
-          file: change.path,
-          type: "parse",
-          message: error instanceof Error ? error.message : "Unknown error",
-          timestamp: new Date(),
-          recoverable: true,
-        });
+        await flushSessionRelationships();
       }
 
+      // Post-pass for any unresolved relationships from this batch
+      await this.runPostResolution(operation);
+
+      // Bulk create session relationships
       await flushSessionRelationships();
-    }
 
-    // Post-pass for any unresolved relationships from this batch
-    await this.runPostResolution(operation);
-
-    // Bulk create session relationships
-    await flushSessionRelationships();
-
-    // Schedule checkpoint job for changed neighborhood
-    const seeds = Array.from(changedSeeds);
-    if (seeds.length > 0) {
-      await this.enqueueCheckpointWithNotification({
-        sessionId,
-        seeds,
-        options: {
-          reason: "manual",
-          hopCount: 2,
-          operationId: operation.id,
-        },
-        processedChanges,
-        totalChanges,
-        publish: (payload) => publishSessionEvent("session_checkpoint", payload),
-      });
-    }
-
-    // Batch-generate embeddings for affected entities
-    if (toEmbed.length > 0) {
-      try {
-        await this.kgService.createEmbeddingsBatch(toEmbed);
-      } catch (e) {
-        operation.errors.push({
-          file: "coordinator",
-          type: "database",
-          message: `Batch embedding failed: ${e instanceof Error ? e.message : 'unknown'}`,
-          timestamp: new Date(),
-          recoverable: true,
+      // Schedule checkpoint job for changed neighborhood
+      const seeds = Array.from(changedSeeds);
+      if (seeds.length > 0) {
+        await this.enqueueCheckpointWithNotification({
+          sessionId,
+          seeds,
+          options: {
+            reason: "manual",
+            hopCount: 2,
+            operationId: operation.id,
+          },
+          processedChanges,
+          totalChanges,
+          publish: (payload) =>
+            publishSessionEvent("session_checkpoint", payload),
         });
       }
-    }
 
-    // Deactivate edges not seen during this scan window (best-effort)
-    try { await this.kgService.finalizeScan(scanStart); } catch {}
+      // Batch-generate embeddings for affected entities
+      if (toEmbed.length > 0) {
+        try {
+          await this.kgService.createEmbeddingsBatch(toEmbed);
+        } catch (e) {
+          operation.errors.push({
+            file: "coordinator",
+            type: "database",
+            message: `Batch embedding failed: ${
+              e instanceof Error ? e.message : "unknown"
+            }`,
+            timestamp: new Date(),
+            recoverable: true,
+          });
+        }
+      }
 
+      // Deactivate edges not seen during this scan window (best-effort)
+      try {
+        await this.kgService.finalizeScan(scanStart);
+      } catch {}
     } catch (error) {
       runError = error;
       teardownPayload = {
@@ -2687,7 +2916,9 @@ export class SynchronizationCoordinator extends EventEmitter {
       return true;
     }
 
-    const queueIndex = this.operationQueue.findIndex((op) => op.id === operationId);
+    const queueIndex = this.operationQueue.findIndex(
+      (op) => op.id === operationId
+    );
     if (queueIndex !== -1) {
       const [operation] = this.operationQueue.splice(queueIndex, 1);
       operation.status = "failed";
@@ -2790,10 +3021,17 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   private handleOperationFailed(operation: SyncOperation): void {
     try {
-      const msg = operation.errors?.map(e => `${e.type}:${e.message}`).join('; ');
-      console.error(`❌ Sync operation ${operation.id} failed: ${msg || 'unknown'}`);
+      const msg = operation.errors
+        ?.map((e) => `${e.type}:${e.message}`)
+        .join("; ");
+      console.error(
+        `❌ Sync operation ${operation.id} failed: ${msg || "unknown"}`
+      );
     } catch {
-      console.error(`❌ Sync operation ${operation.id} failed:`, operation.errors);
+      console.error(
+        `❌ Sync operation ${operation.id} failed:`,
+        operation.errors
+      );
     }
 
     // Check if operation has recoverable errors
@@ -2922,7 +3160,10 @@ export class SynchronizationCoordinator extends EventEmitter {
   // Attempt to resolve and create deferred relationships
   private async runPostResolution(operation: SyncOperation): Promise<void> {
     if (this.unresolvedRelationships.length === 0) return;
-    this.emit("syncProgress", operation, { phase: "resolving_relationships", progress: 0.95 });
+    this.emit("syncProgress", operation, {
+      phase: "resolving_relationships",
+      progress: 0.95,
+    });
 
     const pending = this.unresolvedRelationships.splice(0);
     let createdCount = 0;
@@ -2950,7 +3191,9 @@ export interface PartialUpdate {
   newValue?: any;
 }
 
-export interface FileLikeEntity { path?: string }
+export interface FileLikeEntity {
+  path?: string;
+}
 
 declare module "./SynchronizationCoordinator.js" {
   interface SynchronizationCoordinator {
@@ -2966,208 +3209,384 @@ declare module "./SynchronizationCoordinator.js" {
 }
 
 // Implement as prototype methods to avoid reordering class definitions
-(SynchronizationCoordinator as any).prototype.resolveAndCreateRelationship = async function (
-  this: SynchronizationCoordinator,
-  relationship: GraphRelationship,
-  sourceFilePath?: string
-): Promise<boolean> {
-  try {
-    const toEntity = await (this as any).kgService.getEntity(
-      relationship.toEntityId
-    );
-    if (toEntity) {
-      await (this as any).kgService.createRelationship(relationship, undefined, undefined, { validate: false });
-      return true;
-    }
-  } catch {}
-
-  const resolvedResult = await (this as any).resolveRelationshipTarget(
-    relationship,
-    sourceFilePath
-  );
-  const resolvedId = typeof resolvedResult === 'string' ? resolvedResult : (resolvedResult?.id || null);
-  if (!resolvedId) return false;
-  const enrichedMeta = { ...(relationship as any).metadata } as any;
-  if (resolvedResult && typeof resolvedResult === 'object') {
-    if (Array.isArray((resolvedResult as any).candidates) && (resolvedResult as any).candidates.length > 0) {
-      enrichedMeta.candidates = (resolvedResult as any).candidates.slice(0, 5);
-      (relationship as any).ambiguous = ((resolvedResult as any).candidates.length > 1);
-      (relationship as any).candidateCount = (resolvedResult as any).candidates.length;
-    }
-    if ((resolvedResult as any).resolutionPath) enrichedMeta.resolutionPath = (resolvedResult as any).resolutionPath;
-    enrichedMeta.resolvedTo = { kind: 'entity', id: resolvedId };
-  }
-  const resolvedRel = { ...relationship, toEntityId: resolvedId, metadata: enrichedMeta } as GraphRelationship;
-  await (this as any).kgService.createRelationship(resolvedRel, undefined, undefined, { validate: false });
-  return true;
-};
-
-(SynchronizationCoordinator as any).prototype.resolveRelationshipTarget = async function (
-  this: SynchronizationCoordinator,
-  relationship: GraphRelationship,
-  sourceFilePath?: string
-): Promise<string | { id: string | null; candidates?: Array<{ id: string; name?: string; path?: string; resolver?: string; score?: number }>; resolutionPath?: string } | null> {
-  const to = (relationship.toEntityId as any) || "";
-
-  // Prefer structured toRef when present to avoid brittle string parsing
-  const toRef: any = (relationship as any).toRef;
-  // Establish a currentFilePath context early using fromRef if provided
-  let currentFilePath = sourceFilePath;
-  const candidates: Array<{ id: string; name?: string; path?: string; resolver?: string; score?: number }> = [];
-  try {
-    const fromRef: any = (relationship as any).fromRef;
-    if (!currentFilePath && fromRef && typeof fromRef === 'object') {
-      if (fromRef.kind === 'fileSymbol' && fromRef.file) {
-        currentFilePath = fromRef.file;
-      } else if (fromRef.kind === 'entity' && fromRef.id) {
-        const ent = await (this as any).kgService.getEntity(fromRef.id);
-        const p = (ent as any)?.path as string | undefined;
-        if (p) currentFilePath = p.includes(':') ? p.split(':')[0] : p;
-      }
-    }
-  } catch {}
-  if (toRef && typeof toRef === 'object') {
+(SynchronizationCoordinator as any).prototype.resolveAndCreateRelationship =
+  async function (
+    this: SynchronizationCoordinator,
+    relationship: GraphRelationship,
+    sourceFilePath?: string
+  ): Promise<boolean> {
     try {
-      if (toRef.kind === 'entity' && toRef.id) {
-        return { id: toRef.id, candidates, resolutionPath: 'entity' };
+      const toEntity = await (this as any).kgService.getEntity(
+        relationship.toEntityId
+      );
+      if (toEntity) {
+        await (this as any).kgService.createRelationship(
+          relationship,
+          undefined,
+          undefined,
+          { validate: false }
+        );
+        return true;
       }
-      if (toRef.kind === 'fileSymbol' && toRef.file && (toRef.symbol || toRef.name)) {
-        const ent = await (this as any).kgService.findSymbolInFile(toRef.file, (toRef.symbol || toRef.name));
-        if (ent) return { id: ent.id, candidates, resolutionPath: 'fileSymbol' };
+    } catch {}
+
+    const resolvedResult = await (this as any).resolveRelationshipTarget(
+      relationship,
+      sourceFilePath
+    );
+    const resolvedId =
+      typeof resolvedResult === "string"
+        ? resolvedResult
+        : resolvedResult?.id || null;
+    if (!resolvedId) return false;
+    const enrichedMeta = { ...(relationship as any).metadata } as any;
+    if (resolvedResult && typeof resolvedResult === "object") {
+      if (
+        Array.isArray((resolvedResult as any).candidates) &&
+        (resolvedResult as any).candidates.length > 0
+      ) {
+        enrichedMeta.candidates = (resolvedResult as any).candidates.slice(
+          0,
+          5
+        );
+        (relationship as any).ambiguous =
+          (resolvedResult as any).candidates.length > 1;
+        (relationship as any).candidateCount = (
+          resolvedResult as any
+        ).candidates.length;
       }
-      if (toRef.kind === 'external' && toRef.name) {
-        const name = toRef.name as string;
-        if (!currentFilePath) {
-          try {
-            const fromEntity = await (this as any).kgService.getEntity(relationship.fromEntityId);
-            if (fromEntity && (fromEntity as any).path) {
-              const p = (fromEntity as any).path as string;
-              currentFilePath = p.includes(":") ? p.split(":")[0] : p;
-            }
-          } catch {}
-        }
-        if (currentFilePath) {
-          const local = await (this as any).kgService.findSymbolInFile(currentFilePath, name);
-          if (local) { candidates.push({ id: local.id, name: (local as any).name, path: (local as any).path, resolver: 'local', score: 1.0 }); }
-          const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 5);
-          for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
-        }
-        const global = await (this as any).kgService.findSymbolsByName(name);
-        for (const g of global) {
-          candidates.push({ id: g.id, name: (g as any).name, path: (g as any).path, resolver: 'name' });
-        }
-        if (candidates.length > 0) {
-          const chosen = candidates[0];
-          const resolutionPath = chosen.resolver === 'local'
-            ? 'external-local'
-            : 'external-name';
-          return { id: chosen.id, candidates, resolutionPath };
+      if ((resolvedResult as any).resolutionPath)
+        enrichedMeta.resolutionPath = (resolvedResult as any).resolutionPath;
+      enrichedMeta.resolvedTo = { kind: "entity", id: resolvedId };
+    }
+    const resolvedRel = {
+      ...relationship,
+      toEntityId: resolvedId,
+      metadata: enrichedMeta,
+    } as GraphRelationship;
+    await (this as any).kgService.createRelationship(
+      resolvedRel,
+      undefined,
+      undefined,
+      { validate: false }
+    );
+    return true;
+  };
+
+(SynchronizationCoordinator as any).prototype.resolveRelationshipTarget =
+  async function (
+    this: SynchronizationCoordinator,
+    relationship: GraphRelationship,
+    sourceFilePath?: string
+  ): Promise<
+    | string
+    | {
+        id: string | null;
+        candidates?: Array<{
+          id: string;
+          name?: string;
+          path?: string;
+          resolver?: string;
+          score?: number;
+        }>;
+        resolutionPath?: string;
+      }
+    | null
+  > {
+    const to = (relationship.toEntityId as any) || "";
+
+    // Prefer structured toRef when present to avoid brittle string parsing
+    const toRef: any = (relationship as any).toRef;
+    // Establish a currentFilePath context early using fromRef if provided
+    let currentFilePath = sourceFilePath;
+    const candidates: Array<{
+      id: string;
+      name?: string;
+      path?: string;
+      resolver?: string;
+      score?: number;
+    }> = [];
+    try {
+      const fromRef: any = (relationship as any).fromRef;
+      if (!currentFilePath && fromRef && typeof fromRef === "object") {
+        if (fromRef.kind === "fileSymbol" && fromRef.file) {
+          currentFilePath = fromRef.file;
+        } else if (fromRef.kind === "entity" && fromRef.id) {
+          const ent = await (this as any).kgService.getEntity(fromRef.id);
+          const p = (ent as any)?.path as string | undefined;
+          if (p) currentFilePath = p.includes(":") ? p.split(":")[0] : p;
         }
       }
     } catch {}
-  }
-
-  // Explicit file placeholder: file:<relPath>:<name>
-  {
-    const fileMatch = to.match(/^file:(.+?):(.+)$/);
-    if (fileMatch) {
-      const relPath = fileMatch[1];
-      const name = fileMatch[2];
+    if (toRef && typeof toRef === "object") {
       try {
-        const ent = await (this as any).kgService.findSymbolInFile(relPath, name);
-        if (ent) return { id: ent.id, candidates, resolutionPath: 'file-placeholder' };
+        if (toRef.kind === "entity" && toRef.id) {
+          return { id: toRef.id, candidates, resolutionPath: "entity" };
+        }
+        if (
+          toRef.kind === "fileSymbol" &&
+          toRef.file &&
+          (toRef.symbol || toRef.name)
+        ) {
+          const ent = await (this as any).kgService.findSymbolInFile(
+            toRef.file,
+            toRef.symbol || toRef.name
+          );
+          if (ent)
+            return { id: ent.id, candidates, resolutionPath: "fileSymbol" };
+        }
+        if (toRef.kind === "external" && toRef.name) {
+          const name = toRef.name as string;
+          if (!currentFilePath) {
+            try {
+              const fromEntity = await (this as any).kgService.getEntity(
+                relationship.fromEntityId
+              );
+              if (fromEntity && (fromEntity as any).path) {
+                const p = (fromEntity as any).path as string;
+                currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+              }
+            } catch {}
+          }
+          if (currentFilePath) {
+            const local = await (this as any).kgService.findSymbolInFile(
+              currentFilePath,
+              name
+            );
+            if (local) {
+              candidates.push({
+                id: local.id,
+                name: (local as any).name,
+                path: (local as any).path,
+                resolver: "local",
+                score: 1.0,
+              });
+            }
+            const near = await (this as any).kgService.findNearbySymbols(
+              currentFilePath,
+              name,
+              5
+            );
+            for (const n of near)
+              candidates.push({
+                id: n.id,
+                name: (n as any).name,
+                path: (n as any).path,
+                resolver: "nearby",
+              });
+          }
+          const global = await (this as any).kgService.findSymbolsByName(name);
+          for (const g of global) {
+            candidates.push({
+              id: g.id,
+              name: (g as any).name,
+              path: (g as any).path,
+              resolver: "name",
+            });
+          }
+          if (candidates.length > 0) {
+            const chosen = candidates[0];
+            const resolutionPath =
+              chosen.resolver === "local" ? "external-local" : "external-name";
+            return { id: chosen.id, candidates, resolutionPath };
+          }
+        }
       } catch {}
+    }
+
+    // Explicit file placeholder: file:<relPath>:<name>
+    {
+      const fileMatch = to.match(/^file:(.+?):(.+)$/);
+      if (fileMatch) {
+        const relPath = fileMatch[1];
+        const name = fileMatch[2];
+        try {
+          const ent = await (this as any).kgService.findSymbolInFile(
+            relPath,
+            name
+          );
+          if (ent)
+            return {
+              id: ent.id,
+              candidates,
+              resolutionPath: "file-placeholder",
+            };
+        } catch {}
+        return null;
+      }
+    }
+
+    // Ensure we still have a usable file context for subsequent heuristics
+    // (do not redeclare currentFilePath; just populate if missing)
+    if (!currentFilePath) {
+      try {
+        const fromEntity = await (this as any).kgService.getEntity(
+          relationship.fromEntityId
+        );
+        if (fromEntity && (fromEntity as any).path) {
+          const p = (fromEntity as any).path as string;
+          currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+        }
+      } catch {}
+    }
+
+    const kindMatch = to.match(/^(class|interface|function|typeAlias):(.+)$/);
+    if (kindMatch) {
+      const kind = kindMatch[1];
+      const name = kindMatch[2];
+      if (currentFilePath) {
+        // Use local index first to avoid DB roundtrips
+        const key = `${currentFilePath}:${name}`;
+        const localId = (this as any).localSymbolIndex?.get?.(key);
+        if (localId)
+          return { id: localId, candidates, resolutionPath: "local-index" };
+        const local = await (this as any).kgService.findSymbolInFile(
+          currentFilePath,
+          name
+        );
+        if (local) {
+          candidates.push({
+            id: local.id,
+            name: (local as any).name,
+            path: (local as any).path,
+            resolver: "local",
+          });
+        }
+        // Prefer nearby directory symbols if available
+        const near = await (this as any).kgService.findNearbySymbols(
+          currentFilePath,
+          name,
+          3
+        );
+        for (const n of near)
+          candidates.push({
+            id: n.id,
+            name: (n as any).name,
+            path: (n as any).path,
+            resolver: "nearby",
+          });
+      }
+      const byKind = await (this as any).kgService.findSymbolByKindAndName(
+        kind,
+        name
+      );
+      for (const c of byKind)
+        candidates.push({
+          id: c.id,
+          name: (c as any).name,
+          path: (c as any).path,
+          resolver: "kind-name",
+        });
+      if (candidates.length > 0)
+        return {
+          id: candidates[0].id,
+          candidates,
+          resolutionPath: "kind-name",
+        };
       return null;
     }
-  }
 
-  // Ensure we still have a usable file context for subsequent heuristics
-  // (do not redeclare currentFilePath; just populate if missing)
-  if (!currentFilePath) {
-    try {
-      const fromEntity = await (this as any).kgService.getEntity(
-        relationship.fromEntityId
-      );
-      if (fromEntity && (fromEntity as any).path) {
-        const p = (fromEntity as any).path as string;
-        currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+    const importMatch = to.match(/^import:(.+?):(.+)$/);
+    if (importMatch) {
+      const name = importMatch[2];
+      if (currentFilePath) {
+        const local = await (this as any).kgService.findSymbolInFile(
+          currentFilePath,
+          name
+        );
+        if (local) {
+          candidates.push({
+            id: local.id,
+            name: (local as any).name,
+            path: (local as any).path,
+            resolver: "local",
+          });
+        }
+        // Prefer nearby directory symbols for imported names
+        const near = await (this as any).kgService.findNearbySymbols(
+          currentFilePath,
+          name,
+          5
+        );
+        for (const n of near)
+          candidates.push({
+            id: n.id,
+            name: (n as any).name,
+            path: (n as any).path,
+            resolver: "nearby",
+          });
       }
-    } catch {}
-  }
-
-  const kindMatch = to.match(/^(class|interface|function|typeAlias):(.+)$/);
-  if (kindMatch) {
-    const kind = kindMatch[1];
-    const name = kindMatch[2];
-    if (currentFilePath) {
-      // Use local index first to avoid DB roundtrips
-      const key = `${currentFilePath}:${name}`;
-      const localId = (this as any).localSymbolIndex?.get?.(key);
-      if (localId) return { id: localId, candidates, resolutionPath: 'local-index' };
-      const local = await (this as any).kgService.findSymbolInFile(currentFilePath, name);
-      if (local) { candidates.push({ id: local.id, name: (local as any).name, path: (local as any).path, resolver: 'local' }); }
-      // Prefer nearby directory symbols if available
-      const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 3);
-      for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
+      const byName = await (this as any).kgService.findSymbolsByName(name);
+      for (const c of byName) {
+        candidates.push({
+          id: c.id,
+          name: (c as any).name,
+          path: (c as any).path,
+          resolver: "name",
+        });
+      }
+      if (candidates.length > 0) {
+        const chosen = candidates[0];
+        const suffix = chosen.resolver === "local" ? "local" : "name";
+        return {
+          id: chosen.id,
+          candidates,
+          resolutionPath: `import-${suffix}`,
+        };
+      }
+      return null;
     }
-    const byKind = await (this as any).kgService.findSymbolByKindAndName(
-      kind,
-      name
-    );
-    for (const c of byKind) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'kind-name' });
-    if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'kind-name' };
+
+    const externalMatch = to.match(/^external:(.+)$/);
+    if (externalMatch) {
+      const name = externalMatch[1];
+      if (currentFilePath) {
+        const local = await (this as any).kgService.findSymbolInFile(
+          currentFilePath,
+          name
+        );
+        if (local) {
+          candidates.push({
+            id: local.id,
+            name: (local as any).name,
+            path: (local as any).path,
+            resolver: "local",
+          });
+        }
+        // Prefer nearby matches
+        const near = await (this as any).kgService.findNearbySymbols(
+          currentFilePath,
+          name,
+          5
+        );
+        for (const n of near)
+          candidates.push({
+            id: n.id,
+            name: (n as any).name,
+            path: (n as any).path,
+            resolver: "nearby",
+          });
+      }
+      const global = await (this as any).kgService.findSymbolsByName(name);
+      for (const g of global) {
+        candidates.push({
+          id: g.id,
+          name: (g as any).name,
+          path: (g as any).path,
+          resolver: "name",
+        });
+      }
+      if (candidates.length > 0) {
+        const chosen = candidates[0];
+        const suffix = chosen.resolver === "local" ? "local" : "name";
+        return {
+          id: chosen.id,
+          candidates,
+          resolutionPath: `external-${suffix}`,
+        };
+      }
+      return null;
+    }
+
     return null;
-  }
-
-  const importMatch = to.match(/^import:(.+?):(.+)$/);
-  if (importMatch) {
-    const name = importMatch[2];
-    if (currentFilePath) {
-      const local = await (this as any).kgService.findSymbolInFile(
-        currentFilePath,
-        name
-      );
-      if (local) { candidates.push({ id: local.id, name: (local as any).name, path: (local as any).path, resolver: 'local' }); }
-      // Prefer nearby directory symbols for imported names
-      const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 5);
-      for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
-    }
-    const byName = await (this as any).kgService.findSymbolsByName(name);
-    for (const c of byName) {
-      candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'name' });
-    }
-    if (candidates.length > 0) {
-      const chosen = candidates[0];
-      const suffix = chosen.resolver === 'local' ? 'local' : 'name';
-      return { id: chosen.id, candidates, resolutionPath: `import-${suffix}` };
-    }
-    return null;
-  }
-
-  const externalMatch = to.match(/^external:(.+)$/);
-  if (externalMatch) {
-    const name = externalMatch[1];
-    if (currentFilePath) {
-      const local = await (this as any).kgService.findSymbolInFile(
-        currentFilePath,
-        name
-      );
-      if (local) { candidates.push({ id: local.id, name: (local as any).name, path: (local as any).path, resolver: 'local' }); }
-      // Prefer nearby matches
-      const near = await (this as any).kgService.findNearbySymbols(currentFilePath, name, 5);
-      for (const n of near) candidates.push({ id: n.id, name: (n as any).name, path: (n as any).path, resolver: 'nearby' });
-    }
-    const global = await (this as any).kgService.findSymbolsByName(name);
-    for (const g of global) {
-      candidates.push({ id: g.id, name: (g as any).name, path: (g as any).path, resolver: 'name' });
-    }
-    if (candidates.length > 0) {
-      const chosen = candidates[0];
-      const suffix = chosen.resolver === 'local' ? 'local' : 'name';
-      return { id: chosen.id, candidates, resolutionPath: `external-${suffix}` };
-    }
-    return null;
-  }
-
-  return null;
-};
+  };

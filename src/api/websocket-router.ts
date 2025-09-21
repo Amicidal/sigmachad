@@ -260,7 +260,9 @@ export class WebSocketRouter extends EventEmitter {
       try {
         if (request.url && request.url.startsWith("/ws")) {
           const audit = {
-            requestId: `ws_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            requestId: `ws_${Date.now()}_${Math.random()
+              .toString(36)
+              .slice(2, 8)}`,
             ip: socket.remoteAddress,
             userAgent: request.headers["user-agent"] as string | undefined,
           };
@@ -285,8 +287,13 @@ export class WebSocketRouter extends EventEmitter {
               headerSource["x-api-key"] = apiKeyToken;
             }
 
-            if ((bearerToken || apiKeyToken) && typeof request.url === "string") {
-              const sanitizedParams = new URLSearchParams(parsedUrl.searchParams);
+            if (
+              (bearerToken || apiKeyToken) &&
+              typeof request.url === "string"
+            ) {
+              const sanitizedParams = new URLSearchParams(
+                parsedUrl.searchParams
+              );
               if (sanitizedParams.has("access_token")) {
                 sanitizedParams.set("access_token", "***");
               }
@@ -338,7 +345,10 @@ export class WebSocketRouter extends EventEmitter {
 
           if (
             authRequired &&
-            !scopesSatisfyRequirement(authContext.scopes, WEBSOCKET_REQUIRED_SCOPES)
+            !scopesSatisfyRequirement(
+              authContext.scopes,
+              WEBSOCKET_REQUIRED_SCOPES
+            )
           ) {
             respondWithHttpError(
               socket,
@@ -422,7 +432,9 @@ export class WebSocketRouter extends EventEmitter {
     );
     if (authContext?.user?.userId) {
       console.log(
-        `🔐 WebSocket authenticated as ${authContext.user.userId} [${authContext.scopes.join(",")}]`
+        `🔐 WebSocket authenticated as ${
+          authContext.user.userId
+        } [${authContext.scopes.join(",")}]`
       );
     }
 
@@ -772,9 +784,9 @@ export class WebSocketRouter extends EventEmitter {
 
     const eventConnections = this.subscriptions.get(existing.event);
     if (eventConnections) {
-      const stillSubscribed = Array.from(connection.subscriptions.values()).some(
-        (sub) => sub.event === existing.event
-      );
+      const stillSubscribed = Array.from(
+        connection.subscriptions.values()
+      ).some((sub) => sub.event === existing.event);
       if (!stillSubscribed) {
         eventConnections.delete(connection.id);
         if (eventConnections.size === 0) {
@@ -794,7 +806,9 @@ export class WebSocketRouter extends EventEmitter {
 
     this.backpressureManager.clear(connectionId);
 
-    const socket: WebSocket | undefined = connection.socket as WebSocket | undefined;
+    const socket: WebSocket | undefined = connection.socket as
+      | WebSocket
+      | undefined;
     if (socket) {
       try {
         if (socket.readyState === WebSocket.OPEN) {
@@ -914,6 +928,37 @@ export class WebSocketRouter extends EventEmitter {
       const { attempts, exceeded } = this.backpressureManager.registerThrottle(
         connection.id
       );
+
+      // Send throttled hint to client
+      try {
+        if (socket.readyState === WebSocket.OPEN) {
+          const hintMsg: WebSocketMessage = {
+            type: "throttled",
+            data: {
+              reason: "backpressure",
+              buffered: bufferedAmount,
+              threshold: this.backpressureManager.getThreshold(),
+              retryAfterMs: this.backpressureManager.getRetryDelay(),
+              attempts,
+            },
+            timestamp: new Date().toISOString(),
+          };
+          socket.send(JSON.stringify(hintMsg));
+        }
+      } catch (hintError) {
+        console.warn(
+          `⚠️ Failed to send throttled hint to ${connection.id}`,
+          hintError
+        );
+      }
+
+      // Emit hint for source (e.g., syncCoordinator) to slow down
+      this.emit("backpressureHint", {
+        connectionId: connection.id,
+        bufferedAmount,
+        messageType: (payload as any)?.type ?? "unknown",
+        hint: "throttle_source",
+      });
 
       try {
         console.warn(
