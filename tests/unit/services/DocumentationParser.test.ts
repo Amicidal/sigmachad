@@ -8,8 +8,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { DocumentationParser } from '../../../src/services/DocumentationParser';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
-import { DatabaseService } from '../../../src/services/DatabaseService';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService';
+import { DatabaseService } from '../../../src/services/core/DatabaseService';
 import {
   DocumentationIntelligenceProvider,
   DocumentationIntelligenceRequest,

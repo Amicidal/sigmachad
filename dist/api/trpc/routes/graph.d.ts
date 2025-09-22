@@ -30,7 +30,7 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        items: import("../../../models/entities.js").Entity[];
+        items: import("../../../models/entities.js").Entity[] | undefined;
         total: number;
         limit: number;
         offset: number;
@@ -89,42 +89,42 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         _input_in: {
             query: string;
             limit?: number | undefined;
-            entityTypes?: ("function" | "test" | "class" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
+            entityTypes?: ("function" | "class" | "test" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
             searchType?: "dependency" | "semantic" | "structural" | "usage" | undefined;
             filters?: {
                 tags?: string[] | undefined;
                 path?: string | undefined;
-                checkpointId?: string | undefined;
                 language?: string | undefined;
                 lastModified?: {
                     since?: Date | undefined;
                     until?: Date | undefined;
                 } | undefined;
+                checkpointId?: string | undefined;
             } | undefined;
             includeRelated?: boolean | undefined;
         };
         _input_out: {
             query: string;
             limit: number;
-            entityTypes?: ("function" | "test" | "class" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
+            entityTypes?: ("function" | "class" | "test" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
             searchType?: "dependency" | "semantic" | "structural" | "usage" | undefined;
             filters?: {
                 tags?: string[] | undefined;
                 path?: string | undefined;
-                checkpointId?: string | undefined;
                 language?: string | undefined;
                 lastModified?: {
                     since?: Date | undefined;
                     until?: Date | undefined;
                 } | undefined;
+                checkpointId?: string | undefined;
             } | undefined;
             includeRelated?: boolean | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        items: import("../../../models/entities.js").Entity[];
-        total: number;
+        items: any;
+        total: any;
     }>;
     getDependencies: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
@@ -200,24 +200,21 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         _input_in: {
             startId: string;
             types?: string[] | undefined;
+            maxDepth?: number | undefined;
             since?: Date | undefined;
             until?: Date | undefined;
             atTime?: Date | undefined;
-            maxDepth?: number | undefined;
         };
         _input_out: {
             startId: string;
             types?: string[] | undefined;
+            maxDepth?: number | undefined;
             since?: Date | undefined;
             until?: Date | undefined;
             atTime?: Date | undefined;
-            maxDepth?: number | undefined;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        entities: import("../../../models/entities.js").Entity[];
-        relationships: import("../../../models/relationships.js").GraphRelationship[];
-    }>;
+    }, any>;
 }>;
 //# sourceMappingURL=graph.d.ts.map

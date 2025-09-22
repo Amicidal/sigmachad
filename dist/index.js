@@ -4,17 +4,17 @@
  * Main application entry point
  */
 import 'dotenv/config';
-import { DatabaseService, createDatabaseConfig } from './services/DatabaseService.js';
-import { KnowledgeGraphService } from './services/KnowledgeGraphService.js';
-import { FileWatcher } from './services/FileWatcher.js';
-import { ASTParser } from './services/ASTParser.js';
-import { DocumentationParser } from './services/DocumentationParser.js';
+import { DatabaseService, createDatabaseConfig } from './services/core/DatabaseService.js';
+import { KnowledgeGraphService } from './services/knowledge/KnowledgeGraphService.js';
+import { FileWatcher } from './services/core/FileWatcher.js';
+import { ASTParser } from './services/knowledge/ASTParser.js';
+import { DocumentationParser } from './services/knowledge/DocumentationParser.js';
 import { APIGateway } from './api/APIGateway.js';
-import { SynchronizationCoordinator } from './services/SynchronizationCoordinator.js';
-import { ConflictResolution } from './services/ConflictResolution.js';
-import { SynchronizationMonitoring } from './services/SynchronizationMonitoring.js';
-import { RollbackCapabilities } from './services/RollbackCapabilities.js';
-import { SecurityScanner } from './services/SecurityScanner.js';
+import { SynchronizationCoordinator } from './services/synchronization/SynchronizationCoordinator.js';
+import { ConflictResolution } from './services/scm/ConflictResolution.js';
+import { SynchronizationMonitoring } from './services/synchronization/SynchronizationMonitoring.js';
+import { RollbackCapabilities } from './services/scm/RollbackCapabilities.js';
+import { SecurityScanner } from './services/testing/SecurityScanner.js';
 async function main() {
     console.log('🚀 Starting Memento...');
     try {
@@ -47,7 +47,7 @@ async function main() {
         const syncMonitor = new SynchronizationMonitoring();
         const conflictResolver = new ConflictResolution(kgService);
         const rollbackCapabilities = new RollbackCapabilities(kgService, dbService);
-        const syncCoordinator = new SynchronizationCoordinator(kgService, astParser, dbService);
+        const syncCoordinator = new SynchronizationCoordinator(kgService, astParser, dbService, conflictResolver, rollbackCapabilities);
         // Wire up event handlers for monitoring
         syncCoordinator.on('operationStarted', (operation) => {
             syncMonitor.recordOperationStart(operation);
@@ -64,6 +64,23 @@ async function main() {
                 syncMonitor.recordProgress(operation, payload);
             }
             catch (_a) { }
+        });
+        syncCoordinator.on('conflictDetected', (conflict) => {
+            syncMonitor.recordConflict(conflict);
+        });
+        syncCoordinator.on('sessionSequenceAnomaly', (anomaly) => {
+            try {
+                syncMonitor.recordSessionSequenceAnomaly(anomaly);
+            }
+            catch (_a) { }
+        });
+        syncCoordinator.on('checkpointMetricsUpdated', (snapshot) => {
+            try {
+                syncMonitor.recordCheckpointMetrics(snapshot);
+            }
+            catch (error) {
+                console.warn('[monitor] failed to record checkpoint metrics', error);
+            }
         });
         conflictResolver.addConflictListener((conflict) => {
             syncMonitor.recordConflict(conflict);
@@ -193,6 +210,11 @@ async function main() {
                 // Close database connections
                 await dbService.close();
                 console.log('✅ Shutdown complete');
+                const failureSignals = new Set(['uncaughtException', 'unhandledRejection']);
+                if (failureSignals.has(signal)) {
+                    process.exit(1);
+                    return;
+                }
                 process.exit(0);
             }
             catch (error) {

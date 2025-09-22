@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService';
 import { APIGateway } from '../../../src/api/APIGateway';
-import type { DatabaseService } from '../../../src/services/DatabaseService';
+import type { DatabaseService } from '../../../src/services/core/DatabaseService';
 import type { Entity } from '../../../src/models/entities';
 import { RelationshipType } from '../../../src/models/relationships';
 

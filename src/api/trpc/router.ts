@@ -4,10 +4,10 @@
  */
 
 import { z } from 'zod';
-import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/DatabaseService.js';
-import { ASTParser } from '../../services/ASTParser.js';
-import { FileWatcher } from '../../services/FileWatcher.js';
+import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
+import { DatabaseService } from '../../services/core/DatabaseService.js';
+import { ASTParser } from '../../services/knowledge/ASTParser.js';
+import { FileWatcher } from '../../services/core/FileWatcher.js';
 import { router, publicProcedure, TRPCContext } from './base.js';
 import type { FastifyRequest } from 'fastify';
 import {

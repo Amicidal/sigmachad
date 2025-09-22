@@ -6,13 +6,13 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { APIGateway } from '../../../src/api/APIGateway.js';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../../src/services/DatabaseService.js';
-import { FileWatcher } from '../../../src/services/FileWatcher.js';
-import { SynchronizationCoordinator } from '../../../src/services/SynchronizationCoordinator.js';
-import { SynchronizationMonitoring } from '../../../src/services/SynchronizationMonitoring.js';
-import { ASTParser } from '../../../src/services/ASTParser.js';
-import { ConflictResolution } from '../../../src/services/ConflictResolution.js';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
+import { DatabaseService } from '../../../src/services/core/DatabaseService.js';
+import { FileWatcher } from '../../../src/services/core/FileWatcher.js';
+import { SynchronizationCoordinator } from '../../../src/services/synchronization/SynchronizationCoordinator.js';
+import { SynchronizationMonitoring } from '../../../src/services/synchronization/SynchronizationMonitoring.js';
+import { ASTParser } from '../../../src/services/knowledge/ASTParser.js';
+import { ConflictResolution } from '../../../src/services/scm/ConflictResolution.js';
 import {
   setupTestDatabase,
   cleanupTestDatabase,

@@ -14,28 +14,28 @@ import {
 } from '../../../test-utils.js';
 
 // Mock services
-vi.mock('../../../../src/services/KnowledgeGraphService.js', () => ({
+vi.mock('../../../../src/services/knowledge/KnowledgeGraphService.js', () => ({
   KnowledgeGraphService: vi.fn()
 }));
-vi.mock('../../../../src/services/DatabaseService.js', () => ({
+vi.mock('../../../../src/services/core/DatabaseService.js', () => ({
   DatabaseService: vi.fn()
 }));
-vi.mock('../../../../src/services/FileWatcher.js', () => ({
+vi.mock('../../../../src/services/core/FileWatcher.js', () => ({
   FileWatcher: vi.fn()
 }));
-vi.mock('../../../../src/services/SynchronizationCoordinator.js', () => ({
+vi.mock('../../../../src/services/synchronization/SynchronizationCoordinator.js', () => ({
   SynchronizationCoordinator: vi.fn()
 }));
-vi.mock('../../../../src/services/SynchronizationMonitoring.js', () => ({
+vi.mock('../../../../src/services/synchronization/SynchronizationMonitoring.js', () => ({
   SynchronizationMonitoring: vi.fn()
 }));
-vi.mock('../../../../src/services/ConflictResolution.js', () => ({
+vi.mock('../../../../src/services/scm/ConflictResolution.js', () => ({
   ConflictResolution: vi.fn()
 }));
-vi.mock('../../../../src/services/RollbackCapabilities.js', () => ({
+vi.mock('../../../../src/services/scm/RollbackCapabilities.js', () => ({
   RollbackCapabilities: vi.fn()
 }));
-vi.mock('../../../../src/services/BackupService.js', () => ({
+vi.mock('../../../../src/services/backup/BackupService.js', () => ({
   BackupService: vi.fn(),
   MaintenanceOperationError: class MaintenanceOperationError extends Error {
     statusCode = 500;
@@ -46,13 +46,13 @@ vi.mock('../../../../src/services/BackupService.js', () => ({
     }
   }
 }));
-vi.mock('../../../../src/services/LoggingService.js', () => ({
+vi.mock('../../../../src/services/core/LoggingService.js', () => ({
   LoggingService: vi.fn()
 }));
-vi.mock('../../../../src/services/MaintenanceService.js', () => ({
+vi.mock('../../../../src/services/core/MaintenanceService.js', () => ({
   MaintenanceService: vi.fn()
 }));
-vi.mock('../../../../src/services/ConfigurationService.js', () => ({
+vi.mock('../../../../src/services/core/ConfigurationService.js', () => ({
   ConfigurationService: vi.fn()
 }));
 

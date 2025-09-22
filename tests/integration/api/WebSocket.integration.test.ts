@@ -9,13 +9,13 @@ import { FastifyInstance } from "fastify";
 import { WebSocket } from "ws";
 import { EventEmitter } from "events";
 import { APIGateway } from "../../../src/api/APIGateway.js";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
-import { DatabaseService } from "../../../src/services/DatabaseService.js";
-import { FileWatcher } from "../../../src/services/FileWatcher.js";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../../../src/services/core/DatabaseService.js";
+import { FileWatcher } from "../../../src/services/core/FileWatcher.js";
 import type {
   SessionStreamEvent,
   SynchronizationCoordinator,
-} from "../../../src/services/SynchronizationCoordinator.js";
+} from "../../../src/services/synchronization/SynchronizationCoordinator.js";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

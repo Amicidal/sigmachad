@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
 import { RelationshipType, type GraphRelationship } from '../../../src/models/relationships.js';
 
 const now = new Date();

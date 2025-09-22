@@ -10,7 +10,9 @@ import { existsSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Project } from "ts-morph";
-import { RelationshipType } from "../models/relationships.js";
+import { SpecNotFoundError, TestPlanningService, TestPlanningValidationError, } from "../services/testing/TestPlanningService.js";
+import { SpecService } from "../services/testing/SpecService.js";
+import { resolvePerformanceHistoryOptions } from "../utils/performanceFilters.js";
 export class MCPRouter {
     // Resolve absolute path to the project's src directory, regardless of CWD
     getSrcRoot() {
@@ -48,6 +50,8 @@ export class MCPRouter {
         this.tools = new Map();
         this.metrics = new Map();
         this.executionHistory = [];
+        this.testPlanningService = new TestPlanningService(this.kgService);
+        this.specService = new SpecService(this.kgService, this.dbService);
         this.server = new Server({
             name: "memento-mcp-server",
             version: "1.0.0",
@@ -129,6 +133,157 @@ export class MCPRouter {
                 required: ["query"],
             },
             handler: this.handleGraphSearch.bind(this),
+        });
+        this.registerTool({
+            name: "graph.list_module_children",
+            description: "List structural children for a module or directory with optional filters",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    modulePath: {
+                        type: "string",
+                        description: "Module path or entity id (e.g., file:src/app.ts:module)",
+                    },
+                    includeFiles: {
+                        type: "boolean",
+                        description: "Include file children (default true)",
+                    },
+                    includeSymbols: {
+                        type: "boolean",
+                        description: "Include symbol children (default true)",
+                    },
+                    language: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                        description: "Language filter (case-insensitive)",
+                    },
+                    symbolKind: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                        description: "Symbol kind filter (e.g., class, function)",
+                    },
+                    modulePathPrefix: {
+                        type: "string",
+                        description: "Restrict children to modulePath/path starting with prefix",
+                    },
+                    limit: {
+                        type: "number",
+                        minimum: 1,
+                        maximum: 500,
+                        description: "Maximum number of children to return (default 50)",
+                    },
+                },
+                required: ["modulePath"],
+            },
+            handler: this.handleListModuleChildren.bind(this),
+        });
+        this.registerTool({
+            name: "graph.list_imports",
+            description: "List structural import edges for a file or module",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    entityId: {
+                        type: "string",
+                        description: "Entity id to inspect (e.g., file:src/app.ts:module)",
+                    },
+                    resolvedOnly: {
+                        type: "boolean",
+                        description: "Only include resolved imports",
+                    },
+                    language: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                        description: "Language filter (case-insensitive)",
+                    },
+                    symbolKind: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                        description: "Target symbol kind filter",
+                    },
+                    importAlias: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                        description: "Alias filter (exact match)",
+                    },
+                    importType: {
+                        anyOf: [
+                            {
+                                type: "string",
+                                enum: [
+                                    "default",
+                                    "named",
+                                    "namespace",
+                                    "wildcard",
+                                    "side-effect",
+                                ],
+                            },
+                            {
+                                type: "array",
+                                items: {
+                                    type: "string",
+                                    enum: [
+                                        "default",
+                                        "named",
+                                        "namespace",
+                                        "wildcard",
+                                        "side-effect",
+                                    ],
+                                },
+                            },
+                        ],
+                        description: "Import kind filter",
+                    },
+                    isNamespace: {
+                        type: "boolean",
+                        description: "Filter namespace imports only",
+                    },
+                    modulePath: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                        description: "Exact module path filter",
+                    },
+                    modulePathPrefix: {
+                        type: "string",
+                        description: "Prefix filter for module paths",
+                    },
+                    limit: {
+                        type: "number",
+                        minimum: 1,
+                        maximum: 1000,
+                        description: "Maximum number of imports to return (default 200)",
+                    },
+                },
+                required: ["entityId"],
+            },
+            handler: this.handleListImports.bind(this),
+        });
+        this.registerTool({
+            name: "graph.find_definition",
+            description: "Find the defining entity for a symbol",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    symbolId: {
+                        type: "string",
+                        description: "Symbol id to resolve",
+                    },
+                },
+                required: ["symbolId"],
+            },
+            handler: this.handleFindDefinition.bind(this),
         });
         // AST-Grep search tool: structure-aware code queries
         this.registerTool({
@@ -817,6 +972,9 @@ export class MCPRouter {
                 const endTime = new Date();
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 this.recordExecution(name, startTime, endTime, false, errorMessage, args);
+                if (error instanceof McpError) {
+                    throw error;
+                }
                 throw new McpError(ErrorCode.InternalError, `Tool execution failed: ${errorMessage}`);
             }
         });
@@ -831,56 +989,51 @@ export class MCPRouter {
     }
     // Tool handlers (connected to actual implementations)
     async handleCreateSpec(params) {
+        var _a, _b;
         console.log("MCP Tool called: design.create_spec", params);
         try {
-            // Generate a proper UUID for the spec
-            const { randomUUID } = await import("crypto");
-            const specId = randomUUID();
-            const spec = {
-                id: specId,
-                type: "spec",
-                path: `specs/${specId}`,
-                hash: "",
-                language: "text",
-                lastModified: new Date(),
-                created: new Date(),
-                title: params.title,
-                description: params.description,
-                acceptanceCriteria: params.acceptanceCriteria,
-                status: "draft",
-                priority: params.priority || "medium",
-                assignee: params.assignee,
-                tags: params.tags || [],
-                updated: new Date(),
+            const payload = {
+                title: (_a = params === null || params === void 0 ? void 0 : params.title) !== null && _a !== void 0 ? _a : "",
+                description: (_b = params === null || params === void 0 ? void 0 : params.description) !== null && _b !== void 0 ? _b : "",
+                acceptanceCriteria: Array.isArray(params === null || params === void 0 ? void 0 : params.acceptanceCriteria)
+                    ? params.acceptanceCriteria
+                    : [],
+                priority: typeof (params === null || params === void 0 ? void 0 : params.priority) === "string" ? params.priority : undefined,
+                assignee: params === null || params === void 0 ? void 0 : params.assignee,
+                tags: Array.isArray(params === null || params === void 0 ? void 0 : params.tags) ? params.tags : [],
             };
-            // Store in database
-            await this.dbService.postgresQuery(`INSERT INTO documents (id, type, content, metadata) VALUES ($1, $2, $3, $4)`, [specId, "spec", JSON.stringify(spec), JSON.stringify({})]);
-            // Create entity in knowledge graph
-            await this.kgService.createEntity(spec);
+            const { specId, spec, validationResults } = await this.specService.createSpec(payload);
             return {
                 specId,
                 spec,
-                validationResults: { isValid: true, issues: [], suggestions: [] },
-                message: "Specification created successfully",
+                validationResults,
+                message: `Specification ${specId} created successfully`,
             };
         }
         catch (error) {
+            const message = error instanceof Error ? error.message : String(error !== null && error !== void 0 ? error : "Unknown error");
             console.error("Error in handleCreateSpec:", error);
-            throw new Error(`Failed to create specification: ${error instanceof Error ? error.message : "Unknown error"}`);
+            throw new McpError(ErrorCode.InternalError, "Tool execution failed", `Failed to create specification: ${message}`);
         }
     }
     async handleGraphSearch(params) {
         console.log("MCP Tool called: graph.search", params);
         try {
+            if (!params ||
+                typeof params.query !== "string" ||
+                params.query.trim() === "") {
+                throw new Error("Query parameter must be a non-empty string");
+            }
             // Use the KnowledgeGraphService directly for search
             const entities = await this.kgService.search(params);
+            const normalizedEntities = Array.isArray(entities) ? entities : [];
             // Get relationships if includeRelated is true
             let relationships = [];
             let clusters = [];
             let relevanceScore = 0;
-            if (params.includeRelated && entities.length > 0) {
+            if (params.includeRelated && normalizedEntities.length > 0) {
                 // Get relationships for the top entities
-                const topEntities = entities.slice(0, 5);
+                const topEntities = normalizedEntities.slice(0, 5);
                 for (const entity of topEntities) {
                     const entityRelationships = await this.kgService.getRelationships({
                         fromEntityId: entity.id,
@@ -892,38 +1045,221 @@ export class MCPRouter {
                 relationships = relationships.filter((rel, index, self) => index === self.findIndex((r) => r.id === rel.id));
             }
             // Calculate relevance score based on number of results and relationships
-            relevanceScore = Math.min(entities.length * 0.3 + relationships.length * 0.2, 1.0);
-            // Return in the format expected by the tests
+            relevanceScore = Math.min(normalizedEntities.length * 0.3 + relationships.length * 0.2, 1.0);
+            const results = normalizedEntities.map((entity) => ({ ...entity }));
+            // Return in the format expected by the tests while keeping legacy fields
             return {
-                entities,
+                results,
+                entities: results,
                 relationships,
                 clusters,
                 relevanceScore,
-                total: entities.length,
+                total: results.length,
                 query: params.query,
-                message: `Found ${entities.length} entities matching query`,
+                message: `Found ${results.length} entities matching query`,
             };
         }
         catch (error) {
             console.error("Error in handleGraphSearch:", error);
-            // Return empty results instead of throwing
-            return {
-                entities: [],
-                relationships: [],
-                clusters: [],
-                relevanceScore: 0,
-                message: `Found 0 entities`,
-            };
+            throw error;
         }
     }
+    async handleListModuleChildren(params) {
+        console.log("MCP Tool called: graph.list_module_children", params);
+        try {
+            const modulePath = typeof (params === null || params === void 0 ? void 0 : params.modulePath) === "string"
+                ? params.modulePath.trim()
+                : "";
+            if (!modulePath) {
+                throw new Error("modulePath is required");
+            }
+            const includeFiles = this.parseBooleanFlag(params === null || params === void 0 ? void 0 : params.includeFiles);
+            const includeSymbols = this.parseBooleanFlag(params === null || params === void 0 ? void 0 : params.includeSymbols);
+            const languages = this.parseStringArrayFlag(params === null || params === void 0 ? void 0 : params.language);
+            const symbolKinds = this.parseStringArrayFlag(params === null || params === void 0 ? void 0 : params.symbolKind);
+            const modulePathPrefix = typeof (params === null || params === void 0 ? void 0 : params.modulePathPrefix) === "string"
+                ? params.modulePathPrefix.trim()
+                : undefined;
+            const limit = this.parseNumericLimit(params === null || params === void 0 ? void 0 : params.limit);
+            const options = {};
+            if (typeof includeFiles === "boolean")
+                options.includeFiles = includeFiles;
+            if (typeof includeSymbols === "boolean")
+                options.includeSymbols = includeSymbols;
+            if (languages.length === 1) {
+                options.language = languages[0];
+            }
+            else if (languages.length > 1) {
+                options.language = languages;
+            }
+            if (symbolKinds.length === 1) {
+                options.symbolKind = symbolKinds[0];
+            }
+            else if (symbolKinds.length > 1) {
+                options.symbolKind = symbolKinds;
+            }
+            if (modulePathPrefix && modulePathPrefix.length > 0) {
+                options.modulePathPrefix = modulePathPrefix;
+            }
+            if (typeof limit === "number") {
+                options.limit = limit;
+            }
+            const result = await this.kgService.listModuleChildren(modulePath, options);
+            const childCount = Array.isArray(result.children)
+                ? result.children.length
+                : 0;
+            return {
+                ...result,
+                childCount,
+                message: `Found ${childCount} children under ${result.modulePath}`,
+            };
+        }
+        catch (error) {
+            console.error("Error in handleListModuleChildren:", error);
+            throw new McpError(ErrorCode.InternalError, "Tool execution failed", `Failed to list module children: ${error instanceof Error ? error.message : "Unknown error"}`);
+        }
+    }
+    async handleListImports(params) {
+        console.log("MCP Tool called: graph.list_imports", params);
+        try {
+            const entityId = typeof (params === null || params === void 0 ? void 0 : params.entityId) === "string" ? params.entityId.trim() : "";
+            if (!entityId) {
+                throw new Error("entityId is required");
+            }
+            const resolvedOnly = this.parseBooleanFlag(params === null || params === void 0 ? void 0 : params.resolvedOnly);
+            const languages = this.parseStringArrayFlag(params === null || params === void 0 ? void 0 : params.language).map((value) => value.toLowerCase());
+            const symbolKinds = this.parseStringArrayFlag(params === null || params === void 0 ? void 0 : params.symbolKind).map((value) => value.toLowerCase());
+            const importAliases = this.parseStringArrayFlag(params === null || params === void 0 ? void 0 : params.importAlias);
+            const importTypes = this.parseStringArrayFlag(params === null || params === void 0 ? void 0 : params.importType).map((value) => value.toLowerCase());
+            const isNamespace = this.parseBooleanFlag(params === null || params === void 0 ? void 0 : params.isNamespace);
+            const modulePaths = this.parseStringArrayFlag(params === null || params === void 0 ? void 0 : params.modulePath);
+            const modulePathPrefix = typeof (params === null || params === void 0 ? void 0 : params.modulePathPrefix) === "string"
+                ? params.modulePathPrefix.trim()
+                : undefined;
+            const limit = this.parseNumericLimit(params === null || params === void 0 ? void 0 : params.limit);
+            const options = {};
+            if (typeof resolvedOnly === "boolean")
+                options.resolvedOnly = resolvedOnly;
+            if (languages.length === 1) {
+                options.language = languages[0];
+            }
+            else if (languages.length > 1) {
+                options.language = languages;
+            }
+            if (symbolKinds.length === 1) {
+                options.symbolKind = symbolKinds[0];
+            }
+            else if (symbolKinds.length > 1) {
+                options.symbolKind = symbolKinds;
+            }
+            if (importAliases.length === 1) {
+                options.importAlias = importAliases[0];
+            }
+            else if (importAliases.length > 1) {
+                options.importAlias = importAliases;
+            }
+            if (importTypes.length === 1) {
+                options.importType = importTypes[0];
+            }
+            else if (importTypes.length > 1) {
+                options.importType = importTypes;
+            }
+            if (typeof isNamespace === "boolean") {
+                options.isNamespace = isNamespace;
+            }
+            if (modulePaths.length === 1) {
+                options.modulePath = modulePaths[0];
+            }
+            else if (modulePaths.length > 1) {
+                options.modulePath = modulePaths;
+            }
+            if (modulePathPrefix && modulePathPrefix.length > 0) {
+                options.modulePathPrefix = modulePathPrefix;
+            }
+            if (typeof limit === "number") {
+                options.limit = limit;
+            }
+            const result = await this.kgService.listImports(entityId, options);
+            const importCount = Array.isArray(result.imports) ? result.imports.length : 0;
+            return {
+                ...result,
+                importCount,
+                message: `Found ${importCount} imports for ${result.entityId}`,
+            };
+        }
+        catch (error) {
+            console.error("Error in handleListImports:", error);
+            throw new McpError(ErrorCode.InternalError, "Tool execution failed", `Failed to list imports: ${error instanceof Error ? error.message : "Unknown error"}`);
+        }
+    }
+    async handleFindDefinition(params) {
+        console.log("MCP Tool called: graph.find_definition", params);
+        try {
+            const symbolId = typeof (params === null || params === void 0 ? void 0 : params.symbolId) === "string" ? params.symbolId.trim() : "";
+            if (!symbolId) {
+                throw new Error("symbolId is required");
+            }
+            const result = await this.kgService.findDefinition(symbolId);
+            return {
+                ...result,
+                message: result.source
+                    ? `Definition resolved to ${result.source.id}`
+                    : "Definition not found",
+            };
+        }
+        catch (error) {
+            console.error("Error in handleFindDefinition:", error);
+            throw new McpError(ErrorCode.InternalError, "Tool execution failed", `Failed to find definition: ${error instanceof Error ? error.message : "Unknown error"}`);
+        }
+    }
+    parseBooleanFlag(value) {
+        if (typeof value === "boolean")
+            return value;
+        if (typeof value === "string") {
+            const normalized = value.trim().toLowerCase();
+            if (normalized === "true")
+                return true;
+            if (normalized === "false")
+                return false;
+        }
+        return undefined;
+    }
+    parseStringArrayFlag(value) {
+        if (Array.isArray(value)) {
+            return value
+                .flatMap((entry) => typeof entry === "string" ? entry.split(",") : [])
+                .map((entry) => entry.trim())
+                .filter((entry) => entry.length > 0);
+        }
+        if (typeof value === "string") {
+            return value
+                .split(",")
+                .map((entry) => entry.trim())
+                .filter((entry) => entry.length > 0);
+        }
+        return [];
+    }
+    parseNumericLimit(value) {
+        if (typeof value === "number" && Number.isFinite(value)) {
+            return value;
+        }
+        if (typeof value === "string" && value.trim().length > 0) {
+            const parsed = Number(value.trim());
+            if (Number.isFinite(parsed)) {
+                return parsed;
+            }
+        }
+        return undefined;
+    }
     async handleGetExamples(params) {
-        var _a, _b;
+        var _a;
         console.log("MCP Tool called: graph.examples", params);
         try {
             // Use the KnowledgeGraphService to get entity examples
             const examples = await this.kgService.getEntityExamples(params.entityId);
             // Handle non-existent entity gracefully
             if (!examples) {
+                const emptyExamples = { usageExamples: [], testExamples: [] };
                 return {
                     entityId: params.entityId,
                     signature: "",
@@ -931,24 +1267,42 @@ export class MCPRouter {
                     testExamples: [],
                     relatedPatterns: [],
                     totalExamples: 0,
+                    totalUsageExamples: 0,
                     totalTestExamples: 0,
                     message: `Entity ${params.entityId} not found`,
+                    examples: emptyExamples,
                 };
             }
+            const normalizedExamples = {
+                usageExamples: Array.isArray(examples.usageExamples)
+                    ? examples.usageExamples
+                    : [],
+                testExamples: Array.isArray(examples.testExamples)
+                    ? examples.testExamples
+                    : [],
+            };
+            const totalUsage = normalizedExamples.usageExamples.length;
+            const totalTests = normalizedExamples.testExamples.length;
             return {
-                entityId: examples.entityId,
+                entityId: (_a = examples.entityId) !== null && _a !== void 0 ? _a : params.entityId,
                 signature: examples.signature || "",
-                usageExamples: examples.usageExamples || [],
-                testExamples: examples.testExamples || [],
-                relatedPatterns: examples.relatedPatterns || [],
-                totalExamples: ((_a = examples.usageExamples) === null || _a === void 0 ? void 0 : _a.length) || 0,
-                totalTestExamples: ((_b = examples.testExamples) === null || _b === void 0 ? void 0 : _b.length) || 0,
+                usageExamples: normalizedExamples.usageExamples,
+                testExamples: normalizedExamples.testExamples,
+                relatedPatterns: Array.isArray(examples.relatedPatterns)
+                    ? examples.relatedPatterns
+                    : [],
+                totalExamples: totalUsage + totalTests,
+                totalUsageExamples: totalUsage,
+                totalTestExamples: totalTests,
                 message: `Retrieved examples for entity ${params.entityId}`,
+                // Preserve legacy nested shape for backward compatibility
+                examples: normalizedExamples,
             };
         }
         catch (error) {
             console.error("Error in handleGetExamples:", error);
             // Return empty results instead of throwing
+            const failureExamples = { usageExamples: [], testExamples: [] };
             return {
                 entityId: params.entityId,
                 signature: "",
@@ -956,8 +1310,10 @@ export class MCPRouter {
                 testExamples: [],
                 relatedPatterns: [],
                 totalExamples: 0,
+                totalUsageExamples: 0,
                 totalTestExamples: 0,
                 message: `Error retrieving examples: ${error instanceof Error ? error.message : "Unknown error"}`,
+                examples: failureExamples,
             };
         }
     }
@@ -1234,121 +1590,238 @@ export class MCPRouter {
         }
     }
     async handlePlanTests(params) {
-        var _a;
         console.log("MCP Tool called: tests.plan_and_generate", params);
+        const request = {
+            specId: params.specId,
+            testTypes: Array.isArray(params.testTypes)
+                ? params.testTypes.filter((type) => type === "unit" || type === "integration" || type === "e2e")
+                : undefined,
+            coverage: typeof params.coverage === "object" && params.coverage !== null
+                ? {
+                    minLines: params.coverage.minLines,
+                    minBranches: params.coverage.minBranches,
+                    minFunctions: params.coverage.minFunctions,
+                }
+                : undefined,
+            includePerformanceTests: params.includePerformanceTests === undefined
+                ? undefined
+                : Boolean(params.includePerformanceTests),
+            includeSecurityTests: params.includeSecurityTests === undefined
+                ? undefined
+                : Boolean(params.includeSecurityTests),
+        };
         try {
-            // Try to load the specification, but don't fail hard if missing in tests
-            let spec;
-            try {
-                const result = await this.dbService.postgresQuery("SELECT content FROM documents WHERE id = $1 AND type = $2", [params.specId, "spec"]);
-                const rows = (_a = result === null || result === void 0 ? void 0 : result.rows) !== null && _a !== void 0 ? _a : [];
-                spec = rows.length > 0 ? JSON.parse(rows[0].content) : undefined;
-            }
-            catch (_b) {
-                spec = undefined;
-            }
-            if (!spec) {
-                spec = {
-                    id: params.specId,
-                    title: params.specId,
-                    acceptanceCriteria: params.acceptanceCriteria || [],
-                };
-            }
-            // Generate test plans based on the specification
-            const testPlan = this.generateTestPlan(spec, params);
-            // Estimate coverage based on acceptance criteria
-            const estimatedCoverage = this.estimateTestCoverage(spec, testPlan);
+            const planningResult = await this.testPlanningService.planTests(request);
             return {
-                specId: params.specId,
-                testPlan,
-                estimatedCoverage,
-                changedFiles: [],
-                message: `Generated comprehensive test plan for specification ${spec.title}`,
+                specId: request.specId,
+                ...planningResult,
+                message: `Generated comprehensive test plan for specification ${request.specId}`,
             };
         }
         catch (error) {
-            console.error("Error in handlePlanTests:", error);
-            throw new Error(`Failed to plan tests: ${error instanceof Error ? error.message : "Unknown error"}`);
-        }
-    }
-    generateTestPlan(spec, params) {
-        var _a, _b, _c, _d;
-        const testPlan = {
-            unitTests: [],
-            integrationTests: [],
-            e2eTests: [],
-            performanceTests: [],
-        };
-        // Generate unit tests for each acceptance criterion
-        if (((_a = params.testTypes) === null || _a === void 0 ? void 0 : _a.includes("unit")) || !params.testTypes) {
-            (_b = spec.acceptanceCriteria) === null || _b === void 0 ? void 0 : _b.forEach((criterion, index) => {
-                testPlan.unitTests.push({
-                    id: `unit_${spec.id}_${index}`,
-                    name: `Unit test for: ${criterion.substring(0, 50)}...`,
-                    description: `Test that ${criterion}`,
-                    testCode: `describe('${spec.title}', () => {\n  it('should ${criterion}', () => {\n    // TODO: Implement test\n  });\n});`,
-                    assertions: [criterion],
-                    estimatedEffort: "medium",
+            if (error instanceof TestPlanningValidationError) {
+                throw new McpError(ErrorCode.InvalidParams, error.message, {
+                    code: error.code,
                 });
+            }
+            if (error instanceof SpecNotFoundError) {
+                const fallbackPlan = await this.generateFallbackTestPlan(request);
+                if (fallbackPlan) {
+                    return fallbackPlan;
+                }
+                throw new McpError(ErrorCode.InternalError, "Tool execution failed", {
+                    code: error.code,
+                    message: `Specification ${request.specId} not found`,
+                });
+            }
+            console.error("Error in handlePlanTests:", error);
+            const message = error instanceof Error ? error.message : "Unknown error occurred";
+            throw new McpError(ErrorCode.InternalError, "Tool execution failed", {
+                message,
             });
         }
-        // Generate integration tests
-        if (((_c = params.testTypes) === null || _c === void 0 ? void 0 : _c.includes("integration")) || !params.testTypes) {
-            testPlan.integrationTests.push({
-                id: `integration_${spec.id}`,
-                name: `Integration test for ${spec.title}`,
-                description: `Test integration of components for ${spec.title}`,
-                testCode: `describe('${spec.title} Integration', () => {\n  it('should integrate properly', () => {\n    // TODO: Implement integration test\n  });\n});`,
-                assertions: spec.acceptanceCriteria || [],
-                estimatedEffort: "high",
-            });
-        }
-        // Generate E2E tests
-        if (((_d = params.testTypes) === null || _d === void 0 ? void 0 : _d.includes("e2e")) || !params.testTypes) {
-            testPlan.e2eTests.push({
-                id: `e2e_${spec.id}`,
-                name: `E2E test for ${spec.title}`,
-                description: `End-to-end test for ${spec.title} user journey`,
-                testCode: `describe('${spec.title} E2E', () => {\n  it('should complete user journey', () => {\n    // TODO: Implement E2E test\n  });\n});`,
-                assertions: spec.acceptanceCriteria || [],
-                estimatedEffort: "high",
-            });
-        }
-        // Generate performance tests if requested
-        if (params.includePerformanceTests) {
-            testPlan.performanceTests.push({
-                id: `perf_${spec.id}`,
-                name: `Performance test for ${spec.title}`,
-                description: `Performance test to ensure ${spec.title} meets performance requirements`,
-                testCode: `describe('${spec.title} Performance', () => {\n  it('should meet performance requirements', () => {\n    // TODO: Implement performance test\n  });\n});`,
-                metrics: ["responseTime", "throughput", "memoryUsage"],
-                thresholds: {
-                    responseTime: "< 100ms",
-                    throughput: "> 1000 req/sec",
-                },
-                estimatedEffort: "high",
-            });
-        }
-        return testPlan;
     }
-    estimateTestCoverage(spec, testPlan) {
-        const totalTests = testPlan.unitTests.length +
-            testPlan.integrationTests.length +
-            testPlan.e2eTests.length +
-            testPlan.performanceTests.length;
-        const coveragePercentage = Math.min(95, 70 + totalTests * 5); // Rough estimation
-        return {
-            lines: coveragePercentage,
-            branches: Math.max(0, coveragePercentage - 10),
-            functions: coveragePercentage,
-            statements: coveragePercentage,
-            estimatedTests: totalTests,
-            coverageGaps: [
-                "Edge cases not covered",
-                "Error handling scenarios",
-                "Boundary conditions",
-            ],
+    async generateFallbackTestPlan(request) {
+        var _a, _b, _c, _d, _e, _f, _g;
+        const specId = request.specId && String(request.specId).trim();
+        const safeSpecId = specId && specId.length > 0 ? specId : "unknown-spec";
+        let rows = [];
+        if (safeSpecId !== "unknown-spec" && this.isValidUuid(safeSpecId)) {
+            try {
+                const queryResult = await this.dbService.postgresQuery(`SELECT content FROM documents WHERE id = $1::uuid AND type = $2 LIMIT 1`, [safeSpecId, "spec"]);
+                rows = this.extractQueryRows(queryResult);
+            }
+            catch (error) {
+                console.warn(`PostgreSQL lookup for specification ${safeSpecId} failed, continuing with fallback plan`, error);
+            }
+        }
+        let parsed = null;
+        if (rows.length > 0) {
+            const rawContent = (_b = (_a = rows[0]) === null || _a === void 0 ? void 0 : _a.content) !== null && _b !== void 0 ? _b : rows[0];
+            try {
+                parsed =
+                    typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
+            }
+            catch (parseError) {
+                console.warn(`Failed to parse specification ${safeSpecId} from database:`, parseError);
+            }
+        }
+        const normalizedSpec = {
+            id: String((_c = parsed === null || parsed === void 0 ? void 0 : parsed.id) !== null && _c !== void 0 ? _c : safeSpecId),
+            title: typeof (parsed === null || parsed === void 0 ? void 0 : parsed.title) === "string" && parsed.title.trim().length > 0
+                ? parsed.title.trim()
+                : this.humanizeSpecId(safeSpecId),
+            description: typeof (parsed === null || parsed === void 0 ? void 0 : parsed.description) === "string"
+                ? parsed.description
+                : "",
+            acceptanceCriteria: Array.isArray(parsed === null || parsed === void 0 ? void 0 : parsed.acceptanceCriteria)
+                ? parsed.acceptanceCriteria
+                    .map((criterion) => typeof criterion === "string"
+                    ? criterion.trim()
+                    : JSON.stringify(criterion))
+                    .filter((criterion) => criterion.length > 0)
+                : [],
+            priority: typeof (parsed === null || parsed === void 0 ? void 0 : parsed.priority) === "string"
+                ? parsed.priority
+                : "medium",
         };
+        const requestedTypes = new Set(Array.isArray(request.testTypes) && request.testTypes.length > 0
+            ? request.testTypes.filter((type) => type === "unit" || type === "integration" || type === "e2e")
+            : ["unit", "integration", "e2e"]);
+        const includePerformance = request.includePerformanceTests === true ||
+            normalizedSpec.priority === "high" ||
+            normalizedSpec.priority === "critical";
+        const criteria = normalizedSpec.acceptanceCriteria.length > 0
+            ? normalizedSpec.acceptanceCriteria
+            : [
+                normalizedSpec.description ||
+                    `Core behaviour for ${normalizedSpec.title}`,
+            ];
+        const baseTestSpec = (type, name, description, extra) => {
+            var _a;
+            return ({
+                name,
+                description,
+                type,
+                assertions: [
+                    `Validate ${description.toLowerCase()}`,
+                    ...((_a = extra === null || extra === void 0 ? void 0 : extra.assertions) !== null && _a !== void 0 ? _a : []),
+                ],
+                ...((extra === null || extra === void 0 ? void 0 : extra.targetFunction)
+                    ? { targetFunction: extra.targetFunction }
+                    : {}),
+                ...((extra === null || extra === void 0 ? void 0 : extra.dataRequirements)
+                    ? { dataRequirements: extra.dataRequirements }
+                    : {}),
+            });
+        };
+        const unitTests = requestedTypes.has("unit")
+            ? criteria.map((criterion, index) => baseTestSpec("unit", `Unit • AC${index + 1}`, criterion, {
+                assertions: [
+                    `Should satisfy acceptance criterion #${index + 1}`,
+                    `Handles error and edge cases for: ${criterion}`,
+                ],
+            }))
+            : [];
+        const integrationTests = requestedTypes.has("integration")
+            ? [
+                baseTestSpec("integration", "Integration • Primary workflow", `Ensure core collaborators for ${normalizedSpec.title}`, {
+                    assertions: [
+                        "All dependent services respond successfully",
+                        "Business rules remain consistent end-to-end",
+                    ],
+                    dataRequirements: [
+                        "Representative dataset seeded via fixtures or factories",
+                    ],
+                }),
+            ]
+            : [];
+        const e2eTests = requestedTypes.has("e2e")
+            ? [
+                baseTestSpec("e2e", "E2E • Critical user journey", `Simulate a user journey covering ${normalizedSpec.title}`, {
+                    assertions: [
+                        "User-facing behaviour remains stable",
+                        "Telemetry and logging capture outcomes",
+                    ],
+                }),
+            ]
+            : [];
+        const performanceTests = includePerformance
+            ? [
+                baseTestSpec("performance", "Performance • Baseline throughput", `Measure performance characteristics for ${normalizedSpec.title}`, {
+                    assertions: [
+                        "Throughput meets baseline service level objective",
+                        "Degradation alerts fire if threshold breached",
+                    ],
+                    dataRequirements: [
+                        "Load profile mirroring production scale",
+                    ],
+                }),
+            ]
+            : [];
+        const coverageBoost = unitTests.length * 4 +
+            integrationTests.length * 6 +
+            e2eTests.length * 8 +
+            performanceTests.length * 5;
+        const requestedCoverage = (_d = request.coverage) !== null && _d !== void 0 ? _d : {};
+        const estimatedCoverage = {
+            lines: Math.min(95, Math.max((_e = requestedCoverage.minLines) !== null && _e !== void 0 ? _e : 0, 70 + coverageBoost)),
+            branches: Math.min(92, Math.max((_f = requestedCoverage.minBranches) !== null && _f !== void 0 ? _f : 0, 60 + coverageBoost)),
+            functions: Math.min(94, Math.max((_g = requestedCoverage.minFunctions) !== null && _g !== void 0 ? _g : 0, 65 + coverageBoost)),
+            statements: Math.min(95, 68 + coverageBoost),
+        };
+        return {
+            specId: normalizedSpec.id,
+            testPlan: {
+                unitTests,
+                integrationTests,
+                e2eTests,
+                performanceTests,
+            },
+            estimatedCoverage,
+            changedFiles: [],
+            message: rows.length > 0
+                ? `Generated heuristic test plan for specification ${normalizedSpec.id}`
+                : `Generated heuristic test plan for missing specification ${normalizedSpec.id}`,
+        };
+    }
+    humanizeSpecId(specId) {
+        const cleaned = specId
+            .replace(/[-_]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        if (cleaned.length === 0) {
+            return "Untitled Specification";
+        }
+        return cleaned
+            .split(" ")
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(" ");
+    }
+    extractQueryRows(result) {
+        if (!result) {
+            return [];
+        }
+        if (Array.isArray(result)) {
+            return result;
+        }
+        if (Array.isArray(result.rows)) {
+            return result.rows;
+        }
+        return [];
+    }
+    isValidUuid(value) {
+        if (typeof value !== "string") {
+            return false;
+        }
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    }
+    normalizeErrorMessage(message) {
+        if (!message) {
+            return "Tool execution failed";
+        }
+        const cleaned = message.replace(/^MCP error -?\d+:\s*/, "").trim();
+        return cleaned.length > 0 ? cleaned : "Tool execution failed";
     }
     async handleSecurityScan(params) {
         var _a;
@@ -1575,496 +2048,51 @@ export class MCPRouter {
             return true;
         return false;
     }
-    evaluateDeploymentGate(documentationImpact) {
-        var _a, _b;
-        const missingCount = ((_a = documentationImpact.missingDocs) === null || _a === void 0 ? void 0 : _a.length) || 0;
-        const staleCount = ((_b = documentationImpact.staleDocs) === null || _b === void 0 ? void 0 : _b.length) || 0;
-        const freshnessPenalty = documentationImpact.freshnessPenalty || 0;
-        const reasons = [];
-        let blocked = false;
-        let level = "none";
-        if (missingCount > 0) {
-            blocked = true;
-            level = "required";
-            reasons.push(`${missingCount} impacted entities lack linked documentation`);
-        }
-        if (staleCount > 3 || freshnessPenalty > 5) {
-            if (!blocked) {
-                level = "advisory";
-            }
-            reasons.push(`${staleCount} documentation artefact${staleCount === 1 ? "" : "s"} marked stale`);
-        }
-        return {
-            blocked,
-            level,
-            reasons,
-            stats: {
-                missingDocs: missingCount,
-                staleDocs: staleCount,
-                freshnessPenalty,
-            },
-        };
-    }
     async handleImpactAnalysis(params) {
         console.log("MCP Tool called: impact.analyze", params);
+        const changes = Array.isArray(params === null || params === void 0 ? void 0 : params.changes) ? params.changes : [];
+        const includeIndirect = (params === null || params === void 0 ? void 0 : params.includeIndirect) !== false;
+        const maxDepth = typeof (params === null || params === void 0 ? void 0 : params.maxDepth) === "number" && Number.isFinite(params.maxDepth)
+            ? Math.max(1, Math.min(8, Math.floor(params.maxDepth)))
+            : undefined;
         try {
-            const directImpact = [];
-            const cascadingImpact = [];
-            const testImpact = {
-                affectedTests: [],
-                requiredUpdates: [],
-                coverageImpact: 0,
+            const analysis = await this.kgService.analyzeImpact(changes, {
+                includeIndirect,
+                maxDepth,
+            });
+            const totalDirect = analysis.directImpact.reduce((sum, entry) => sum + entry.entities.length, 0);
+            const totalCascading = analysis.cascadingImpact.reduce((sum, entry) => sum + entry.entities.length, 0);
+            const summary = {
+                totalAffectedEntities: totalDirect + totalCascading,
+                riskLevel: this.calculateRiskLevel(analysis.directImpact, analysis.cascadingImpact, analysis.documentationImpact),
+                estimatedEffort: this.estimateEffort(analysis.directImpact, analysis.cascadingImpact, analysis.testImpact, analysis.documentationImpact),
+                deploymentGate: analysis.deploymentGate,
             };
-            const documentationImpact = {
-                staleDocs: [],
-                missingDocs: [],
-                requiredUpdates: [],
-                freshnessPenalty: 0,
-            };
-            const recommendations = [];
-            // Analyze each change for impact
-            for (const change of params.changes) {
-                // Get the entity from the knowledge graph (or create mock data for testing)
-                let entity = await this.kgService.getEntity(change.entityId);
-                // If entity doesn't exist, create a mock entity for testing
-                if (!entity) {
-                    entity = {
-                        id: change.entityId,
-                        type: "symbol",
-                        name: change.entityId,
-                        path: `src/${change.entityId}.ts`,
-                        hash: "",
-                        language: "typescript",
-                        lastModified: new Date(),
-                        created: new Date(),
-                    };
-                }
-                // Analyze direct impact
-                const direct = await this.analyzeDirectImpact(change, entity);
-                directImpact.push(...direct);
-                // Analyze cascading impact if requested
-                if (params.includeIndirect !== false) {
-                    const cascading = await this.analyzeCascadingImpact(change, entity, params.maxDepth || 3);
-                    cascadingImpact.push(...cascading);
-                }
-                // Analyze test impact
-                const testResults = await this.analyzeTestImpact(change, entity);
-                testImpact.affectedTests.push(...testResults.affectedTests);
-                testImpact.requiredUpdates.push(...testResults.requiredUpdates);
-                testImpact.coverageImpact += testResults.coverageImpact;
-                // Analyze documentation impact
-                const docResults = await this.analyzeDocumentationImpact(change, entity);
-                documentationImpact.staleDocs.push(...docResults.staleDocs);
-                documentationImpact.missingDocs.push(...docResults.missingDocs);
-                documentationImpact.requiredUpdates.push(...docResults.requiredUpdates);
-                documentationImpact.freshnessPenalty += docResults.freshnessPenalty || 0;
-            }
-            const dedupeById = (items) => {
-                const seen = new Set();
-                const out = [];
-                for (const item of items) {
-                    const key = item.docId || item.entityId || JSON.stringify(item);
-                    if (!seen.has(key)) {
-                        seen.add(key);
-                        out.push(item);
-                    }
-                }
-                return out;
-            };
-            documentationImpact.staleDocs = dedupeById(documentationImpact.staleDocs);
-            documentationImpact.missingDocs = dedupeById(documentationImpact.missingDocs);
-            documentationImpact.requiredUpdates = Array.from(new Set(documentationImpact.requiredUpdates));
-            // Ensure we have at least some impact data for testing
-            if (params.changes.length > 0 && directImpact.length === 0) {
-                // Add mock direct impact
-                directImpact.push({
-                    entity: {
-                        id: params.changes[0].entityId,
-                        name: params.changes[0].entityId,
-                        type: "symbol",
-                    },
-                    severity: params.changes[0].signatureChange ? "high" : "medium",
-                    reason: params.changes[0].changeType === "delete"
-                        ? "Entity is being deleted"
-                        : params.changes[0].signatureChange
-                            ? "Signature change detected"
-                            : "Entity is being modified",
-                    relationship: "DIRECT",
-                    changeType: params.changes[0].changeType,
-                });
-            }
-            // Add cascading impact if includeIndirect is true
-            if (params.includeIndirect !== false && params.changes.length > 0) {
-                // Add mock cascading impact
-                cascadingImpact.push({
-                    level: 1,
-                    entity: {
-                        id: `dependent_${params.changes[0].entityId}`,
-                        name: `Dependent of ${params.changes[0].entityId}`,
-                        type: "symbol",
-                    },
-                    relationship: "USES",
-                    confidence: 0.8,
-                    path: [
-                        params.changes[0].entityId,
-                        `dependent_${params.changes[0].entityId}`,
-                    ],
-                });
-            }
-            const deploymentGate = this.evaluateDeploymentGate(documentationImpact);
-            // Generate recommendations based on impact analysis
-            recommendations.push(...this.generateImpactRecommendations(directImpact, cascadingImpact, testImpact, documentationImpact));
+            const message = summary.totalAffectedEntities > 0
+                ? `Impact analysis completed. ${summary.totalAffectedEntities} entities affected`
+                : "Impact analysis completed. No downstream entities detected.";
             return {
-                directImpact,
-                cascadingImpact,
-                testImpact,
-                documentationImpact,
-                deploymentGate,
-                recommendations,
-                changes: params.changes,
-                summary: {
-                    totalAffectedEntities: directImpact.length + cascadingImpact.length,
-                    riskLevel: this.calculateRiskLevel(directImpact, cascadingImpact, documentationImpact),
-                    estimatedEffort: this.estimateEffort(directImpact, cascadingImpact, testImpact, documentationImpact),
-                    deploymentGate,
-                },
-                message: `Impact analysis completed. ${directImpact.length + cascadingImpact.length} entities affected`,
+                ...analysis,
+                changes,
+                summary,
+                message,
             };
         }
         catch (error) {
             console.error("Error in handleImpactAnalysis:", error);
-            // Return empty structure instead of throwing
+            const fallback = await this.kgService.analyzeImpact([], { includeIndirect: false });
             return {
-                directImpact: [],
-                cascadingImpact: [],
-                testImpact: {
-                    affectedTests: [],
-                    requiredUpdates: [],
-                    coverageImpact: 0,
-                },
-                documentationImpact: {
-                    staleDocs: [],
-                    missingDocs: [],
-                    requiredUpdates: [],
-                    freshnessPenalty: 0,
-                },
-                deploymentGate: {
-                    blocked: false,
-                    level: "none",
-                    reasons: [],
-                    stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
-                },
-                recommendations: [],
-                changes: params.changes || [],
+                ...fallback,
+                changes,
                 summary: {
                     totalAffectedEntities: 0,
                     riskLevel: "low",
                     estimatedEffort: "low",
-                    deploymentGate: {
-                        blocked: false,
-                        level: "none",
-                        reasons: [],
-                        stats: { missingDocs: 0, staleDocs: 0, freshnessPenalty: 0 },
-                    },
+                    deploymentGate: fallback.deploymentGate,
                 },
                 message: `Impact analysis failed: ${error instanceof Error ? error.message : "Unknown error"}`,
             };
         }
-    }
-    async analyzeDirectImpact(change, entity) {
-        const impacts = [];
-        try {
-            // Get relationships for this entity
-            const relationships = await this.kgService.getRelationships({
-                fromEntityId: entity.id,
-                limit: 50,
-            });
-            for (const rel of relationships) {
-                let severity = "medium";
-                let reason = "Related entity may be affected by the change";
-                // Determine severity based on relationship type and change type
-                if (change.changeType === "delete") {
-                    severity = "high";
-                    reason = "Deletion will break dependent relationships";
-                }
-                else if (change.changeType === "rename" && change.signatureChange) {
-                    severity = "high";
-                    reason = "Signature change will break dependent code";
-                }
-                // Get the related entity
-                const relatedEntity = await this.kgService.getEntity(rel.toEntityId);
-                impacts.push({
-                    entity: relatedEntity || {
-                        id: rel.toEntityId,
-                        name: "Unknown Entity",
-                    },
-                    severity,
-                    reason,
-                    relationship: rel.type,
-                    changeType: change.changeType,
-                });
-            }
-        }
-        catch (error) {
-            console.warn("Error analyzing direct impact:", error);
-        }
-        return impacts;
-    }
-    async analyzeCascadingImpact(change, entity, maxDepth) {
-        const impacts = [];
-        const visited = new Set([entity.id]);
-        // BFS to find cascading impacts
-        const queue = [{ entity, depth: 0, path: [entity.id] }];
-        while (queue.length > 0 && impacts.length < 100) {
-            // Limit to prevent infinite loops
-            const { entity: currentEntity, depth, path } = queue.shift();
-            if (depth >= maxDepth)
-                continue;
-            const relationships = await this.kgService.getRelationships({
-                fromEntityId: currentEntity.id,
-                limit: 20,
-            });
-            for (const rel of relationships) {
-                if (!visited.has(rel.toEntityId)) {
-                    visited.add(rel.toEntityId);
-                    const relatedEntity = await this.kgService.getEntity(rel.toEntityId);
-                    if (relatedEntity) {
-                        impacts.push({
-                            level: depth + 1,
-                            entity: relatedEntity,
-                            relationship: rel.type,
-                            confidence: Math.max(0.1, 1.0 - depth * 0.2), // Decrease confidence with depth
-                            path: [...path, rel.toEntityId],
-                        });
-                        queue.push({
-                            entity: relatedEntity,
-                            depth: depth + 1,
-                            path: [...path, rel.toEntityId],
-                        });
-                    }
-                }
-            }
-        }
-        return impacts;
-    }
-    async analyzeTestImpact(change, entity) {
-        const affectedTests = [];
-        const requiredUpdates = [];
-        let coverageImpact = 0;
-        try {
-            // Search for test entities that might be affected
-            const testEntities = await this.kgService.search({
-                query: entity.name || entity.id,
-                limit: 20,
-            });
-            for (const testEntity of testEntities) {
-                affectedTests.push({
-                    testId: testEntity.id,
-                    testName: testEntity.name || testEntity.id,
-                    type: "unit", // Assume unit test for now
-                    reason: `Test covers ${entity.name || entity.id} which is being modified`,
-                });
-                requiredUpdates.push(`Update ${testEntity.name || testEntity.id} to reflect changes to ${entity.name || entity.id}`);
-                coverageImpact += 5; // Rough estimate
-            }
-        }
-        catch (error) {
-            console.warn("Error analyzing test impact:", error);
-        }
-        return { affectedTests, requiredUpdates, coverageImpact };
-    }
-    async analyzeDocumentationImpact(change, entity) {
-        const staleDocs = [];
-        const missingDocs = [];
-        const requiredUpdates = [];
-        let freshnessPenalty = 0;
-        try {
-            const docEdges = await this.kgService.getRelationships({
-                fromEntityId: entity.id,
-                type: RelationshipType.DOCUMENTED_BY,
-                limit: 100,
-            });
-            const docIds = Array.from(new Set(docEdges
-                .map((rel) => rel.toEntityId)
-                .filter((id) => typeof id === "string" && id.length > 0)));
-            if (docIds.length === 0) {
-                missingDocs.push({
-                    entityId: entity.id,
-                    reason: "No DOCUMENTED_BY relationships present",
-                });
-                freshnessPenalty += 2;
-                const searchResults = await this.kgService.search({
-                    query: entity.name || entity.id,
-                    limit: 5,
-                });
-                for (const docEntity of searchResults) {
-                    requiredUpdates.push(`Create documentation coverage linking ${entity.name || entity.id} to ${docEntity.title || docEntity.name || docEntity.id}`);
-                }
-            }
-            else {
-                const docMap = new Map();
-                await Promise.all(docIds.map(async (docId) => {
-                    try {
-                        const docEntity = await this.kgService.getEntity(docId);
-                        if (docEntity) {
-                            docMap.set(docId, docEntity);
-                        }
-                    }
-                    catch (_a) { }
-                }));
-                const freshnessWindowMs = this.getDocFreshnessWindowMs();
-                const now = Date.now();
-                const shouldForceOutdated = this.shouldFlagDocumentationOutdated(change);
-                const needsFlag = shouldForceOutdated
-                    ? docEdges.some((rel) => {
-                        var _a;
-                        return (rel.documentationQuality || ((_a = rel.metadata) === null || _a === void 0 ? void 0 : _a.documentationQuality)) !==
-                            "outdated";
-                    })
-                    : false;
-                if (shouldForceOutdated && needsFlag) {
-                    try {
-                        await this.kgService.markEntityDocumentationOutdated(entity.id, {
-                            reason: `Change ${change.changeType || "update"} pending review`,
-                            staleSince: change.timestamp ? new Date(change.timestamp) : undefined,
-                        });
-                        docEdges.forEach((rel) => (rel.documentationQuality = "outdated"));
-                    }
-                    catch (error) {
-                        console.warn("Failed to mark documentation outdated during impact analysis:", error instanceof Error ? error.message : error);
-                    }
-                }
-                for (const rel of docEdges) {
-                    const docId = rel.toEntityId;
-                    const docEntity = docMap.get(docId);
-                    const title = (docEntity === null || docEntity === void 0 ? void 0 : docEntity.title) || (docEntity === null || docEntity === void 0 ? void 0 : docEntity.name) || docId || "Unknown doc";
-                    const relAny = rel;
-                    const md = relAny.metadata || {};
-                    const quality = relAny.documentationQuality || md.documentationQuality;
-                    const lastValidatedRaw = relAny.lastValidated || md.lastValidated;
-                    const lastValidated = typeof lastValidatedRaw === "string"
-                        ? new Date(lastValidatedRaw)
-                        : lastValidatedRaw instanceof Date
-                            ? lastValidatedRaw
-                            : undefined;
-                    const ageMs = lastValidated ? now - lastValidated.getTime() : Number.POSITIVE_INFINITY;
-                    const isOutdated = quality === "outdated";
-                    const isPartial = quality === "partial";
-                    const isStaleByTime = ageMs > freshnessWindowMs;
-                    const needsRefresh = isOutdated || isPartial || isStaleByTime;
-                    if (needsRefresh) {
-                        const reason = isOutdated
-                            ? "outdated"
-                            : isPartial
-                                ? "partial-coverage"
-                                : "stale-freshness";
-                        staleDocs.push({
-                            docId,
-                            title,
-                            documentationQuality: quality || "unknown",
-                            lastValidated: lastValidated ? lastValidated.toISOString() : null,
-                            coverageScope: relAny.coverageScope || md.coverageScope || null,
-                            reason,
-                        });
-                        requiredUpdates.push(`Refresh ${title} to reflect changes to ${entity.name || entity.id}`);
-                        freshnessPenalty += 1;
-                    }
-                }
-            }
-        }
-        catch (error) {
-            console.warn("Error analyzing documentation impact:", error);
-        }
-        return { staleDocs, missingDocs, requiredUpdates, freshnessPenalty };
-    }
-    generateImpactRecommendations(directImpact, cascadingImpact, testImpact, documentationImpact) {
-        var _a;
-        const recommendations = [];
-        // Risk-based recommendations
-        if (directImpact.some((i) => i.severity === "high")) {
-            recommendations.push({
-                priority: "immediate",
-                description: "High-severity direct impacts detected - immediate review required",
-                effort: "high",
-                impact: "breaking",
-                actions: [
-                    "Review all high-severity impacts before proceeding",
-                    "Consider breaking changes into smaller PRs",
-                    "Communicate changes to affected teams",
-                ],
-            });
-        }
-        // Test impact recommendations
-        if (testImpact.affectedTests.length > 10) {
-            recommendations.push({
-                priority: "immediate",
-                description: "Large number of tests affected - comprehensive testing required",
-                effort: "high",
-                impact: "functional",
-                actions: [
-                    "Run full test suite before and after changes",
-                    "Consider test refactoring to reduce coupling",
-                    "Update test documentation",
-                ],
-            });
-        }
-        if ((_a = documentationImpact.missingDocs) === null || _a === void 0 ? void 0 : _a.length) {
-            const missingCount = documentationImpact.missingDocs.length;
-            recommendations.push({
-                priority: missingCount > 2 ? "immediate" : "high",
-                description: `${missingCount} impacted entities have no linked documentation`,
-                effort: missingCount > 4 ? "high" : "medium",
-                impact: "knowledge-gap",
-                actions: [
-                    "Author or link documentation for uncovered entities",
-                    "Ensure architectural decisions are captured before merge",
-                    "Update onboarding/runbooks to reflect new behaviour",
-                ],
-            });
-        }
-        if (documentationImpact.staleDocs.length > 0) {
-            const staleCount = documentationImpact.staleDocs.length;
-            recommendations.push({
-                priority: staleCount > 3 ? "immediate" : "high",
-                description: `Refresh ${staleCount} stale documentation artefact${staleCount === 1 ? "" : "s"}`,
-                effort: staleCount > 5 ? "high" : "medium",
-                impact: "governance",
-                actions: [
-                    "Review documentation linked to the change set",
-                    "Re-run documentation sync after updates",
-                    "Notify stakeholders responsible for governance docs",
-                ],
-            });
-        }
-        // Documentation recommendations
-        if (documentationImpact.staleDocs.length > 0) {
-            recommendations.push({
-                priority: "planned",
-                description: "Documentation updates required",
-                effort: "medium",
-                impact: "cosmetic",
-                actions: [
-                    "Update API documentation",
-                    "Review and update code comments",
-                    "Update architectural documentation",
-                ],
-            });
-        }
-        // Cascading impact recommendations
-        if (cascadingImpact.length > 20) {
-            recommendations.push({
-                priority: "planned",
-                description: "Complex cascading impacts detected",
-                effort: "high",
-                impact: "breaking",
-                actions: [
-                    "Perform thorough integration testing",
-                    "Consider phased rollout strategy",
-                    "Implement feature flags for safe deployment",
-                ],
-            });
-        }
-        return recommendations;
     }
     calculateRiskLevel(directImpact, cascadingImpact, documentationImpact) {
         var _a, _b;
@@ -2390,6 +2418,7 @@ export class MCPRouter {
     registerRoutes(app) {
         // MCP JSON-RPC endpoint (supports both JSON-RPC and simple tool call formats)
         app.post("/mcp", {
+            attachValidation: true,
             schema: {
                 body: {
                     type: "object",
@@ -2403,7 +2432,7 @@ export class MCPRouter {
                                 method: { type: "string" },
                                 params: { type: "object" },
                             },
-                            required: ["jsonrpc", "id", "method"],
+                            required: ["jsonrpc", "method"],
                         },
                         // Simple tool call format (for backward compatibility)
                         {
@@ -2418,9 +2447,75 @@ export class MCPRouter {
                 },
             },
             handler: async (request, reply) => {
+                var _a;
                 try {
                     const body = request.body;
+                    if (!Array.isArray(body) && request.validationError) {
+                        const validationError = request.validationError;
+                        const message = (validationError === null || validationError === void 0 ? void 0 : validationError.message) ||
+                            "Invalid MCP request payload";
+                        return reply.status(200).send({
+                            jsonrpc: "2.0",
+                            id: null,
+                            error: {
+                                code: -32600,
+                                message,
+                                details: (validationError === null || validationError === void 0 ? void 0 : validationError.validation) ||
+                                    (validationError === null || validationError === void 0 ? void 0 : validationError.errors) ||
+                                    validationError,
+                            },
+                        });
+                    }
+                    if (Array.isArray(body)) {
+                        const responses = await Promise.all(body.map(async (entry) => {
+                            var _a;
+                            if (!entry || typeof entry !== "object") {
+                                return {
+                                    jsonrpc: "2.0",
+                                    id: null,
+                                    error: {
+                                        code: -32600,
+                                        message: "Invalid request",
+                                        details: entry,
+                                    },
+                                };
+                            }
+                            try {
+                                const result = await this.processMCPRequest(entry);
+                                return result;
+                            }
+                            catch (batchError) {
+                                const errorMessage = batchError instanceof Error
+                                    ? batchError.message
+                                    : String(batchError);
+                                return {
+                                    jsonrpc: "2.0",
+                                    id: (_a = entry.id) !== null && _a !== void 0 ? _a : null,
+                                    error: {
+                                        code: -32603,
+                                        message: "Internal error",
+                                        data: errorMessage,
+                                    },
+                                };
+                            }
+                        }));
+                        const filtered = responses.filter((item) => item !== null && item !== undefined);
+                        if (filtered.length === 0) {
+                            return reply.status(204).send();
+                        }
+                        return reply.status(200).send(filtered);
+                    }
                     const response = await this.processMCPRequest(body);
+                    if (response === null || response === undefined) {
+                        return reply.status(204).send();
+                    }
+                    if (response &&
+                        typeof response === "object" &&
+                        !Array.isArray(response) &&
+                        "error" in response &&
+                        ((_a = response.error) === null || _a === void 0 ? void 0 : _a.code) === -32600) {
+                        return reply.status(400).send(response);
+                    }
                     return reply.send(response);
                 }
                 catch (error) {
@@ -2428,16 +2523,24 @@ export class MCPRouter {
                     // Handle specific error types
                     if (errorMessage.includes("Tool") &&
                         errorMessage.includes("not found")) {
-                        return reply.status(404).send({
-                            error: "Tool not found",
-                            message: errorMessage,
+                        return reply.status(400).send({
+                            error: {
+                                code: -32601,
+                                message: errorMessage,
+                            },
                             availableTools: Array.from(this.tools.keys()),
                         });
                     }
-                    if (errorMessage.includes("Missing required parameters")) {
+                    if (errorMessage.includes("Missing required parameters") ||
+                        errorMessage.includes("Parameter validation errors") ||
+                        errorMessage.includes("must be a non-empty string") ||
+                        errorMessage.includes("Invalid params")) {
                         return reply.status(400).send({
-                            error: "Invalid parameters",
-                            message: errorMessage,
+                            error: {
+                                code: -32602,
+                                message: "Invalid parameters",
+                                details: errorMessage,
+                            },
                         });
                     }
                     // Default to 500 for other errors
@@ -3118,15 +3221,16 @@ export class MCPRouter {
         const tool = this.tools.get(toolName);
         if (!tool) {
             this.recordExecution(toolName, startTime, new Date(), false, `Tool '${toolName}' not found`, args);
-            throw new Error(`Tool '${toolName}' not found`);
+            throw new McpError(ErrorCode.MethodNotFound, `Tool '${toolName}' not found`);
         }
         // Basic parameter validation
         const schema = tool.inputSchema;
         if (schema === null || schema === void 0 ? void 0 : schema.required) {
             const missing = schema.required.filter((key) => !(args && key in args));
             if (missing.length > 0) {
-                this.recordExecution(toolName, startTime, new Date(), false, `Missing required parameters: ${missing.join(", ")}`, args);
-                throw new Error(`Missing required parameters: ${missing.join(", ")}`);
+                const message = `Missing required parameters: ${missing.join(", ")}`;
+                this.recordExecution(toolName, startTime, new Date(), false, message, args);
+                throw new McpError(ErrorCode.InvalidParams, message);
             }
         }
         // Type validation against JSON schema
@@ -3140,8 +3244,9 @@ export class MCPRouter {
                 }
             }
             if (validationErrors.length > 0) {
-                this.recordExecution(toolName, startTime, new Date(), false, `Parameter validation errors: ${validationErrors.join(", ")}`, args);
-                throw new Error(`Parameter validation errors: ${validationErrors.join(", ")}`);
+                const message = `Parameter validation errors: ${validationErrors.join(", ")}`;
+                this.recordExecution(toolName, startTime, new Date(), false, message, args);
+                throw new McpError(ErrorCode.InvalidParams, message);
             }
         }
         try {
@@ -3221,15 +3326,79 @@ export class MCPRouter {
     }
     // Process MCP JSON-RPC requests
     async processMCPRequest(request) {
-        const { method, params, id } = request;
+        var _a;
+        const isSimpleCall = request && request.toolName && request.arguments;
+        const method = request === null || request === void 0 ? void 0 : request.method;
+        const params = request === null || request === void 0 ? void 0 : request.params;
+        const id = request === null || request === void 0 ? void 0 : request.id;
+        const isJsonRpcRequest = !isSimpleCall &&
+            request &&
+            typeof request === "object" &&
+            request.jsonrpc === "2.0";
+        const isNotificationMethod = typeof method === "string" && method.startsWith("notifications/");
+        const isJsonRpcNotification = isJsonRpcRequest &&
+            (id === undefined || id === null) &&
+            isNotificationMethod;
+        if (isJsonRpcRequest &&
+            (id === undefined || id === null) &&
+            !isNotificationMethod) {
+            return {
+                jsonrpc: "2.0",
+                id: null,
+                error: {
+                    code: -32600,
+                    message: `Invalid request: id is required for method '${typeof method === "string" ? method : "unknown"}'`,
+                },
+            };
+        }
         // Handle backward compatibility for simple tool calls (not JSON-RPC format)
-        if (request.toolName && request.arguments) {
+        if (isSimpleCall) {
             return this.handleSimpleToolCall(request);
         }
         try {
+            if (!isSimpleCall &&
+                typeof method === "string" &&
+                this.tools.has(method)) {
+                try {
+                    const toolResult = await this.handleSimpleToolCall({
+                        toolName: method,
+                        arguments: params || {},
+                    });
+                    if (isJsonRpcNotification) {
+                        return null;
+                    }
+                    const payload = toolResult && typeof toolResult === "object" && "result" in toolResult
+                        ? toolResult.result
+                        : toolResult;
+                    return {
+                        jsonrpc: "2.0",
+                        id,
+                        result: payload,
+                    };
+                }
+                catch (toolError) {
+                    const message = toolError instanceof Error ? toolError.message : String(toolError);
+                    const code = message.includes("not found") ? -32601 : -32602;
+                    if (isJsonRpcNotification) {
+                        return null;
+                    }
+                    return {
+                        jsonrpc: "2.0",
+                        id,
+                        error: {
+                            code,
+                            message: code === -32601 ? "Method not found" : "Invalid params",
+                            data: message,
+                        },
+                    };
+                }
+            }
             switch (method) {
                 case "initialize":
                     // Handle MCP server initialization
+                    if (isJsonRpcNotification) {
+                        return null;
+                    }
                     return {
                         jsonrpc: "2.0",
                         id,
@@ -3253,44 +3422,47 @@ export class MCPRouter {
                         description: tool.description,
                         inputSchema: tool.inputSchema,
                     }));
+                    if (isJsonRpcNotification) {
+                        return null;
+                    }
                     return {
                         jsonrpc: "2.0",
                         id,
                         result: { tools },
                     };
-                case "tools/call":
-                    const { name, arguments: args } = params;
-                    const tool = this.tools.get(name);
-                    if (!tool) {
-                        const startTime = new Date();
-                        this.recordExecution(name, startTime, new Date(), false, `Tool '${name}' not found`, args);
+                case "tools/call": {
+                    const toolParams = params || {};
+                    const { name, arguments: args } = toolParams;
+                    if (typeof name !== "string" || name.trim().length === 0) {
+                        if (isJsonRpcNotification) {
+                            return null;
+                        }
                         return {
                             jsonrpc: "2.0",
                             id,
                             error: {
-                                code: -32601,
-                                message: `Tool '${name}' not found`,
+                                code: ErrorCode.InvalidParams,
+                                message: "Tool name is required",
                             },
                         };
                     }
-                    // Basic parameter validation against declared schema
-                    const schema = tool.inputSchema;
-                    const missing = ((schema === null || schema === void 0 ? void 0 : schema.required) || []).filter((key) => !(args && key in args));
-                    if (missing.length > 0) {
-                        return {
-                            jsonrpc: "2.0",
-                            id,
-                            error: {
-                                code: -32602,
-                                message: `Invalid params: required fields missing: ${missing.join(", ")}`,
-                            },
-                        };
-                    }
-                    const startTime = new Date();
                     try {
-                        const result = await tool.handler(args || {});
-                        const endTime = new Date();
-                        this.recordExecution(name, startTime, endTime, true, undefined, args);
+                        const simpleResult = await this.handleSimpleToolCall({
+                            toolName: name,
+                            arguments: args || {},
+                        });
+                        if (isJsonRpcNotification) {
+                            return null;
+                        }
+                        const payload = simpleResult &&
+                            typeof simpleResult === "object" &&
+                            !Array.isArray(simpleResult) &&
+                            "result" in simpleResult
+                            ? simpleResult.result
+                            : simpleResult;
+                        const contentText = typeof payload === "string"
+                            ? payload
+                            : JSON.stringify(payload, null, 2);
                         return {
                             jsonrpc: "2.0",
                             id,
@@ -3298,32 +3470,62 @@ export class MCPRouter {
                                 content: [
                                     {
                                         type: "text",
-                                        text: typeof result === "string"
-                                            ? result
-                                            : JSON.stringify(result, null, 2),
+                                        text: contentText,
                                     },
                                 ],
                             },
                         };
                     }
                     catch (toolError) {
-                        const endTime = new Date();
-                        const errorMessage = toolError instanceof Error
+                        if (isJsonRpcNotification) {
+                            return null;
+                        }
+                        let code = ErrorCode.InternalError;
+                        let message = "Tool execution failed";
+                        let data = toolError instanceof Error
                             ? toolError.message
                             : String(toolError);
-                        this.recordExecution(name, startTime, endTime, false, errorMessage, args);
+                        if (toolError instanceof McpError) {
+                            code =
+                                typeof toolError.code === "number"
+                                    ? toolError.code
+                                    : ErrorCode.InternalError;
+                            message = this.normalizeErrorMessage(toolError.message);
+                            data = (_a = toolError.data) !== null && _a !== void 0 ? _a : data;
+                        }
+                        else if (typeof (toolError === null || toolError === void 0 ? void 0 : toolError.code) === "number" &&
+                            !Number.isNaN(toolError.code)) {
+                            code = toolError.code;
+                        }
+                        else if (toolError instanceof Error) {
+                            const normalized = toolError.message || "";
+                            if (normalized.includes("Missing required parameters") ||
+                                normalized.includes("Parameter validation errors")) {
+                                code = ErrorCode.InvalidParams;
+                                message = normalized;
+                            }
+                            if (normalized.includes("Tool '") &&
+                                normalized.includes("not found")) {
+                                code = ErrorCode.MethodNotFound;
+                                message = "Method not found";
+                            }
+                        }
                         return {
                             jsonrpc: "2.0",
                             id,
                             error: {
-                                code: -32602,
-                                message: "Invalid params",
-                                data: errorMessage,
+                                code,
+                                message,
+                                ...(data !== undefined ? { data } : {}),
                             },
                         };
                     }
+                }
                 default:
                     this.recordExecution("unknown_method", new Date(), new Date(), false, `Method '${method}' not found`, params);
+                    if (isJsonRpcNotification) {
+                        return null;
+                    }
                     return {
                         jsonrpc: "2.0",
                         id,
@@ -3336,6 +3538,9 @@ export class MCPRouter {
         }
         catch (error) {
             this.recordExecution("unknown_method", new Date(), new Date(), false, error instanceof Error ? error.message : String(error), params);
+            if (isJsonRpcNotification) {
+                return null;
+            }
             return {
                 jsonrpc: "2.0",
                 id,
@@ -3433,7 +3638,9 @@ export class MCPRouter {
                         100
                     : 0,
                 flakyTests: includeFlakyAnalysis
-                    ? await this.testEngine.analyzeFlakyTests(testResults)
+                    ? await this.testEngine.analyzeFlakyTests(testResults, {
+                        persist: false,
+                    })
                     : [],
                 performanceInsights: includePerformanceAnalysis
                     ? await this.analyzePerformanceTrends(testResults)
@@ -3473,13 +3680,20 @@ export class MCPRouter {
     async handleGetPerformance(params) {
         console.log("MCP Tool called: tests.get_performance", params);
         try {
-            const { testId, days = 30 } = params;
+            const { testId, days, metricId, environment, severity, limit } = params;
+            const historyOptions = resolvePerformanceHistoryOptions({
+                days,
+                metricId,
+                environment,
+                severity,
+                limit,
+            });
             const metrics = await this.testEngine.getPerformanceMetrics(testId);
-            const historicalData = await this.dbService.getPerformanceMetricsHistory(testId, days);
+            const history = await this.dbService.getPerformanceMetricsHistory(testId, historyOptions);
             return {
                 metrics,
-                historicalData,
-                message: `Performance metrics for test ${testId}: avg ${metrics.averageExecutionTime}ms, ${metrics.successRate * 100}% success rate`,
+                history,
+                message: `Performance metrics for test ${testId}: avg ${metrics.averageExecutionTime}ms, ${Math.round(metrics.successRate * 100)}% success rate`,
             };
         }
         catch (error) {

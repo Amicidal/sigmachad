@@ -6,8 +6,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { APIGateway } from '../../../src/api/APIGateway.js';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../../src/services/DatabaseService.js';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
+import { DatabaseService } from '../../../src/services/core/DatabaseService.js';
 import {
   setupTestDatabase,
   cleanupTestDatabase,

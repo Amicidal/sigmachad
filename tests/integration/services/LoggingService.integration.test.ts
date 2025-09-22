@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { LoggingService } from "../../../src/services/LoggingService";
-import type { LoggingServiceOptions } from "../../../src/services/LoggingService";
+import { LoggingService } from "../../../src/services/core/LoggingService";
+import type { LoggingServiceOptions } from "../../../src/services/core/LoggingService";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";

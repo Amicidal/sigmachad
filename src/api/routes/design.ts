@@ -5,9 +5,9 @@
 
 import { FastifyInstance } from "fastify";
 import { v4 as uuidv4 } from "uuid";
-import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/DatabaseService.js";
-import { SpecService } from "../../services/SpecService.js";
+import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../../services/core/DatabaseService.js";
+import { SpecService } from "../../services/testing/SpecService.js";
 import {
   CreateSpecRequest,
   UpdateSpecRequest,

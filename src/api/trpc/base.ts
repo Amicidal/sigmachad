@@ -1,10 +1,10 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { z } from 'zod';
-import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/DatabaseService.js';
-import { ASTParser } from '../../services/ASTParser.js';
-import { FileWatcher } from '../../services/FileWatcher.js';
+import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
+import { DatabaseService } from '../../services/core/DatabaseService.js';
+import { ASTParser } from '../../services/knowledge/ASTParser.js';
+import { FileWatcher } from '../../services/core/FileWatcher.js';
 import type { AuthContext } from '../middleware/authentication.js';
 import { scopesSatisfyRequirement } from '../middleware/authentication.js';
 

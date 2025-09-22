@@ -12,12 +12,12 @@ vi.mock('../../../src/services/TestResultParser');
 vi.mock('fs/promises');
 
 // Import mocked dependencies first
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
-import { DatabaseService } from '../../../src/services/DatabaseService';
-import { TestResultParser } from '../../../src/services/TestResultParser';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService';
+import { DatabaseService } from '../../../src/services/core/DatabaseService';
+import { TestResultParser } from '../../../src/services/testing/TestResultParser';
 
 // Import the service after mocks are set up
-import { TestEngine, TestResult, TestSuiteResult, FlakyTestAnalysis, TestCoverageAnalysis } from '../../../src/services/TestEngine';
+import { TestEngine, TestResult, TestSuiteResult, FlakyTestAnalysis, TestCoverageAnalysis } from '../../../src/services/testing/TestEngine';
 import { normalizeMetricIdForId } from '../../../src/utils/codeEdges';
 
 import {

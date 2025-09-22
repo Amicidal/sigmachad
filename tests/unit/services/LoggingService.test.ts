@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { LoggingService } from "../../../src/services/LoggingService";
+import { LoggingService } from "../../../src/services/core/LoggingService";
 import type { FileSystemFacade } from "../../../src/services/logging/FileSink";
 import * as fs from "fs/promises";
 import * as path from "path";

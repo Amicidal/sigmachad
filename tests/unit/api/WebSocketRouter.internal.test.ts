@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EventEmitter } from "events";
 import { WebSocket } from "ws";
 import { WebSocketRouter } from "../../../src/api/websocket-router.js";
-import type { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService.js";
-import type { DatabaseService } from "../../../src/services/DatabaseService.js";
+import type { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService.js";
+import type { DatabaseService } from "../../../src/services/core/DatabaseService.js";
 
 const createRouter = (): WebSocketRouter => {
   const kgStub = new EventEmitter() as unknown as KnowledgeGraphService;

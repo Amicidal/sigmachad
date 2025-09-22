@@ -2,8 +2,8 @@
  * Subgraph & Neighbors endpoints for graph viewer
  */
 import { FastifyInstance } from 'fastify';
-import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/DatabaseService.js';
+import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
+import { DatabaseService } from '../../services/core/DatabaseService.js';
 
 export async function registerGraphViewerRoutes(app: FastifyInstance, kg: KnowledgeGraphService, _db: DatabaseService) {
   // GET /api/v1/graph/subgraph?limit=2000&type=symbol

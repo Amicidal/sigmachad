@@ -3,7 +3,7 @@ import {
   TestPlanningService,
   SpecNotFoundError,
   TestPlanningValidationError,
-} from '../../../src/services/TestPlanningService.js';
+} from '../../../src/services/testing/TestPlanningService.js';
 import { RelationshipType, type GraphRelationship } from '../../../src/models/relationships.js';
 import type { Spec, Test, Symbol } from '../../../src/models/entities.js';
 import type { TestPlanRequest } from '../../../src/models/types.js';

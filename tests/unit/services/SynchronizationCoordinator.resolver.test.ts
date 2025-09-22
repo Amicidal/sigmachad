@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SynchronizationCoordinator } from '@/services/SynchronizationCoordinator';
+import { SynchronizationCoordinator } from '../../../src/services/synchronization/SynchronizationCoordinator';
 import { RelationshipType } from '@/models/relationships';
 
 describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRef', () => {

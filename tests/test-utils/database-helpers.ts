@@ -6,9 +6,9 @@
 import {
   DatabaseService,
   DatabaseConfig,
-} from "../../src/services/DatabaseService";
+} from "../../src/services/core/DatabaseService";
 import { v4 as uuidv4 } from "uuid";
-import { KnowledgeGraphService } from "../../src/services/KnowledgeGraphService.js";
+import { KnowledgeGraphService } from "../../src/services/knowledge/KnowledgeGraphService.js";
 import { RelationshipType } from "../../src/models/relationships.js";
 
 // Integration test utilities for services that need to use database isolation

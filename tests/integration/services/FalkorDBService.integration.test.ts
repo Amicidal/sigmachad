@@ -8,7 +8,7 @@ import { FalkorDBService } from "../../../src/services/database/FalkorDBService"
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/DatabaseService";
+} from "../../../src/services/core/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

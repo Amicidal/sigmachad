@@ -1,18 +1,14 @@
-/**
- * Administration Routes
- * Handles system administration, monitoring, and maintenance operations
- */
 import { FastifyInstance } from 'fastify';
-import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/DatabaseService.js';
-import { FileWatcher } from '../../services/FileWatcher.js';
-import { SynchronizationCoordinator } from '../../services/SynchronizationCoordinator.js';
-import { SynchronizationMonitoring } from '../../services/SynchronizationMonitoring.js';
-import { ConflictResolution } from '../../services/ConflictResolution.js';
-import { RollbackCapabilities } from '../../services/RollbackCapabilities.js';
-import { BackupService } from '../../services/BackupService.js';
-import { LoggingService } from '../../services/LoggingService.js';
-import { MaintenanceService } from '../../services/MaintenanceService.js';
-import { ConfigurationService } from '../../services/ConfigurationService.js';
-export declare function registerAdminRoutes(app: FastifyInstance, kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher: FileWatcher, syncCoordinator?: SynchronizationCoordinator, syncMonitor?: SynchronizationMonitoring, conflictResolver?: ConflictResolution, rollbackCapabilities?: RollbackCapabilities, backupService?: BackupService, loggingService?: LoggingService, maintenanceService?: MaintenanceService, configurationService?: ConfigurationService): Promise<void>;
+import type { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
+import type { DatabaseService } from '../../services/core/DatabaseService.js';
+import type { FileWatcher } from '../../services/core/FileWatcher.js';
+import type { SynchronizationCoordinator } from '../../services/synchronization/SynchronizationCoordinator.js';
+import type { SynchronizationMonitoring } from '../../services/synchronization/SynchronizationMonitoring.js';
+import type { ConflictResolution } from '../../services/scm/ConflictResolution.js';
+import type { RollbackCapabilities } from '../../services/scm/RollbackCapabilities.js';
+import { BackupService } from '../../services/backup/BackupService.js';
+import type { LoggingService } from '../../services/core/LoggingService.js';
+import type { MaintenanceService } from '../../services/core/MaintenanceService.js';
+import type { ConfigurationService } from '../../services/core/ConfigurationService.js';
+export declare function registerAdminRoutes(app: FastifyInstance, kgService: KnowledgeGraphService, dbService: DatabaseService, fileWatcher: FileWatcher, syncCoordinator?: SynchronizationCoordinator, syncMonitor?: SynchronizationMonitoring, _conflictResolver?: ConflictResolution, _rollbackCapabilities?: RollbackCapabilities, backupService?: BackupService, loggingService?: LoggingService, maintenanceService?: MaintenanceService, configurationService?: ConfigurationService): Promise<void>;
 //# sourceMappingURL=admin.d.ts.map

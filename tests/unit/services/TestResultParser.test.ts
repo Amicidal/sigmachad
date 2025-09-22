@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TestResultParser, ParsedTestSuite, ParsedTestResult } from '../../../src/services/TestResultParser.js';
-import { TestSuiteResult } from '../../../src/services/TestEngine.js';
+import { TestResultParser, ParsedTestSuite, ParsedTestResult } from '../../../src/services/testing/TestResultParser.js';
+import { TestSuiteResult } from '../../../src/services/testing/TestEngine.js';
 
 describe('TestResultParser', () => {
   let parser: TestResultParser;

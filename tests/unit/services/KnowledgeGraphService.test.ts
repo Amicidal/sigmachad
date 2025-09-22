@@ -11,12 +11,12 @@ vi.mock('../../../src/utils/embedding');
 vi.mock('events');
 
 // Import the mocked dependencies first
-import { DatabaseService } from '../../../src/services/DatabaseService';
+import { DatabaseService } from '../../../src/services/core/DatabaseService';
 import { embeddingService } from '../../../src/utils/embedding';
 import { EventEmitter } from 'events';
 
 // Import the service after mocks are set up
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService';
 
 // Prevent index helpers from emitting massive CREATE INDEX spam in unit tests
 vi.spyOn(KnowledgeGraphService.prototype as any, 'ensureIndices').mockResolvedValue({

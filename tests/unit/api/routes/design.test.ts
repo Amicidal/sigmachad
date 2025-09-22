@@ -21,8 +21,8 @@ import { makeRealisticKgService } from '../../../test-utils/kg-realistic';
 import { makeRealisticDbService } from '../../../test-utils/db-realistic';
 
 // Mock external dependencies
-vi.mock('../../../../src/services/KnowledgeGraphService.js');
-vi.mock('../../../../src/services/DatabaseService.js');
+vi.mock('../../../../src/services/knowledge/KnowledgeGraphService.js');
+vi.mock('../../../../src/services/core/DatabaseService.js');
 
 // Helper function to create mock Spec entities
 function createMockSpec(overrides: Partial<Spec> = {}): Spec {

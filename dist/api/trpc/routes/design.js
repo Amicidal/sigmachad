@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import { router, publicProcedure } from '../base.js';
-import { SpecService } from '../../../services/SpecService.js';
+import { SpecService } from '../../../services/testing/SpecService.js';
 const ValidationIssueSchema = z.object({
     message: z.string(),
     severity: z.enum(['error', 'warning', 'info']).default('warning'),

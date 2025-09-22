@@ -17,11 +17,12 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         }>;
         _meta: object;
         _ctx_out: {
-            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
-            dbService: import("../../../services/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            kgService: import("../../../services/index.js").KnowledgeGraphService;
+            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
             authToken: string | undefined;
+            authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
         _input_in: {
             reason?: "manual" | "daily" | "incident" | undefined;
@@ -46,7 +47,7 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        checkpointId: string;
+        checkpointId: any;
     }>;
     listCheckpoints: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
@@ -57,31 +58,32 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         }>;
         _meta: object;
         _ctx_out: {
-            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
-            dbService: import("../../../services/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            kgService: import("../../../services/index.js").KnowledgeGraphService;
+            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
             authToken: string | undefined;
+            authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
         _input_in: {
             limit?: number | undefined;
             offset?: number | undefined;
-            reason?: string | undefined;
             since?: Date | undefined;
+            reason?: string | undefined;
             until?: Date | undefined;
         } | undefined;
         _input_out: {
             limit?: number | undefined;
             offset?: number | undefined;
-            reason?: string | undefined;
             since?: Date | undefined;
+            reason?: string | undefined;
             until?: Date | undefined;
         } | undefined;
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        items: any[];
-        total: number;
+        items: any;
+        total: any;
     }>;
     getCheckpoint: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
@@ -92,11 +94,12 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         }>;
         _meta: object;
         _ctx_out: {
-            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
-            dbService: import("../../../services/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            kgService: import("../../../services/index.js").KnowledgeGraphService;
+            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
             authToken: string | undefined;
+            authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
         _input_in: {
             id: string;
@@ -106,7 +109,7 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, import("../../../models/entities.js").Entity | null>;
+    }, any>;
     getCheckpointMembers: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -116,11 +119,12 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         }>;
         _meta: object;
         _ctx_out: {
-            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
-            dbService: import("../../../services/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            kgService: import("../../../services/index.js").KnowledgeGraphService;
+            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
             authToken: string | undefined;
+            authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
         _input_in: {
             id: string;
@@ -135,8 +139,8 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        items: import("../../../models/entities.js").Entity[];
-        total: number;
+        items: any;
+        total: any;
     }>;
     getCheckpointSummary: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
@@ -147,11 +151,12 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         }>;
         _meta: object;
         _ctx_out: {
-            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
-            dbService: import("../../../services/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            kgService: import("../../../services/index.js").KnowledgeGraphService;
+            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
             authToken: string | undefined;
+            authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
         _input_in: {
             id: string;
@@ -161,17 +166,7 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        totalMembers: number;
-        entityTypeCounts: Array<{
-            type: string;
-            count: number;
-        }>;
-        relationshipTypeCounts: Array<{
-            type: string;
-            count: number;
-        }>;
-    } | null>;
+    }, any>;
     exportCheckpoint: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -181,11 +176,12 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         }>;
         _meta: object;
         _ctx_out: {
-            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
-            dbService: import("../../../services/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            kgService: import("../../../services/index.js").KnowledgeGraphService;
+            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
             authToken: string | undefined;
+            authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
         _input_in: {
             id: string;
@@ -197,11 +193,7 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        checkpoint: any;
-        members: import("../../../models/entities.js").Entity[];
-        relationships?: import("../../../models/relationships.js").GraphRelationship[];
-    } | null>;
+    }, any>;
     importCheckpoint: import("@trpc/server").BuildProcedure<"mutation", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -211,11 +203,12 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         }>;
         _meta: object;
         _ctx_out: {
-            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
-            dbService: import("../../../services/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            kgService: import("../../../services/index.js").KnowledgeGraphService;
+            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
             authToken: string | undefined;
+            authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
         _input_in: {
             members: any[];
@@ -231,11 +224,7 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, {
-        checkpointId: string;
-        linked: number;
-        missing: number;
-    }>;
+    }, any>;
     deleteCheckpoint: import("@trpc/server").BuildProcedure<"mutation", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -245,11 +234,12 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         }>;
         _meta: object;
         _ctx_out: {
-            kgService: import("../../../services/KnowledgeGraphService.js").KnowledgeGraphService;
-            dbService: import("../../../services/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/FileWatcher.js").FileWatcher;
+            kgService: import("../../../services/index.js").KnowledgeGraphService;
+            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
+            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
+            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
             authToken: string | undefined;
+            authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
         _input_in: {
             id: string;
@@ -260,7 +250,7 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        success: boolean;
+        success: any;
     }>;
 }>;
 //# sourceMappingURL=history.d.ts.map

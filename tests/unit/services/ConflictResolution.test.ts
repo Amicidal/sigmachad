@@ -7,7 +7,7 @@ import {
   ConflictResolution,
   Conflict,
   ConflictResolutionResult,
-} from "../../../src/services/ConflictResolution";
+} from "../../../src/services/scm/ConflictResolution";
 import { Entity } from "../../../src/models/entities";
 import { GraphRelationship, RelationshipType } from "../../../src/models/relationships";
 import { canonicalRelationshipId } from "../../../src/utils/codeEdges";

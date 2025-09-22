@@ -60,7 +60,11 @@
       "Bash(RUN_INTEGRATION=1 NODE_ENV=test npx vitest run tests/integration/services/DatabaseService.integration.test.ts -t \"should handle race conditions in concurrent updates\")",
       "Bash(RUN_INTEGRATION=1 NODE_ENV=test npx vitest run tests/integration/services/KnowledgeGraphService.integration.test.ts -t \"should perform structural search by path pattern\" --reporter=verbose)",
       "Bash(npx @repomix/cli:*)",
-      "Bash(npx repomix:*)"
+      "Bash(npx repomix:*)",
+      "Bash(mv:*)",
+      "Bash(sed:*)",
+      "Bash({} ;)",
+      "Bash(/Users/Coding/Desktop/sigmachad/src/health-check.ts)"
     ],
     "deny": [],
     "ask": []

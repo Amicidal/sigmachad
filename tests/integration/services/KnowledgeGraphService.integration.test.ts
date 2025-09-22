@@ -5,8 +5,8 @@
 
 import crypto from "crypto";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/DatabaseService";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
+import { DatabaseService } from "../../../src/services/core/DatabaseService";
 import {
   setupIsolatedServiceTest,
   cleanupIsolatedServiceTest,

@@ -5,7 +5,7 @@
  * Used by Docker health checks and monitoring systems
  */
 
-import { DatabaseService, createDatabaseConfig } from './services/DatabaseService.js';
+import { DatabaseService, createDatabaseConfig } from './services/core/DatabaseService.js';
 import { IDatabaseHealthCheck } from './services/database/interfaces.js';
 
 export interface HealthCheckResult {
@@ -42,8 +42,7 @@ export async function performHealthCheck(): Promise<HealthCheckResult> {
     return {
       healthy: false,
       databases: {
-        falkordb: { status: 'unhealthy' },
-        qdrant: { status: 'unhealthy' },
+        neo4j: { status: 'unhealthy' },
         postgresql: { status: 'unhealthy' },
         redis: { status: 'unhealthy' },
       },

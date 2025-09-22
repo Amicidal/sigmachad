@@ -2,10 +2,10 @@
  * tRPC Router for Memento
  * Provides type-safe API endpoints with automatic OpenAPI generation
  */
-import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/DatabaseService.js';
-import { ASTParser } from '../../services/ASTParser.js';
-import { FileWatcher } from '../../services/FileWatcher.js';
+import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
+import { DatabaseService } from '../../services/core/DatabaseService.js';
+import { ASTParser } from '../../services/knowledge/ASTParser.js';
+import { FileWatcher } from '../../services/core/FileWatcher.js';
 import { TRPCContext } from './base.js';
 import type { FastifyRequest } from 'fastify';
 export declare const createTRPCContext: (opts: {
@@ -90,7 +90,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, import("../../services/ASTParser.js").ParseResult>;
+        }, import("../../services/knowledge/ASTParser.js").ParseResult>;
         getSymbols: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
                 ctx: TRPCContext;
@@ -110,7 +110,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, import("../../models/entities.js").Entity[]>;
+        }, Entity[]>;
     }>;
     design: import("@trpc/server").CreateRouterInner<import("@trpc/server").RootConfig<{
         ctx: TRPCContext;
@@ -138,12 +138,12 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_in: {
                 issues: {
                     message: string;
-                    field?: string | undefined;
                     file?: string | undefined;
                     suggestion?: string | undefined;
                     line?: number | undefined;
                     column?: number | undefined;
                     severity?: "info" | "error" | "warning" | undefined;
+                    field?: string | undefined;
                     rule?: string | undefined;
                 }[];
                 isValid: boolean;
@@ -153,11 +153,11 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 issues: {
                     message: string;
                     severity: "info" | "error" | "warning";
-                    field?: string | undefined;
                     file?: string | undefined;
                     suggestion?: string | undefined;
                     line?: number | undefined;
                     column?: number | undefined;
+                    field?: string | undefined;
                     rule?: string | undefined;
                 }[];
                 isValid: boolean;
@@ -264,54 +264,54 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _meta: object;
             _ctx_out: TRPCContext;
             _input_in: {
-                description: string;
                 id: string;
                 title: string;
+                description: string;
                 acceptanceCriteria: string[];
                 status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
                 priority?: "high" | "medium" | "low" | "critical" | undefined;
                 assignee?: string | null | undefined;
                 tags?: string[] | undefined;
+                updated?: string | Date | undefined;
                 path?: string | undefined;
                 hash?: string | undefined;
                 language?: string | undefined;
                 lastModified?: string | Date | undefined;
                 created?: string | Date | undefined;
                 metadata?: Record<string, any> | undefined;
-                updated?: string | Date | undefined;
             };
             _input_out: {
-                description: string;
                 id: string;
                 title: string;
+                description: string;
                 acceptanceCriteria: string[];
                 status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
                 priority?: "high" | "medium" | "low" | "critical" | undefined;
                 assignee?: string | null | undefined;
                 tags?: string[] | undefined;
+                updated?: string | Date | undefined;
                 path?: string | undefined;
                 hash?: string | undefined;
                 language?: string | undefined;
                 lastModified?: string | Date | undefined;
                 created?: string | Date | undefined;
                 metadata?: Record<string, any> | undefined;
-                updated?: string | Date | undefined;
             };
             _output_in: {
                 spec: {
                     type: "spec";
-                    description: string;
                     status: "deprecated" | "draft" | "approved" | "implemented";
                     priority: "high" | "medium" | "low" | "critical";
-                    path: string;
                     id: string;
+                    title: string;
+                    description: string;
+                    acceptanceCriteria: string[];
+                    updated: Date;
+                    path: string;
                     hash: string;
                     language: string;
                     lastModified: Date;
                     created: Date;
-                    title: string;
-                    acceptanceCriteria: string[];
-                    updated: Date;
                     assignee?: string | null | undefined;
                     tags?: string[] | undefined;
                     metadata?: Record<string, any> | undefined;
@@ -322,18 +322,18 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_out: {
                 spec: {
                     type: "spec";
-                    description: string;
                     status: "deprecated" | "draft" | "approved" | "implemented";
                     priority: "high" | "medium" | "low" | "critical";
-                    path: string;
                     id: string;
+                    title: string;
+                    description: string;
+                    acceptanceCriteria: string[];
+                    updated: Date;
+                    path: string;
                     hash: string;
                     language: string;
                     lastModified: Date;
                     created: Date;
-                    title: string;
-                    acceptanceCriteria: string[];
-                    updated: Date;
                     assignee?: string | null | undefined;
                     tags?: string[] | undefined;
                     metadata?: Record<string, any> | undefined;
@@ -360,22 +360,41 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_in: {
                 spec: {
                     type: "spec";
-                    description: string;
                     status: "deprecated" | "draft" | "approved" | "implemented";
                     priority: "high" | "medium" | "low" | "critical";
-                    path: string;
                     id: string;
+                    title: string;
+                    description: string;
+                    acceptanceCriteria: string[];
+                    updated: Date;
+                    path: string;
                     hash: string;
                     language: string;
                     lastModified: Date;
                     created: Date;
-                    title: string;
-                    acceptanceCriteria: string[];
-                    updated: Date;
                     assignee?: string | null | undefined;
                     tags?: string[] | undefined;
                     metadata?: Record<string, any> | undefined;
                 };
+                relatedSpecs: {
+                    type?: "spec" | undefined;
+                    status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
+                    priority?: "high" | "medium" | "low" | "critical" | undefined;
+                    assignee?: string | null | undefined;
+                    tags?: string[] | undefined;
+                    id?: string | undefined;
+                    title?: string | undefined;
+                    description?: string | undefined;
+                    acceptanceCriteria?: string[] | undefined;
+                    updated?: Date | undefined;
+                    path?: string | undefined;
+                    hash?: string | undefined;
+                    language?: string | undefined;
+                    lastModified?: Date | undefined;
+                    created?: Date | undefined;
+                    metadata?: Record<string, any> | undefined;
+                }[];
+                affectedEntities: any[];
                 testCoverage: {
                     entityId: string;
                     overallCoverage: {
@@ -412,45 +431,45 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                         covers: string[];
                     }[];
                 };
-                relatedSpecs: {
-                    type?: "spec" | undefined;
-                    description?: string | undefined;
-                    status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
-                    priority?: "high" | "medium" | "low" | "critical" | undefined;
-                    assignee?: string | null | undefined;
-                    tags?: string[] | undefined;
-                    path?: string | undefined;
-                    id?: string | undefined;
-                    hash?: string | undefined;
-                    language?: string | undefined;
-                    lastModified?: Date | undefined;
-                    created?: Date | undefined;
-                    metadata?: Record<string, any> | undefined;
-                    title?: string | undefined;
-                    acceptanceCriteria?: string[] | undefined;
-                    updated?: Date | undefined;
-                }[];
-                affectedEntities: any[];
             };
             _output_out: {
                 spec: {
                     type: "spec";
-                    description: string;
                     status: "deprecated" | "draft" | "approved" | "implemented";
                     priority: "high" | "medium" | "low" | "critical";
-                    path: string;
                     id: string;
+                    title: string;
+                    description: string;
+                    acceptanceCriteria: string[];
+                    updated: Date;
+                    path: string;
                     hash: string;
                     language: string;
                     lastModified: Date;
                     created: Date;
-                    title: string;
-                    acceptanceCriteria: string[];
-                    updated: Date;
                     assignee?: string | null | undefined;
                     tags?: string[] | undefined;
                     metadata?: Record<string, any> | undefined;
                 };
+                relatedSpecs: {
+                    type?: "spec" | undefined;
+                    status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
+                    priority?: "high" | "medium" | "low" | "critical" | undefined;
+                    assignee?: string | null | undefined;
+                    tags?: string[] | undefined;
+                    id?: string | undefined;
+                    title?: string | undefined;
+                    description?: string | undefined;
+                    acceptanceCriteria?: string[] | undefined;
+                    updated?: Date | undefined;
+                    path?: string | undefined;
+                    hash?: string | undefined;
+                    language?: string | undefined;
+                    lastModified?: Date | undefined;
+                    created?: Date | undefined;
+                    metadata?: Record<string, any> | undefined;
+                }[];
+                affectedEntities: any[];
                 testCoverage: {
                     entityId: string;
                     overallCoverage: {
@@ -487,25 +506,6 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                         covers: string[];
                     }[];
                 };
-                relatedSpecs: {
-                    type?: "spec" | undefined;
-                    description?: string | undefined;
-                    status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
-                    priority?: "high" | "medium" | "low" | "critical" | undefined;
-                    assignee?: string | null | undefined;
-                    tags?: string[] | undefined;
-                    path?: string | undefined;
-                    id?: string | undefined;
-                    hash?: string | undefined;
-                    language?: string | undefined;
-                    lastModified?: Date | undefined;
-                    created?: Date | undefined;
-                    metadata?: Record<string, any> | undefined;
-                    title?: string | undefined;
-                    acceptanceCriteria?: string[] | undefined;
-                    updated?: Date | undefined;
-                }[];
-                affectedEntities: any[];
             };
         }, unknown>;
         listSpecs: import("@trpc/server").BuildProcedure<"query", {
@@ -518,42 +518,42 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _meta: object;
             _ctx_out: TRPCContext;
             _input_in: {
-                search?: string | undefined;
-                limit?: number | undefined;
-                offset?: number | undefined;
                 status?: ("deprecated" | "draft" | "approved" | "implemented")[] | undefined;
                 priority?: ("high" | "medium" | "low" | "critical")[] | undefined;
                 assignee?: string | undefined;
                 tags?: string[] | undefined;
-                sortBy?: "status" | "priority" | "created" | "title" | "updated" | undefined;
+                search?: string | undefined;
+                limit?: number | undefined;
+                offset?: number | undefined;
+                sortBy?: "status" | "priority" | "title" | "updated" | "created" | undefined;
                 sortOrder?: "asc" | "desc" | undefined;
             } | undefined;
             _input_out: {
-                search?: string | undefined;
-                limit?: number | undefined;
-                offset?: number | undefined;
                 status?: ("deprecated" | "draft" | "approved" | "implemented")[] | undefined;
                 priority?: ("high" | "medium" | "low" | "critical")[] | undefined;
                 assignee?: string | undefined;
                 tags?: string[] | undefined;
-                sortBy?: "status" | "priority" | "created" | "title" | "updated" | undefined;
+                search?: string | undefined;
+                limit?: number | undefined;
+                offset?: number | undefined;
+                sortBy?: "status" | "priority" | "title" | "updated" | "created" | undefined;
                 sortOrder?: "asc" | "desc" | undefined;
             } | undefined;
             _output_in: {
                 items: {
                     type: "spec";
-                    description: string;
                     status: "deprecated" | "draft" | "approved" | "implemented";
                     priority: "high" | "medium" | "low" | "critical";
-                    path: string;
                     id: string;
+                    title: string;
+                    description: string;
+                    acceptanceCriteria: string[];
+                    updated: Date;
+                    path: string;
                     hash: string;
                     language: string;
                     lastModified: Date;
                     created: Date;
-                    title: string;
-                    acceptanceCriteria: string[];
-                    updated: Date;
                     assignee?: string | null | undefined;
                     tags?: string[] | undefined;
                     metadata?: Record<string, any> | undefined;
@@ -568,18 +568,18 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_out: {
                 items: {
                     type: "spec";
-                    description: string;
                     status: "deprecated" | "draft" | "approved" | "implemented";
                     priority: "high" | "medium" | "low" | "critical";
-                    path: string;
                     id: string;
+                    title: string;
+                    description: string;
+                    acceptanceCriteria: string[];
+                    updated: Date;
+                    path: string;
                     hash: string;
                     language: string;
                     lastModified: Date;
                     created: Date;
-                    title: string;
-                    acceptanceCriteria: string[];
-                    updated: Date;
                     assignee?: string | null | undefined;
                     tags?: string[] | undefined;
                     metadata?: Record<string, any> | undefined;
@@ -621,7 +621,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            items: import("../../models/entities.js").Entity[];
+            items: import("../../models/entities.js").Entity[] | undefined;
             total: number;
             limit: number;
             offset: number;
@@ -680,42 +680,42 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _input_in: {
                 query: string;
                 limit?: number | undefined;
-                entityTypes?: ("function" | "test" | "class" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
+                entityTypes?: ("function" | "class" | "test" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
                 searchType?: "dependency" | "semantic" | "structural" | "usage" | undefined;
                 filters?: {
                     tags?: string[] | undefined;
                     path?: string | undefined;
-                    checkpointId?: string | undefined;
                     language?: string | undefined;
                     lastModified?: {
                         since?: Date | undefined;
                         until?: Date | undefined;
                     } | undefined;
+                    checkpointId?: string | undefined;
                 } | undefined;
                 includeRelated?: boolean | undefined;
             };
             _input_out: {
                 query: string;
                 limit: number;
-                entityTypes?: ("function" | "test" | "class" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
+                entityTypes?: ("function" | "class" | "test" | "file" | "directory" | "module" | "interface" | "spec" | "change" | "session")[] | undefined;
                 searchType?: "dependency" | "semantic" | "structural" | "usage" | undefined;
                 filters?: {
                     tags?: string[] | undefined;
                     path?: string | undefined;
-                    checkpointId?: string | undefined;
                     language?: string | undefined;
                     lastModified?: {
                         since?: Date | undefined;
                         until?: Date | undefined;
                     } | undefined;
+                    checkpointId?: string | undefined;
                 } | undefined;
                 includeRelated?: boolean | undefined;
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            items: import("../../models/entities.js").Entity[];
-            total: number;
+            items: any;
+            total: any;
         }>;
         getDependencies: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
@@ -791,25 +791,22 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _input_in: {
                 startId: string;
                 types?: string[] | undefined;
+                maxDepth?: number | undefined;
                 since?: Date | undefined;
                 until?: Date | undefined;
                 atTime?: Date | undefined;
-                maxDepth?: number | undefined;
             };
             _input_out: {
                 startId: string;
                 types?: string[] | undefined;
+                maxDepth?: number | undefined;
                 since?: Date | undefined;
                 until?: Date | undefined;
                 atTime?: Date | undefined;
-                maxDepth?: number | undefined;
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, {
-            entities: import("../../models/entities.js").Entity[];
-            relationships: import("../../models/relationships.js").GraphRelationship[];
-        }>;
+        }, any>;
     }>;
     admin: import("@trpc/server").CreateRouterInner<import("@trpc/server").RootConfig<{
         ctx: TRPCContext;
@@ -831,6 +828,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 limit?: number | undefined;
@@ -861,36 +859,20 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: typeof import("@trpc/server").unsetMarker;
             _input_out: typeof import("@trpc/server").unsetMarker;
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            graph: {
-                nodes: number;
-                relationships: number;
-            };
+            graph: any;
             history: {
-                versions: number;
-                checkpoints: number;
-                checkpointMembers: {
-                    avg: number;
-                    min: number;
-                    max: number;
-                };
-                temporalEdges: {
-                    open: number;
-                    closed: number;
-                };
-                lastPrune: {
-                    retentionDays: number;
-                    cutoff: string;
-                    versions: number;
-                    closedEdges: number;
-                    checkpoints: number;
-                    dryRun?: boolean;
-                } | undefined;
+                versions: any;
+                checkpoints: any;
+                checkpointMembers: any;
+                temporalEdges: any;
+                lastPrune: any;
             };
             process: {
                 uptime: number;
@@ -912,6 +894,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 paths?: string[] | undefined;
@@ -938,12 +921,13 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
-                type?: "search" | "entities" | "relationships" | "all" | undefined;
+                type?: "search" | "relationships" | "entities" | "all" | undefined;
             };
             _input_out: {
-                type: "search" | "entities" | "relationships" | "all";
+                type: "search" | "relationships" | "entities" | "all";
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
@@ -962,6 +946,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: typeof import("@trpc/server").unsetMarker;
             _input_out: typeof import("@trpc/server").unsetMarker;
@@ -990,6 +975,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 key: string;
@@ -1016,24 +1002,13 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: typeof import("@trpc/server").unsetMarker;
             _input_out: typeof import("@trpc/server").unsetMarker;
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, {
-            supported: boolean;
-            indexes?: any[];
-            expected: {
-                file_path: boolean;
-                symbol_path: boolean;
-                version_entity: boolean;
-                checkpoint_id: boolean;
-                rel_validFrom: boolean;
-                rel_validTo: boolean;
-            };
-            notes?: string[];
-        }>;
+        }, any>;
         ensureIndexes: import("@trpc/server").BuildProcedure<"mutation", {
             _config: import("@trpc/server").RootConfig<{
                 ctx: TRPCContext;
@@ -1048,6 +1023,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: typeof import("@trpc/server").unsetMarker;
             _input_out: typeof import("@trpc/server").unsetMarker;
@@ -1055,19 +1031,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
             ensured: boolean;
-            health: {
-                supported: boolean;
-                indexes?: any[];
-                expected: {
-                    file_path: boolean;
-                    symbol_path: boolean;
-                    version_entity: boolean;
-                    checkpoint_id: boolean;
-                    rel_validFrom: boolean;
-                    rel_validTo: boolean;
-                };
-                notes?: string[];
-            };
+            health: any;
         }>;
         runBenchmarks: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
@@ -1083,6 +1047,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 mode?: "quick" | "full" | undefined;
@@ -1092,15 +1057,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             } | undefined;
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, {
-            mode: "quick" | "full";
-            totals: {
-                nodes: number;
-                edges: number;
-            };
-            timings: Record<string, number>;
-            samples: Record<string, any>;
-        }>;
+        }, any>;
     }>;
     history: import("@trpc/server").CreateRouterInner<import("@trpc/server").RootConfig<{
         ctx: TRPCContext;
@@ -1122,6 +1079,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 reason?: "manual" | "daily" | "incident" | undefined;
@@ -1146,7 +1104,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            checkpointId: string;
+            checkpointId: any;
         }>;
         listCheckpoints: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
@@ -1162,26 +1120,27 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 limit?: number | undefined;
                 offset?: number | undefined;
-                reason?: string | undefined;
                 since?: Date | undefined;
+                reason?: string | undefined;
                 until?: Date | undefined;
             } | undefined;
             _input_out: {
                 limit?: number | undefined;
                 offset?: number | undefined;
-                reason?: string | undefined;
                 since?: Date | undefined;
+                reason?: string | undefined;
                 until?: Date | undefined;
             } | undefined;
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            items: any[];
-            total: number;
+            items: any;
+            total: any;
         }>;
         getCheckpoint: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
@@ -1197,6 +1156,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1206,7 +1166,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, import("../../models/entities.js").Entity | null>;
+        }, any>;
         getCheckpointMembers: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
                 ctx: TRPCContext;
@@ -1221,6 +1181,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1235,8 +1196,8 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            items: import("../../models/entities.js").Entity[];
-            total: number;
+            items: any;
+            total: any;
         }>;
         getCheckpointSummary: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
@@ -1252,6 +1213,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1261,17 +1223,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, {
-            totalMembers: number;
-            entityTypeCounts: Array<{
-                type: string;
-                count: number;
-            }>;
-            relationshipTypeCounts: Array<{
-                type: string;
-                count: number;
-            }>;
-        } | null>;
+        }, any>;
         exportCheckpoint: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
                 ctx: TRPCContext;
@@ -1286,6 +1238,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1297,11 +1250,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, {
-            checkpoint: any;
-            members: import("../../models/entities.js").Entity[];
-            relationships?: import("../../models/relationships.js").GraphRelationship[];
-        } | null>;
+        }, any>;
         importCheckpoint: import("@trpc/server").BuildProcedure<"mutation", {
             _config: import("@trpc/server").RootConfig<{
                 ctx: TRPCContext;
@@ -1316,6 +1265,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 members: any[];
@@ -1331,11 +1281,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, {
-            checkpointId: string;
-            linked: number;
-            missing: number;
-        }>;
+        }, any>;
         deleteCheckpoint: import("@trpc/server").BuildProcedure<"mutation", {
             _config: import("@trpc/server").RootConfig<{
                 ctx: TRPCContext;
@@ -1350,6 +1296,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
+                authContext: import("../middleware/authentication.js").AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1360,7 +1307,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            success: boolean;
+            success: any;
         }>;
     }>;
     health: import("@trpc/server").BuildProcedure<"query", {
@@ -1379,7 +1326,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
     }, {
         status: string;
         timestamp: string;
-        services: import("../../services/database/interfaces.js").IDatabaseHealthCheck;
+        services: import("../../services/index.js").IDatabaseHealthCheck;
     }>;
 }>;
 export type AppRouter = typeof appRouter;

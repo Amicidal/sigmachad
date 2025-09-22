@@ -42,13 +42,13 @@ import {
   SecurityRule,
   SecurityScanOptions,
   SecurityMonitoringConfig,
-} from "../../../src/services/SecurityScanner";
+} from "../../../src/services/testing/SecurityScanner";
 import {
   DatabaseService,
   IFalkorDBService,
   IPostgreSQLService,
-} from "../../../src/services/DatabaseService";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
+} from "../../../src/services/core/DatabaseService";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
 import {
   SecurityIssue,
   Vulnerability,

@@ -4,10 +4,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { DatabaseService } from '../../../src/services/DatabaseService';
+import { DatabaseService } from '../../../src/services/core/DatabaseService';
 import { InMemoryKnowledgeGraphMock } from '../../test-utils/in-memory-kg';
 // Service under test
-import { RollbackCapabilities, RollbackPoint, RollbackResult } from '../../../src/services/RollbackCapabilities';
+import { RollbackCapabilities, RollbackPoint, RollbackResult } from '../../../src/services/scm/RollbackCapabilities';
 
 import { Entity, GraphRelationship } from '../../../src/models/entities';
 import { RelationshipType } from '../../../src/models/relationships';

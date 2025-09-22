@@ -37,7 +37,7 @@ export class FalkorDBService {
         }
         return this.falkordbClient;
     }
-    async query(query, params = {}) {
+    async query(query, params = {}, graphKeyOverride) {
         if (!this.initialized) {
             throw new Error("FalkorDB not initialized");
         }
@@ -57,14 +57,14 @@ export class FalkorDBService {
             // Replace $param placeholders with actual values using sanitized parameters
             for (const [key, value] of Object.entries(sanitizedParams)) {
                 const placeholder = `$${key}`;
-                const replacementValue = this.parameterToCypherString(value);
+                const replacementValue = this.parameterToCypherString(value, key, query);
                 // Use word boundaries to ensure exact matches
                 const regex = new RegExp(`\\$${key}\\b`, "g");
                 processedQuery = processedQuery.replace(regex, replacementValue);
             }
             const result = await this.falkordbClient.sendCommand([
                 "GRAPH.QUERY",
-                this.config.graphKey || "memento",
+                graphKeyOverride || this.config.graphKey || "memento",
                 processedQuery,
             ]);
             // FalkorDB returns results in a specific format:
@@ -141,6 +141,9 @@ export class FalkorDBService {
         if (command === "PING" || flat.length === 1) {
             return result;
         }
+        if (command === "EXEC" || command === "DISCARD" || command === "MULTI") {
+            return result;
+        }
         // For GRAPH.QUERY commands, parse and return structured data
         if (command === "GRAPH.QUERY") {
             // FalkorDB GRAPH.QUERY returns [header, ...dataRows, stats]
@@ -209,29 +212,62 @@ export class FalkorDBService {
         if (!this.initialized) {
             throw new Error("FalkorDB not initialized");
         }
+        const graphKey = this.config.graphKey || "memento";
         try {
-            // Create graph if it doesn't exist
-            await this.command("GRAPH.QUERY", this.config.graphKey || "memento", "MATCH (n) RETURN count(n) LIMIT 1");
-            console.log("📊 Setting up FalkorDB graph indexes...");
-            // Create indexes for better query performance
-            // Index on node ID for fast lookups
-            await this.command("GRAPH.QUERY", this.config.graphKey || "memento", "CREATE INDEX FOR (n:Entity) ON (n.id)");
-            // Index on node type for filtering
-            await this.command("GRAPH.QUERY", this.config.graphKey || "memento", "CREATE INDEX FOR (n:Entity) ON (n.type)");
-            // Index on node path for file-based queries
-            await this.command("GRAPH.QUERY", this.config.graphKey || "memento", "CREATE INDEX FOR (n:Entity) ON (n.path)");
-            // Index on node language for language-specific queries
-            await this.command("GRAPH.QUERY", this.config.graphKey || "memento", "CREATE INDEX FOR (n:Entity) ON (n.language)");
-            // Index on lastModified for temporal queries
-            await this.command("GRAPH.QUERY", this.config.graphKey || "memento", "CREATE INDEX FOR (n:Entity) ON (n.lastModified)");
-            // Composite index for common query patterns
-            await this.command("GRAPH.QUERY", this.config.graphKey || "memento", "CREATE INDEX FOR (n:Entity) ON (n.type, n.path)");
-            console.log("✅ FalkorDB graph indexes created");
+            await this.command("GRAPH.QUERY", graphKey, "MATCH (n) RETURN count(n) LIMIT 1");
         }
         catch (error) {
-            // Graph doesn't exist, it will be created on first write
-            console.log("📊 FalkorDB graph will be created on first write operation with indexes");
+            if (this.isGraphMissingError(error)) {
+                console.log("📊 FalkorDB graph will be created on first write operation; index creation deferred");
+                return;
+            }
+            console.error("FalkorDB graph warmup failed:", error);
+            return;
         }
+        console.log("📊 Setting up FalkorDB graph indexes...");
+        const stats = {
+            created: 0,
+            exists: 0,
+            deferred: 0,
+            failed: 0,
+        };
+        const bump = (outcome) => {
+            stats[outcome] += 1;
+        };
+        const primaryIndexQueries = [
+            "CREATE INDEX ON :Entity(id)",
+            "CREATE INDEX ON :Entity(type)",
+            "CREATE INDEX ON :Entity(path)",
+            "CREATE INDEX ON :Entity(language)",
+            "CREATE INDEX ON :Entity(lastModified)",
+        ];
+        for (const query of primaryIndexQueries) {
+            const outcome = await this.ensureGraphIndex(graphKey, query);
+            bump(outcome);
+            if (outcome === "deferred" || outcome === "failed") {
+                console.log("📊 FalkorDB graph index bootstrap deferred; remaining indexes will be attempted later", { outcome, query });
+                return;
+            }
+        }
+        const legacyIndexQueries = [
+            "CREATE INDEX ON :file(path)",
+            "CREATE INDEX ON :symbol(path)",
+            "CREATE INDEX ON :version(entityId)",
+            "CREATE INDEX ON :checkpoint(checkpointId)",
+        ];
+        for (const query of legacyIndexQueries) {
+            const outcome = await this.ensureGraphIndex(graphKey, query);
+            bump(outcome);
+            if (outcome === "deferred" || outcome === "failed") {
+                console.log("📊 FalkorDB legacy index bootstrap halted", { outcome, query });
+                return;
+            }
+        }
+        console.log("✅ FalkorDB graph index bootstrap complete", {
+            created: stats.created,
+            alreadyPresent: stats.exists,
+            attempts: stats.created + stats.exists + stats.deferred + stats.failed,
+        });
     }
     async healthCheck() {
         if (!this.initialized || !this.falkordbClient) {
@@ -246,14 +282,30 @@ export class FalkorDBService {
             return false;
         }
     }
+    async ensureGraphIndex(graphKey, query) {
+        try {
+            await this.command("GRAPH.QUERY", graphKey, query);
+            return "created";
+        }
+        catch (error) {
+            if (this.isIndexAlreadyExistsError(error)) {
+                return "exists";
+            }
+            if (this.isGraphMissingError(error)) {
+                return "deferred";
+            }
+            console.warn(`FalkorDB index creation failed for query "${query}":`, error);
+            return "failed";
+        }
+    }
     sanitizeParameterValue(value) {
         // Deep clone to prevent mutations of original object
         if (value === null || value === undefined) {
             return value;
         }
         if (typeof value === "string") {
-            // Remove or escape potentially dangerous characters
-            return value.replace(/['"`\\]/g, "\\$&");
+            // Strip control characters that Falkor/Redis refuse while preserving the original content
+            return value.replace(/[\u0000-\u001f\u007f]/g, "");
         }
         if (Array.isArray(value)) {
             return value.map((item) => this.sanitizeParameterValue(item));
@@ -271,27 +323,67 @@ export class FalkorDBService {
         // For primitives, return as-is
         return value;
     }
-    parameterToCypherString(value) {
+    parameterToCypherString(value, key, queryForContext) {
         if (value === null || value === undefined) {
             return "null";
         }
         if (typeof value === "string") {
-            return `'${value}'`;
+            const escaped = value
+                .replace(/\\/g, "\\\\")
+                .replace(/'/g, "\\'");
+            return `'${escaped}'`;
         }
         if (typeof value === "boolean" || typeof value === "number") {
             return String(value);
         }
         if (Array.isArray(value)) {
-            const elements = value.map((item) => this.parameterToCypherString(item));
+            const childKey = key
+                ? key.endsWith("s")
+                    ? key.slice(0, -1)
+                    : key
+                : undefined;
+            const elements = value.map((item) => this.parameterToCypherString(item, childKey, queryForContext));
             return `[${elements.join(", ")}]`;
         }
         if (typeof value === "object") {
-            // Represent plain objects as Cypher map literals for property updates (SET n += $props)
-            // Values inside the map are handled (quoted/escaped) by objectToCypherProperties
-            return this.objectToCypherProperties(value);
+            if (this.shouldTreatObjectAsMap(key, queryForContext) ||
+                (!key && this.shouldTreatObjectAsMap("row", queryForContext))) {
+                return this.objectToCypherProperties(value);
+            }
+            const json = JSON.stringify(value);
+            const escaped = json.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+            return `'${escaped}'`;
         }
         // For other types, convert to string and quote
         return `'${String(value)}'`;
+    }
+    shouldTreatObjectAsMap(key, queryForContext) {
+        if (!key) {
+            return false;
+        }
+        const normalized = key.toLowerCase();
+        if (normalized === "props" ||
+            normalized === "row" ||
+            normalized === "rows" ||
+            normalized.endsWith("props") ||
+            normalized.endsWith("properties") ||
+            normalized.endsWith("map")) {
+            return true;
+        }
+        if (queryForContext &&
+            new RegExp(`UNWIND\\s+\\$${key}\\s+AS\\s+`, "i").test(queryForContext)) {
+            return true;
+        }
+        if (!queryForContext) {
+            return false;
+        }
+        const mapPatterns = [
+            new RegExp(`SET\\s+\\w+\\s*\\+=\\s*\\$${key}\\b`, "i"),
+            new RegExp(`SET\\s+\\w+\\.\\w+\\s*\\+=\\s*\\$${key}\\b`, "i"),
+            new RegExp(`ON\\s+MATCH\\s+SET\\s+\\w+\\s*\\+=\\s*\\$${key}\\b`, "i"),
+            new RegExp(`ON\\s+CREATE\\s+SET\\s+\\w+\\s*\\+=\\s*\\$${key}\\b`, "i"),
+        ];
+        return mapPatterns.some((pattern) => pattern.test(queryForContext));
     }
     objectToCypherProperties(obj) {
         const props = Object.entries(obj)
@@ -301,21 +393,14 @@ export class FalkorDBService {
                 throw new Error(`Invalid property name: ${key}`);
             }
             if (typeof value === "string") {
-                return `${key}: '${value}'`;
+                return `${key}: ${this.parameterToCypherString(value, key, undefined)}`;
             }
             else if (Array.isArray(value)) {
                 // Handle arrays properly for Cypher
-                const arrayElements = value.map((item) => {
-                    if (typeof item === "string") {
-                        return `'${item}'`;
-                    }
-                    else if (item === null || item === undefined) {
-                        return "null";
-                    }
-                    else {
-                        return String(item);
-                    }
-                });
+                const childKey = key.endsWith("s")
+                    ? key.slice(0, -1)
+                    : key;
+                const arrayElements = value.map((item) => this.parameterToCypherString(item, childKey, undefined));
                 return `${key}: [${arrayElements.join(", ")}]`;
             }
             else if (value === null || value === undefined) {
@@ -325,14 +410,41 @@ export class FalkorDBService {
                 return `${key}: ${value}`;
             }
             else {
-                // For other types (including objects), store JSON string
-                const json = JSON.stringify(value);
-                const escaped = json.replace(/'/g, "\\'");
-                return `${key}: '${escaped}'`;
+                // Treat nested objects as maps so callers can pass structured props
+                return `${key}: ${this.objectToCypherProperties(value)}`;
             }
         })
             .join(", ");
         return `{${props}}`;
+    }
+    normalizeErrorMessage(error) {
+        if (error instanceof Error) {
+            return error.message.toLowerCase();
+        }
+        if (typeof error === "string") {
+            return error.toLowerCase();
+        }
+        if (error && typeof error === "object") {
+            const message = error.message;
+            if (typeof message === "string") {
+                return message.toLowerCase();
+            }
+        }
+        return String(error !== null && error !== void 0 ? error : "").toLowerCase();
+    }
+    isIndexAlreadyExistsError(error) {
+        const message = this.normalizeErrorMessage(error);
+        return (message.includes("already indexed") ||
+            message.includes("already exists"));
+    }
+    isGraphMissingError(error) {
+        const message = this.normalizeErrorMessage(error);
+        if (!message) {
+            return false;
+        }
+        return ((message.includes("graph") && message.includes("does not exist")) ||
+            message.includes("unknown graph") ||
+            message.includes("graph not found"));
     }
     async buildProcessedQuery(query, params) {
         let processedQuery = query;
@@ -345,7 +457,7 @@ export class FalkorDBService {
         }
         for (const [key, value] of Object.entries(sanitizedParams)) {
             const regex = new RegExp(`\\$${key}\\b`, "g");
-            const replacement = this.parameterToCypherString(value);
+            const replacement = this.parameterToCypherString(value, key, query);
             processedQuery = processedQuery.replace(regex, replacement);
         }
         return processedQuery;

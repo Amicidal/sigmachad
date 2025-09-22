@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { sanitizeData, serializeLogEntry } from '../../../../src/services/logging/serialization.js';
-import type { LogEntry } from '../../../../src/services/LoggingService.js';
+import type { LogEntry } from '../../../../src/services/core/LoggingService.js';
 
 describe('logging serialization', () => {
   it('coerces bigint primitives into JSON-safe strings', () => {

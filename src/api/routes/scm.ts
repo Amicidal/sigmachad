@@ -5,10 +5,10 @@
 
 import { FastifyInstance } from "fastify";
 import path from "path";
-import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/DatabaseService.js";
-import { GitService } from "../../services/GitService.js";
-import { SCMService, ValidationError } from "../../services/SCMService.js";
+import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../../services/core/DatabaseService.js";
+import { GitService } from "../../services/scm/GitService.js";
+import { SCMService, ValidationError } from "../../services/scm/SCMService.js";
 import { LocalGitProvider } from "../../services/scm/LocalGitProvider.js";
 import { SCMProviderNotConfiguredError } from "../../services/scm/SCMProvider.js";
 import type { CommitPRRequest } from "../../models/types.js";

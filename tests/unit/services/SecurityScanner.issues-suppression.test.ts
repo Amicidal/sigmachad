@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SecurityScanner } from '../../../src/services/SecurityScanner';
+import { SecurityScanner } from '../../../src/services/testing/SecurityScanner';
 
 describe('SecurityScanner issue suppression', () => {
   let scanner: SecurityScanner;

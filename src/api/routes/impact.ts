@@ -4,8 +4,8 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/DatabaseService.js";
+import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../../services/core/DatabaseService.js";
 import { ImpactAnalysis, ImpactAnalysisRequest } from "../../models/types.js";
 
 type ChangeType = ImpactAnalysisRequest["changes"][number]["changeType"];

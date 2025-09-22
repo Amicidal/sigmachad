@@ -8,12 +8,12 @@ import {
   DocumentationParser,
   ParsedDocument,
   SearchResult,
-} from "../../../src/services/DocumentationParser";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
+} from "../../../src/services/knowledge/DocumentationParser";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/DatabaseService";
+} from "../../../src/services/core/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

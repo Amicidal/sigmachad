@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { z } from 'zod';
+import { scopesSatisfyRequirement } from '../middleware/authentication.js';
 // Shared tRPC base used by router and route modules to avoid circular imports
 export const t = initTRPC.context().create({
     transformer: superjson,
@@ -18,13 +19,13 @@ export const t = initTRPC.context().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 export const adminProcedure = t.procedure.use(async ({ ctx, next }) => {
-    const required = (process.env.ADMIN_API_TOKEN || '').trim();
-    if (!required) {
-        return next(); // no auth required in development
+    const required = ['admin'];
+    const context = ctx.authContext;
+    if (!context) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Authentication is required' });
     }
-    const provided = (ctx.authToken || '').trim();
-    if (provided !== required) {
-        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid or missing API token' });
+    if (!scopesSatisfyRequirement(context.scopes, required)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Admin scope is required' });
     }
     return next();
 });

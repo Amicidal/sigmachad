@@ -1,0 +1,85 @@
+/**
+ * Knowledge Graph Service
+ * Facade that orchestrates all specialized graph services
+ */
+import { EventEmitter } from 'events';
+import { Neo4jConfig } from './Neo4jService.js';
+import { SearchService } from './SearchService.js';
+import { Entity } from '../../models/entities.js';
+import { GraphRelationship, RelationshipQuery, PathQuery } from '../../models/relationships.js';
+import { GraphSearchRequest, ImpactAnalysisRequest, ImpactAnalysis, DependencyAnalysis } from '../../models/types.js';
+export declare class KnowledgeGraphService extends EventEmitter {
+    private neo4j;
+    private entities;
+    private relationships;
+    private embeddings;
+    search: SearchService;
+    private history;
+    private analysis;
+    constructor(config?: Neo4jConfig);
+    /**
+     * Initialize database with necessary indexes and constraints
+     */
+    private initializeDatabase;
+    /**
+     * Setup event forwarding from sub-services
+     */
+    private setupEventForwarding;
+    createEntity(entity: Entity, options?: {
+        skipEmbedding?: boolean;
+    }): Promise<Entity>;
+    updateEntity(id: string, updates: Partial<Entity>): Promise<Entity>;
+    getEntity(id: string): Promise<Entity | null>;
+    deleteEntity(id: string): Promise<void>;
+    listEntities(options?: any): Promise<{
+        entities?: Entity[];
+        items: Entity[];
+        total: number;
+    }>;
+    createEntitiesBulk(entities: Entity[], options?: any): Promise<any>;
+    createRelationship(relationship: GraphRelationship): Promise<GraphRelationship>;
+    createRelationshipsBulk(relationships: GraphRelationship[], options?: any): Promise<any>;
+    getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
+    deleteRelationship(fromId: string, toId: string, type: any): Promise<void>;
+    searchEntities(request: GraphSearchRequest): Promise<any[]>;
+    semanticSearch(query: string, options?: any): Promise<any[]>;
+    structuralSearch(query: string, options?: any): Promise<any[]>;
+    findSymbolsByName(name: string, options?: any): Promise<Entity[]>;
+    findNearbySymbols(filePath: string, position: any, options?: any): Promise<Entity[]>;
+    analyzeImpact(request: ImpactAnalysisRequest): Promise<ImpactAnalysis>;
+    getEntityDependencies(entityId: string, options?: any): Promise<DependencyAnalysis>;
+    findPaths(query: PathQuery): Promise<any>;
+    computeAndStoreEdgeStats(entityId: string): Promise<void>;
+    appendVersion(entity: Entity, options?: any): Promise<string>;
+    createCheckpoint(seedEntities: string[], options: any): Promise<any>;
+    pruneHistory(retentionDays: number, options?: any): Promise<any>;
+    listCheckpoints(options?: any): Promise<any>;
+    getHistoryMetrics(): Promise<any>;
+    timeTravelTraversal(query: any): Promise<any>;
+    createEmbedding(entity: Entity): Promise<any>;
+    updateEmbedding(entityId: string, content?: string): Promise<void>;
+    deleteEmbedding(entityId: string): Promise<void>;
+    createEmbeddingsBatch(entities: Entity[], options?: any): Promise<any>;
+    findSimilar(entityId: string, options?: any): Promise<any[]>;
+    getStats(): Promise<any>;
+    clearSearchCache(): Promise<void>;
+    invalidateSearchCache(pattern?: any): Promise<void>;
+    ensureIndices(): Promise<void>;
+    mergeNormalizedDuplicates(): Promise<number>;
+    markInactiveEdgesNotSeenSince(since: Date): Promise<number>;
+    close(): Promise<void>;
+    initialize(): Promise<void>;
+    getEntitiesByFile(filePath: string): Promise<Entity[]>;
+    getEntityExamples(entityId: string): Promise<any>;
+    upsertEdgeEvidenceBulk(updates: any[]): Promise<void>;
+    openEdge(fromId: string, toId: string, type: any, ts?: Date, changeSetId?: string): Promise<void>;
+    closeEdge(fromId: string, toId: string, type: any, ts?: Date): Promise<void>;
+    findRecentEntityIds(limit?: number): Promise<string[]>;
+    search(request: GraphSearchRequest): Promise<Entity[]>;
+    findEntitiesByType(entityType: string): Promise<Entity[]>;
+    listRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
+    listModuleChildren(moduleId: string): Promise<Entity[]>;
+    listImports(fileId: string): Promise<Entity[]>;
+    findDefinition(symbolId: string): Promise<Entity | null>;
+}
+//# sourceMappingURL=KnowledgeGraphService.d.ts.map

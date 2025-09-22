@@ -11,13 +11,13 @@ import {
   HealthMetrics,
   MonitoringAlert,
   SyncLogEntry
-} from '@/services/SynchronizationMonitoring';
+} from '../../../src/services/synchronization/SynchronizationMonitoring';
 import {
   SyncOperation,
   SyncError,
   SyncConflict
-} from '@/services/SynchronizationCoordinator';
-import { Conflict } from '@/services/ConflictResolution';
+} from '../../../src/services/synchronization/SynchronizationCoordinator';
+import { Conflict } from '../../../src/services/scm/ConflictResolution';
 
 // Mock Date for consistent testing
 const mockDate = new Date('2024-01-01T12:00:00Z');

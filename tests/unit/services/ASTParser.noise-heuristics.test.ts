@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
-import { ASTParser } from '@/services/ASTParser';
+import { ASTParser } from '../../../src/services/knowledge/ASTParser';
 import { RelationshipType } from '@/models/relationships';
 
 describe('ASTParser noise heuristics', () => {

@@ -13,22 +13,22 @@ import {
 } from '../../../test-utils.js';
 import fs from 'fs/promises';
 import { makeRealisticKgService } from '../../../test-utils/kg-realistic';
-import type { ParseResult } from '../../../../src/services/ASTParser.js';
+import type { ParseResult } from '../../../../src/services/knowledge/ASTParser.js';
 import type {
   FunctionSymbol,
   ClassSymbol
 } from '../../../../src/models/entities.js';
 
 // Mock external dependencies
-vi.mock('../../../../src/services/KnowledgeGraphService.js', () => ({
+vi.mock('../../../../src/services/knowledge/KnowledgeGraphService.js', () => ({
   KnowledgeGraphService: vi.fn()
 }));
 
-vi.mock('../../../../src/services/DatabaseService.js', () => ({
+vi.mock('../../../../src/services/core/DatabaseService.js', () => ({
   DatabaseService: vi.fn()
 }));
 
-vi.mock('../../../../src/services/ASTParser.js', () => ({
+vi.mock('../../../../src/services/knowledge/ASTParser.js', () => ({
   ASTParser: vi.fn(),
   ParseResult: vi.fn()
 }));

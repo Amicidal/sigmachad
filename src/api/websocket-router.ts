@@ -6,9 +6,9 @@
 import { FastifyInstance } from "fastify";
 import { EventEmitter } from "events";
 import type { Server as HttpServer } from "http";
-import { FileWatcher, FileChange } from "../services/FileWatcher.js";
-import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
-import { DatabaseService } from "../services/DatabaseService.js";
+import { FileWatcher, FileChange } from "../services/core/FileWatcher.js";
+import { KnowledgeGraphService } from "../services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../services/core/DatabaseService.js";
 import { WebSocketServer, WebSocket } from "ws";
 import {
   authenticateHeaders,
@@ -19,7 +19,7 @@ import type { AuthContext } from "./middleware/authentication.js";
 import {
   SessionStreamEvent,
   SynchronizationCoordinator,
-} from "../services/SynchronizationCoordinator.js";
+} from "../services/synchronization/SynchronizationCoordinator.js";
 import {
   WebSocketConnection,
   WebSocketMessage,

@@ -6,17 +6,17 @@
  */
 
 import 'dotenv/config';
-import { DatabaseService, createDatabaseConfig } from './services/DatabaseService.js';
-import { KnowledgeGraphService } from './services/KnowledgeGraphService.js';
-import { FileWatcher } from './services/FileWatcher.js';
-import { ASTParser } from './services/ASTParser.js';
-import { DocumentationParser } from './services/DocumentationParser.js';
+import { DatabaseService, createDatabaseConfig } from './services/core/DatabaseService.js';
+import { KnowledgeGraphService } from './services/knowledge/KnowledgeGraphService.js';
+import { FileWatcher } from './services/core/FileWatcher.js';
+import { ASTParser } from './services/knowledge/ASTParser.js';
+import { DocumentationParser } from './services/knowledge/DocumentationParser.js';
 import { APIGateway } from './api/APIGateway.js';
-import { SynchronizationCoordinator } from './services/SynchronizationCoordinator.js';
-import { ConflictResolution } from './services/ConflictResolution.js';
-import { SynchronizationMonitoring } from './services/SynchronizationMonitoring.js';
-import { RollbackCapabilities } from './services/RollbackCapabilities.js';
-import { SecurityScanner } from './services/SecurityScanner.js';
+import { SynchronizationCoordinator } from './services/synchronization/SynchronizationCoordinator.js';
+import { ConflictResolution } from './services/scm/ConflictResolution.js';
+import { SynchronizationMonitoring } from './services/synchronization/SynchronizationMonitoring.js';
+import { RollbackCapabilities } from './services/scm/RollbackCapabilities.js';
+import { SecurityScanner } from './services/testing/SecurityScanner.js';
 
 async function main() {
   console.log('🚀 Starting Memento...');

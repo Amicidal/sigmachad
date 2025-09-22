@@ -4,9 +4,9 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/DatabaseService.js';
-import { SecurityScanner } from '../../services/SecurityScanner.js';
+import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
+import { DatabaseService } from '../../services/core/DatabaseService.js';
+import { SecurityScanner } from '../../services/testing/SecurityScanner.js';
 
 interface SecurityScanRequest {
   entityIds?: string[];

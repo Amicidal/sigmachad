@@ -4,8 +4,8 @@ import 'dotenv/config';
 import {
   createDatabaseConfig,
   DatabaseService,
-} from '../src/services/DatabaseService.js';
-import { KnowledgeGraphService } from '../src/services/KnowledgeGraphService.js';
+} from '../src/services/core/DatabaseService.js';
+import { KnowledgeGraphService } from '../src/services/knowledge/KnowledgeGraphService.js';
 import { TemporalHistoryValidator } from '../src/jobs/TemporalHistoryValidator.js';
 
 interface CLIOptions {

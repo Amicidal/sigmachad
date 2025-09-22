@@ -1,12 +1,12 @@
 #!/usr/bin/env tsx
 
 import 'dotenv/config';
-import { DatabaseService, createDatabaseConfig } from '../src/services/DatabaseService.js';
-import { KnowledgeGraphService } from '../src/services/KnowledgeGraphService.js';
-import { ASTParser } from '../src/services/ASTParser.js';
-import { SynchronizationCoordinator } from '../src/services/SynchronizationCoordinator.js';
-import { ConflictResolution } from '../src/services/ConflictResolution.js';
-import { RollbackCapabilities } from '../src/services/RollbackCapabilities.js';
+import { DatabaseService, createDatabaseConfig } from '../src/services/core/DatabaseService.js';
+import { KnowledgeGraphService } from '../src/services/knowledge/KnowledgeGraphService.js';
+import { ASTParser } from '../src/services/knowledge/ASTParser.js';
+import { SynchronizationCoordinator } from '../src/services/synchronization/SynchronizationCoordinator.js';
+import { ConflictResolution } from '../src/services/scm/ConflictResolution.js';
+import { RollbackCapabilities } from '../src/services/scm/RollbackCapabilities.js';
 
 async function waitForCompletion(
   coordinator: SynchronizationCoordinator,

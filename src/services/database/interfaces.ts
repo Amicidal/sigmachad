@@ -73,13 +73,11 @@ export interface BulkQueryInstrumentationConfig {
 }
 
 export interface DatabaseConfig {
-  falkordb: {
-    url: string;
-    database?: number;
-  };
-  qdrant: {
-    url: string;
-    apiKey?: string;
+  neo4j: {
+    uri: string;
+    username: string;
+    password: string;
+    database?: string;
   };
   postgresql: {
     connectionString: string;
@@ -150,6 +148,47 @@ export interface IPostgreSQLService {
   getBulkWriterMetrics(): BulkQueryMetrics;
 }
 
+export interface INeo4jService {
+  initialize(): Promise<void>;
+  close(): Promise<void>;
+  isInitialized(): boolean;
+  getDriver(): any;
+  query(
+    cypher: string,
+    params?: Record<string, any>,
+    options?: { database?: string }
+  ): Promise<any>;
+  transaction<T>(
+    callback: (tx: any) => Promise<T>,
+    options?: { database?: string }
+  ): Promise<T>;
+  setupGraph(): Promise<void>;
+  setupVectorIndexes(): Promise<void>;
+  upsertVector(
+    collection: string,
+    id: string,
+    vector: number[],
+    metadata?: Record<string, any>
+  ): Promise<void>;
+  searchVector(
+    collection: string,
+    vector: number[],
+    limit?: number,
+    filter?: Record<string, any>
+  ): Promise<Array<{ id: string; score: number; metadata?: any }>>;
+  deleteVector(collection: string, id: string): Promise<void>;
+  scrollVectors(
+    collection: string,
+    limit?: number,
+    offset?: number
+  ): Promise<{
+    points: Array<{ id: string; vector: number[]; metadata?: any }>;
+    total: number;
+  }>;
+  command(...args: any[]): Promise<any>;
+  healthCheck(): Promise<boolean>;
+}
+
 export interface IRedisService {
   initialize(): Promise<void>;
   close(): Promise<void>;
@@ -162,8 +201,7 @@ export interface IRedisService {
 }
 
 export interface IDatabaseHealthCheck {
-  falkordb: HealthComponentStatus;
-  qdrant: HealthComponentStatus;
+  neo4j: HealthComponentStatus;
   postgresql: HealthComponentStatus;
   redis?: HealthComponentStatus;
 }

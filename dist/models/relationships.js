@@ -53,6 +53,7 @@ export var RelationshipType;
     // Performance relationships
     RelationshipType["PERFORMANCE_IMPACT"] = "PERFORMANCE_IMPACT";
     RelationshipType["PERFORMANCE_REGRESSION"] = "PERFORMANCE_REGRESSION";
+    RelationshipType["COVERAGE_PROVIDES"] = "COVERAGE_PROVIDES";
     // Session-based temporal relationships
     RelationshipType["SESSION_MODIFIED"] = "SESSION_MODIFIED";
     RelationshipType["SESSION_IMPACTED"] = "SESSION_IMPACTED";
@@ -63,6 +64,29 @@ export var RelationshipType;
     // Checkpoint relationships
     RelationshipType["CHECKPOINT_INCLUDES"] = "CHECKPOINT_INCLUDES";
 })(RelationshipType || (RelationshipType = {}));
+const STRUCTURAL_RELATIONSHIP_TYPE_SET = new Set([
+    RelationshipType.CONTAINS,
+    RelationshipType.DEFINES,
+    RelationshipType.EXPORTS,
+    RelationshipType.IMPORTS,
+]);
+export const isStructuralRelationshipType = (type) => STRUCTURAL_RELATIONSHIP_TYPE_SET.has(type);
+export const PERFORMANCE_RELATIONSHIP_TYPES = [
+    RelationshipType.PERFORMANCE_IMPACT,
+    RelationshipType.PERFORMANCE_REGRESSION,
+];
+const PERFORMANCE_RELATIONSHIP_TYPE_SET = new Set(PERFORMANCE_RELATIONSHIP_TYPES);
+export const isPerformanceRelationshipType = (type) => PERFORMANCE_RELATIONSHIP_TYPE_SET.has(type);
+export const SESSION_RELATIONSHIP_TYPES = [
+    RelationshipType.SESSION_MODIFIED,
+    RelationshipType.SESSION_IMPACTED,
+    RelationshipType.SESSION_CHECKPOINT,
+    RelationshipType.BROKE_IN,
+    RelationshipType.FIXED_IN,
+    RelationshipType.DEPENDS_ON_CHANGE,
+];
+const SESSION_RELATIONSHIP_TYPE_SET = new Set(SESSION_RELATIONSHIP_TYPES);
+export const isSessionRelationshipType = (type) => SESSION_RELATIONSHIP_TYPE_SET.has(type);
 // Shared list of relationship types that describe code edges.
 export const CODE_RELATIONSHIP_TYPES = [
     RelationshipType.CALLS,

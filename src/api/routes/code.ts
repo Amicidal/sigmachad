@@ -4,9 +4,9 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/DatabaseService.js";
-import { ASTParser, ParseResult } from "../../services/ASTParser.js";
+import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../../services/core/DatabaseService.js";
+import { ASTParser, ParseResult } from "../../services/knowledge/ASTParser.js";
 import { RelationshipType } from "../../models/relationships.js";
 import { ValidationResult, ValidationIssue } from "../../models/types.js";
 import {

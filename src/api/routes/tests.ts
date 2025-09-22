@@ -4,10 +4,10 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../services/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/DatabaseService.js";
-import { TestEngine } from "../../services/TestEngine.js";
-import { TestPlanningService, SpecNotFoundError, TestPlanningValidationError } from "../../services/TestPlanningService.js";
+import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../../services/core/DatabaseService.js";
+import { TestEngine } from "../../services/testing/TestEngine.js";
+import { TestPlanningService, SpecNotFoundError, TestPlanningValidationError } from "../../services/testing/TestPlanningService.js";
 import { RelationshipType } from "../../models/relationships.js";
 import type { TestPerformanceMetrics } from "../../models/entities.js";
 import type {

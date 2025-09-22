@@ -71,7 +71,7 @@ export declare const codeRouter: import("@trpc/server").CreateRouterInner<import
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, import("../../../services/ASTParser.js").ParseResult>;
+    }, import("../../../services/knowledge/ASTParser.js").ParseResult>;
     getSymbols: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{
             ctx: import("../base.js").TRPCContext;
@@ -91,6 +91,6 @@ export declare const codeRouter: import("@trpc/server").CreateRouterInner<import
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, import("../../../models/entities.js").Entity[]>;
+    }, Entity[]>;
 }>;
 //# sourceMappingURL=code.d.ts.map

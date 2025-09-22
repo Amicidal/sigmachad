@@ -22,11 +22,11 @@ import {
   BackupService,
   BackupOptions,
   BackupMetadata,
-} from "../../../src/services/BackupService";
+} from "../../../src/services/backup/BackupService";
 import {
   DatabaseService,
   DatabaseConfig,
-} from "../../../src/services/DatabaseService";
+} from "../../../src/services/core/DatabaseService";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";

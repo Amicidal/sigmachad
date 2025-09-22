@@ -4,11 +4,11 @@
  */
 import { FastifyInstance } from "fastify";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
-import { DatabaseService } from "../services/DatabaseService.js";
-import { ASTParser } from "../services/ASTParser.js";
-import { TestEngine } from "../services/TestEngine.js";
-import { SecurityScanner } from "../services/SecurityScanner.js";
+import { KnowledgeGraphService } from "../services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../services/core/DatabaseService.js";
+import { ASTParser } from "../services/knowledge/ASTParser.js";
+import { TestEngine } from "../services/testing/TestEngine.js";
+import { SecurityScanner } from "../services/testing/SecurityScanner.js";
 interface ToolExecutionMetrics {
     toolName: string;
     executionCount: number;
@@ -30,6 +30,8 @@ export declare class MCPRouter {
     private tools;
     private metrics;
     private executionHistory;
+    private testPlanningService;
+    private specService;
     private getSrcRoot;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, astParser: ASTParser, testEngine: TestEngine, securityScanner: SecurityScanner);
     private registerTools;
@@ -37,12 +39,21 @@ export declare class MCPRouter {
     private setupRequestHandlers;
     private handleCreateSpec;
     private handleGraphSearch;
+    private handleListModuleChildren;
+    private handleListImports;
+    private handleFindDefinition;
+    private parseBooleanFlag;
+    private parseStringArrayFlag;
+    private parseNumericLimit;
     private handleGetExamples;
     private handleProposeDiff;
     private handleValidateCode;
     private handlePlanTests;
-    private generateTestPlan;
-    private estimateTestCoverage;
+    private generateFallbackTestPlan;
+    private humanizeSpecId;
+    private extractQueryRows;
+    private isValidUuid;
+    private normalizeErrorMessage;
     private handleSecurityScan;
     private performStaticAnalysisScan;
     private performDependencyScan;
@@ -53,13 +64,7 @@ export declare class MCPRouter {
     private getMockCVSSScore;
     private getDocFreshnessWindowMs;
     private shouldFlagDocumentationOutdated;
-    private evaluateDeploymentGate;
     private handleImpactAnalysis;
-    private analyzeDirectImpact;
-    private analyzeCascadingImpact;
-    private analyzeTestImpact;
-    private analyzeDocumentationImpact;
-    private generateImpactRecommendations;
     private calculateRiskLevel;
     private riskLevelToScore;
     private riskScoreToLabel;

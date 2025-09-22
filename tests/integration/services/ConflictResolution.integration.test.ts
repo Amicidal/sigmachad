@@ -7,9 +7,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   ConflictResolution,
   Conflict,
-} from "../../../src/services/ConflictResolution";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/DatabaseService";
+} from "../../../src/services/scm/ConflictResolution";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
+import { DatabaseService } from "../../../src/services/core/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

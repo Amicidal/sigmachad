@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import Fastify from 'fastify';
 import { v4 as uuid } from 'uuid';
 import { registerImpactRoutes } from '../../../src/api/routes/impact.js';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
 import { RelationshipType } from '../../../src/models/relationships.js';
 import type { CodebaseEntity, DocumentationNode, Spec, Test } from '../../../src/models/entities.js';
 import {
@@ -10,7 +10,7 @@ import {
   cleanupTestDatabase,
   clearTestData,
 } from '../../test-utils/database-helpers.js';
-import type { DatabaseService } from '../../../src/services/DatabaseService.js';
+import type { DatabaseService } from '../../../src/services/core/DatabaseService.js';
 
 const now = () => new Date();
 

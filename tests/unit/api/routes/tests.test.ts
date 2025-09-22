@@ -30,13 +30,13 @@ const createPerformanceMetric = (
 });
 
 // Mock services
-vi.mock("../../../../src/services/KnowledgeGraphService.js", () => ({
+vi.mock("../../../../src/services/knowledge/KnowledgeGraphService.js", () => ({
   KnowledgeGraphService: vi.fn(),
 }));
-vi.mock("../../../../src/services/DatabaseService.js", () => ({
+vi.mock("../../../../src/services/core/DatabaseService.js", () => ({
   DatabaseService: vi.fn(),
 }));
-vi.mock("../../../../src/services/TestEngine.js", () => ({
+vi.mock("../../../../src/services/testing/TestEngine.js", () => ({
   TestEngine: vi.fn(),
 }));
 
@@ -76,10 +76,10 @@ describe("aggregatePerformanceMetrics", () => {
   });
 });
 
-vi.mock("../../../../src/services/TestPlanningService.js", async () => {
+vi.mock("../../../../src/services/testing/TestPlanningService.js", async () => {
   const actual = await vi.importActual<
-    typeof import("../../../../src/services/TestPlanningService.js")
-  >("../../../../src/services/TestPlanningService.js");
+    typeof import("../../../../src/services/testing/TestPlanningService.js")
+  >("../../../../src/services/testing/TestPlanningService.js");
 
   return {
     ...actual,
@@ -93,7 +93,7 @@ import {
   TestPlanningService,
   SpecNotFoundError,
   TestPlanningValidationError,
-} from "../../../../src/services/TestPlanningService.js";
+} from "../../../../src/services/testing/TestPlanningService.js";
 
 describe("Test Routes", () => {
   let mockApp: any;

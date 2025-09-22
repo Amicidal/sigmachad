@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from '../../../src/services/DatabaseService';
+} from '../../../src/services/core/DatabaseService';
 import {
   RealisticFalkorDBMock,
   RealisticPostgreSQLMock,

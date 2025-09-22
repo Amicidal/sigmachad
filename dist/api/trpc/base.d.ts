@@ -1,14 +1,16 @@
 import superjson from 'superjson';
-import { KnowledgeGraphService } from '../../services/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/DatabaseService.js';
-import { ASTParser } from '../../services/ASTParser.js';
-import { FileWatcher } from '../../services/FileWatcher.js';
+import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
+import { DatabaseService } from '../../services/core/DatabaseService.js';
+import { ASTParser } from '../../services/knowledge/ASTParser.js';
+import { FileWatcher } from '../../services/core/FileWatcher.js';
+import type { AuthContext } from '../middleware/authentication.js';
 export type TRPCContext = {
     kgService: KnowledgeGraphService;
     dbService: DatabaseService;
     astParser: ASTParser;
     fileWatcher: FileWatcher;
     authToken?: string;
+    authContext?: AuthContext;
 };
 export declare const t: {
     _config: import("@trpc/server").RootConfig<{
@@ -106,6 +108,7 @@ export declare const adminProcedure: import("@trpc/server").ProcedureBuilder<{
         astParser: ASTParser;
         fileWatcher: FileWatcher;
         authToken: string | undefined;
+        authContext: AuthContext | undefined;
     };
     _input_in: typeof import("@trpc/server").unsetMarker;
     _input_out: typeof import("@trpc/server").unsetMarker;

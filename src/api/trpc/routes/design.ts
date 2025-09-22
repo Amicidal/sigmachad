@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import { router, publicProcedure, type TRPCContext } from '../base.js';
-import { SpecService } from '../../../services/SpecService.js';
+import { SpecService } from '../../../services/testing/SpecService.js';
 import type { Spec } from '../../../models/entities.js';
 import type { ListSpecsParams } from '../../../models/types.js';
 

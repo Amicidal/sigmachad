@@ -13,13 +13,18 @@ export declare class FalkorDBService implements IFalkorDBService {
     close(): Promise<void>;
     isInitialized(): boolean;
     getClient(): RedisClientType;
-    query(query: string, params?: Record<string, any>): Promise<any>;
+    query(query: string, params?: Record<string, any>, graphKeyOverride?: string): Promise<any>;
     command(...args: any[]): Promise<any>;
     setupGraph(): Promise<void>;
     healthCheck(): Promise<boolean>;
+    private ensureGraphIndex;
     private sanitizeParameterValue;
     private parameterToCypherString;
+    private shouldTreatObjectAsMap;
     private objectToCypherProperties;
+    private normalizeErrorMessage;
+    private isIndexAlreadyExistsError;
+    private isGraphMissingError;
     private buildProcessedQuery;
     private decodeGraphValue;
 }

@@ -1,8 +1,43 @@
+import { normalizeMetricIdForId } from "../../utils/codeEdges.js";
+import { sanitizeEnvironment } from "../../utils/environment.js";
+import { performance } from "node:perf_hooks";
 export class PostgreSQLService {
     constructor(config, options) {
         this.initialized = false;
+        this.bulkMetrics = {
+            activeBatches: 0,
+            maxConcurrentBatches: 0,
+            totalBatches: 0,
+            totalQueries: 0,
+            totalDurationMs: 0,
+            maxBatchSize: 0,
+            maxQueueDepth: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+            lastBatch: null,
+            history: [],
+            slowBatches: [],
+        };
+        this.bulkInstrumentationConfig = {
+            warnOnLargeBatchSize: 50,
+            slowBatchThresholdMs: 750,
+            queueDepthWarningThreshold: 3,
+            historyLimit: 10,
+        };
         this.config = config;
         this.poolFactory = options === null || options === void 0 ? void 0 : options.poolFactory;
+        if (options === null || options === void 0 ? void 0 : options.bulkConfig) {
+            this.bulkInstrumentationConfig = {
+                ...this.bulkInstrumentationConfig,
+                ...options.bulkConfig,
+            };
+        }
+        this.bulkTelemetryEmitter = options === null || options === void 0 ? void 0 : options.bulkTelemetryEmitter;
+        // Sanitize instrumentation config values
+        this.bulkInstrumentationConfig.historyLimit = Math.max(0, Math.floor(this.bulkInstrumentationConfig.historyLimit));
+        this.bulkInstrumentationConfig.warnOnLargeBatchSize = Math.max(1, Math.floor(this.bulkInstrumentationConfig.warnOnLargeBatchSize));
+        this.bulkInstrumentationConfig.slowBatchThresholdMs = Math.max(0, this.bulkInstrumentationConfig.slowBatchThresholdMs);
+        this.bulkInstrumentationConfig.queueDepthWarningThreshold = Math.max(0, Math.floor(this.bulkInstrumentationConfig.queueDepthWarningThreshold));
     }
     async initialize() {
         if (this.initialized) {
@@ -28,11 +63,11 @@ export class PostgreSQLService {
                 // Configure JSONB parsing based on environment
                 if (process.env.NODE_ENV === "test" ||
                     process.env.RUN_INTEGRATION === "1") {
-                    // In tests, parse JSONB as objects for easier testing
+                    // In tests, parse JSONB as objects for easier assertions (callers can re-stringify if needed)
                     types.setTypeParser(3802, (value) => JSON.parse(value)); // JSONB oid = 3802
                 }
                 else {
-                    // In production, return as string for performance
+                    // In production, return raw string for performance
                     types.setTypeParser(3802, (value) => value); // JSONB oid = 3802
                 }
                 // Configure numeric type parsing for all environments
@@ -180,6 +215,7 @@ export class PostgreSQLService {
         }
     }
     async bulkQuery(queries, options = {}) {
+        var _a;
         if (!this.initialized) {
             throw new Error("PostgreSQL not initialized");
         }
@@ -187,10 +223,25 @@ export class PostgreSQLService {
         for (const query of queries) {
             this.validateQueryParams(query.params);
         }
+        const batchSize = queries.length;
+        const continueOnError = (_a = options === null || options === void 0 ? void 0 : options.continueOnError) !== null && _a !== void 0 ? _a : false;
         const results = [];
-        const client = await this.postgresPool.connect();
+        const startedAtIso = new Date().toISOString();
+        const startTime = performance.now();
+        let client = null;
+        let transactionStarted = false;
+        let capturedError;
+        const activeAtStart = ++this.bulkMetrics.activeBatches;
+        if (this.bulkMetrics.activeBatches > this.bulkMetrics.maxConcurrentBatches) {
+            this.bulkMetrics.maxConcurrentBatches = this.bulkMetrics.activeBatches;
+        }
+        const queueDepthAtStart = Math.max(0, activeAtStart - 1);
+        if (queueDepthAtStart > this.bulkMetrics.maxQueueDepth) {
+            this.bulkMetrics.maxQueueDepth = queueDepthAtStart;
+        }
         try {
-            if (options.continueOnError) {
+            client = await this.postgresPool.connect();
+            if (continueOnError) {
                 // Execute queries independently to avoid aborting the whole transaction
                 for (const { query, params } of queries) {
                     try {
@@ -204,32 +255,181 @@ export class PostgreSQLService {
                 }
                 return results;
             }
-            else {
-                await client.query("BEGIN");
-                for (const { query, params } of queries) {
-                    const result = await client.query(query, params);
-                    results.push(result);
-                }
-                await client.query("COMMIT");
-                return results;
+            await client.query("BEGIN");
+            transactionStarted = true;
+            for (const { query, params } of queries) {
+                const result = await client.query(query, params);
+                results.push(result);
             }
+            await client.query("COMMIT");
+            transactionStarted = false;
+            return results;
         }
         catch (error) {
-            // Only attempt rollback if a transaction was opened
-            try {
-                await client.query("ROLLBACK");
+            capturedError = error;
+            if (transactionStarted && client) {
+                try {
+                    await client.query("ROLLBACK");
+                }
+                catch (_b) { }
             }
-            catch (_a) { }
             throw error;
         }
         finally {
-            try {
-                client.release();
+            const durationMs = performance.now() - startTime;
+            if (client) {
+                try {
+                    client.release();
+                }
+                catch (releaseError) {
+                    console.error("Error releasing PostgreSQL client in bulk operation:", releaseError);
+                }
             }
-            catch (releaseError) {
-                console.error("Error releasing PostgreSQL client in bulk operation:", releaseError);
-            }
+            this.bulkMetrics.activeBatches = Math.max(0, this.bulkMetrics.activeBatches - 1);
+            this.recordBulkOperationTelemetry({
+                batchSize,
+                continueOnError,
+                durationMs,
+                startedAt: startedAtIso,
+                queueDepth: queueDepthAtStart,
+                error: capturedError,
+            });
         }
+    }
+    recordBulkOperationTelemetry(params) {
+        const safeDuration = Number.isFinite(params.durationMs)
+            ? Math.max(0, params.durationMs)
+            : 0;
+        const roundedDuration = Number(safeDuration.toFixed(3));
+        const entry = {
+            batchSize: params.batchSize,
+            continueOnError: params.continueOnError,
+            durationMs: roundedDuration,
+            startedAt: params.startedAt,
+            finishedAt: new Date().toISOString(),
+            queueDepth: Math.max(0, params.queueDepth || 0),
+            mode: params.continueOnError ? "independent" : "transaction",
+            success: !params.error,
+            error: params.error
+                ? params.error instanceof Error
+                    ? params.error.message
+                    : String(params.error)
+                : undefined,
+        };
+        this.bulkMetrics.totalBatches += 1;
+        this.bulkMetrics.totalQueries += params.batchSize;
+        this.bulkMetrics.totalDurationMs += roundedDuration;
+        this.bulkMetrics.averageDurationMs =
+            this.bulkMetrics.totalBatches === 0
+                ? 0
+                : this.bulkMetrics.totalDurationMs / this.bulkMetrics.totalBatches;
+        this.bulkMetrics.maxBatchSize = Math.max(this.bulkMetrics.maxBatchSize, params.batchSize);
+        this.bulkMetrics.maxDurationMs = Math.max(this.bulkMetrics.maxDurationMs, roundedDuration);
+        this.bulkMetrics.maxQueueDepth = Math.max(this.bulkMetrics.maxQueueDepth, entry.queueDepth);
+        this.bulkMetrics.lastBatch = entry;
+        this.appendTelemetryRecord(this.bulkMetrics.history, entry);
+        const shouldTrackSlowBatch = !entry.success ||
+            entry.durationMs >= this.bulkInstrumentationConfig.slowBatchThresholdMs ||
+            entry.batchSize >= this.bulkInstrumentationConfig.warnOnLargeBatchSize ||
+            entry.queueDepth >=
+                this.bulkInstrumentationConfig.queueDepthWarningThreshold;
+        if (shouldTrackSlowBatch) {
+            this.appendTelemetryRecord(this.bulkMetrics.slowBatches, entry);
+        }
+        const snapshot = this.createBulkTelemetrySnapshot();
+        this.emitBulkTelemetry(entry, snapshot);
+        this.logBulkTelemetry(entry);
+    }
+    appendTelemetryRecord(collection, entry) {
+        const rawLimit = this.bulkInstrumentationConfig.historyLimit;
+        const limit = Number.isFinite(rawLimit)
+            ? Math.max(0, Math.floor(rawLimit))
+            : 10;
+        if (limit === 0) {
+            collection.length = 0;
+            return;
+        }
+        collection.push(entry);
+        if (collection.length > limit) {
+            collection.splice(0, collection.length - limit);
+        }
+    }
+    createBulkTelemetrySnapshot() {
+        return {
+            activeBatches: this.bulkMetrics.activeBatches,
+            maxConcurrentBatches: this.bulkMetrics.maxConcurrentBatches,
+            totalBatches: this.bulkMetrics.totalBatches,
+            totalQueries: this.bulkMetrics.totalQueries,
+            totalDurationMs: this.bulkMetrics.totalDurationMs,
+            maxBatchSize: this.bulkMetrics.maxBatchSize,
+            maxQueueDepth: this.bulkMetrics.maxQueueDepth,
+            maxDurationMs: this.bulkMetrics.maxDurationMs,
+            averageDurationMs: this.bulkMetrics.averageDurationMs,
+            lastBatch: this.bulkMetrics.lastBatch
+                ? { ...this.bulkMetrics.lastBatch }
+                : null,
+        };
+    }
+    emitBulkTelemetry(entry, snapshot) {
+        if (!this.bulkTelemetryEmitter) {
+            return;
+        }
+        try {
+            this.bulkTelemetryEmitter({
+                entry: { ...entry },
+                metrics: {
+                    ...snapshot,
+                    lastBatch: snapshot.lastBatch ? { ...snapshot.lastBatch } : null,
+                },
+            });
+        }
+        catch (error) {
+            console.error("Bulk telemetry emitter threw an error:", error);
+        }
+    }
+    logBulkTelemetry(entry) {
+        var _a;
+        const baseMessage = `[PostgreSQLService.bulkQuery] batch=${entry.batchSize} ` +
+            `duration=${entry.durationMs.toFixed(2)}ms ` +
+            `mode=${entry.mode} queueDepth=${entry.queueDepth}`;
+        if (!entry.success) {
+            console.error(`${baseMessage} failed: ${(_a = entry.error) !== null && _a !== void 0 ? _a : "unknown error"}`);
+            return;
+        }
+        const isLargeBatch = entry.batchSize >= this.bulkInstrumentationConfig.warnOnLargeBatchSize;
+        const isSlow = entry.durationMs >= this.bulkInstrumentationConfig.slowBatchThresholdMs;
+        const hasBackpressure = entry.queueDepth >=
+            this.bulkInstrumentationConfig.queueDepthWarningThreshold;
+        if (isLargeBatch || isSlow || hasBackpressure) {
+            const flags = [
+                isLargeBatch ? "large-batch" : null,
+                isSlow ? "slow" : null,
+                hasBackpressure ? "backpressure" : null,
+            ]
+                .filter(Boolean)
+                .join(", ");
+            console.warn(`${baseMessage}${flags.length ? ` flags=[${flags}]` : ""}`);
+            return;
+        }
+        console.debug(baseMessage);
+    }
+    getBulkWriterMetrics() {
+        return {
+            activeBatches: this.bulkMetrics.activeBatches,
+            maxConcurrentBatches: this.bulkMetrics.maxConcurrentBatches,
+            totalBatches: this.bulkMetrics.totalBatches,
+            totalQueries: this.bulkMetrics.totalQueries,
+            totalDurationMs: this.bulkMetrics.totalDurationMs,
+            maxBatchSize: this.bulkMetrics.maxBatchSize,
+            maxQueueDepth: this.bulkMetrics.maxQueueDepth,
+            maxDurationMs: this.bulkMetrics.maxDurationMs,
+            averageDurationMs: this.bulkMetrics.averageDurationMs,
+            lastBatch: this.bulkMetrics.lastBatch
+                ? { ...this.bulkMetrics.lastBatch }
+                : null,
+            history: this.bulkMetrics.history.map((entry) => ({ ...entry })),
+            slowBatches: this.bulkMetrics.slowBatches.map((entry) => ({ ...entry })),
+        };
     }
     async setupSchema() {
         if (!this.initialized) {
@@ -330,6 +530,22 @@ export class PostgreSQLService {
             `ALTER TABLE flaky_test_analyses ALTER COLUMN flaky_score TYPE DECIMAL(6,2)`,
             `ALTER TABLE flaky_test_analyses ALTER COLUMN failure_rate TYPE DECIMAL(6,4)`,
             `ALTER TABLE flaky_test_analyses ALTER COLUMN success_rate TYPE DECIMAL(6,4)`,
+            `CREATE TABLE IF NOT EXISTS maintenance_backups (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        recorded_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        size_bytes BIGINT DEFAULT 0,
+        checksum TEXT,
+        status TEXT NOT NULL,
+        components JSONB NOT NULL,
+        storage_provider TEXT,
+        destination TEXT,
+        labels TEXT[] DEFAULT ARRAY[]::TEXT[],
+        metadata JSONB NOT NULL,
+        error TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
             // Changes table (depends on sessions)
             `CREATE TABLE IF NOT EXISTS changes (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -346,12 +562,46 @@ export class PostgreSQLService {
         spec_id UUID,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`,
-            // Compatibility tables for integration tests
-            `CREATE TABLE IF NOT EXISTS performance_metrics (
-        entity_id UUID NOT NULL,
-        metric_type VARCHAR(64) NOT NULL,
-        value DOUBLE PRECISION NOT NULL,
-        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            `CREATE TABLE IF NOT EXISTS scm_commits (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        commit_hash TEXT NOT NULL UNIQUE,
+        branch TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        author TEXT,
+        metadata JSONB,
+        changes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        related_spec_id TEXT,
+        test_results TEXT[] DEFAULT ARRAY[]::TEXT[],
+        validation_results JSONB,
+        pr_url TEXT,
+        provider TEXT,
+        status TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
+            `CREATE TABLE IF NOT EXISTS performance_metric_snapshots (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        test_id TEXT NOT NULL,
+        target_id TEXT,
+        metric_id TEXT NOT NULL,
+        scenario TEXT,
+        environment TEXT,
+        severity TEXT,
+        trend TEXT,
+        unit TEXT,
+        baseline_value DOUBLE PRECISION,
+        current_value DOUBLE PRECISION,
+        delta DOUBLE PRECISION,
+        percent_change DOUBLE PRECISION,
+        sample_size INTEGER,
+        risk_score DOUBLE PRECISION,
+        run_id TEXT,
+        detected_at TIMESTAMP WITH TIME ZONE,
+        resolved_at TIMESTAMP WITH TIME ZONE,
+        metadata JSONB,
+        metrics_history JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`,
             `CREATE TABLE IF NOT EXISTS coverage_history (
         entity_id UUID NOT NULL,
@@ -410,6 +660,8 @@ export class PostgreSQLService {
             "CREATE INDEX IF NOT EXISTS idx_changes_entity_id ON changes(entity_id)",
             "CREATE INDEX IF NOT EXISTS idx_changes_timestamp ON changes(timestamp)",
             "CREATE INDEX IF NOT EXISTS idx_changes_session_id ON changes(session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_scm_commits_branch ON scm_commits(branch)",
+            "CREATE INDEX IF NOT EXISTS idx_scm_commits_created_at ON scm_commits(created_at)",
             "CREATE INDEX IF NOT EXISTS idx_test_suites_timestamp ON test_suites(timestamp)",
             "CREATE INDEX IF NOT EXISTS idx_test_suites_framework ON test_suites(framework)",
             "CREATE INDEX IF NOT EXISTS idx_test_results_test_id ON test_results(test_id)",
@@ -422,8 +674,13 @@ export class PostgreSQLService {
             "CREATE INDEX IF NOT EXISTS idx_test_performance_suite_id ON test_performance(suite_id)",
             "CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_test_id ON flaky_test_analyses(test_id)",
             "CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_flaky_score ON flaky_test_analyses(flaky_score)",
-            "CREATE INDEX IF NOT EXISTS idx_performance_metrics_entity_id ON performance_metrics(entity_id)",
-            "CREATE INDEX IF NOT EXISTS idx_performance_metrics_timestamp ON performance_metrics(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_test_id ON performance_metric_snapshots(test_id)",
+            "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_metric_id ON performance_metric_snapshots(metric_id)",
+            "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_environment ON performance_metric_snapshots(environment)",
+            "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_severity ON performance_metric_snapshots(severity)",
+            "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_trend ON performance_metric_snapshots(trend)",
+            "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_metric_env ON performance_metric_snapshots(metric_id, environment)",
+            "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_detected ON performance_metric_snapshots(detected_at)",
             "CREATE INDEX IF NOT EXISTS idx_coverage_history_entity_id ON coverage_history(entity_id)",
             "CREATE INDEX IF NOT EXISTS idx_coverage_history_timestamp ON coverage_history(timestamp)",
         ];
@@ -636,6 +893,301 @@ export class PostgreSQLService {
         });
         return result;
     }
+    async recordPerformanceMetricSnapshot(snapshot) {
+        var _a, _b, _c, _d, _e, _f, _g;
+        if (!this.initialized) {
+            throw new Error("PostgreSQL service not initialized");
+        }
+        const client = await this.postgresPool.connect();
+        try {
+            const sanitizeNumber = (value) => {
+                if (value === null || value === undefined)
+                    return null;
+                const num = Number(value);
+                return Number.isFinite(num) ? num : null;
+            };
+            const sanitizeInt = (value) => {
+                const num = sanitizeNumber(value);
+                if (num === null)
+                    return null;
+                return Math.round(num);
+            };
+            const metricsHistory = Array.isArray(snapshot.metricsHistory)
+                ? snapshot.metricsHistory
+                    .slice(-50)
+                    .map((entry) => ({
+                    ...entry,
+                    timestamp: entry.timestamp
+                        ? new Date(entry.timestamp).toISOString()
+                        : undefined,
+                }))
+                : null;
+            const metadata = {
+                ...(snapshot.metadata || {}),
+                evidence: snapshot.evidence,
+            };
+            const query = `
+        INSERT INTO performance_metric_snapshots (
+          test_id,
+          target_id,
+          metric_id,
+          scenario,
+          environment,
+          severity,
+          trend,
+          unit,
+          baseline_value,
+          current_value,
+          delta,
+          percent_change,
+          sample_size,
+          risk_score,
+          run_id,
+          detected_at,
+          resolved_at,
+          metadata,
+          metrics_history
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      `;
+            await client.query(query, [
+                snapshot.fromEntityId,
+                (_a = snapshot.toEntityId) !== null && _a !== void 0 ? _a : null,
+                snapshot.metricId,
+                (_b = snapshot.scenario) !== null && _b !== void 0 ? _b : null,
+                (_c = snapshot.environment) !== null && _c !== void 0 ? _c : null,
+                (_d = snapshot.severity) !== null && _d !== void 0 ? _d : null,
+                (_e = snapshot.trend) !== null && _e !== void 0 ? _e : null,
+                (_f = snapshot.unit) !== null && _f !== void 0 ? _f : null,
+                sanitizeNumber(snapshot.baselineValue),
+                sanitizeNumber(snapshot.currentValue),
+                sanitizeNumber(snapshot.delta),
+                sanitizeNumber(snapshot.percentChange),
+                sanitizeInt(snapshot.sampleSize),
+                sanitizeNumber(snapshot.riskScore),
+                (_g = snapshot.runId) !== null && _g !== void 0 ? _g : null,
+                snapshot.detectedAt ? new Date(snapshot.detectedAt) : null,
+                snapshot.resolvedAt ? new Date(snapshot.resolvedAt) : null,
+                metadata ? JSON.stringify(metadata) : null,
+                metricsHistory ? JSON.stringify(metricsHistory) : null,
+            ]);
+        }
+        finally {
+            client.release();
+        }
+    }
+    async recordSCMCommit(commit) {
+        var _a, _b, _c, _d, _e, _f;
+        if (!this.initialized) {
+            throw new Error("PostgreSQL service not initialized");
+        }
+        const changes = Array.isArray(commit.changes)
+            ? commit.changes.map((c) => String(c))
+            : [];
+        const testResults = Array.isArray(commit.testResults)
+            ? commit.testResults.map((t) => String(t))
+            : [];
+        const metadata = commit.metadata ? JSON.stringify(commit.metadata) : null;
+        const validationResults = commit.validationResults !== undefined && commit.validationResults !== null
+            ? JSON.stringify(commit.validationResults)
+            : null;
+        const query = `
+      INSERT INTO scm_commits (
+        commit_hash,
+        branch,
+        title,
+        description,
+        author,
+        metadata,
+        changes,
+        related_spec_id,
+        test_results,
+        validation_results,
+        pr_url,
+        provider,
+        status,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12,
+        $13,
+        COALESCE($14, NOW()),
+        COALESCE($15, NOW())
+      )
+      ON CONFLICT (commit_hash)
+      DO UPDATE SET
+        branch = EXCLUDED.branch,
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        author = EXCLUDED.author,
+        metadata = EXCLUDED.metadata,
+        changes = EXCLUDED.changes,
+        related_spec_id = EXCLUDED.related_spec_id,
+        test_results = EXCLUDED.test_results,
+        validation_results = EXCLUDED.validation_results,
+        pr_url = EXCLUDED.pr_url,
+        provider = EXCLUDED.provider,
+        status = EXCLUDED.status,
+        updated_at = NOW();
+    `;
+        await this.query(query, [
+            commit.commitHash,
+            commit.branch,
+            commit.title,
+            (_a = commit.description) !== null && _a !== void 0 ? _a : null,
+            (_b = commit.author) !== null && _b !== void 0 ? _b : null,
+            metadata,
+            changes,
+            (_c = commit.relatedSpecId) !== null && _c !== void 0 ? _c : null,
+            testResults,
+            validationResults,
+            (_d = commit.prUrl) !== null && _d !== void 0 ? _d : null,
+            (_e = commit.provider) !== null && _e !== void 0 ? _e : "local",
+            (_f = commit.status) !== null && _f !== void 0 ? _f : "committed",
+            commit.createdAt ? new Date(commit.createdAt) : null,
+            commit.updatedAt ? new Date(commit.updatedAt) : null,
+        ]);
+    }
+    async getSCMCommitByHash(commitHash) {
+        var _a, _b, _c, _d, _e, _f, _g, _h;
+        if (!this.initialized) {
+            throw new Error("PostgreSQL service not initialized");
+        }
+        const result = await this.query(`
+        SELECT
+          id,
+          commit_hash,
+          branch,
+          title,
+          description,
+          author,
+          metadata,
+          changes,
+          related_spec_id,
+          test_results,
+          validation_results,
+          pr_url,
+          provider,
+          status,
+          created_at,
+          updated_at
+        FROM scm_commits
+        WHERE commit_hash = $1
+      `, [commitHash]);
+        if (!((_a = result === null || result === void 0 ? void 0 : result.rows) === null || _a === void 0 ? void 0 : _a.length)) {
+            return null;
+        }
+        const row = result.rows[0];
+        const parseJson = (value) => {
+            if (value == null)
+                return undefined;
+            if (typeof value === "object")
+                return value;
+            try {
+                return JSON.parse(String(value));
+            }
+            catch (_a) {
+                return undefined;
+            }
+        };
+        return {
+            id: (_b = row.id) !== null && _b !== void 0 ? _b : undefined,
+            commitHash: row.commit_hash,
+            branch: row.branch,
+            title: row.title,
+            description: (_c = row.description) !== null && _c !== void 0 ? _c : undefined,
+            author: (_d = row.author) !== null && _d !== void 0 ? _d : undefined,
+            changes: Array.isArray(row.changes) ? row.changes : [],
+            relatedSpecId: (_e = row.related_spec_id) !== null && _e !== void 0 ? _e : undefined,
+            testResults: Array.isArray(row.test_results) ? row.test_results : undefined,
+            validationResults: parseJson(row.validation_results),
+            prUrl: (_f = row.pr_url) !== null && _f !== void 0 ? _f : undefined,
+            provider: (_g = row.provider) !== null && _g !== void 0 ? _g : undefined,
+            status: (_h = row.status) !== null && _h !== void 0 ? _h : undefined,
+            metadata: parseJson(row.metadata),
+            createdAt: row.created_at ? new Date(row.created_at) : undefined,
+            updatedAt: row.updated_at ? new Date(row.updated_at) : undefined,
+        };
+    }
+    async listSCMCommits(limit = 50) {
+        var _a;
+        if (!this.initialized) {
+            throw new Error("PostgreSQL service not initialized");
+        }
+        const sanitizedLimit = Math.max(1, Math.min(Math.floor(limit), 200));
+        const result = await this.query(`
+        SELECT
+          id,
+          commit_hash,
+          branch,
+          title,
+          description,
+          author,
+          metadata,
+          changes,
+          related_spec_id,
+          test_results,
+          validation_results,
+          pr_url,
+          provider,
+          status,
+          created_at,
+          updated_at
+        FROM scm_commits
+        ORDER BY created_at DESC
+        LIMIT $1
+      `, [sanitizedLimit]);
+        if (!((_a = result === null || result === void 0 ? void 0 : result.rows) === null || _a === void 0 ? void 0 : _a.length)) {
+            return [];
+        }
+        const parseJson = (value) => {
+            if (value == null)
+                return undefined;
+            if (typeof value === "object")
+                return value;
+            try {
+                return JSON.parse(String(value));
+            }
+            catch (_a) {
+                return undefined;
+            }
+        };
+        return result.rows.map((row) => {
+            var _a, _b, _c, _d, _e, _f, _g;
+            return ({
+                id: (_a = row.id) !== null && _a !== void 0 ? _a : undefined,
+                commitHash: row.commit_hash,
+                branch: row.branch,
+                title: row.title,
+                description: (_b = row.description) !== null && _b !== void 0 ? _b : undefined,
+                author: (_c = row.author) !== null && _c !== void 0 ? _c : undefined,
+                changes: Array.isArray(row.changes) ? row.changes : [],
+                relatedSpecId: (_d = row.related_spec_id) !== null && _d !== void 0 ? _d : undefined,
+                testResults: Array.isArray(row.test_results)
+                    ? row.test_results
+                    : undefined,
+                validationResults: parseJson(row.validation_results),
+                prUrl: (_e = row.pr_url) !== null && _e !== void 0 ? _e : undefined,
+                provider: (_f = row.provider) !== null && _f !== void 0 ? _f : undefined,
+                status: (_g = row.status) !== null && _g !== void 0 ? _g : undefined,
+                metadata: parseJson(row.metadata),
+                createdAt: row.created_at ? new Date(row.created_at) : undefined,
+                updatedAt: row.updated_at ? new Date(row.updated_at) : undefined,
+            });
+        });
+    }
     async getTestExecutionHistory(entityId, limit = 50) {
         if (!this.initialized) {
             throw new Error("PostgreSQL service not initialized");
@@ -674,22 +1226,162 @@ export class PostgreSQLService {
             client.release();
         }
     }
-    async getPerformanceMetricsHistory(entityId, days = 30) {
+    async getPerformanceMetricsHistory(entityId, options = {}) {
         if (!this.initialized) {
             throw new Error("PostgreSQL service not initialized");
         }
+        const normalizedOptions = typeof options === "number"
+            ? { days: options }
+            : options !== null && options !== void 0 ? options : {};
+        const { days = 30, metricId, environment, severity, limit = 100, } = normalizedOptions;
+        const sanitizedMetricId = typeof metricId === "string" && metricId.trim().length > 0
+            ? normalizeMetricIdForId(metricId)
+            : undefined;
+        const sanitizedEnvironment = typeof environment === "string" && environment.trim().length > 0
+            ? sanitizeEnvironment(environment)
+            : undefined;
+        const sanitizedSeverity = (() => {
+            if (typeof severity !== "string")
+                return undefined;
+            const normalized = severity.trim().toLowerCase();
+            switch (normalized) {
+                case "critical":
+                case "high":
+                case "medium":
+                case "low":
+                    return normalized;
+                default:
+                    return undefined;
+            }
+        })();
+        const safeLimit = Number.isFinite(limit)
+            ? Math.min(500, Math.max(1, Math.floor(limit)))
+            : 100;
+        const safeDays = typeof days === "number" && Number.isFinite(days)
+            ? Math.min(365, Math.max(1, Math.floor(days)))
+            : undefined;
         const client = await this.postgresPool.connect();
         try {
-            // Use a simpler query to avoid parameter binding issues
-            const query = `
-        SELECT pm.*
-        FROM performance_metrics pm
-        WHERE pm.entity_id = $1::uuid
-        AND (pm.timestamp IS NULL OR pm.timestamp >= NOW() - INTERVAL '${days} days')
-        ORDER BY COALESCE(pm.timestamp, NOW()) DESC
+            const conditions = ["(pm.test_id = $1 OR pm.target_id = $1)"];
+            const params = [entityId];
+            let paramIndex = 2;
+            if (sanitizedMetricId) {
+                conditions.push(`pm.metric_id = $${paramIndex}`);
+                params.push(sanitizedMetricId);
+                paramIndex += 1;
+            }
+            if (sanitizedEnvironment) {
+                conditions.push(`pm.environment = $${paramIndex}`);
+                params.push(sanitizedEnvironment);
+                paramIndex += 1;
+            }
+            if (sanitizedSeverity) {
+                conditions.push(`pm.severity = $${paramIndex}`);
+                params.push(sanitizedSeverity);
+                paramIndex += 1;
+            }
+            if (typeof safeDays === "number") {
+                conditions.push(`(pm.detected_at IS NULL OR pm.detected_at >= NOW() - $${paramIndex} * INTERVAL '1 day')`);
+                params.push(safeDays);
+                paramIndex += 1;
+            }
+            const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+            params.push(safeLimit);
+            const snapshotQuery = `
+        SELECT
+          pm.id,
+          pm.test_id,
+          pm.target_id,
+          pm.metric_id,
+          pm.scenario,
+          pm.environment,
+          pm.severity,
+          pm.trend,
+          pm.unit,
+          pm.baseline_value,
+          pm.current_value,
+          pm.delta,
+          pm.percent_change,
+          pm.sample_size,
+          pm.risk_score,
+          pm.run_id,
+          pm.detected_at,
+          pm.resolved_at,
+          pm.metadata,
+          pm.metrics_history,
+          pm.created_at
+        FROM performance_metric_snapshots pm
+        ${whereClause}
+        ORDER BY COALESCE(pm.detected_at, pm.created_at) DESC
+        LIMIT $${paramIndex}
       `;
-            const result = await client.query(query, [entityId]);
-            return result.rows;
+            const snapshotResult = await client.query(snapshotQuery, params);
+            const parseJson = (value) => {
+                if (value == null)
+                    return null;
+                if (typeof value === "object")
+                    return value;
+                if (typeof value === "string" && value.trim().length > 0) {
+                    try {
+                        return JSON.parse(value);
+                    }
+                    catch (_a) {
+                        return null;
+                    }
+                }
+                return null;
+            };
+            const toDateOrNull = (value) => {
+                if (!value)
+                    return null;
+                const date = new Date(value);
+                return Number.isNaN(date.getTime()) ? null : date;
+            };
+            const normalizeSnapshot = (row) => {
+                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+                const metadata = (_a = parseJson(row.metadata)) !== null && _a !== void 0 ? _a : undefined;
+                const historyRaw = parseJson(row.metrics_history);
+                const metricsHistory = Array.isArray(historyRaw)
+                    ? historyRaw
+                        .map((entry) => {
+                        if (!entry || typeof entry !== "object")
+                            return null;
+                        const normalized = { ...entry };
+                        if (normalized.timestamp) {
+                            const ts = toDateOrNull(normalized.timestamp);
+                            normalized.timestamp = ts !== null && ts !== void 0 ? ts : undefined;
+                        }
+                        return normalized;
+                    })
+                        .filter(Boolean)
+                    : undefined;
+                return {
+                    id: (_b = row.id) !== null && _b !== void 0 ? _b : undefined,
+                    testId: (_c = row.test_id) !== null && _c !== void 0 ? _c : undefined,
+                    targetId: (_d = row.target_id) !== null && _d !== void 0 ? _d : undefined,
+                    metricId: row.metric_id,
+                    scenario: (_e = row.scenario) !== null && _e !== void 0 ? _e : undefined,
+                    environment: (_f = row.environment) !== null && _f !== void 0 ? _f : undefined,
+                    severity: (_g = row.severity) !== null && _g !== void 0 ? _g : undefined,
+                    trend: (_h = row.trend) !== null && _h !== void 0 ? _h : undefined,
+                    unit: (_j = row.unit) !== null && _j !== void 0 ? _j : undefined,
+                    baselineValue: row.baseline_value !== null ? Number(row.baseline_value) : null,
+                    currentValue: row.current_value !== null ? Number(row.current_value) : null,
+                    delta: row.delta !== null ? Number(row.delta) : null,
+                    percentChange: row.percent_change !== null ? Number(row.percent_change) : null,
+                    sampleSize: row.sample_size !== null ? Number(row.sample_size) : null,
+                    riskScore: row.risk_score !== null ? Number(row.risk_score) : null,
+                    runId: (_k = row.run_id) !== null && _k !== void 0 ? _k : undefined,
+                    detectedAt: toDateOrNull(row.detected_at),
+                    resolvedAt: toDateOrNull(row.resolved_at),
+                    metricsHistory: metricsHistory !== null && metricsHistory !== void 0 ? metricsHistory : undefined,
+                    metadata,
+                    createdAt: toDateOrNull(row.created_at),
+                    source: "snapshot",
+                };
+            };
+            const snapshots = snapshotResult.rows.map(normalizeSnapshot);
+            return snapshots;
         }
         finally {
             client.release();

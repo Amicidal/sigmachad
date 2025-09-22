@@ -3,20 +3,48 @@
  * Handles real-time updates, subscriptions, and connection management
  */
 import { EventEmitter } from "events";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
+import { authenticateHeaders, scopesSatisfyRequirement, } from "./middleware/authentication.js";
+import { isApiKeyRegistryConfigured } from "./middleware/api-key-registry.js";
+import { normalizeFilter, matchesEvent } from "./websocket/filters.js";
+import { BackpressureManager } from "./websocket/backpressure.js";
+const WEBSOCKET_REQUIRED_SCOPES = ["graph:read"];
 export class WebSocketRouter extends EventEmitter {
-    constructor(kgService, dbService, fileWatcher) {
+    constructor(kgService, dbService, fileWatcher, syncCoordinator) {
         super();
         this.kgService = kgService;
         this.dbService = dbService;
         this.fileWatcher = fileWatcher;
+        this.syncCoordinator = syncCoordinator;
         this.connections = new Map();
         this.subscriptions = new Map(); // eventType -> connectionIds
         this.lastEvents = new Map();
+        this.backpressureThreshold = 512 * 1024; // 512 KB per connection buffer ceiling
+        this.backpressureRetryDelayMs = 100;
+        this.maxBackpressureRetries = 5;
+        this.metrics = {
+            backpressureSkips: 0,
+            stalledConnections: new Set(),
+            backpressureDisconnects: 0,
+        };
+        this.keepAliveGraceMs = 15000;
         // Set max listeners for event emitter
         this.setMaxListeners(100);
         // Bind event handlers
         this.bindEventHandlers();
+        this.bindSessionEvents();
+        this.backpressureManager = new BackpressureManager({
+            thresholdBytes: this.backpressureThreshold,
+            retryDelayMs: this.backpressureRetryDelayMs,
+            maxRetries: this.maxBackpressureRetries,
+        });
+    }
+    isAuthRequired() {
+        const hasJwt = typeof process.env.JWT_SECRET === "string" &&
+            process.env.JWT_SECRET.trim().length > 0;
+        const hasAdmin = typeof process.env.ADMIN_API_TOKEN === "string" &&
+            process.env.ADMIN_API_TOKEN.trim().length > 0;
+        return hasJwt || hasAdmin || isApiKeyRegistryConfigured();
     }
     bindEventHandlers() {
         // File watcher events (only if fileWatcher is available)
@@ -89,6 +117,15 @@ export class WebSocketRouter extends EventEmitter {
             });
         });
     }
+    bindSessionEvents() {
+        if (!this.syncCoordinator) {
+            return;
+        }
+        this.sessionEventHandler = (event) => {
+            this.handleSessionStreamEvent(event);
+        };
+        this.syncCoordinator.on("sessionEvent", this.sessionEventHandler);
+    }
     registerRoutes(app) {
         // Plain GET route so tests can detect route registration
         app.get("/ws", async (request, reply) => {
@@ -108,14 +145,123 @@ export class WebSocketRouter extends EventEmitter {
         });
         // Attach a WebSocket server using HTTP upgrade
         this.wss = new WebSocketServer({ noServer: true });
+        const respondWithHttpError = (socket, statusCode, code, message, requiredScopes, providedScopes) => {
+            const statusText = statusCode === 401
+                ? "Unauthorized"
+                : statusCode === 403
+                    ? "Forbidden"
+                    : "Bad Request";
+            const payload = JSON.stringify({
+                success: false,
+                error: {
+                    code,
+                    message,
+                },
+                metadata: {
+                    requiredScopes,
+                    providedScopes,
+                },
+                timestamp: new Date().toISOString(),
+            });
+            const headers = [
+                `HTTP/1.1 ${statusCode} ${statusText}`,
+                "Content-Type: application/json",
+                `Content-Length: ${Buffer.byteLength(payload)}`,
+                "Connection: close",
+                "\r\n",
+            ].join("\r\n");
+            try {
+                socket.write(headers);
+                socket.write(payload);
+            }
+            catch (error) {
+                console.warn("Failed to write websocket auth error", error);
+            }
+            try {
+                socket.destroy();
+            }
+            catch (_a) { }
+        };
         // Forward connections to our handler
         this.wss.on("connection", (ws, request) => {
             this.handleConnection({ ws }, request);
         });
-        // Hook into Fastify's underlying Node server
-        app.server.on("upgrade", (request, socket, head) => {
+        this.httpServer = app.server;
+        this.upgradeHandler = (request, socket, head) => {
             try {
                 if (request.url && request.url.startsWith("/ws")) {
+                    const audit = {
+                        requestId: `ws_${Date.now()}_${Math.random()
+                            .toString(36)
+                            .slice(2, 8)}`,
+                        ip: socket.remoteAddress,
+                        userAgent: request.headers["user-agent"],
+                    };
+                    const headerSource = { ...request.headers };
+                    try {
+                        const parsedUrl = new URL(request.url, "http://localhost");
+                        const query = parsedUrl.searchParams;
+                        const bearerToken = query.get("access_token") ||
+                            query.get("token") ||
+                            query.get("bearer_token");
+                        const apiKeyToken = query.get("api_key") ||
+                            query.get("apikey") ||
+                            query.get("apiKey");
+                        if (bearerToken && !headerSource["authorization"]) {
+                            headerSource["authorization"] = `Bearer ${bearerToken}`;
+                        }
+                        if (apiKeyToken && !headerSource["x-api-key"]) {
+                            headerSource["x-api-key"] = apiKeyToken;
+                        }
+                        if ((bearerToken || apiKeyToken) &&
+                            typeof request.url === "string") {
+                            const sanitizedParams = new URLSearchParams(parsedUrl.searchParams);
+                            if (sanitizedParams.has("access_token")) {
+                                sanitizedParams.set("access_token", "***");
+                            }
+                            if (sanitizedParams.has("token")) {
+                                sanitizedParams.set("token", "***");
+                            }
+                            if (sanitizedParams.has("bearer_token")) {
+                                sanitizedParams.set("bearer_token", "***");
+                            }
+                            if (sanitizedParams.has("api_key")) {
+                                sanitizedParams.set("api_key", "***");
+                            }
+                            if (sanitizedParams.has("apikey")) {
+                                sanitizedParams.set("apikey", "***");
+                            }
+                            if (sanitizedParams.has("apiKey")) {
+                                sanitizedParams.set("apiKey", "***");
+                            }
+                            const sanitizedQuery = sanitizedParams.toString();
+                            const sanitizedUrl = sanitizedQuery
+                                ? `${parsedUrl.pathname}?${sanitizedQuery}`
+                                : parsedUrl.pathname;
+                            try {
+                                request.url = sanitizedUrl;
+                            }
+                            catch (_a) { }
+                        }
+                    }
+                    catch (_b) { }
+                    const authContext = authenticateHeaders(headerSource, audit);
+                    const authRequired = this.isAuthRequired();
+                    if (authContext.tokenError) {
+                        const code = authContext.tokenError === "TOKEN_EXPIRED"
+                            ? "TOKEN_EXPIRED"
+                            : authContext.tokenError === "INVALID_API_KEY"
+                                ? "INVALID_API_KEY"
+                                : "UNAUTHORIZED";
+                        respondWithHttpError(socket, 401, code, authContext.tokenErrorDetail || "Authentication failed", WEBSOCKET_REQUIRED_SCOPES, authContext.scopes);
+                        return;
+                    }
+                    if (authRequired &&
+                        !scopesSatisfyRequirement(authContext.scopes, WEBSOCKET_REQUIRED_SCOPES)) {
+                        respondWithHttpError(socket, 403, "INSUFFICIENT_SCOPES", "WebSocket connection requires graph:read scope", WEBSOCKET_REQUIRED_SCOPES, authContext.scopes);
+                        return;
+                    }
+                    request.authContext = authContext;
                     this.wss.handleUpgrade(request, socket, head, (ws) => {
                         this.wss.emit("connection", ws, request);
                     });
@@ -128,21 +274,30 @@ export class WebSocketRouter extends EventEmitter {
                 try {
                     socket.destroy();
                 }
-                catch (_a) { }
+                catch (_c) { }
             }
-        });
+        };
+        if (this.httpServer && this.upgradeHandler) {
+            this.httpServer.on("upgrade", this.upgradeHandler);
+        }
         // Health check for WebSocket connections
         app.get("/ws/health", async (request, reply) => {
             reply.send({
                 status: "healthy",
                 connections: this.connections.size,
                 subscriptions: Array.from(this.subscriptions.keys()),
+                metrics: {
+                    backpressureSkips: this.metrics.backpressureSkips,
+                    stalledConnections: this.metrics.stalledConnections.size,
+                    backpressureDisconnects: this.metrics.backpressureDisconnects,
+                },
                 timestamp: new Date().toISOString(),
             });
         });
     }
     handleConnection(connection, request) {
-        var _a;
+        var _a, _b;
+        const authContext = request === null || request === void 0 ? void 0 : request.authContext;
         try {
             // Debug connection object shape
             const keys = Object.keys(connection || {});
@@ -150,20 +305,25 @@ export class WebSocketRouter extends EventEmitter {
             // @ts-ignore
             console.log("🔍 has connection.socket?", !!(connection === null || connection === void 0 ? void 0 : connection.socket), "send fn?", typeof ((_a = connection === null || connection === void 0 ? void 0 : connection.socket) === null || _a === void 0 ? void 0 : _a.send));
         }
-        catch (_b) { }
+        catch (_c) { }
         const connectionId = this.generateConnectionId();
         const wsConnection = {
             id: connectionId,
             // Prefer connection.ws (newer @fastify/websocket), fallback to .socket or the connection itself
             socket: (connection === null || connection === void 0 ? void 0 : connection.ws) || (connection === null || connection === void 0 ? void 0 : connection.socket) || connection,
-            subscriptions: new Set(),
+            subscriptions: new Map(),
             lastActivity: new Date(),
             userAgent: request.headers["user-agent"],
             ip: request.ip,
+            subscriptionCounter: 0,
+            auth: authContext,
         };
         // Add to connections
         this.connections.set(connectionId, wsConnection);
         console.log(`🔌 WebSocket connection established: ${connectionId} (${request.ip})`);
+        if ((_b = authContext === null || authContext === void 0 ? void 0 : authContext.user) === null || _b === void 0 ? void 0 : _b.userId) {
+            console.log(`🔐 WebSocket authenticated as ${authContext.user.userId} [${authContext.scopes.join(",")}]`);
+        }
         // No automatic welcome message; tests expect first response to match their actions
         const wsSock = wsConnection.socket;
         // Handle incoming messages
@@ -194,6 +354,9 @@ export class WebSocketRouter extends EventEmitter {
                 wsSock.pong();
             }
             catch (_a) { }
+        });
+        wsSock.on("pong", () => {
+            wsConnection.lastActivity = new Date();
         });
         // In test runs, proactively send periodic pongs to satisfy heartbeat tests
         if (process.env.NODE_ENV === "test" ||
@@ -239,10 +402,18 @@ export class WebSocketRouter extends EventEmitter {
                 });
                 break;
             case "list_subscriptions":
+                const summaries = Array.from(connection.subscriptions.values()).map((sub) => ({
+                    id: sub.id,
+                    event: sub.event,
+                    filter: sub.rawFilter,
+                }));
                 this.sendMessage(connection, {
                     type: "subscriptions",
                     id: message.id,
-                    data: Array.from(connection.subscriptions),
+                    data: summaries.map((sub) => sub.event),
+                    // Provide detailed data for clients that need richer info
+                    // @ts-ignore allow protocol extension field
+                    details: summaries,
                 });
                 break;
             default:
@@ -254,6 +425,7 @@ export class WebSocketRouter extends EventEmitter {
                         supportedTypes: [
                             "subscribe",
                             "unsubscribe",
+                            "unsubscribe_all",
                             "ping",
                             "list_subscriptions",
                         ],
@@ -269,7 +441,8 @@ export class WebSocketRouter extends EventEmitter {
             data.channel ||
             message.event ||
             message.channel;
-        const filter = data.filter || message.filter;
+        const rawFilter = data.filter || message.filter;
+        const providedId = message.subscriptionId || data.subscriptionId || message.id;
         if (!event) {
             this.sendMessage(connection, {
                 type: "error",
@@ -283,9 +456,22 @@ export class WebSocketRouter extends EventEmitter {
             });
             return;
         }
-        // Add to connection's subscriptions
-        connection.subscriptions.add(event);
-        // Add to global subscriptions
+        const subscriptionId = typeof providedId === "string" && providedId.trim().length > 0
+            ? providedId.trim()
+            : `${event}:${connection.subscriptionCounter++}`;
+        // If this subscriptionId already exists, replace it to avoid duplicates
+        if (connection.subscriptions.has(subscriptionId)) {
+            this.removeSubscription(connection, subscriptionId);
+        }
+        const normalizedFilter = normalizeFilter(rawFilter);
+        const subscription = {
+            id: subscriptionId,
+            event,
+            rawFilter,
+            normalizedFilter,
+        };
+        connection.subscriptions.set(subscriptionId, subscription);
+        // Add to global subscriptions (event -> connectionId)
         if (!this.subscriptions.has(event)) {
             this.subscriptions.set(event, new Set());
         }
@@ -299,43 +485,80 @@ export class WebSocketRouter extends EventEmitter {
             // Promote event to top-level for tests that expect it
             // @ts-ignore include for tests
             event,
+            // @ts-ignore include subscription id for tests
+            subscriptionId,
             data: {
                 event,
-                filter,
+                subscriptionId,
+                filter: rawFilter,
             },
         });
         // If we have a recent event of this type, replay it to the new subscriber
         const recent = this.lastEvents.get(event);
-        if (recent) {
-            let payloadData = recent;
-            if (recent.type === "file_change") {
-                const change = recent.data || {};
-                payloadData = {
-                    type: "file_change",
-                    changeType: change.type,
-                    ...change,
-                };
+        if (recent && matchesEvent(subscription, recent)) {
+            this.sendMessage(connection, this.toEventMessage(recent));
+        }
+    }
+    handleSessionStreamEvent(event) {
+        var _a;
+        const payload = {
+            event: event.type,
+            sessionId: event.sessionId,
+            operationId: event.operationId,
+            ...((_a = event.payload) !== null && _a !== void 0 ? _a : {}),
+        };
+        this.broadcastEvent({
+            type: "session_event",
+            timestamp: event.timestamp,
+            data: payload,
+            source: "synchronization",
+        });
+    }
+    toEventMessage(event) {
+        const basePayload = {
+            timestamp: event.timestamp,
+            source: event.source,
+        };
+        let payloadData;
+        if (event.type === "file_change") {
+            const change = event.data && typeof event.data === "object" ? { ...event.data } : {};
+            let changeType;
+            if (typeof change.type === "string") {
+                changeType = String(change.type);
+                delete change.type;
             }
-            this.sendMessage(connection, {
-                type: "event",
-                data: payloadData,
-            });
+            if (!changeType && typeof change.changeType === "string") {
+                changeType = String(change.changeType);
+            }
+            payloadData = {
+                type: "file_change",
+                ...change,
+                ...basePayload,
+            };
+            if (changeType) {
+                payloadData.changeType = changeType;
+            }
         }
-        // In tests, provide a synthetic immediate event for file_change to avoid FS timing
-        if ((process.env.NODE_ENV === "test" ||
-            process.env.RUN_INTEGRATION === "1") &&
-            event === "file_change") {
-            this.sendMessage(connection, {
-                type: "event",
-                data: {
-                    type: "file_change",
-                    path: "",
-                    changeType: "modify",
-                    timestamp: new Date().toISOString(),
-                    source: "synthetic",
-                },
-            });
+        else {
+            const eventData = event.data && typeof event.data === "object" ? { ...event.data } : {};
+            let innerType;
+            if (typeof eventData.type === "string") {
+                innerType = String(eventData.type);
+                delete eventData.type;
+            }
+            payloadData = {
+                ...eventData,
+                ...basePayload,
+                type: event.type,
+            };
+            if (innerType && innerType !== event.type) {
+                payloadData.entityType = innerType;
+            }
         }
+        return {
+            type: "event",
+            data: payloadData,
+        };
     }
     handleUnsubscription(connection, message) {
         var _a;
@@ -345,72 +568,103 @@ export class WebSocketRouter extends EventEmitter {
             message.event ||
             message.channel;
         const subscriptionId = message.subscriptionId || data.subscriptionId;
-        if (message.type === "unsubscribe_all") {
-            // Clear all connection subscriptions
-            for (const subEvent of Array.from(connection.subscriptions)) {
-                const set = this.subscriptions.get(subEvent);
-                if (set) {
-                    set.delete(connection.id);
-                    if (set.size === 0)
-                        this.subscriptions.delete(subEvent);
+        const messageType = message.type || message.type;
+        if (messageType === "unsubscribe_all") {
+            const removedIds = Array.from(connection.subscriptions.keys());
+            for (const id of removedIds) {
+                this.removeSubscription(connection, id);
+            }
+            this.sendMessage(connection, {
+                type: "unsubscribed",
+                id: message.id,
+                data: {
+                    removedSubscriptions: removedIds,
+                    totalSubscriptions: connection.subscriptions.size,
+                },
+            });
+            return;
+        }
+        const removedIds = [];
+        if (subscriptionId) {
+            const removed = this.removeSubscription(connection, subscriptionId);
+            if (removed) {
+                removedIds.push(subscriptionId);
+            }
+        }
+        else if (event) {
+            for (const [id, sub] of Array.from(connection.subscriptions.entries())) {
+                if (sub.event === event) {
+                    this.removeSubscription(connection, id);
+                    removedIds.push(id);
                 }
             }
-            connection.subscriptions.clear();
-            this.sendMessage(connection, {
-                type: "unsubscribed",
-                id: message.id,
-            });
-            return;
         }
-        // If no event provided, still acknowledge using subscriptionId for compatibility
-        if (!event) {
-            this.sendMessage(connection, {
-                type: "unsubscribed",
-                id: message.id,
-                // @ts-ignore include for tests
-                subscriptionId,
-            });
-            return;
-        }
-        // Remove from connection's subscriptions
-        connection.subscriptions.delete(event);
-        // Remove from global subscriptions
-        const eventSubscriptions = this.subscriptions.get(event);
-        if (eventSubscriptions) {
-            eventSubscriptions.delete(connection.id);
-            if (eventSubscriptions.size === 0) {
-                this.subscriptions.delete(event);
-            }
-        }
-        console.log(`📡 Connection ${connection.id} unsubscribed from: ${event}`);
         this.sendMessage(connection, {
             type: "unsubscribed",
             id: message.id,
-            // @ts-ignore include for tests
-            subscriptionId,
+            // @ts-ignore include primary subscription id for tests
+            subscriptionId: removedIds[0],
             data: {
                 event,
+                subscriptionId: removedIds[0],
+                removedSubscriptions: removedIds,
                 totalSubscriptions: connection.subscriptions.size,
             },
         });
+    }
+    removeSubscription(connection, subscriptionId) {
+        const existing = connection.subscriptions.get(subscriptionId);
+        if (!existing) {
+            return undefined;
+        }
+        connection.subscriptions.delete(subscriptionId);
+        const eventConnections = this.subscriptions.get(existing.event);
+        if (eventConnections) {
+            const stillSubscribed = Array.from(connection.subscriptions.values()).some((sub) => sub.event === existing.event);
+            if (!stillSubscribed) {
+                eventConnections.delete(connection.id);
+                if (eventConnections.size === 0) {
+                    this.subscriptions.delete(existing.event);
+                }
+            }
+        }
+        return existing;
     }
     handleDisconnection(connectionId) {
         const connection = this.connections.get(connectionId);
         if (!connection)
             return;
         console.log(`🔌 WebSocket connection closed: ${connectionId}`);
-        // Clean up subscriptions
-        for (const event of connection.subscriptions) {
-            const eventSubscriptions = this.subscriptions.get(event);
-            if (eventSubscriptions) {
-                eventSubscriptions.delete(connectionId);
-                if (eventSubscriptions.size === 0) {
-                    this.subscriptions.delete(event);
+        this.backpressureManager.clear(connectionId);
+        const socket = connection.socket;
+        if (socket) {
+            try {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.close(4000, "Connection terminated by server");
+                }
+                else if (socket.readyState === WebSocket.CONNECTING) {
+                    socket.close(4000, "Connection terminated by server");
+                }
+                else if (socket.readyState !== WebSocket.CLOSED &&
+                    typeof socket.terminate === "function") {
+                    socket.terminate();
                 }
             }
+            catch (error) {
+                try {
+                    console.warn(`⚠️ Failed to close WebSocket connection ${connectionId}`, error instanceof Error ? error.message : error);
+                }
+                catch (_a) { }
+            }
+        }
+        // Clean up subscriptions
+        const subscriptionIds = Array.from(connection.subscriptions.keys());
+        for (const id of subscriptionIds) {
+            this.removeSubscription(connection, id);
         }
         // Remove from connections
         this.connections.delete(connectionId);
+        this.metrics.stalledConnections.delete(connectionId);
     }
     broadcastEvent(event) {
         // Remember last event per type for late subscribers
@@ -419,27 +673,25 @@ export class WebSocketRouter extends EventEmitter {
         if (!eventSubscriptions || eventSubscriptions.size === 0) {
             return; // No subscribers for this event
         }
-        // Flatten payload for certain event types for compatibility with tests
-        let payloadData = event;
-        if (event.type === "file_change") {
-            const change = event.data || {};
-            payloadData = {
-                type: "file_change",
-                changeType: change.type,
-                ...change,
-            };
-        }
-        const eventMessage = {
-            type: "event",
-            data: payloadData,
-        };
+        const eventMessage = this.toEventMessage(event);
         let broadcastCount = 0;
-        for (const connectionId of eventSubscriptions) {
+        for (const connectionId of Array.from(eventSubscriptions)) {
             const connection = this.connections.get(connectionId);
-            if (connection) {
-                this.sendMessage(connection, eventMessage);
-                broadcastCount++;
+            if (!connection) {
+                eventSubscriptions.delete(connectionId);
+                continue;
             }
+            const relevantSubscriptions = Array.from(connection.subscriptions.values()).filter((sub) => sub.event === event.type);
+            if (relevantSubscriptions.length === 0) {
+                eventSubscriptions.delete(connectionId);
+                continue;
+            }
+            const shouldBroadcast = relevantSubscriptions.some((sub) => matchesEvent(sub, event));
+            if (!shouldBroadcast) {
+                continue;
+            }
+            this.sendMessage(connection, eventMessage);
+            broadcastCount++;
         }
         if (broadcastCount > 0) {
             console.log(`📡 Broadcasted ${event.type} event to ${broadcastCount} connections`);
@@ -450,24 +702,106 @@ export class WebSocketRouter extends EventEmitter {
             ...message,
             timestamp: message.timestamp || new Date().toISOString(),
         };
-        const json = JSON.stringify(payload);
-        const trySend = (attempt) => {
+        this.dispatchWithBackpressure(connection, payload);
+    }
+    dispatchWithBackpressure(connection, payload) {
+        var _a, _b;
+        const socket = connection.socket;
+        if (!socket) {
+            return;
+        }
+        if (socket.readyState === WebSocket.CLOSING ||
+            socket.readyState === WebSocket.CLOSED) {
+            return;
+        }
+        const bufferedAmount = typeof socket.bufferedAmount === "number" ? socket.bufferedAmount : 0;
+        if (bufferedAmount > this.backpressureManager.getThreshold()) {
+            this.metrics.backpressureSkips++;
+            this.metrics.stalledConnections.add(connection.id);
+            const { attempts, exceeded } = this.backpressureManager.registerThrottle(connection.id);
+            // Send throttled hint to client
             try {
-                if (connection.socket.readyState === 1) {
-                    // OPEN
-                    try {
-                        console.log(`➡️  WS SEND to ${connection.id}: ${String((message === null || message === void 0 ? void 0 : message.type) || "unknown")}`);
+                if (socket.readyState === WebSocket.OPEN) {
+                    const hintMsg = {
+                        type: "throttled",
+                        data: {
+                            reason: "backpressure",
+                            buffered: bufferedAmount,
+                            threshold: this.backpressureManager.getThreshold(),
+                            retryAfterMs: this.backpressureManager.getRetryDelay(),
+                            attempts,
+                        },
+                        timestamp: new Date().toISOString(),
+                    };
+                    socket.send(JSON.stringify(hintMsg));
+                }
+            }
+            catch (hintError) {
+                console.warn(`⚠️ Failed to send throttled hint to ${connection.id}`, hintError);
+            }
+            // Emit hint for source (e.g., syncCoordinator) to slow down
+            this.emit("backpressureHint", {
+                connectionId: connection.id,
+                bufferedAmount,
+                messageType: (_a = payload === null || payload === void 0 ? void 0 : payload.type) !== null && _a !== void 0 ? _a : "unknown",
+                hint: "throttle_source",
+            });
+            try {
+                console.warn(`⚠️  Delaying message to ${connection.id} due to backpressure`, {
+                    bufferedAmount,
+                    threshold: this.backpressureManager.getThreshold(),
+                    messageType: (_b = payload === null || payload === void 0 ? void 0 : payload.type) !== null && _b !== void 0 ? _b : "unknown",
+                    attempts,
+                });
+            }
+            catch (_c) { }
+            if (exceeded) {
+                this.metrics.backpressureDisconnects++;
+                this.backpressureManager.clear(connection.id);
+                try {
+                    socket.close(1013, "Backpressure threshold exceeded");
+                    if (typeof socket.readyState === "number") {
+                        socket.readyState = WebSocket.CLOSING;
                     }
-                    catch (_a) { }
-                    connection.socket.send(json);
+                }
+                catch (_d) { }
+                this.handleDisconnection(connection.id);
+                return;
+            }
+            setTimeout(() => {
+                const activeConnection = this.connections.get(connection.id);
+                if (!activeConnection) {
                     return;
                 }
-                if (attempt < 3) {
-                    setTimeout(() => trySend(attempt + 1), 10);
+                this.dispatchWithBackpressure(activeConnection, payload);
+            }, this.backpressureManager.getRetryDelay());
+            return;
+        }
+        this.backpressureManager.clear(connection.id);
+        this.metrics.stalledConnections.delete(connection.id);
+        const json = JSON.stringify(payload);
+        this.writeToSocket(connection, json, payload);
+    }
+    writeToSocket(connection, json, payload) {
+        const socket = connection.socket;
+        if (!socket) {
+            return;
+        }
+        const trySend = (retriesRemaining) => {
+            try {
+                if (socket.readyState === WebSocket.OPEN) {
+                    try {
+                        console.log(`➡️  WS SEND to ${connection.id}: ${String((payload === null || payload === void 0 ? void 0 : payload.type) || "unknown")}`);
+                    }
+                    catch (_a) { }
+                    socket.send(json);
+                    return;
                 }
-                else {
-                    // Final attempt regardless of state; let ws handle errors
-                    connection.socket.send(json);
+                if (retriesRemaining > 0) {
+                    setTimeout(() => trySend(retriesRemaining - 1), 10);
+                }
+                else if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(json);
                 }
             }
             catch (error) {
@@ -475,7 +809,7 @@ export class WebSocketRouter extends EventEmitter {
                 this.handleDisconnection(connection.id);
             }
         };
-        trySend(0);
+        trySend(3);
     }
     generateConnectionId() {
         return `ws_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -484,10 +818,25 @@ export class WebSocketRouter extends EventEmitter {
     startConnectionManagement() {
         // Heartbeat to detect dead connections
         this.heartbeatInterval = setInterval(() => {
+            var _a;
             const now = Date.now();
             const timeout = 30000; // 30 seconds
             for (const [connectionId, connection] of this.connections) {
-                if (now - connection.lastActivity.getTime() > timeout) {
+                const idleMs = now - connection.lastActivity.getTime();
+                if (idleMs > this.keepAliveGraceMs) {
+                    try {
+                        if (typeof ((_a = connection.socket) === null || _a === void 0 ? void 0 : _a.ping) === "function") {
+                            connection.socket.ping();
+                        }
+                    }
+                    catch (error) {
+                        try {
+                            console.warn(`⚠️  Failed to ping WebSocket connection ${connectionId}`, error instanceof Error ? error.message : error);
+                        }
+                        catch (_b) { }
+                    }
+                }
+                if (idleMs > timeout) {
                     console.log(`💔 Connection ${connectionId} timed out`);
                     this.handleDisconnection(connectionId);
                 }
@@ -526,6 +875,9 @@ export class WebSocketRouter extends EventEmitter {
             totalConnections: this.connections.size,
             activeSubscriptions,
             uptime: process.uptime(),
+            backpressureSkips: this.metrics.backpressureSkips,
+            stalledConnections: this.metrics.stalledConnections.size,
+            backpressureDisconnects: this.metrics.backpressureDisconnects,
         };
     }
     // Broadcast custom events
@@ -553,6 +905,27 @@ export class WebSocketRouter extends EventEmitter {
         console.log("🔄 Shutting down WebSocket router...");
         // Stop connection management
         this.stopConnectionManagement();
+        if (this.httpServer && this.upgradeHandler) {
+            try {
+                if (typeof this.httpServer.off === "function") {
+                    this.httpServer.off("upgrade", this.upgradeHandler);
+                }
+                else {
+                    this.httpServer.removeListener("upgrade", this.upgradeHandler);
+                }
+            }
+            catch (_a) { }
+            this.upgradeHandler = undefined;
+        }
+        if (this.syncCoordinator && this.sessionEventHandler) {
+            if (typeof this.syncCoordinator.off === "function") {
+                this.syncCoordinator.off("sessionEvent", this.sessionEventHandler);
+            }
+            else if (typeof this.syncCoordinator.removeListener === "function") {
+                this.syncCoordinator.removeListener("sessionEvent", this.sessionEventHandler);
+            }
+            this.sessionEventHandler = undefined;
+        }
         // Close all connections
         const closePromises = [];
         for (const connection of this.connections.values()) {
@@ -569,8 +942,21 @@ export class WebSocketRouter extends EventEmitter {
             }));
         }
         await Promise.all(closePromises);
+        if (this.wss) {
+            await new Promise((resolve) => {
+                try {
+                    this.wss.close(() => resolve());
+                }
+                catch (_a) {
+                    resolve();
+                }
+            });
+            this.wss = undefined;
+        }
+        this.httpServer = undefined;
         this.connections.clear();
         this.subscriptions.clear();
+        this.metrics.stalledConnections.clear();
         console.log("✅ WebSocket router shutdown complete");
     }
 }

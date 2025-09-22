@@ -13,15 +13,15 @@ import {
 } from '../../../test-utils.js';
 
 // Mock external dependencies
-vi.mock('../../../../src/services/KnowledgeGraphService.js', () => ({
+vi.mock('../../../../src/services/knowledge/KnowledgeGraphService.js', () => ({
   KnowledgeGraphService: vi.fn()
 }));
 
-vi.mock('../../../../src/services/DatabaseService.js', () => ({
+vi.mock('../../../../src/services/core/DatabaseService.js', () => ({
   DatabaseService: vi.fn()
 }));
 
-vi.mock('../../../../src/services/DocumentationParser.js', () => ({
+vi.mock('../../../../src/services/knowledge/DocumentationParser.js', () => ({
   DocumentationParser: vi.fn()
 }));
 

@@ -7,14 +7,14 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   ConfigurationService,
   SystemConfiguration,
-} from "../../../src/services/ConfigurationService";
+} from "../../../src/services/core/ConfigurationService";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/DatabaseService";
-import { SynchronizationCoordinator } from "../../../src/services/SynchronizationCoordinator";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { ASTParser } from "../../../src/services/ASTParser";
+} from "../../../src/services/core/DatabaseService";
+import { SynchronizationCoordinator } from "../../../src/services/synchronization/SynchronizationCoordinator";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
+import { ASTParser } from "../../../src/services/knowledge/ASTParser";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";

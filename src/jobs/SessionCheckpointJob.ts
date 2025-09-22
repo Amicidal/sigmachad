@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
-import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
-import { RollbackCapabilities } from "../services/RollbackCapabilities.js";
+import { KnowledgeGraphService } from "../services/knowledge/KnowledgeGraphService.js";
+import { RollbackCapabilities } from "../services/scm/RollbackCapabilities.js";
 import {
   SessionCheckpointJobPayload,
   SessionCheckpointJobPersistence,

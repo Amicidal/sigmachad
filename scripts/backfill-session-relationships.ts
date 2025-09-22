@@ -7,7 +7,7 @@ import crypto from "crypto";
 import {
   createDatabaseConfig,
   DatabaseService,
-} from "../src/services/DatabaseService.js";
+} from "../src/services/core/DatabaseService.js";
 import {
   canonicalRelationshipId,
 } from "../src/utils/codeEdges.js";

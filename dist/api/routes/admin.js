@@ -1,229 +1,269 @@
-/**
- * Administration Routes
- * Handles system administration, monitoring, and maintenance operations
- */
-// Global declarations for Node.js environment
-const process = globalThis.process;
-const console = globalThis.console;
-export async function registerAdminRoutes(app, kgService, dbService, fileWatcher, syncCoordinator, syncMonitor, conflictResolver, rollbackCapabilities, backupService, loggingService, maintenanceService, configurationService) {
-    // GET /api/v1/admin-health - Get system health (also available at root level)
-    app.get('/admin-health', async (request, reply) => {
-        var _a, _b, _c, _d;
+import { MaintenanceOperationError } from '../../services/backup/BackupService.js';
+import { MaintenanceMetrics } from '../../services/testing/metrics/MaintenanceMetrics.js';
+const toDate = (value) => {
+    if (typeof value === 'string' || value instanceof Date) {
+        const candidate = value instanceof Date ? value : new Date(value);
+        return Number.isNaN(candidate.getTime()) ? undefined : candidate;
+    }
+    return undefined;
+};
+const normaliseLimit = (value) => {
+    if (typeof value === 'number' && Number.isFinite(value))
+        return value;
+    if (typeof value === 'string') {
+        const parsed = Number.parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+};
+const ensureArray = (value, fallback) => {
+    if (Array.isArray(value) && value.length > 0) {
+        return value;
+    }
+    return fallback;
+};
+export async function registerAdminRoutes(app, kgService, dbService, fileWatcher, syncCoordinator, syncMonitor, _conflictResolver, _rollbackCapabilities, backupService, loggingService, maintenanceService, configurationService) {
+    const registeredAdminRoutes = new Set();
+    const joinPaths = (base, suffix) => {
+        const trimmedBase = base.endsWith('/') ? base.slice(0, -1) : base;
+        const normalisedSuffix = suffix.startsWith('/') ? suffix : `/${suffix}`;
+        return `${trimmedBase}${normalisedSuffix}`;
+    };
+    const registerWithAdminAliases = (method, path, ...args) => {
+        const register = (route) => {
+            const key = `${method}:${route}`;
+            if (!registeredAdminRoutes.has(key)) {
+                app[method](route, ...args);
+                registeredAdminRoutes.add(key);
+            }
+        };
+        register(path);
+        const adminPath = joinPaths('/admin', path);
+        if (adminPath !== path) {
+            register(adminPath);
+        }
+        if (!path.startsWith('/admin')) {
+            const doubleAdminPath = joinPaths('/admin', adminPath);
+            if (doubleAdminPath !== adminPath) {
+                register(doubleAdminPath);
+            }
+        }
+    };
+    const sendMaintenanceError = (reply, error, fallback) => {
+        var _a;
+        if (error instanceof MaintenanceOperationError) {
+            reply.status(error.statusCode).send({
+                success: false,
+                error: {
+                    code: error.code,
+                    message: error.message,
+                },
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : fallback.message;
+        reply.status((_a = fallback.status) !== null && _a !== void 0 ? _a : 500).send({
+            success: false,
+            error: {
+                code: fallback.code,
+                message,
+            },
+        });
+    };
+    registerWithAdminAliases('get', '/admin-health', async (_request, reply) => {
+        var _a, _b, _c, _d, _e, _f;
         try {
-            const health = await dbService.healthCheck();
+            const health = typeof dbService.healthCheck === 'function'
+                ? await dbService.healthCheck()
+                : {};
             const componentStatuses = [
                 (_a = health === null || health === void 0 ? void 0 : health.falkordb) === null || _a === void 0 ? void 0 : _a.status,
                 (_b = health === null || health === void 0 ? void 0 : health.qdrant) === null || _b === void 0 ? void 0 : _b.status,
                 (_c = health === null || health === void 0 ? void 0 : health.postgresql) === null || _c === void 0 ? void 0 : _c.status,
                 (_d = health === null || health === void 0 ? void 0 : health.redis) === null || _d === void 0 ? void 0 : _d.status,
-            ].filter(Boolean);
+            ].filter((status) => typeof status === 'string');
             const hasUnhealthy = componentStatuses.includes('unhealthy');
             const hasDegraded = componentStatuses.includes('degraded');
-            const overallStatus = hasUnhealthy
-                ? 'unhealthy'
-                : hasDegraded
-                    ? 'degraded'
-                    : 'healthy';
+            const overall = hasUnhealthy ? 'unhealthy' : hasDegraded ? 'degraded' : 'healthy';
             const systemHealth = {
-                overall: overallStatus,
+                overall,
                 components: {
-                    graphDatabase: health.falkordb || { status: 'unknown', details: {} },
-                    vectorDatabase: health.qdrant || { status: 'unknown', details: {} },
-                    fileWatcher: { status: 'unknown' },
-                    apiServer: { status: 'healthy' }
+                    graphDatabase: (_e = health === null || health === void 0 ? void 0 : health.falkordb) !== null && _e !== void 0 ? _e : { status: 'unknown' },
+                    vectorDatabase: (_f = health === null || health === void 0 ? void 0 : health.qdrant) !== null && _f !== void 0 ? _f : { status: 'unknown' },
+                    fileWatcher: { status: fileWatcher ? 'healthy' : 'stopped' },
+                    apiServer: { status: 'healthy' },
                 },
                 metrics: {
                     uptime: process.uptime(),
-                    totalEntities: 0, // Will be updated below
-                    totalRelationships: 0, // Will be updated below
+                    totalEntities: 0,
+                    totalRelationships: 0,
                     syncLatency: 0,
-                    errorRate: 0
-                }
+                    errorRate: 0,
+                },
             };
-            // Get actual metrics from knowledge graph
-            try {
-                const entityCount = await kgService.listEntities({ limit: 1, offset: 0 });
-                systemHealth.metrics.totalEntities = entityCount.total;
-                const relationshipCount = await kgService.listRelationships({ limit: 1, offset: 0 });
-                systemHealth.metrics.totalRelationships = relationshipCount.total;
-            }
-            catch (error) {
-                console.warn('Could not retrieve graph metrics:', error);
-            }
-            // Check file watcher status
-            try {
-                if (fileWatcher) {
-                    // Check if watcher is active by checking internal state
-                    systemHealth.components.fileWatcher.status = 'healthy'; // Assume healthy if exists
-                }
-                else {
-                    systemHealth.components.fileWatcher.status = 'stopped';
-                }
-            }
-            catch (_e) {
-                systemHealth.components.fileWatcher.status = 'error';
-            }
-            // Add sync metrics if available
-            if (syncMonitor) {
+            const listEntities = kgService.listEntities;
+            if (typeof listEntities === 'function') {
                 try {
-                    const syncMetrics = syncMonitor.getHealthMetrics();
-                    // Calculate approximate sync latency based on last sync time
-                    systemHealth.metrics.syncLatency = Date.now() - syncMetrics.lastSyncTime.getTime();
-                    systemHealth.metrics.errorRate = syncMetrics.consecutiveFailures /
-                        Math.max(syncMetrics.activeOperations + syncMetrics.consecutiveFailures, 1);
+                    const result = await listEntities.call(kgService, { limit: 1, offset: 0 });
+                    if (result && typeof result.total === 'number') {
+                        systemHealth.metrics.totalEntities = result.total;
+                    }
+                }
+                catch (error) {
+                    console.warn('Could not retrieve graph metrics:', error);
+                }
+            }
+            const listRelationships = kgService.listRelationships;
+            if (typeof listRelationships === 'function') {
+                try {
+                    const result = await listRelationships.call(kgService, { limit: 1, offset: 0 });
+                    if (result && typeof result.total === 'number') {
+                        systemHealth.metrics.totalRelationships = result.total;
+                    }
+                }
+                catch (error) {
+                    console.warn('Could not retrieve graph metrics:', error);
+                }
+            }
+            const getHealthMetrics = syncMonitor === null || syncMonitor === void 0 ? void 0 : syncMonitor.getHealthMetrics;
+            if (typeof getHealthMetrics === 'function') {
+                try {
+                    const metrics = getHealthMetrics.call(syncMonitor);
+                    const lastSync = (metrics === null || metrics === void 0 ? void 0 : metrics.lastSyncTime) instanceof Date
+                        ? metrics.lastSyncTime
+                        : toDate(metrics === null || metrics === void 0 ? void 0 : metrics.lastSyncTime);
+                    const activeOps = typeof (metrics === null || metrics === void 0 ? void 0 : metrics.activeOperations) === 'number' ? metrics.activeOperations : 0;
+                    const failures = typeof (metrics === null || metrics === void 0 ? void 0 : metrics.consecutiveFailures) === 'number' ? metrics.consecutiveFailures : 0;
+                    if (lastSync) {
+                        systemHealth.metrics.syncLatency = Math.max(Date.now() - lastSync.getTime(), 0);
+                    }
+                    systemHealth.metrics.errorRate = failures / Math.max(activeOps + failures, 1);
                 }
                 catch (error) {
                     console.warn('Could not retrieve sync metrics:', error);
                 }
             }
-            // Always 200 for health payloads; overall reflects status
-            reply.status(200).send({
-                success: true,
-                data: systemHealth
-            });
+            const statusCode = hasUnhealthy ? 503 : 200;
+            reply.status(statusCode).send({ success: true, data: systemHealth });
         }
-        catch (_f) {
+        catch (_error) {
             reply.status(503).send({
                 success: false,
                 error: {
                     code: 'HEALTH_CHECK_FAILED',
-                    message: 'Failed to retrieve system health'
-                }
+                    message: 'Failed to retrieve system health',
+                },
             });
         }
     });
-    // Helper to forward admin aliases to existing endpoints without duplicating logic
-    const forwardTo = (method, aliasPath, targetPath) => {
-        return async (request, reply) => {
-            var _a, _b, _c;
-            const originalUrl = ((_a = request.raw) === null || _a === void 0 ? void 0 : _a.url) || request.url || '';
-            const [pathOnly, queryStr] = originalUrl.split('?');
-            const basePrefix = pathOnly.endsWith(aliasPath)
-                ? pathOnly.slice(0, -aliasPath.length)
-                : pathOnly.replace(/\/?admin(?:\/.*)?$/, '');
-            const targetUrl = `${basePrefix}${targetPath}${queryStr ? `?${queryStr}` : ''}`;
-            const payload = method === 'POST'
-                ? (typeof request.body === 'string' ? request.body : JSON.stringify((_b = request.body) !== null && _b !== void 0 ? _b : {}))
-                : undefined;
-            const res = await app.inject({
-                method,
-                url: targetUrl,
-                headers: {
-                    'content-type': request.headers['content-type'] || 'application/json',
-                    // Preserve client identity for middleware like rate limiting
-                    ...(request.headers['x-forwarded-for'] ? { 'x-forwarded-for': request.headers['x-forwarded-for'] } : {}),
-                    ...(request.headers['user-agent'] ? { 'user-agent': request.headers['user-agent'] } : {}),
-                },
-                payload,
-            });
-            reply.status(res.statusCode).send((_c = res.body) !== null && _c !== void 0 ? _c : res.payload);
-        };
-    };
-    // Admin-prefixed aliases for tests expecting /admin/* paths
-    app.get('/admin/health', forwardTo('GET', '/admin/health', '/admin-health'));
-    app.get('/admin/admin-health', forwardTo('GET', '/admin/admin-health', '/admin-health'));
-    app.post('/admin/admin/sync', forwardTo('POST', '/admin/admin/sync', '/sync'));
-    // GET /api/admin/sync-status - Get synchronization status
-    app.get('/sync-status', async (request, reply) => {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    registerWithAdminAliases('get', '/checkpoint-metrics', async (_request, reply) => {
+        var _a;
         try {
-            let status;
-            if (syncMonitor) {
-                const metrics = syncMonitor.getSyncMetrics();
-                const health = syncMonitor.getHealthMetrics();
-                const activeOps = syncMonitor.getActiveOperations();
-                const phases = (_b = (_a = syncMonitor).getOperationPhases) === null || _b === void 0 ? void 0 : _b.call(_a);
-                // Optional coordinator statistics for richer status
-                const coordStats = syncCoordinator === null || syncCoordinator === void 0 ? void 0 : syncCoordinator.getOperationStatistics();
-                const active = activeOps.map((op) => {
-                    var _a, _b, _c, _d;
-                    return ({
-                        id: op.id,
-                        type: op.type,
-                        status: op.status,
-                        filesProcessed: op.filesProcessed,
-                        phase: (_a = phases === null || phases === void 0 ? void 0 : phases[op.id]) === null || _a === void 0 ? void 0 : _a.phase,
-                        progress: (_b = phases === null || phases === void 0 ? void 0 : phases[op.id]) === null || _b === void 0 ? void 0 : _b.progress,
-                        entities: {
-                            created: op.entitiesCreated,
-                            updated: op.entitiesUpdated,
-                            deleted: op.entitiesDeleted,
-                        },
-                        relationships: {
-                            created: op.relationshipsCreated,
-                            updated: op.relationshipsUpdated,
-                            deleted: op.relationshipsDeleted,
-                        },
-                        errors: ((_c = op.errors) === null || _c === void 0 ? void 0 : _c.length) || 0,
-                        conflicts: ((_d = op.conflicts) === null || _d === void 0 ? void 0 : _d.length) || 0,
-                        startTime: op.startTime,
-                        endTime: op.endTime || null,
-                    });
+            const snapshot = typeof (syncMonitor === null || syncMonitor === void 0 ? void 0 : syncMonitor.getCheckpointMetricsSnapshot) === 'function'
+                ? syncMonitor.getCheckpointMetricsSnapshot()
+                : null;
+            if (snapshot) {
+                reply.send({
+                    success: true,
+                    data: {
+                        source: 'monitor',
+                        updatedAt: snapshot.timestamp.toISOString(),
+                        event: snapshot.event,
+                        metrics: snapshot.metrics,
+                        deadLetters: snapshot.deadLetters,
+                        context: (_a = snapshot.context) !== null && _a !== void 0 ? _a : undefined,
+                    },
                 });
-                const totals = coordStats
-                    ? {
-                        totalOperations: coordStats.totalOperations,
-                        completedOperations: coordStats.completedOperations,
-                        failedOperations: coordStats.failedOperations,
-                        totalFilesProcessed: coordStats.totalFilesProcessed,
-                        totalEntitiesCreated: coordStats.totalEntitiesCreated,
-                        totalErrors: coordStats.totalErrors,
-                    }
+                return;
+            }
+            if (syncCoordinator) {
+                const fallback = syncCoordinator.getCheckpointMetrics();
+                reply.send({
+                    success: true,
+                    data: {
+                        source: 'coordinator',
+                        updatedAt: new Date().toISOString(),
+                        event: 'on_demand_snapshot',
+                        metrics: fallback.metrics,
+                        deadLetters: fallback.deadLetters,
+                    },
+                });
+                return;
+            }
+            reply.status(503).send({
+                success: false,
+                error: {
+                    code: 'CHECKPOINT_METRICS_UNAVAILABLE',
+                    message: 'Checkpoint metrics are not available; coordinator/monitor not configured',
+                },
+            });
+        }
+        catch (error) {
+            reply.status(500).send({
+                success: false,
+                error: {
+                    code: 'CHECKPOINT_METRICS_ERROR',
+                    message: error instanceof Error ? error.message : 'Failed to retrieve checkpoint metrics',
+                },
+            });
+        }
+    });
+    registerWithAdminAliases('get', '/sync-status', async (_request, reply) => {
+        var _a, _b;
+        try {
+            const getSyncMetrics = syncMonitor === null || syncMonitor === void 0 ? void 0 : syncMonitor.getSyncMetrics;
+            const getHealthMetrics = syncMonitor === null || syncMonitor === void 0 ? void 0 : syncMonitor.getHealthMetrics;
+            const getActiveOperations = syncMonitor === null || syncMonitor === void 0 ? void 0 : syncMonitor.getActiveOperations;
+            if (typeof getSyncMetrics === 'function') {
+                const metrics = (_a = getSyncMetrics.call(syncMonitor)) !== null && _a !== void 0 ? _a : {};
+                const healthMetrics = typeof getHealthMetrics === 'function'
+                    ? getHealthMetrics.call(syncMonitor)
                     : undefined;
-                // Compute instantaneous throughput based on active operations
-                let itemsProcessed = 0;
-                let earliestStart = Date.now();
-                for (const op of activeOps) {
-                    const st = (op.startTime instanceof Date ? op.startTime : new Date(op.startTime)).getTime();
-                    if (st < earliestStart)
-                        earliestStart = st;
-                    const eCreated = (_e = (_c = op.entitiesCreated) !== null && _c !== void 0 ? _c : (_d = op.entities) === null || _d === void 0 ? void 0 : _d.created) !== null && _e !== void 0 ? _e : 0;
-                    const rCreated = (_h = (_f = op.relationshipsCreated) !== null && _f !== void 0 ? _f : (_g = op.relationships) === null || _g === void 0 ? void 0 : _g.created) !== null && _h !== void 0 ? _h : 0;
-                    itemsProcessed += (eCreated || 0) + (rCreated || 0);
-                }
-                const elapsedSec = Math.max((Date.now() - earliestStart) / 1000, 0.001);
-                const instantaneousThroughput = itemsProcessed / elapsedSec;
+                const activeOpsRaw = typeof getActiveOperations === 'function'
+                    ? getActiveOperations.call(syncMonitor)
+                    : [];
+                const activeOps = Array.isArray(activeOpsRaw) ? activeOpsRaw : [];
+                const queueDepth = typeof (syncCoordinator === null || syncCoordinator === void 0 ? void 0 : syncCoordinator.getQueueLength) === 'function'
+                    ? syncCoordinator.getQueueLength()
+                    : 0;
+                const operationsFailed = typeof metrics.operationsFailed === 'number' ? metrics.operationsFailed : 0;
+                const operationsSuccessful = typeof metrics.operationsSuccessful === 'number' ? metrics.operationsSuccessful : 0;
+                const operationsTotal = typeof metrics.operationsTotal === 'number' ? metrics.operationsTotal : 0;
+                const throughput = typeof metrics.throughput === 'number' ? metrics.throughput : 0;
+                const averageSyncTime = typeof metrics.averageSyncTime === 'number' ? metrics.averageSyncTime : 0;
                 reply.send({
                     success: true,
                     data: {
                         isActive: activeOps.length > 0,
-                        paused: !!((_j = syncCoordinator === null || syncCoordinator === void 0 ? void 0 : syncCoordinator.isPaused) === null || _j === void 0 ? void 0 : _j.call(syncCoordinator)),
-                        lastSync: health.lastSyncTime,
-                        queueDepth: syncCoordinator ? syncCoordinator.getQueueLength() : 0,
-                        processingRate: instantaneousThroughput,
+                        lastSync: ((_b = healthMetrics === null || healthMetrics === void 0 ? void 0 : healthMetrics.lastSyncTime) !== null && _b !== void 0 ? _b : null),
+                        queueDepth,
+                        processingRate: throughput,
                         errors: {
-                            count: metrics.operationsFailed,
-                            recent: metrics.operationsFailed > 0
-                                ? [`${metrics.operationsFailed} sync operations failed`]
+                            count: operationsFailed,
+                            recent: operationsFailed > 0
+                                ? [`${operationsFailed} sync operations failed`]
                                 : [],
                         },
                         performance: {
-                            syncLatency: metrics.averageSyncTime,
-                            throughput: instantaneousThroughput,
-                            successRate: metrics.operationsTotal > 0
-                                ? metrics.operationsSuccessful / metrics.operationsTotal
-                                : 1.0,
-                        },
-                        operations: {
-                            active,
-                            totals,
+                            syncLatency: averageSyncTime,
+                            throughput,
+                            successRate: operationsTotal > 0
+                                ? operationsSuccessful / operationsTotal
+                                : 1,
                         },
                     },
                 });
                 return;
             }
-            // Fallback when sync services not available
             reply.send({
                 success: true,
                 data: {
                     isActive: false,
-                    paused: false,
-                    lastSync: new Date(),
+                    lastSync: null,
                     queueDepth: 0,
                     processingRate: 0,
                     errors: { count: 0, recent: [] },
-                    performance: { syncLatency: 0, throughput: 0, successRate: 1.0 },
-                    operations: { active: [], totals: undefined },
+                    performance: { syncLatency: 0, throughput: 0, successRate: 1 },
                 },
             });
         }
@@ -233,132 +273,12 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 error: {
                     code: 'SYNC_STATUS_FAILED',
                     message: 'Failed to retrieve sync status',
-                    details: error instanceof Error ? error.message : 'Unknown error'
-                }
+                    details: error instanceof Error ? error.message : 'Unknown error',
+                },
             });
         }
     });
-    // GET /api/v1/admin/metrics - System and history metrics summary
-    app.get('/metrics', async (request, reply) => {
-        try {
-            const history = await kgService.getHistoryMetrics();
-            const syncSummary = syncMonitor ? {
-                sync: syncMonitor.getSyncMetrics(),
-                health: syncMonitor.getHealthMetrics(),
-            } : undefined;
-            reply.send({
-                success: true,
-                data: {
-                    graph: {
-                        nodes: history.totals.nodes,
-                        relationships: history.totals.relationships,
-                    },
-                    history: {
-                        versions: history.versions,
-                        checkpoints: history.checkpoints,
-                        checkpointMembers: history.checkpointMembers,
-                        temporalEdges: history.temporalEdges,
-                        lastPrune: history.lastPrune || undefined,
-                    },
-                    ...(syncSummary ? { synchronization: {
-                            operations: syncSummary.sync,
-                            health: syncSummary.health,
-                        } } : {}),
-                    timestamp: new Date().toISOString(),
-                }
-            });
-        }
-        catch (error) {
-            reply.status(500).send({
-                success: false,
-                error: { code: 'METRICS_FAILED', message: error instanceof Error ? error.message : 'Failed to collect metrics' }
-            });
-        }
-    });
-    // Admin alias
-    app.get('/admin/metrics', forwardTo('GET', '/admin/metrics', '/metrics'));
-    // GET /api/v1/admin/index-health - Graph index presence and expected coverage
-    app.get('/index-health', async (_request, reply) => {
-        try {
-            const health = await kgService.getIndexHealth();
-            reply.send({ success: true, data: health });
-        }
-        catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'INDEX_HEALTH_FAILED', message: error instanceof Error ? error.message : 'Failed to fetch index health' } });
-        }
-    });
-    app.get('/admin/index-health', forwardTo('GET', '/admin/index-health', '/index-health'));
-    // GET /api/v1/admin/benchmarks - Run preliminary graph benchmarks
-    app.get('/benchmarks', async (request, reply) => {
-        try {
-            const q = request.query || {};
-            const mode = (q.mode === 'full' ? 'full' : 'quick');
-            const results = await kgService.runBenchmarks({ mode });
-            reply.send({ success: true, data: results });
-        }
-        catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'BENCHMARKS_FAILED', message: error instanceof Error ? error.message : 'Failed to run benchmarks' } });
-        }
-    });
-    app.get('/admin/benchmarks', forwardTo('GET', '/admin/benchmarks', '/benchmarks'));
-    // POST /api/v1/admin/indexes/ensure - Best-effort creation of recommended indexes
-    app.post('/indexes/ensure', async (_request, reply) => {
-        try {
-            await kgService.ensureGraphIndexes();
-            const health = await kgService.getIndexHealth();
-            reply.send({ success: true, data: { ensured: true, health } });
-        }
-        catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'INDEX_ENSURE_FAILED', message: error instanceof Error ? error.message : 'Failed to ensure indexes' } });
-        }
-    });
-    app.post('/admin/indexes/ensure', forwardTo('POST', '/admin/indexes/ensure', '/indexes/ensure'));
-    app.get('/admin/sync-status', forwardTo('GET', '/admin/sync-status', '/sync-status'));
-    // POST /api/admin/sync/pause - Pause synchronization queue (non-destructive)
-    app.post('/sync/pause', async (request, reply) => {
-        try {
-            if (!syncCoordinator) {
-                reply.status(409).send({ success: false, error: { code: 'SYNC_UNAVAILABLE', message: 'Synchronization coordinator not available' } });
-                return;
-            }
-            if (typeof syncCoordinator.pauseSync === 'function') {
-                syncCoordinator.pauseSync();
-            }
-            else {
-                reply.status(501).send({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Pause not supported in this build' } });
-                return;
-            }
-            reply.send({ success: true, data: { paused: true, message: 'Synchronization paused' } });
-        }
-        catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'SYNC_PAUSE_FAILED', message: error instanceof Error ? error.message : 'Failed to pause sync' } });
-        }
-    });
-    // POST /api/admin/sync/resume - Resume synchronization queue
-    app.post('/sync/resume', async (request, reply) => {
-        try {
-            if (!syncCoordinator) {
-                reply.status(409).send({ success: false, error: { code: 'SYNC_UNAVAILABLE', message: 'Synchronization coordinator not available' } });
-                return;
-            }
-            if (typeof syncCoordinator.resumeSync === 'function') {
-                syncCoordinator.resumeSync();
-            }
-            else {
-                reply.status(501).send({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Resume not supported in this build' } });
-                return;
-            }
-            reply.send({ success: true, data: { paused: false, message: 'Synchronization resumed' } });
-        }
-        catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'SYNC_RESUME_FAILED', message: error instanceof Error ? error.message : 'Failed to resume sync' } });
-        }
-    });
-    // Admin-prefixed aliases for pause/resume
-    app.post('/admin/sync/pause', forwardTo('POST', '/admin/sync/pause', '/sync/pause'));
-    app.post('/admin/sync/resume', forwardTo('POST', '/admin/sync/resume', '/sync/resume'));
-    // POST /api/admin/sync - Trigger full synchronization
-    app.post('/sync', {
+    registerWithAdminAliases('post', '/sync', {
         schema: {
             body: {
                 type: 'object',
@@ -368,270 +288,259 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                     includeEmbeddings: { type: 'boolean' },
                     includeTests: { type: 'boolean' },
                     includeSecurity: { type: 'boolean' },
-                    maxConcurrency: { type: 'number', minimum: 1, maximum: 32 },
-                    timeout: { type: 'number', minimum: 1000 },
-                    batchSize: { type: 'number', minimum: 1, maximum: 1000 }
-                }
-            }
-        }
+                },
+            },
+        },
     }, async (request, reply) => {
         try {
-            const options = request.body;
-            if (!syncCoordinator) {
-                reply.status(409).send({
+            if (!syncCoordinator || typeof syncCoordinator.startFullSynchronization !== 'function') {
+                reply.status(404).send({
                     success: false,
                     error: {
                         code: 'SYNC_UNAVAILABLE',
-                        message: 'Synchronization coordinator not available'
-                    }
+                        message: 'Synchronization coordinator not available',
+                    },
                 });
                 return;
             }
-            // Trigger full synchronization
-            const operationId = await syncCoordinator.startFullSynchronization(options);
-            const result = {
-                jobId: operationId,
-                status: 'running',
-                options,
-                estimatedDuration: '5-10 minutes',
-                message: 'Synchronization started'
-            };
+            const options = (request.body && typeof request.body === 'object') ? request.body : {};
+            const jobId = await syncCoordinator.startFullSynchronization(options);
             reply.send({
                 success: true,
-                data: result
+                data: {
+                    jobId,
+                    status: 'running',
+                    options,
+                    estimatedDuration: '5-10 minutes',
+                    message: 'Full synchronization started',
+                },
             });
         }
-        catch (_a) {
+        catch (_error) {
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'SYNC_TRIGGER_FAILED',
-                    message: 'Failed to trigger synchronization'
-                }
+                    message: 'Failed to trigger synchronization',
+                },
             });
         }
     });
-    // POST /api/admin/sync/tune - Update tuning for an active sync (batchSize, maxConcurrency)
-    app.post('/sync/tune', {
-        schema: {
-            body: {
-                type: 'object',
-                required: ['jobId'],
-                properties: {
-                    jobId: { type: 'string' },
-                    batchSize: { type: 'number', minimum: 1, maximum: 5000 },
-                    maxConcurrency: { type: 'number', minimum: 1, maximum: 64 }
-                }
-            }
-        }
-    }, async (request, reply) => {
-        var _a, _b;
-        try {
-            if (!syncCoordinator) {
-                reply.status(409).send({ success: false, error: { code: 'SYNC_UNAVAILABLE', message: 'Synchronization coordinator not available' } });
-                return;
-            }
-            const { jobId, batchSize, maxConcurrency } = request.body;
-            const ok = (_b = (_a = syncCoordinator).updateTuning) === null || _b === void 0 ? void 0 : _b.call(_a, jobId, { batchSize, maxConcurrency });
-            if (!ok) {
-                reply.status(404).send({ success: false, error: { code: 'OP_NOT_FOUND', message: 'Operation not active or not found' } });
-                return;
-            }
-            reply.send({ success: true, data: { jobId, batchSize, maxConcurrency } });
-        }
-        catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'SYNC_TUNE_FAILED', message: error instanceof Error ? error.message : 'Failed to update tuning' } });
-        }
-    });
-    app.post('/admin/sync', forwardTo('POST', '/admin/sync', '/sync'));
-    // GET /api/analytics - Get system analytics
-    app.get('/analytics', {
+    registerWithAdminAliases('get', '/analytics', {
         schema: {
             querystring: {
                 type: 'object',
                 properties: {
                     since: { type: 'string', format: 'date-time' },
-                    until: { type: 'string', format: 'date-time' }
-                }
-            }
-        }
+                    until: { type: 'string', format: 'date-time' },
+                },
+            },
+        },
     }, async (request, reply) => {
+        var _a, _b, _c, _d;
         try {
-            const { since, until } = request.query;
-            const periodStart = since ? new Date(since) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // 7 days ago
-            const periodEnd = until ? new Date(until) : new Date();
-            // Get content analytics from knowledge graph
-            const entitiesResult = await kgService.listEntities({ limit: 1000 });
-            const relationshipsResult = await kgService.listRelationships({ limit: 1000 });
-            // Calculate growth rate (simplified - would need historical data for real growth)
-            const growthRate = 0; // Placeholder - would calculate from historical data
-            // Find most active domains (simplified - based on file paths)
+            const query = (_a = request.query) !== null && _a !== void 0 ? _a : {};
+            const since = (_b = toDate(query.since)) !== null && _b !== void 0 ? _b : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            const until = (_c = toDate(query.until)) !== null && _c !== void 0 ? _c : new Date();
+            const listEntities = kgService.listEntities;
+            const listRelationships = kgService.listRelationships;
+            const entitiesResult = typeof listEntities === 'function'
+                ? await listEntities.call(kgService, { limit: 1000 })
+                : { entities: [], total: 0 };
+            const relationshipsResult = typeof listRelationships === 'function'
+                ? await listRelationships.call(kgService, { limit: 1000 })
+                : { entities: [], total: 0 };
+            const entities = Array.isArray(entitiesResult === null || entitiesResult === void 0 ? void 0 : entitiesResult.entities) ? entitiesResult.entities : [];
+            const totalEntities = typeof (entitiesResult === null || entitiesResult === void 0 ? void 0 : entitiesResult.total) === 'number' ? entitiesResult.total : entities.length;
+            const totalRelationships = typeof (relationshipsResult === null || relationshipsResult === void 0 ? void 0 : relationshipsResult.total) === 'number'
+                ? relationshipsResult.total
+                : Array.isArray(relationshipsResult === null || relationshipsResult === void 0 ? void 0 : relationshipsResult.entities)
+                    ? relationshipsResult.entities.length
+                    : 0;
             const domainCounts = new Map();
-            for (const entity of entitiesResult.entities) {
-                if (entity.type === 'file' && 'path' in entity && typeof entity.path === 'string') {
-                    const path = entity.path;
-                    const domain = path.split('/')[1] || 'root'; // Extract first directory
-                    domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
+            for (const entity of entities) {
+                if (entity && entity.type === 'file' && typeof entity.path === 'string') {
+                    const [, domain = 'root'] = entity.path.split('/');
+                    domainCounts.set(domain, ((_d = domainCounts.get(domain)) !== null && _d !== void 0 ? _d : 0) + 1);
                 }
             }
             const mostActiveDomains = Array.from(domainCounts.entries())
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 5)
                 .map(([domain]) => domain);
-            // Get sync performance metrics
+            const getHealthMetrics = syncMonitor === null || syncMonitor === void 0 ? void 0 : syncMonitor.getHealthMetrics;
             let averageResponseTime = 0;
             let p95ResponseTime = 0;
             let errorRate = 0;
-            if (syncMonitor) {
+            if (typeof getHealthMetrics === 'function') {
                 try {
-                    const metrics = syncMonitor.getHealthMetrics();
-                    // Calculate approximate response time based on last sync time
-                    averageResponseTime = Date.now() - metrics.lastSyncTime.getTime();
-                    p95ResponseTime = averageResponseTime * 1.5; // Simplified P95 calculation
-                    errorRate = metrics.consecutiveFailures / Math.max(metrics.activeOperations + metrics.consecutiveFailures, 1);
+                    const metrics = getHealthMetrics.call(syncMonitor);
+                    const lastSync = (metrics === null || metrics === void 0 ? void 0 : metrics.lastSyncTime) instanceof Date
+                        ? metrics.lastSyncTime
+                        : toDate(metrics === null || metrics === void 0 ? void 0 : metrics.lastSyncTime);
+                    if (lastSync) {
+                        averageResponseTime = Math.max(Date.now() - lastSync.getTime(), 0);
+                        p95ResponseTime = averageResponseTime * 1.5;
+                    }
+                    const active = typeof (metrics === null || metrics === void 0 ? void 0 : metrics.activeOperations) === 'number' ? metrics.activeOperations : 0;
+                    const failures = typeof (metrics === null || metrics === void 0 ? void 0 : metrics.consecutiveFailures) === 'number' ? metrics.consecutiveFailures : 0;
+                    errorRate = failures / Math.max(active + failures, 1);
                 }
                 catch (error) {
                     console.warn('Could not retrieve sync performance metrics:', error);
                 }
             }
-            const analytics = {
-                period: {
-                    since: periodStart,
-                    until: periodEnd
-                },
-                usage: {
-                    apiCalls: 0, // Would need request logging to track this
-                    uniqueUsers: 1, // Simplified - would track actual users
-                    popularEndpoints: {
-                        '/api/v1/graph/search': 45,
-                        '/api/v1/graph/entities': 32,
-                        '/api/v1/code/validate': 28,
-                        '/health': 15
-                    }
-                },
-                performance: {
-                    averageResponseTime,
-                    p95ResponseTime,
-                    errorRate
-                },
-                content: {
-                    totalEntities: entitiesResult.total,
-                    totalRelationships: relationshipsResult.total,
-                    growthRate,
-                    mostActiveDomains
-                }
-            };
             reply.send({
                 success: true,
-                data: analytics
+                data: {
+                    period: { since, until },
+                    usage: {
+                        apiCalls: 0,
+                        uniqueUsers: 1,
+                        popularEndpoints: {
+                            '/api/v1/graph/search': 45,
+                            '/api/v1/graph/entities': 32,
+                            '/api/v1/code/validate': 28,
+                            '/health': 15,
+                        },
+                    },
+                    performance: {
+                        averageResponseTime,
+                        p95ResponseTime,
+                        errorRate,
+                    },
+                    content: {
+                        totalEntities,
+                        totalRelationships,
+                        growthRate: 0,
+                        mostActiveDomains,
+                    },
+                },
             });
         }
         catch (error) {
+            const detailMessage = error instanceof Error ? error.message : 'Unknown error';
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'ANALYTICS_FAILED',
                     message: 'Failed to generate analytics',
-                    details: error instanceof Error ? error.message : 'Unknown error'
-                }
-            });
-        }
-    });
-    app.get('/admin/analytics', forwardTo('GET', '/admin/analytics', '/analytics'));
-    // GET /api/v1/history/config - Retrieve history configuration
-    app.get('/history/config', async (_request, reply) => {
-        var _a;
-        try {
-            const enabledFeature = ((configurationService === null || configurationService === void 0 ? void 0 : configurationService.getSystemConfiguration)
-                ? (await configurationService.getSystemConfiguration()).features.history
-                : ((process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false'));
-            const hc = ((_a = configurationService === null || configurationService === void 0 ? void 0 : configurationService.getHistoryConfig) === null || _a === void 0 ? void 0 : _a.call(configurationService))
-                || {
-                    enabled: enabledFeature,
-                    retentionDays: parseInt(process.env.HISTORY_RETENTION_DAYS || '30', 10),
-                    checkpoint: {
-                        hops: parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '2', 10),
-                        embedVersions: (process.env.HISTORY_EMBED_VERSIONS || 'false').toLowerCase() === 'true',
-                    }
-                };
-            reply.send({ success: true, data: { ...hc, featureEnabled: enabledFeature } });
-        }
-        catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'HISTORY_CONFIG_FAILED', message: error instanceof Error ? error.message : 'Failed to read history config' } });
-        }
-    });
-    // PUT /api/v1/history/config - Update history configuration
-    app.put('/history/config', {
-        schema: {
-            body: {
-                type: 'object',
-                properties: {
-                    enabled: { type: 'boolean' },
-                    retentionDays: { type: 'number', minimum: 1 },
-                    checkpoint: {
-                        type: 'object',
-                        properties: {
-                            hops: { type: 'number', minimum: 1, maximum: 5 },
-                            embedVersions: { type: 'boolean' }
-                        }
-                    },
-                    incident: {
-                        type: 'object',
-                        properties: {
-                            enabled: { type: 'boolean' },
-                            hops: { type: 'number', minimum: 1, maximum: 5 }
-                        }
-                    }
-                }
-            }
-        }
-    }, async (request, reply) => {
-        try {
-            if (!(configurationService === null || configurationService === void 0 ? void 0 : configurationService.updateHistoryConfig)) {
-                reply.status(501).send({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Runtime config updates not supported in this build' } });
-                return;
-            }
-            const updates = request.body;
-            const updated = configurationService.updateHistoryConfig(updates);
-            reply.send({ success: true, data: updated });
-        }
-        catch (error) {
-            reply.status(400).send({ success: false, error: { code: 'HISTORY_CONFIG_UPDATE_FAILED', message: error instanceof Error ? error.message : 'Failed to update history config' } });
-        }
-    });
-    // Admin aliases
-    app.get('/admin/history/config', forwardTo('GET', '/admin/history/config', '/history/config'));
-    app.put('/admin/history/config', forwardTo('POST', '/admin/history/config', '/history/config'));
-    // POST /api/v1/admin/history/prune - Trigger history pruning
-    app.post('/history/prune', {
-        schema: {
-            body: {
-                type: 'object',
-                properties: {
-                    retentionDays: { type: 'number', minimum: 1, default: 30 },
-                    dryRun: { type: 'boolean', default: false }
+                    details: `Cannot destructure analytics payload: ${detailMessage}`,
                 },
-                required: []
-            }
-        }
-    }, async (request, reply) => {
-        try {
-            const { retentionDays, dryRun } = (request.body || {});
-            const days = typeof retentionDays === 'number' && retentionDays > 0 ? Math.floor(retentionDays) : 30;
-            const result = await kgService.pruneHistory(days, { dryRun: !!dryRun });
-            reply.send({ success: true, data: { ...result, retentionDays: days, dryRun: !!dryRun } });
-        }
-        catch (error) {
-            reply.status(500).send({
-                success: false,
-                error: { code: 'HISTORY_PRUNE_FAILED', message: error instanceof Error ? error.message : 'Failed to prune history' }
             });
         }
     });
-    // Admin alias for prune endpoint
-    app.post('/admin/history/prune', forwardTo('POST', '/admin/history/prune', '/history/prune'));
-    // POST /api/admin/backup - Create system backup
-    app.post('/backup', {
+    const kgAdmin = kgService;
+    if (typeof kgAdmin.getHistoryMetrics === 'function') {
+        const metricsHandler = async (_request, reply) => {
+            try {
+                const history = await kgAdmin.getHistoryMetrics.call(kgService);
+                const getSyncMetrics = syncMonitor === null || syncMonitor === void 0 ? void 0 : syncMonitor.getSyncMetrics;
+                const getHealthMetrics = syncMonitor === null || syncMonitor === void 0 ? void 0 : syncMonitor.getHealthMetrics;
+                const syncSummary = typeof getSyncMetrics === 'function'
+                    ? {
+                        sync: getSyncMetrics.call(syncMonitor),
+                        health: typeof getHealthMetrics === 'function'
+                            ? getHealthMetrics.call(syncMonitor)
+                            : undefined,
+                    }
+                    : undefined;
+                reply.send({
+                    success: true,
+                    data: {
+                        history,
+                        syncSummary,
+                        maintenance: MaintenanceMetrics.getInstance().getSummary(),
+                    },
+                });
+            }
+            catch (error) {
+                reply.status(500).send({
+                    success: false,
+                    error: {
+                        code: 'METRICS_FAILED',
+                        message: error instanceof Error ? error.message : 'Failed to retrieve metrics',
+                    },
+                });
+            }
+        };
+        app.get('/metrics', metricsHandler);
+        app.get('/admin/metrics', metricsHandler);
+    }
+    app.get('/maintenance/metrics', async (_request, reply) => {
+        const metrics = MaintenanceMetrics.getInstance().getSummary();
+        reply.send({ success: true, data: metrics });
+    });
+    app.get('/maintenance/metrics/prometheus', async (_request, reply) => {
+        const metricsText = MaintenanceMetrics.getInstance().toPrometheus();
+        reply
+            .header('Content-Type', 'text/plain; version=0.0.4')
+            .send(metricsText);
+    });
+    if (typeof kgAdmin.getIndexHealth === 'function') {
+        const indexHealthHandler = async (_request, reply) => {
+            try {
+                const health = await kgAdmin.getIndexHealth.call(kgService);
+                reply.send({ success: true, data: health });
+            }
+            catch (error) {
+                reply.status(500).send({
+                    success: false,
+                    error: {
+                        code: 'INDEX_HEALTH_FAILED',
+                        message: error instanceof Error ? error.message : 'Failed to fetch index health',
+                    },
+                });
+            }
+        };
+        app.get('/index-health', indexHealthHandler);
+        app.get('/admin/index-health', indexHealthHandler);
+    }
+    if (typeof kgAdmin.ensureGraphIndexes === 'function') {
+        const ensureIndexesHandler = async (_request, reply) => {
+            try {
+                await kgAdmin.ensureGraphIndexes.call(kgService);
+                const health = typeof kgAdmin.getIndexHealth === 'function'
+                    ? await kgAdmin.getIndexHealth.call(kgService)
+                    : undefined;
+                reply.send({ success: true, data: { ensured: true, health } });
+            }
+            catch (error) {
+                reply.status(500).send({
+                    success: false,
+                    error: {
+                        code: 'INDEX_ENSURE_FAILED',
+                        message: error instanceof Error ? error.message : 'Failed to ensure indexes',
+                    },
+                });
+            }
+        };
+        app.post('/indexes/ensure', ensureIndexesHandler);
+        app.post('/admin/indexes/ensure', ensureIndexesHandler);
+    }
+    if (typeof kgAdmin.runBenchmarks === 'function') {
+        const benchmarksHandler = async (request, reply) => {
+            var _a;
+            try {
+                const query = (_a = request.query) !== null && _a !== void 0 ? _a : {};
+                const mode = query.mode === 'full' ? 'full' : 'quick';
+                const results = await kgAdmin.runBenchmarks.call(kgService, { mode });
+                reply.send({ success: true, data: { ...results, mode } });
+            }
+            catch (error) {
+                reply.status(500).send({
+                    success: false,
+                    error: {
+                        code: 'BENCHMARKS_FAILED',
+                        message: error instanceof Error ? error.message : 'Failed to run benchmarks',
+                    },
+                });
+            }
+        };
+        app.get('/benchmarks', benchmarksHandler);
+        app.get('/admin/benchmarks', benchmarksHandler);
+    }
+    registerWithAdminAliases('post', '/backup', {
         schema: {
             body: {
                 type: 'object',
@@ -640,93 +549,260 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                     includeData: { type: 'boolean', default: true },
                     includeConfig: { type: 'boolean', default: true },
                     compression: { type: 'boolean', default: true },
-                    destination: { type: 'string' }
-                }
-            }
-        }
+                    destination: { type: 'string' },
+                },
+            },
+        },
     }, async (request, reply) => {
-        var _a, _b, _c;
+        var _a, _b, _c, _d, _e;
         try {
-            if (!backupService) {
+            if (!backupService || typeof backupService.createBackup !== 'function') {
                 reply.status(503).send({
                     success: false,
                     error: {
                         code: 'SERVICE_UNAVAILABLE',
-                        message: 'Backup service not available'
-                    }
+                        message: 'Backup service not available',
+                    },
                 });
                 return;
             }
-            const options = request.body;
-            const result = await backupService.createBackup({
-                type: options.type || 'full',
-                includeData: (_a = options.includeData) !== null && _a !== void 0 ? _a : true,
-                includeConfig: (_b = options.includeConfig) !== null && _b !== void 0 ? _b : true,
-                compression: (_c = options.compression) !== null && _c !== void 0 ? _c : true,
-                destination: options.destination
-            });
-            reply.send({
-                success: true,
-                data: result
-            });
+            const options = (_a = request.body) !== null && _a !== void 0 ? _a : {};
+            const payload = {
+                type: (_b = options.type) !== null && _b !== void 0 ? _b : 'full',
+                includeData: (_c = options.includeData) !== null && _c !== void 0 ? _c : true,
+                includeConfig: (_d = options.includeConfig) !== null && _d !== void 0 ? _d : true,
+                compression: (_e = options.compression) !== null && _e !== void 0 ? _e : true,
+                destination: options.destination,
+            };
+            const result = await backupService.createBackup(payload);
+            reply.send({ success: true, data: result });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'BACKUP_FAILED',
-                    message: error instanceof Error ? error.message : 'Failed to create backup'
-                }
+                    message: error instanceof Error ? error.message : 'Backup creation failed',
+                },
             });
         }
     });
-    app.post('/admin/backup', forwardTo('POST', '/admin/backup', '/backup'));
-    // POST /api/admin/restore - Restore from backup
-    app.post('/restore', {
+    registerWithAdminAliases('post', '/restore/preview', {
         schema: {
             body: {
                 type: 'object',
+                required: ['backupId'],
                 properties: {
                     backupId: { type: 'string' },
-                    dryRun: { type: 'boolean', default: true }
+                    validateIntegrity: { type: 'boolean', default: true },
+                    destination: { type: 'string' },
+                    storageProviderId: { type: 'string' },
                 },
-                required: ['backupId']
-            }
-        }
+            },
+        },
     }, async (request, reply) => {
+        var _a, _b, _c, _d;
         try {
-            if (!backupService) {
+            if (!backupService || typeof backupService.restoreBackup !== 'function') {
                 reply.status(503).send({
                     success: false,
                     error: {
                         code: 'SERVICE_UNAVAILABLE',
-                        message: 'Backup service not available'
-                    }
+                        message: 'Backup service not available',
+                    },
                 });
                 return;
             }
-            const { backupId, dryRun } = request.body;
+            const body = (_a = request.body) !== null && _a !== void 0 ? _a : {};
+            const backupId = body.backupId;
+            if (typeof backupId !== 'string' || backupId.trim().length === 0) {
+                reply.status(400).send({
+                    success: false,
+                    error: {
+                        code: 'INVALID_BACKUP_ID',
+                        message: 'A valid backupId must be provided',
+                    },
+                });
+                return;
+            }
             const result = await backupService.restoreBackup(backupId, {
-                dryRun: dryRun !== null && dryRun !== void 0 ? dryRun : true
+                dryRun: true,
+                validateIntegrity: (_b = body.validateIntegrity) !== null && _b !== void 0 ? _b : true,
+                destination: body.destination,
+                storageProviderId: body.storageProviderId,
+                requestedBy: (_d = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.user) === null || _d === void 0 ? void 0 : _d.userId,
+            });
+            const statusCode = result.success
+                ? 200
+                : result.token
+                    ? 202
+                    : 409;
+            reply.status(statusCode).send({
+                success: result.success,
+                data: result,
+                metadata: {
+                    status: result.status,
+                    tokenExpiresAt: result.tokenExpiresAt,
+                    requiresApproval: result.requiresApproval,
+                },
+            });
+        }
+        catch (error) {
+            sendMaintenanceError(reply, error, {
+                code: 'RESTORE_PREVIEW_FAILED',
+                message: 'Failed to prepare restore preview',
+            });
+        }
+    });
+    registerWithAdminAliases('post', '/restore/confirm', {
+        schema: {
+            body: {
+                type: 'object',
+                required: ['backupId', 'restoreToken'],
+                properties: {
+                    backupId: { type: 'string' },
+                    restoreToken: { type: 'string' },
+                    validateIntegrity: { type: 'boolean', default: false },
+                    destination: { type: 'string' },
+                    storageProviderId: { type: 'string' },
+                },
+            },
+        },
+    }, async (request, reply) => {
+        var _a, _b, _c, _d;
+        try {
+            if (!backupService || typeof backupService.restoreBackup !== 'function') {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Backup service not available',
+                    },
+                });
+                return;
+            }
+            const body = (_a = request.body) !== null && _a !== void 0 ? _a : {};
+            const backupId = body.backupId;
+            const restoreToken = body.restoreToken;
+            if (typeof backupId !== 'string' || typeof restoreToken !== 'string') {
+                reply.status(400).send({
+                    success: false,
+                    error: {
+                        code: 'INVALID_RESTORE_REQUEST',
+                        message: 'backupId and restoreToken are required',
+                    },
+                });
+                return;
+            }
+            const result = await backupService.restoreBackup(backupId, {
+                dryRun: false,
+                restoreToken,
+                validateIntegrity: (_b = body.validateIntegrity) !== null && _b !== void 0 ? _b : false,
+                destination: body.destination,
+                storageProviderId: body.storageProviderId,
+                requestedBy: (_d = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.user) === null || _d === void 0 ? void 0 : _d.userId,
+            });
+            reply.status(result.success ? 200 : 500).send({
+                success: result.success,
+                data: result,
+            });
+        }
+        catch (error) {
+            sendMaintenanceError(reply, error, {
+                code: 'RESTORE_FAILED',
+                message: 'Failed to restore from backup',
+            });
+        }
+    });
+    registerWithAdminAliases('post', '/restore/approve', {
+        schema: {
+            body: {
+                type: 'object',
+                required: ['token'],
+                properties: {
+                    token: { type: 'string' },
+                    reason: { type: 'string' },
+                },
+            },
+        },
+    }, async (request, reply) => {
+        var _a, _b, _c, _d;
+        try {
+            if (!backupService || typeof backupService.approveRestore !== 'function') {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Backup service not available',
+                    },
+                });
+                return;
+            }
+            const body = (_a = request.body) !== null && _a !== void 0 ? _a : {};
+            const token = body.token;
+            if (typeof token !== 'string' || token.trim().length === 0) {
+                reply.status(400).send({
+                    success: false,
+                    error: {
+                        code: 'INVALID_RESTORE_TOKEN',
+                        message: 'A valid token is required',
+                    },
+                });
+                return;
+            }
+            const approved = backupService.approveRestore({
+                token,
+                reason: body.reason,
+                approvedBy: (_d = (_c = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.user) === null || _c === void 0 ? void 0 : _c.userId) !== null && _d !== void 0 ? _d : 'unknown',
             });
             reply.send({
                 success: true,
-                data: result
+                data: {
+                    token: approved.token,
+                    approvedAt: approved.approvedAt,
+                    approvedBy: approved.approvedBy,
+                    expiresAt: approved.expiresAt,
+                },
+            });
+        }
+        catch (error) {
+            sendMaintenanceError(reply, error, {
+                code: 'RESTORE_APPROVAL_FAILED',
+                message: 'Failed to approve restore token',
+            });
+        }
+    });
+    registerWithAdminAliases('get', '/logs/health', async (_request, reply) => {
+        try {
+            if (!loggingService || typeof loggingService.getHealthMetrics !== 'function') {
+                reply.status(503).send({
+                    success: false,
+                    error: {
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Logging service not available',
+                    },
+                });
+                return;
+            }
+            const metrics = loggingService.getHealthMetrics();
+            reply.send({
+                success: true,
+                data: metrics,
             });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
-                    code: 'RESTORE_FAILED',
-                    message: error instanceof Error ? error.message : 'Failed to restore from backup'
-                }
+                    code: 'LOG_HEALTH_FAILED',
+                    message: error instanceof Error
+                        ? error.message
+                        : 'Failed to retrieve logging health metrics',
+                },
             });
         }
     });
-    app.post('/admin/restore', forwardTo('POST', '/admin/restore', '/restore'));
-    // GET /api/admin/logs - Get system logs
-    app.get('/logs', {
+    registerWithAdminAliases('get', '/logs', {
         schema: {
             querystring: {
                 type: 'object',
@@ -734,41 +810,43 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                     level: { type: 'string', enum: ['error', 'warn', 'info', 'debug'] },
                     since: { type: 'string', format: 'date-time' },
                     until: { type: 'string', format: 'date-time' },
-                    limit: { type: 'number', default: 100 },
+                    limit: { type: 'number' },
                     component: { type: 'string' },
-                    search: { type: 'string' }
-                }
-            }
-        }
+                    search: { type: 'string' },
+                },
+            },
+        },
     }, async (request, reply) => {
+        var _a;
         try {
-            if (!loggingService) {
+            if (!loggingService || typeof loggingService.queryLogs !== 'function') {
                 reply.status(503).send({
                     success: false,
                     error: {
                         code: 'SERVICE_UNAVAILABLE',
-                        message: 'Logging service not available'
-                    }
+                        message: 'Logging service not available',
+                    },
                 });
                 return;
             }
-            const { level, since, until, limit, component, search } = request.query;
-            const query = {
-                level,
-                component,
-                since: since ? new Date(since) : undefined,
-                until: until ? new Date(until) : undefined,
-                limit,
-                search
+            const query = (_a = request.query) !== null && _a !== void 0 ? _a : {};
+            const parsedQuery = {
+                level: query.level,
+                component: query.component,
+                since: toDate(query.since),
+                until: toDate(query.until),
+                limit: normaliseLimit(query.limit),
+                search: query.search,
             };
-            const logs = await loggingService.queryLogs(query);
+            const logs = await loggingService.queryLogs(parsedQuery);
+            const count = Array.isArray(logs) ? logs.length : 0;
             reply.send({
                 success: true,
                 data: logs,
                 metadata: {
-                    count: logs.length,
-                    query
-                }
+                    count,
+                    query: parsedQuery,
+                },
             });
         }
         catch (error) {
@@ -776,65 +854,68 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 success: false,
                 error: {
                     code: 'LOGS_FAILED',
-                    message: error instanceof Error ? error.message : 'Failed to retrieve system logs'
-                }
+                    message: error instanceof Error ? error.message : 'Failed to retrieve logs',
+                },
             });
         }
     });
-    app.get('/admin/logs', forwardTo('GET', '/admin/logs', '/logs'));
-    // POST /api/admin/maintenance - Run maintenance tasks
-    app.post('/maintenance', {
+    registerWithAdminAliases('post', '/maintenance', {
         schema: {
             body: {
                 type: 'object',
                 properties: {
-                    tasks: {
-                        type: 'array',
-                        items: {
-                            type: 'string',
-                            enum: ['cleanup', 'optimize', 'reindex', 'validate']
-                        }
-                    },
-                    schedule: { type: 'string', enum: ['immediate', 'scheduled'] }
+                    tasks: { type: 'array', items: { type: 'string' } },
+                    schedule: { type: 'string' },
                 },
-                required: ['tasks']
-            }
-        }
+            },
+        },
     }, async (request, reply) => {
+        var _a, _b;
         try {
-            if (!maintenanceService) {
+            if (!maintenanceService || typeof maintenanceService.runMaintenanceTask !== 'function') {
                 reply.status(503).send({
                     success: false,
                     error: {
                         code: 'SERVICE_UNAVAILABLE',
-                        message: 'Maintenance service not available'
-                    }
+                        message: 'Maintenance service not available',
+                    },
                 });
                 return;
             }
-            const { tasks, schedule } = request.body;
+            const body = (_a = request.body) !== null && _a !== void 0 ? _a : {};
+            const tasks = ensureArray(body.tasks, ['cleanup']);
+            const schedule = typeof body.schedule === 'string' ? body.schedule : 'immediate';
             const results = [];
-            for (const taskType of tasks) {
+            for (const task of tasks) {
                 try {
-                    const result = await maintenanceService.runMaintenanceTask(taskType);
-                    results.push(result);
+                    const outcome = await maintenanceService.runMaintenanceTask(task);
+                    results.push(outcome);
                 }
                 catch (error) {
                     results.push({
-                        taskId: `${taskType}_${Date.now()}`,
+                        task,
+                        taskId: `${task}_${Date.now()}`,
                         success: false,
-                        error: error instanceof Error ? error.message : 'Unknown error'
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        statusCode: error === null || error === void 0 ? void 0 : error.statusCode,
                     });
                 }
             }
-            reply.send({
-                success: true,
+            const hasFailure = results.some((item) => item && item.success === false);
+            const failureStatuses = results
+                .filter((item) => item && item.success === false && item.statusCode)
+                .map((item) => item.statusCode);
+            const statusCode = hasFailure
+                ? (_b = failureStatuses[0]) !== null && _b !== void 0 ? _b : 207
+                : 200;
+            reply.status(statusCode).send({
+                success: !hasFailure,
                 data: {
+                    status: hasFailure ? 'completed-with-errors' : 'completed',
+                    schedule,
                     tasks: results,
-                    schedule: schedule || 'immediate',
-                    status: 'completed',
-                    completedAt: new Date().toISOString()
-                }
+                    completedAt: new Date(),
+                },
             });
         }
         catch (error) {
@@ -842,110 +923,119 @@ export async function registerAdminRoutes(app, kgService, dbService, fileWatcher
                 success: false,
                 error: {
                     code: 'MAINTENANCE_FAILED',
-                    message: error instanceof Error ? error.message : 'Failed to run maintenance tasks'
-                }
+                    message: error instanceof Error ? error.message : 'Failed to run maintenance tasks',
+                },
             });
         }
     });
-    // GET /api/admin/config - Get system configuration
-    app.get('/config', async (request, reply) => {
+    if (typeof kgAdmin.pruneHistory === 'function') {
+        const historyPruneHandler = async (request, reply) => {
+            var _a, _b;
+            try {
+                const body = (_a = request.body) !== null && _a !== void 0 ? _a : {};
+                const retentionDaysRaw = body.retentionDays;
+                const retentionDays = typeof retentionDaysRaw === 'number' && retentionDaysRaw > 0
+                    ? Math.floor(retentionDaysRaw)
+                    : 30;
+                const dryRun = (_b = body.dryRun) !== null && _b !== void 0 ? _b : false;
+                const result = await kgAdmin.pruneHistory.call(kgService, retentionDays, { dryRun });
+                reply.send({
+                    success: true,
+                    data: {
+                        ...(result !== null && result !== void 0 ? result : {}),
+                        retentionDays,
+                        dryRun,
+                    },
+                });
+            }
+            catch (error) {
+                if ((error === null || error === void 0 ? void 0 : error.statusCode) === 204) {
+                    reply.status(204).send();
+                    return;
+                }
+                reply.status(500).send({
+                    success: false,
+                    error: {
+                        code: 'HISTORY_PRUNE_FAILED',
+                        message: error instanceof Error ? error.message : 'Failed to prune history',
+                    },
+                });
+            }
+        };
+        registerWithAdminAliases('post', '/history/prune', {
+            schema: {
+                body: {
+                    type: 'object',
+                    properties: {
+                        retentionDays: { type: 'number', minimum: 1 },
+                        dryRun: { type: 'boolean' },
+                    },
+                },
+            },
+        }, historyPruneHandler);
+    }
+    registerWithAdminAliases('get', '/config', async (_request, reply) => {
         try {
-            if (!configurationService) {
+            if (!configurationService || typeof configurationService.getSystemConfiguration !== 'function') {
                 reply.status(503).send({
                     success: false,
                     error: {
                         code: 'SERVICE_UNAVAILABLE',
-                        message: 'Configuration service not available'
-                    }
+                        message: 'Configuration service not available',
+                    },
                 });
                 return;
             }
             const config = await configurationService.getSystemConfiguration();
-            reply.send({
-                success: true,
-                data: config
-            });
+            reply.send({ success: true, data: config });
         }
         catch (error) {
             reply.status(500).send({
                 success: false,
                 error: {
                     code: 'CONFIG_FAILED',
-                    message: error instanceof Error ? error.message : 'Failed to retrieve system configuration'
-                }
+                    message: error instanceof Error ? error.message : 'Failed to retrieve configuration',
+                },
             });
         }
     });
-    // PUT /api/admin/config - Update system configuration
-    if (typeof app.put === 'function') {
-        app.put('/config', {
-            schema: {
-                body: {
-                    type: 'object',
-                    properties: {
-                        performance: {
-                            type: 'object',
-                            properties: {
-                                maxConcurrentSync: { type: 'number' },
-                                cacheSize: { type: 'number' },
-                                requestTimeout: { type: 'number' }
-                            }
-                        },
-                        security: {
-                            type: 'object',
-                            properties: {
-                                rateLimiting: { type: 'boolean' }
-                            }
-                        }
-                    }
-                }
-            }
-        }, async (request, reply) => {
-            try {
-                if (!configurationService) {
-                    reply.status(503).send({
-                        success: false,
-                        error: {
-                            code: 'SERVICE_UNAVAILABLE',
-                            message: 'Configuration service not available'
-                        }
-                    });
-                    return;
-                }
-                const updates = request.body;
-                await configurationService.updateConfiguration(updates);
-                reply.send({
-                    success: true,
-                    message: 'Configuration updated successfully'
-                });
-            }
-            catch (error) {
-                const message = error instanceof Error ? error.message : 'Failed to update system configuration';
-                const validationPatterns = [
-                    'must be at least',
-                    'cannot be negative',
-                    'must be at least 1000ms',
-                ];
-                if (error instanceof Error &&
-                    validationPatterns.some((pattern) => message.includes(pattern))) {
-                    reply.status(400).send({
-                        success: false,
-                        error: {
-                            code: 'CONFIG_VALIDATION_FAILED',
-                            message,
-                        }
-                    });
-                    return;
-                }
-                reply.status(500).send({
+    registerWithAdminAliases('put', '/config', {
+        schema: {
+            body: {
+                type: 'object',
+                additionalProperties: true,
+            },
+        },
+    }, async (request, reply) => {
+        try {
+            if (!configurationService || typeof configurationService.updateConfiguration !== 'function') {
+                reply.status(503).send({
                     success: false,
                     error: {
-                        code: 'CONFIG_UPDATE_FAILED',
-                        message,
-                    }
+                        code: 'SERVICE_UNAVAILABLE',
+                        message: 'Configuration service not available',
+                    },
                 });
+                return;
             }
-        });
-    }
+            const updates = (request.body && typeof request.body === 'object') ? request.body : {};
+            await configurationService.updateConfiguration(updates);
+            reply.send({
+                success: true,
+                message: 'Configuration updated successfully',
+            });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update configuration';
+            const isValidation = message.toLowerCase().includes('must');
+            reply.status(isValidation ? 400 : 500).send({
+                success: false,
+                error: {
+                    code: isValidation ? 'CONFIG_VALIDATION_FAILED' : 'CONFIG_UPDATE_FAILED',
+                    message,
+                },
+            });
+        }
+    });
 }
 //# sourceMappingURL=admin.js.map

@@ -1,6 +1,8 @@
 /**
  * Noise/heuristics configuration with env overrides.
  */
+export declare const floatFromEnv: (key: string, defaultValue: number, min: number, max: number) => number;
+export declare const intFromEnv: (key: string, defaultValue: number, min: number, max: number) => number;
 export declare const noiseConfig: {
     AST_MIN_NAME_LENGTH: number;
     AST_STOPLIST_EXTRA: Set<string>;
@@ -26,5 +28,13 @@ export declare const noiseConfig: {
     PERF_DEGRADING_MIN_DELTA_MS: number;
     PERF_IMPACT_AVG_MS: number;
     PERF_IMPACT_P95_MS: number;
+    PERF_SEVERITY_PERCENT_CRITICAL: number;
+    PERF_SEVERITY_PERCENT_HIGH: number;
+    PERF_SEVERITY_PERCENT_MEDIUM: number;
+    PERF_SEVERITY_PERCENT_LOW: number;
+    PERF_SEVERITY_DELTA_CRITICAL: number;
+    PERF_SEVERITY_DELTA_HIGH: number;
+    PERF_SEVERITY_DELTA_MEDIUM: number;
+    PERF_SEVERITY_DELTA_LOW: number;
 };
 //# sourceMappingURL=noise.d.ts.map

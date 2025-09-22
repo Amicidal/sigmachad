@@ -14,11 +14,11 @@ import {
   McpError,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
-import { DatabaseService } from "../services/DatabaseService.js";
-import { ASTParser } from "../services/ASTParser.js";
-import { TestEngine } from "../services/TestEngine.js";
-import { SecurityScanner } from "../services/SecurityScanner.js";
+import { KnowledgeGraphService } from "../services/knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../services/core/DatabaseService.js";
+import { ASTParser } from "../services/knowledge/ASTParser.js";
+import { TestEngine } from "../services/testing/TestEngine.js";
+import { SecurityScanner } from "../services/testing/SecurityScanner.js";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import path from "path";
@@ -29,14 +29,14 @@ import {
   SpecNotFoundError,
   TestPlanningService,
   TestPlanningValidationError,
-} from "../services/TestPlanningService.js";
+} from "../services/testing/TestPlanningService.js";
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestSpec,
 } from "../models/types.js";
 import type { CoverageMetrics, Spec } from "../models/entities.js";
-import { SpecService } from "../services/SpecService.js";
+import { SpecService } from "../services/testing/SpecService.js";
 import { resolvePerformanceHistoryOptions } from "../utils/performanceFilters.js";
 
 // MCP Tool definitions

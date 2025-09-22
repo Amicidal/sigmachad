@@ -2,8 +2,8 @@
  * API Types and Interfaces for Memento
  * Based on the comprehensive API design
  */
-import { Entity, Spec, Test, SecurityIssue, Vulnerability, CoverageMetrics } from "./entities.js";
-import { GraphRelationship, RelationshipType } from "./relationships.js";
+import { Entity, Spec, Test, SecurityIssue, Vulnerability, CoverageMetrics, Change } from "./entities.js";
+import { GraphRelationship, RelationshipType, type PerformanceMetricSample, type PerformanceSeverity, type PerformanceTrend, type SessionRelationship } from "./relationships.js";
 export interface APIResponse<T = any> {
     success: boolean;
     data?: T;
@@ -59,6 +59,206 @@ export interface TemporalGraphQuery {
     since?: Date;
     until?: Date;
     maxDepth?: number;
+}
+export interface EntityTimelineEntry {
+    versionId: string;
+    timestamp: Date;
+    hash?: string;
+    path?: string;
+    language?: string;
+    changeSetId?: string;
+    previousVersionId?: string | null;
+    changes: Array<{
+        changeId: string;
+        type: RelationshipType;
+        metadata?: Record<string, any>;
+        change?: Change;
+    }>;
+    metadata?: Record<string, any>;
+}
+export interface EntityTimelineResult {
+    entityId: string;
+    versions: EntityTimelineEntry[];
+    relationships?: RelationshipTimeline[];
+}
+export interface RelationshipTimelineSegment {
+    segmentId: string;
+    openedAt: Date;
+    closedAt?: Date | null;
+    changeSetId?: string;
+}
+export interface RelationshipTimeline {
+    relationshipId: string;
+    type: RelationshipType | string;
+    fromEntityId: string;
+    toEntityId: string;
+    active: boolean;
+    current?: RelationshipTimelineSegment;
+    segments: RelationshipTimelineSegment[];
+    lastModified?: Date;
+    temporal?: Record<string, any>;
+}
+export interface StructuralNavigationEntry {
+    entity: Entity;
+    relationship: GraphRelationship;
+}
+export interface ModuleChildrenResult {
+    modulePath: string;
+    parentId?: string;
+    children: StructuralNavigationEntry[];
+}
+export interface ModuleHistoryOptions {
+    includeInactive?: boolean;
+    limit?: number;
+    versionLimit?: number;
+}
+export interface ModuleHistoryEntitySummary {
+    id: string;
+    type?: string;
+    name?: string;
+    path?: string;
+    language?: string;
+}
+export interface ModuleHistoryRelationship {
+    relationshipId: string;
+    type: RelationshipType | string;
+    direction: "outgoing" | "incoming";
+    from: ModuleHistoryEntitySummary;
+    to: ModuleHistoryEntitySummary;
+    active: boolean;
+    current?: RelationshipTimelineSegment;
+    segments: RelationshipTimelineSegment[];
+    firstSeenAt?: Date | null;
+    lastSeenAt?: Date | null;
+    confidence?: number | null;
+    scope?: string | null;
+    metadata?: Record<string, any>;
+    temporal?: Record<string, any>;
+    lastModified?: Date;
+}
+export interface ModuleHistoryResult {
+    moduleId?: string | null;
+    modulePath: string;
+    moduleType?: string;
+    generatedAt: Date;
+    versions: EntityTimelineEntry[];
+    relationships: ModuleHistoryRelationship[];
+}
+export interface ImportEntry {
+    relationship: GraphRelationship;
+    target?: Entity | null;
+}
+export interface ListImportsResult {
+    entityId: string;
+    imports: ImportEntry[];
+}
+export interface DefinitionLookupResult {
+    symbolId: string;
+    relationship?: GraphRelationship | null;
+    source?: Entity | null;
+}
+export interface SessionChangeSummary {
+    change: Change;
+    relationships: Array<{
+        relationshipId: string;
+        type: RelationshipType;
+        entityId: string;
+        direction: "incoming" | "outgoing";
+    }>;
+    versions: Array<{
+        versionId: string;
+        entityId: string;
+        relationshipType: RelationshipType;
+    }>;
+}
+export interface SessionChangesResult {
+    sessionId: string;
+    total: number;
+    changes: SessionChangeSummary[];
+}
+export interface SessionTimelineEvent {
+    relationshipId: string;
+    type: RelationshipType;
+    fromEntityId: string;
+    toEntityId: string;
+    timestamp: Date | null;
+    sequenceNumber?: number | null;
+    actor?: string;
+    impactSeverity?: 'critical' | 'high' | 'medium' | 'low';
+    stateTransitionTo?: 'working' | 'broken' | 'unknown';
+    changeInfo?: SessionRelationship['changeInfo'];
+    impact?: SessionRelationship['impact'];
+    stateTransition?: SessionRelationship['stateTransition'];
+    metadata?: Record<string, any>;
+}
+export interface SessionTimelineSummary {
+    totalEvents: number;
+    byType: Record<string, number>;
+    bySeverity: Record<string, number>;
+    actors: Array<{
+        actor: string;
+        count: number;
+    }>;
+    firstTimestamp?: Date;
+    lastTimestamp?: Date;
+}
+export interface SessionTimelineResult {
+    sessionId: string;
+    total: number;
+    events: SessionTimelineEvent[];
+    page: {
+        limit: number;
+        offset: number;
+        count: number;
+    };
+    summary: SessionTimelineSummary;
+}
+export interface SessionImpactEntry {
+    entityId: string;
+    relationshipIds: string[];
+    impactCount: number;
+    firstTimestamp?: Date;
+    latestTimestamp?: Date;
+    latestSeverity?: 'critical' | 'high' | 'medium' | 'low' | null;
+    latestSequenceNumber?: number | null;
+    actors: string[];
+}
+export interface SessionImpactsResult {
+    sessionId: string;
+    totalEntities: number;
+    impacts: SessionImpactEntry[];
+    page: {
+        limit: number;
+        offset: number;
+        count: number;
+    };
+    summary: {
+        bySeverity: Record<string, number>;
+        totalRelationships: number;
+    };
+}
+export interface SessionsAffectingEntityEntry {
+    sessionId: string;
+    relationshipIds: string[];
+    eventCount: number;
+    firstTimestamp?: Date;
+    lastTimestamp?: Date;
+    actors: string[];
+    severities: Record<string, number>;
+}
+export interface SessionsAffectingEntityResult {
+    entityId: string;
+    totalSessions: number;
+    sessions: SessionsAffectingEntityEntry[];
+    page: {
+        limit: number;
+        offset: number;
+        count: number;
+    };
+    summary: {
+        bySeverity: Record<string, number>;
+        totalRelationships: number;
+    };
 }
 export interface CreateSpecRequest {
     title: string;
@@ -157,8 +357,43 @@ export interface PerformanceMetrics {
     historicalData: {
         timestamp: Date;
         executionTime: number;
+        averageExecutionTime: number;
+        p95ExecutionTime: number;
         successRate: number;
+        coveragePercentage?: number;
+        runId?: string;
     }[];
+}
+export interface PerformanceHistoryOptions {
+    days?: number;
+    metricId?: string;
+    environment?: string;
+    severity?: PerformanceSeverity;
+    limit?: number;
+}
+export interface PerformanceHistoryRecord {
+    id?: string;
+    testId?: string;
+    targetId?: string;
+    metricId: string;
+    scenario?: string;
+    environment?: string;
+    severity?: PerformanceSeverity;
+    trend?: PerformanceTrend;
+    unit?: string;
+    baselineValue?: number | null;
+    currentValue?: number | null;
+    delta?: number | null;
+    percentChange?: number | null;
+    sampleSize?: number | null;
+    riskScore?: number | null;
+    runId?: string;
+    detectedAt?: Date | null;
+    resolvedAt?: Date | null;
+    metricsHistory?: PerformanceMetricSample[] | null;
+    metadata?: Record<string, any> | null;
+    createdAt?: Date | null;
+    source?: "snapshot";
 }
 export interface TestCoverage {
     entityId: string;
@@ -353,6 +588,7 @@ export interface ImpactAnalysis {
         requiredUpdates: string[];
         freshnessPenalty: number;
     };
+    specImpact: ImpactAnalysisSpecImpact;
     deploymentGate: {
         blocked: boolean;
         level: "none" | "advisory" | "required";
@@ -371,6 +607,36 @@ export interface ImpactAnalysis {
         type?: "warning" | "requirement" | "suggestion";
         actions?: string[];
     }[];
+}
+export interface ImpactAnalysisSpecImpact {
+    relatedSpecs: Array<{
+        specId: string;
+        spec?: Pick<Spec, "id" | "title" | "priority" | "status" | "assignee" | "tags">;
+        priority?: "critical" | "high" | "medium" | "low";
+        impactLevel?: "critical" | "high" | "medium" | "low";
+        status?: Spec["status"] | "unknown";
+        ownerTeams: string[];
+        acceptanceCriteriaIds: string[];
+        relationships: Array<{
+            type: RelationshipType;
+            impactLevel?: "critical" | "high" | "medium" | "low";
+            priority?: "critical" | "high" | "medium" | "low";
+            acceptanceCriteriaId?: string;
+            acceptanceCriteriaIds?: string[];
+            rationale?: string;
+            ownerTeam?: string;
+            confidence?: number;
+            status?: Spec["status"] | "unknown";
+        }>;
+    }>;
+    requiredUpdates: string[];
+    summary: {
+        byPriority: Record<"critical" | "high" | "medium" | "low", number>;
+        byImpactLevel: Record<"critical" | "high" | "medium" | "low", number>;
+        statuses: Record<"draft" | "approved" | "implemented" | "deprecated" | "unknown", number>;
+        acceptanceCriteriaReferences: number;
+        pendingSpecs: number;
+    };
 }
 export interface VectorSearchRequest {
     query: string;
@@ -403,7 +669,7 @@ export interface CommitPRRequest {
     changes: string[];
     relatedSpecId?: string;
     testResults?: string[];
-    validationResults?: string;
+    validationResults?: string | ValidationResult | Record<string, unknown>;
     createPR?: boolean;
     branchName?: string;
     labels?: string[];
@@ -412,11 +678,85 @@ export interface CommitPRResponse {
     commitHash: string;
     prUrl?: string;
     branch: string;
-    relatedArtifacts: {
-        spec: Spec;
-        tests: Test[];
-        validation: ValidationResult;
+    status: "committed" | "pending" | "failed";
+    provider?: string;
+    retryAttempts?: number;
+    escalationRequired?: boolean;
+    escalationMessage?: string;
+    providerError?: {
+        message: string;
+        code?: string;
+        lastAttempt?: number;
     };
+    relatedArtifacts: {
+        spec: Spec | null;
+        tests: Test[];
+        validation: ValidationResult | Record<string, unknown> | null;
+    };
+}
+export interface SCMCommitRecord {
+    id?: string;
+    commitHash: string;
+    branch: string;
+    title: string;
+    description?: string;
+    author?: string;
+    changes: string[];
+    relatedSpecId?: string;
+    testResults?: string[];
+    validationResults?: any;
+    prUrl?: string;
+    provider?: string;
+    status?: "pending" | "committed" | "pushed" | "merged" | "failed";
+    metadata?: Record<string, unknown>;
+    createdAt?: Date;
+    updatedAt?: Date;
+}
+export interface SCMStatusSummary {
+    branch: string;
+    clean: boolean;
+    ahead: number;
+    behind: number;
+    staged: string[];
+    unstaged: string[];
+    untracked: string[];
+    lastCommit?: {
+        hash: string;
+        author: string;
+        date?: string;
+        title: string;
+    } | null;
+}
+export interface SCMBranchInfo {
+    name: string;
+    isCurrent: boolean;
+    isRemote?: boolean;
+    upstream?: string | null;
+    lastCommit?: {
+        hash: string;
+        title: string;
+        author?: string;
+        date?: string;
+    } | null;
+}
+export interface SCMPushResult {
+    remote: string;
+    branch: string;
+    forced: boolean;
+    pushed: boolean;
+    commitHash?: string;
+    provider?: string;
+    url?: string;
+    message?: string;
+    timestamp: string;
+}
+export interface SCMCommitLogEntry {
+    hash: string;
+    author: string;
+    email?: string;
+    date: string;
+    message: string;
+    refs?: string[];
 }
 export interface SecurityScanRequest {
     entityIds?: string[];

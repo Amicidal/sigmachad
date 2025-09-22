@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { SecurityScanner } from "../../../src/services/SecurityScanner";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/DatabaseService";
+import { SecurityScanner } from "../../../src/services/testing/SecurityScanner";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
+import { DatabaseService } from "../../../src/services/core/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

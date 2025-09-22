@@ -59,6 +59,7 @@ export declare enum RelationshipType {
     SECURITY_IMPACTS = "SECURITY_IMPACTS",
     PERFORMANCE_IMPACT = "PERFORMANCE_IMPACT",
     PERFORMANCE_REGRESSION = "PERFORMANCE_REGRESSION",
+    COVERAGE_PROVIDES = "COVERAGE_PROVIDES",
     SESSION_MODIFIED = "SESSION_MODIFIED",
     SESSION_IMPACTED = "SESSION_IMPACTED",
     SESSION_CHECKPOINT = "SESSION_CHECKPOINT",
@@ -67,9 +68,34 @@ export declare enum RelationshipType {
     DEPENDS_ON_CHANGE = "DEPENDS_ON_CHANGE",
     CHECKPOINT_INCLUDES = "CHECKPOINT_INCLUDES"
 }
+export type StructuralImportType = "default" | "named" | "namespace" | "wildcard" | "side-effect";
 export interface StructuralRelationship extends Relationship {
     type: RelationshipType.CONTAINS | RelationshipType.DEFINES | RelationshipType.EXPORTS | RelationshipType.IMPORTS;
+    importType?: StructuralImportType;
+    importAlias?: string;
+    importDepth?: number;
+    isNamespace?: boolean;
+    isReExport?: boolean;
+    reExportTarget?: string | null;
+    language?: string;
+    symbolKind?: string;
+    modulePath?: string;
+    resolutionState?: "resolved" | "unresolved" | "partial";
+    metadata?: Record<string, any> & {
+        languageSpecific?: Record<string, any>;
+    };
+    confidence?: number;
+    scope?: CodeScope;
+    firstSeenAt?: Date;
+    lastSeenAt?: Date;
 }
+export declare const isStructuralRelationshipType: (type: RelationshipType) => type is StructuralRelationship["type"];
+export declare const PERFORMANCE_RELATIONSHIP_TYPES: readonly [RelationshipType.PERFORMANCE_IMPACT, RelationshipType.PERFORMANCE_REGRESSION];
+export type PerformanceRelationshipType = (typeof PERFORMANCE_RELATIONSHIP_TYPES)[number];
+export declare const isPerformanceRelationshipType: (type: RelationshipType) => type is PerformanceRelationshipType;
+export declare const SESSION_RELATIONSHIP_TYPES: readonly [RelationshipType.SESSION_MODIFIED, RelationshipType.SESSION_IMPACTED, RelationshipType.SESSION_CHECKPOINT, RelationshipType.BROKE_IN, RelationshipType.FIXED_IN, RelationshipType.DEPENDS_ON_CHANGE];
+export type SessionRelationshipType = (typeof SESSION_RELATIONSHIP_TYPES)[number];
+export declare const isSessionRelationshipType: (type: RelationshipType) => type is SessionRelationshipType;
 export type CodeEdgeSource = 'ast' | 'type-checker' | 'heuristic' | 'index' | 'runtime' | 'lsp';
 export type CodeEdgeKind = 'call' | 'identifier' | 'instantiation' | 'type' | 'read' | 'write' | 'override' | 'inheritance' | 'return' | 'param' | 'decorator' | 'annotation' | 'throw' | 'dependency';
 export declare const CODE_RELATIONSHIP_TYPES: readonly [RelationshipType.CALLS, RelationshipType.REFERENCES, RelationshipType.IMPLEMENTS, RelationshipType.EXTENDS, RelationshipType.DEPENDS_ON, RelationshipType.OVERRIDES, RelationshipType.READS, RelationshipType.WRITES, RelationshipType.THROWS, RelationshipType.TYPE_USES, RelationshipType.RETURNS_TYPE, RelationshipType.PARAM_TYPE];
@@ -230,18 +256,65 @@ export interface SecurityRelationship extends Relationship {
     status?: 'open' | 'fixed' | 'accepted' | 'false-positive';
     cvssScore?: number;
 }
+export type PerformanceTrend = "regression" | "improvement" | "neutral";
+export type PerformanceSeverity = "critical" | "high" | "medium" | "low";
+export interface PerformanceConfidenceInterval {
+    lower?: number;
+    upper?: number;
+}
+export interface PerformanceMetricSample {
+    timestamp?: Date;
+    value: number;
+    runId?: string;
+    environment?: string;
+    unit?: string;
+}
 export interface PerformanceRelationship extends Relationship {
-    type: RelationshipType.PERFORMANCE_IMPACT | RelationshipType.PERFORMANCE_REGRESSION;
-    executionTime?: number;
-    memoryUsage?: number;
-    coveragePercentage?: number;
-    benchmarkValue?: number;
+    type: PerformanceRelationshipType;
+    metricId: string;
+    scenario?: string;
+    environment?: string;
+    baselineValue?: number;
+    currentValue?: number;
+    unit?: string;
+    delta?: number;
+    percentChange?: number;
+    sampleSize?: number;
+    confidenceInterval?: PerformanceConfidenceInterval | null;
+    trend?: PerformanceTrend;
+    severity?: PerformanceSeverity;
+    riskScore?: number;
+    runId?: string;
+    policyId?: string;
+    detectedAt?: Date;
+    resolvedAt?: Date | null;
+    metricsHistory?: PerformanceMetricSample[];
+    evidence?: EdgeEvidence[];
+    metadata?: Record<string, any> & {
+        metrics?: Array<Record<string, any>>;
+    };
 }
 export interface SessionRelationship extends Relationship {
     type: RelationshipType.SESSION_MODIFIED | RelationshipType.SESSION_IMPACTED | RelationshipType.SESSION_CHECKPOINT | RelationshipType.BROKE_IN | RelationshipType.FIXED_IN | RelationshipType.DEPENDS_ON_CHANGE;
     sessionId: string;
     timestamp: Date;
     sequenceNumber: number;
+    eventId?: string;
+    actor?: string;
+    annotations?: string[];
+    impactSeverity?: 'critical' | 'high' | 'medium' | 'low';
+    stateTransitionTo?: 'working' | 'broken' | 'unknown';
+    checkpointId?: string;
+    checkpointStatus?: 'pending' | 'completed' | 'failed' | 'manual_intervention';
+    checkpointDetails?: {
+        reason?: 'daily' | 'incident' | 'manual';
+        hopCount?: number;
+        attempts?: number;
+        seedEntityIds?: string[];
+        jobId?: string;
+        error?: string;
+        updatedAt?: Date;
+    };
     changeInfo?: {
         elementType: 'function' | 'class' | 'import' | 'test';
         elementName: string;
@@ -292,6 +365,14 @@ export interface RelationshipQuery {
     tag?: string | string[];
     lastValidatedAfter?: Date;
     lastValidatedBefore?: Date;
+    metricId?: string | string[];
+    environment?: string | string[];
+    severity?: PerformanceSeverity | PerformanceSeverity[];
+    trend?: PerformanceTrend | PerformanceTrend[];
+    detectedAfter?: Date;
+    detectedBefore?: Date;
+    resolvedAfter?: Date;
+    resolvedBefore?: Date;
     kind?: CodeEdgeKind | CodeEdgeKind[];
     source?: CodeEdgeSource | CodeEdgeSource[];
     resolution?: CodeResolution | CodeResolution[];
@@ -321,6 +402,23 @@ export interface RelationshipQuery {
     callee?: string;
     importDepthMin?: number;
     importDepthMax?: number;
+    importAlias?: string | string[];
+    importType?: StructuralImportType | StructuralImportType[];
+    isNamespace?: boolean;
+    language?: string | string[];
+    symbolKind?: string | string[];
+    modulePath?: string | string[];
+    modulePathPrefix?: string;
+    sessionId?: string | string[];
+    sessionIds?: string[];
+    sequenceNumber?: number | number[];
+    sequenceNumberMin?: number;
+    sequenceNumberMax?: number;
+    timestampFrom?: Date | string;
+    timestampTo?: Date | string;
+    actor?: string | string[];
+    impactSeverity?: 'critical' | 'high' | 'medium' | 'low' | Array<'critical' | 'high' | 'medium' | 'low'>;
+    stateTransitionTo?: 'working' | 'broken' | 'unknown' | Array<'working' | 'broken' | 'unknown'>;
 }
 export interface RelationshipFilter {
     types?: RelationshipType[];

@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
 import { registerHistoryRoutes } from '../../../src/api/routes/history.js';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
 import { RelationshipType, type GraphRelationship } from '../../../src/models/relationships.js';
-import type { DatabaseService } from '../../../src/services/DatabaseService.js';
+import type { DatabaseService } from '../../../src/services/core/DatabaseService.js';
 import type { Entity, Session } from '../../../src/models/entities.js';
 import {
   cleanupTestDatabase,

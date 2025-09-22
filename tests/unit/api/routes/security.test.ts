@@ -13,13 +13,13 @@ import {
 } from '../../../test-utils.js';
 
 // Mock services
-vi.mock('../../../../src/services/SecurityScanner.js', () => ({
+vi.mock('../../../../src/services/testing/SecurityScanner.js', () => ({
   SecurityScanner: vi.fn()
 }));
-vi.mock('../../../../src/services/DatabaseService.js', () => ({
+vi.mock('../../../../src/services/core/DatabaseService.js', () => ({
   DatabaseService: vi.fn()
 }));
-vi.mock('../../../../src/services/KnowledgeGraphService.js', () => ({
+vi.mock('../../../../src/services/knowledge/KnowledgeGraphService.js', () => ({
   KnowledgeGraphService: vi.fn()
 }));
 

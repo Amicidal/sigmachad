@@ -2,7 +2,8 @@
  * Design & Specification Routes
  * Handles spec creation, validation, and management
  */
-import { SpecService } from "../../services/SpecService.js";
+import { v4 as uuidv4 } from "uuid";
+import { SpecService } from "../../services/testing/SpecService.js";
 export function registerDesignRoutes(app, kgService, dbService) {
     const specService = new SpecService(kgService, dbService);
     // Create specification

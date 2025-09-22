@@ -9,7 +9,7 @@ import { randomUUID } from "crypto";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/DatabaseService";
+} from "../../../src/services/core/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -2590,10 +2590,10 @@ describe("DatabaseService Integration", () => {
       it("should complete full initialization successfully", async () => {
         // Create a new service instance
         const { DatabaseService } = await import(
-          "../../../src/services/DatabaseService"
+          "../../../src/services/core/DatabaseService"
         );
         const { createTestDatabaseConfig } = await import(
-          "../../../src/services/DatabaseService"
+          "../../../src/services/core/DatabaseService"
         );
         const newService = new DatabaseService(createTestDatabaseConfig());
 

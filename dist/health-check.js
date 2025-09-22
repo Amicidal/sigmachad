@@ -3,7 +3,7 @@
  * Health Check Script for Memento
  * Used by Docker health checks and monitoring systems
  */
-import { DatabaseService, createDatabaseConfig } from './services/DatabaseService.js';
+import { DatabaseService, createDatabaseConfig } from './services/core/DatabaseService.js';
 /**
  * Perform health check on all system components
  */
@@ -28,8 +28,7 @@ export async function performHealthCheck() {
         return {
             healthy: false,
             databases: {
-                falkordb: { status: 'unhealthy' },
-                qdrant: { status: 'unhealthy' },
+                neo4j: { status: 'unhealthy' },
                 postgresql: { status: 'unhealthy' },
                 redis: { status: 'unhealthy' },
             },

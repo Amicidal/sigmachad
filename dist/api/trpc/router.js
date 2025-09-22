@@ -3,17 +3,22 @@
  * Provides type-safe API endpoints with automatic OpenAPI generation
  */
 import { router, publicProcedure } from './base.js';
+import { authenticateRequest, authenticateHeaders, } from '../middleware/authentication.js';
 // Create tRPC context
 export const createTRPCContext = async (opts) => {
     var _a;
-    // Extract auth token from headers if available
+    // Derive authentication context from the inbound request headers
     let authToken;
+    let authContext = undefined;
     try {
-        const hdrs = ((_a = opts.req) === null || _a === void 0 ? void 0 : _a.headers) || {};
-        const headerKey = hdrs['x-api-key'] || '';
-        const authz = hdrs['authorization'] || '';
-        const bearer = authz.toLowerCase().startsWith('bearer ') ? authz.slice(7) : authz;
-        authToken = headerKey || bearer || undefined;
+        if (opts.req) {
+            authContext = authenticateRequest(opts.req);
+        }
+        else {
+            const hdrs = ((_a = opts === null || opts === void 0 ? void 0 : opts.req) === null || _a === void 0 ? void 0 : _a.headers) || {};
+            authContext = authenticateHeaders(hdrs);
+        }
+        authToken = authContext === null || authContext === void 0 ? void 0 : authContext.rawToken;
     }
     catch (_b) {
         authToken = undefined;
@@ -22,6 +27,7 @@ export const createTRPCContext = async (opts) => {
     return {
         ...rest,
         authToken,
+        authContext,
     };
 };
 // Import route procedures

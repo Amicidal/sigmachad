@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TemporalHistoryValidator } from '../../../src/jobs/TemporalHistoryValidator.js';
-import type { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
+import type { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
 import type { EntityTimelineResult } from '../../../src/models/types.js';
 
 describe('TemporalHistoryValidator', () => {

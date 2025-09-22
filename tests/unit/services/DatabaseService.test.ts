@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   DatabaseService,
   DatabaseConfig,
-} from '../../../src/services/DatabaseService';
+} from '../../../src/services/core/DatabaseService';
 
 interface ServiceMocks {
   initialize: ReturnType<typeof vi.fn>;

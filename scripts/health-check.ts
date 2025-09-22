@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 import 'dotenv/config';
-import { DatabaseService, createDatabaseConfig } from '../src/services/DatabaseService.js';
+import { DatabaseService, createDatabaseConfig } from '../src/services/core/DatabaseService.js';
 
 async function main() {
   const config = createDatabaseConfig();

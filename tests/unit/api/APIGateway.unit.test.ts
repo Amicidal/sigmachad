@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
-import type { DatabaseService } from '../../../src/services/DatabaseService.js';
+import type { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
+import type { DatabaseService } from '../../../src/services/core/DatabaseService.js';
 
 // --- Shared spies for constructor side effects --------------------------------
 const fastifyStubs: Array<ReturnType<typeof createFastifyStub>> = [];
@@ -42,7 +42,7 @@ vi.mock('fastify', () => ({
 }));
 
 const testEngineCtor = vi.fn();
-vi.mock('../../../src/services/TestEngine.js', () => ({
+vi.mock('../../../src/services/testing/TestEngine.js', () => ({
   TestEngine: vi.fn().mockImplementation(function TestEngineMock(...args: unknown[]) {
     testEngineCtor(...args);
     return { executePlan: vi.fn() };
@@ -50,7 +50,7 @@ vi.mock('../../../src/services/TestEngine.js', () => ({
 }));
 
 const securityScannerCtor = vi.fn();
-vi.mock('../../../src/services/SecurityScanner.js', () => ({
+vi.mock('../../../src/services/testing/SecurityScanner.js', () => ({
   SecurityScanner: vi.fn().mockImplementation(function SecurityScannerMock(...args: unknown[]) {
     securityScannerCtor(...args);
     return { scan: vi.fn() };
@@ -58,7 +58,7 @@ vi.mock('../../../src/services/SecurityScanner.js', () => ({
 }));
 
 const astParserCtor = vi.fn();
-vi.mock('../../../src/services/ASTParser.js', () => ({
+vi.mock('../../../src/services/knowledge/ASTParser.js', () => ({
   ASTParser: vi.fn().mockImplementation(function ASTParserMock() {
     astParserCtor();
     return { initialize: vi.fn(), clearCache: vi.fn() };
@@ -66,7 +66,7 @@ vi.mock('../../../src/services/ASTParser.js', () => ({
 }));
 
 const documentationParserCtor = vi.fn();
-vi.mock('../../../src/services/DocumentationParser.js', () => ({
+vi.mock('../../../src/services/knowledge/DocumentationParser.js', () => ({
   DocumentationParser: vi.fn().mockImplementation(function DocumentationParserMock(...args: unknown[]) {
     documentationParserCtor(...args);
     return { parse: vi.fn() };
@@ -74,7 +74,7 @@ vi.mock('../../../src/services/DocumentationParser.js', () => ({
 }));
 
 const backupServiceCtor = vi.fn();
-vi.mock('../../../src/services/BackupService.js', () => ({
+vi.mock('../../../src/services/backup/BackupService.js', () => ({
   BackupService: vi.fn().mockImplementation(function BackupServiceMock(...args: unknown[]) {
     backupServiceCtor(...args);
     return { createCheckpoint: vi.fn() };
@@ -82,7 +82,7 @@ vi.mock('../../../src/services/BackupService.js', () => ({
 }));
 
 const loggingServiceCtor = vi.fn();
-vi.mock('../../../src/services/LoggingService.js', () => ({
+vi.mock('../../../src/services/core/LoggingService.js', () => ({
   LoggingService: vi.fn().mockImplementation(function LoggingServiceMock(...args: unknown[]) {
     loggingServiceCtor(...args);
     return { log: vi.fn() };
@@ -90,7 +90,7 @@ vi.mock('../../../src/services/LoggingService.js', () => ({
 }));
 
 const maintenanceServiceCtor = vi.fn();
-vi.mock('../../../src/services/MaintenanceService.js', () => ({
+vi.mock('../../../src/services/core/MaintenanceService.js', () => ({
   MaintenanceService: vi.fn().mockImplementation(function MaintenanceServiceMock(...args: unknown[]) {
     maintenanceServiceCtor(...args);
     return { runMaintenance: vi.fn() };
@@ -98,7 +98,7 @@ vi.mock('../../../src/services/MaintenanceService.js', () => ({
 }));
 
 const configurationServiceCtor = vi.fn();
-vi.mock('../../../src/services/ConfigurationService.js', () => ({
+vi.mock('../../../src/services/core/ConfigurationService.js', () => ({
   ConfigurationService: vi.fn().mockImplementation(function ConfigurationServiceMock(...args: unknown[]) {
     configurationServiceCtor(...args);
     return { getSettings: vi.fn() };

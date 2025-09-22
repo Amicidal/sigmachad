@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService';
 import { RelationshipType } from '../../../src/models/relationships';
 
 describe('KnowledgeGraphService inferred relationship gating', () => {

@@ -17,8 +17,8 @@ import {
   SyncMetrics,
   PerformanceMetrics,
   HealthMetrics,
-} from "../../../src/services/SynchronizationMonitoring";
-import { SyncOperation } from "../../../src/services/SynchronizationCoordinator";
+} from "../../../src/services/synchronization/SynchronizationMonitoring";
+import { SyncOperation } from "../../../src/services/synchronization/SynchronizationCoordinator";
 
 describe("SynchronizationMonitoring Integration", () => {
   let monitoring: SynchronizationMonitoring;

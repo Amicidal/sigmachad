@@ -1,4 +1,4 @@
-import { GitService } from "../GitService.js";
+import { GitService } from "./GitService.js";
 import {
   SCMProvider,
   SCMProviderPullRequestPayload,

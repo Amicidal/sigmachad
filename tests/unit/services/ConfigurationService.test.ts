@@ -21,10 +21,10 @@ import {
 import {
   ConfigurationService,
   SystemConfiguration,
-} from "../../../src/services/ConfigurationService";
+} from "../../../src/services/core/ConfigurationService";
 
 // Import DatabaseService for mocking
-import { DatabaseService } from "../../../src/services/DatabaseService";
+import { DatabaseService } from "../../../src/services/core/DatabaseService";
 
 // Import realistic mocks
 import {
@@ -235,7 +235,7 @@ describe("ConfigurationService", () => {
       }));
 
       const { ConfigurationService: MockedConfigurationService } = await import(
-        "../../../src/services/ConfigurationService"
+        "../../../src/services/core/ConfigurationService"
       );
       const testService = new MockedConfigurationService(dbService, mockSyncCoordinator);
       const version = await (testService as any).getVersion();
@@ -251,7 +251,7 @@ describe("ConfigurationService", () => {
       }));
 
       const { ConfigurationService: MockedConfigurationService } = await import(
-        "../../../src/services/ConfigurationService"
+        "../../../src/services/core/ConfigurationService"
       );
       const testService = new MockedConfigurationService(dbService, mockSyncCoordinator);
       const version = await (testService as any).getVersion();
@@ -265,7 +265,7 @@ describe("ConfigurationService", () => {
       }));
 
       const { ConfigurationService: MockedConfigurationService } = await import(
-        "../../../src/services/ConfigurationService"
+        "../../../src/services/core/ConfigurationService"
       );
       const testService = new MockedConfigurationService(dbService, mockSyncCoordinator);
       const version = await (testService as any).getVersion();
@@ -279,7 +279,7 @@ describe("ConfigurationService", () => {
       }));
 
       const { ConfigurationService: MockedConfigurationService } = await import(
-        "../../../src/services/ConfigurationService"
+        "../../../src/services/core/ConfigurationService"
       );
       const testService = new MockedConfigurationService(dbService, mockSyncCoordinator);
       const version = await (testService as any).getVersion();

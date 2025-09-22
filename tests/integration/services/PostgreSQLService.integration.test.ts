@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from "uuid";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/DatabaseService";
+} from "../../../src/services/core/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

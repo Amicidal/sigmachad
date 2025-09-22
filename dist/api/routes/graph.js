@@ -2,6 +2,61 @@
  * Graph Operations Routes
  * Handles graph search, entity examples, and dependency analysis
  */
+const GRAPH_ENTITY_TYPE_LOOKUP = {
+    change: "change",
+    directory: "directory",
+    file: "file",
+    module: "module",
+    spec: "spec",
+    symbol: "symbol",
+    test: "test",
+};
+const GRAPH_SYMBOL_KIND_LOOKUP = {
+    class: "class",
+    function: "function",
+    interface: "interface",
+    method: "method",
+    property: "property",
+    typealias: "typeAlias",
+    unknown: "unknown",
+    variable: "variable",
+};
+const parseBooleanParam = (value) => {
+    if (typeof value === "boolean")
+        return value;
+    if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === "true")
+            return true;
+        if (normalized === "false")
+            return false;
+    }
+    return undefined;
+};
+const parseStringArrayParam = (value) => {
+    if (Array.isArray(value)) {
+        return value
+            .flatMap((entry) => typeof entry === "string" ? entry.split(",") : [])
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0);
+    }
+    if (typeof value === "string") {
+        return value
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0);
+    }
+    return [];
+};
+const buildErrorResponse = (request, error) => {
+    var _a;
+    return ({
+        success: false,
+        error,
+        requestId: (_a = request === null || request === void 0 ? void 0 : request.id) !== null && _a !== void 0 ? _a : "unknown",
+        timestamp: new Date().toISOString(),
+    });
+};
 export async function registerGraphRoutes(app, kgService, dbService) {
     // Simple redirect to the build-based graph UI if available
     app.get('/graph/ui', async (_req, reply) => {
@@ -35,25 +90,41 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             reply.send({ success: true, data: entity });
         }
         catch (error) {
-            reply.status(500).send({
-                success: false,
-                error: {
-                    code: "ENTITY_FETCH_FAILED",
-                    message: "Failed to fetch entity",
-                    details: error instanceof Error ? error.message : "Unknown error",
-                },
-            });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "ENTITY_FETCH_FAILED",
+                message: "Failed to fetch entity",
+                details,
+            }));
         }
     });
     // Alias: /graph/entities/:entityId -> /graph/entity/:entityId
     app.get("/graph/entities/:entityId", async (request, reply) => {
-        var _a;
+        var _a, _b;
         const params = request.params;
         const res = await app.inject({
             method: "GET",
             url: `/graph/entity/${encodeURIComponent(params.entityId)}`,
         });
-        reply.status(res.statusCode).send((_a = res.body) !== null && _a !== void 0 ? _a : res.payload);
+        const headers = (_a = res.headers) !== null && _a !== void 0 ? _a : {};
+        const contentTypeHeader = headers["content-type"];
+        Object.entries(headers).forEach(([key, value]) => {
+            if (key.toLowerCase() === "content-length" || typeof value === "undefined") {
+                return;
+            }
+            reply.header(key, value);
+        });
+        let payload = (_b = res.body) !== null && _b !== void 0 ? _b : res.payload;
+        const isJsonResponse = typeof contentTypeHeader === "string" && contentTypeHeader.includes("application/json");
+        if (isJsonResponse && typeof payload === "string") {
+            try {
+                payload = JSON.parse(payload);
+            }
+            catch (_c) {
+                // fall back to sending raw payload if parsing fails
+            }
+        }
+        reply.status(res.statusCode).send(payload);
     });
     // GET /api/graph/relationship/:relationshipId - Get single relationship by ID
     app.get("/graph/relationship/:relationshipId", {
@@ -83,14 +154,250 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             reply.send({ success: true, data: rel });
         }
         catch (error) {
-            reply.status(500).send({
-                success: false,
-                error: {
-                    code: "RELATIONSHIP_FETCH_FAILED",
-                    message: "Failed to fetch relationship",
-                    details: error instanceof Error ? error.message : "Unknown error",
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "RELATIONSHIP_FETCH_FAILED",
+                message: "Failed to fetch relationship",
+                details,
+            }));
+        }
+    });
+    app.get("/graph/modules/children", {
+        schema: {
+            querystring: {
+                type: "object",
+                properties: {
+                    modulePath: { type: "string" },
+                    includeFiles: {
+                        anyOf: [
+                            { type: "boolean" },
+                            { type: "string" },
+                        ],
+                    },
+                    includeSymbols: {
+                        anyOf: [
+                            { type: "boolean" },
+                            { type: "string" },
+                        ],
+                    },
+                    language: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                    },
+                    symbolKind: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                    },
+                    modulePathPrefix: { type: "string" },
+                    limit: { type: "integer", minimum: 1, maximum: 500 },
                 },
-            });
+                required: ["modulePath"],
+            },
+        },
+    }, async (request, reply) => {
+        const query = request.query;
+        try {
+            const includeFiles = parseBooleanParam(query.includeFiles);
+            const includeSymbols = parseBooleanParam(query.includeSymbols);
+            const languages = parseStringArrayParam(query.language);
+            const symbolKinds = parseStringArrayParam(query.symbolKind);
+            const modulePathPrefix = typeof query.modulePathPrefix === "string"
+                ? query.modulePathPrefix.trim()
+                : undefined;
+            const limit = typeof query.limit === "number"
+                ? query.limit
+                : typeof query.limit === "string" && query.limit.trim().length > 0
+                    ? Number(query.limit)
+                    : undefined;
+            const options = {};
+            if (typeof includeFiles === "boolean")
+                options.includeFiles = includeFiles;
+            if (typeof includeSymbols === "boolean")
+                options.includeSymbols = includeSymbols;
+            if (languages.length === 1) {
+                options.language = languages[0];
+            }
+            else if (languages.length > 1) {
+                options.language = languages;
+            }
+            if (symbolKinds.length === 1) {
+                options.symbolKind = symbolKinds[0];
+            }
+            else if (symbolKinds.length > 1) {
+                options.symbolKind = symbolKinds;
+            }
+            if (modulePathPrefix && modulePathPrefix.length > 0) {
+                options.modulePathPrefix = modulePathPrefix;
+            }
+            if (typeof limit === "number" && !Number.isNaN(limit)) {
+                options.limit = limit;
+            }
+            const result = await kgService.listModuleChildren(query.modulePath, options);
+            reply.send({ success: true, data: result });
+        }
+        catch (error) {
+            const details = error instanceof Error ? error.message : "Failed to list module children";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "MODULE_CHILDREN_FAILED",
+                message: "Failed to list module children",
+                details,
+            }));
+        }
+    });
+    app.get("/graph/entity/:entityId/imports", {
+        schema: {
+            params: {
+                type: "object",
+                properties: { entityId: { type: "string" } },
+                required: ["entityId"],
+            },
+            querystring: {
+                type: "object",
+                properties: {
+                    resolvedOnly: { type: "boolean" },
+                    language: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                    },
+                    symbolKind: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                    },
+                    importAlias: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                    },
+                    importType: {
+                        anyOf: [
+                            {
+                                type: "string",
+                                enum: ["default", "named", "namespace", "wildcard", "side-effect"],
+                            },
+                            {
+                                type: "array",
+                                items: {
+                                    type: "string",
+                                    enum: ["default", "named", "namespace", "wildcard", "side-effect"],
+                                },
+                            },
+                        ],
+                    },
+                    isNamespace: { type: "boolean" },
+                    modulePath: {
+                        anyOf: [
+                            { type: "string" },
+                            { type: "array", items: { type: "string" } },
+                        ],
+                    },
+                    modulePathPrefix: { type: "string" },
+                    limit: { type: "integer", minimum: 1, maximum: 1000 },
+                },
+            },
+        },
+    }, async (request, reply) => {
+        const params = request.params;
+        const query = request.query;
+        try {
+            const resolvedOnly = parseBooleanParam(query.resolvedOnly);
+            const languages = parseStringArrayParam(query.language).map((value) => value.toLowerCase());
+            const symbolKinds = parseStringArrayParam(query.symbolKind).map((value) => value.toLowerCase());
+            const importAliases = parseStringArrayParam(query.importAlias);
+            const importTypes = parseStringArrayParam(query.importType).map((value) => value.toLowerCase());
+            const isNamespace = parseBooleanParam(query.isNamespace);
+            const modulePaths = parseStringArrayParam(query.modulePath);
+            const modulePathPrefix = typeof query.modulePathPrefix === "string"
+                ? query.modulePathPrefix.trim()
+                : undefined;
+            const limit = typeof query.limit === "number"
+                ? query.limit
+                : typeof query.limit === "string" && query.limit.trim().length > 0
+                    ? Number(query.limit)
+                    : undefined;
+            const options = {};
+            if (typeof resolvedOnly === "boolean")
+                options.resolvedOnly = resolvedOnly;
+            if (languages.length === 1) {
+                options.language = languages[0];
+            }
+            else if (languages.length > 1) {
+                options.language = languages;
+            }
+            if (symbolKinds.length === 1) {
+                options.symbolKind = symbolKinds[0];
+            }
+            else if (symbolKinds.length > 1) {
+                options.symbolKind = symbolKinds;
+            }
+            if (importAliases.length === 1) {
+                options.importAlias = importAliases[0];
+            }
+            else if (importAliases.length > 1) {
+                options.importAlias = importAliases;
+            }
+            if (importTypes.length === 1) {
+                options.importType = importTypes[0];
+            }
+            else if (importTypes.length > 1) {
+                options.importType = importTypes;
+            }
+            if (typeof isNamespace === "boolean") {
+                options.isNamespace = isNamespace;
+            }
+            if (modulePaths.length === 1) {
+                options.modulePath = modulePaths[0];
+            }
+            else if (modulePaths.length > 1) {
+                options.modulePath = modulePaths;
+            }
+            if (modulePathPrefix && modulePathPrefix.length > 0) {
+                options.modulePathPrefix = modulePathPrefix;
+            }
+            if (typeof limit === "number" && !Number.isNaN(limit)) {
+                options.limit = limit;
+            }
+            const result = await kgService.listImports(params.entityId, options);
+            reply.send({ success: true, data: result });
+        }
+        catch (error) {
+            const details = error instanceof Error ? error.message : "Failed to list imports";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "LIST_IMPORTS_FAILED",
+                message: "Failed to list imports",
+                details,
+            }));
+        }
+    });
+    app.get("/graph/symbol/:symbolId/definition", {
+        schema: {
+            params: {
+                type: "object",
+                properties: { symbolId: { type: "string" } },
+                required: ["symbolId"],
+            },
+        },
+    }, async (request, reply) => {
+        const params = request.params;
+        try {
+            const result = await kgService.findDefinition(params.symbolId);
+            reply.send({ success: true, data: result });
+        }
+        catch (error) {
+            const details = error instanceof Error ? error.message : "Failed to resolve definition";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "FIND_DEFINITION_FAILED",
+                message: "Failed to find symbol definition",
+                details,
+            }));
         }
     });
     // GET /api/graph/relationship/:relationshipId/evidence - List auxiliary evidence nodes
@@ -120,7 +427,12 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             reply.send({ success: true, data: evidence });
         }
         catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'EVIDENCE_FETCH_FAILED', message: 'Failed to fetch evidence', details: error instanceof Error ? error.message : 'Unknown error' } });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "EVIDENCE_FETCH_FAILED",
+                message: "Failed to fetch evidence",
+                details,
+            }));
         }
     });
     // GET /api/graph/relationship/:relationshipId/sites - List auxiliary site nodes
@@ -150,7 +462,12 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             reply.send({ success: true, data: sites });
         }
         catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'SITES_FETCH_FAILED', message: 'Failed to fetch sites', details: error instanceof Error ? error.message : 'Unknown error' } });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "SITES_FETCH_FAILED",
+                message: "Failed to fetch sites",
+                details,
+            }));
         }
     });
     // GET /api/graph/relationship/:relationshipId/candidates - List auxiliary candidate nodes
@@ -180,7 +497,12 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             reply.send({ success: true, data: candidates });
         }
         catch (error) {
-            reply.status(500).send({ success: false, error: { code: 'CANDIDATES_FETCH_FAILED', message: 'Failed to fetch candidates', details: error instanceof Error ? error.message : 'Unknown error' } });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "CANDIDATES_FETCH_FAILED",
+                message: "Failed to fetch candidates",
+                details,
+            }));
         }
     });
     // GET /api/graph/relationship/:relationshipId/full - Relationship with resolved endpoints
@@ -215,14 +537,12 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             reply.send({ success: true, data: { relationship: rel, from, to } });
         }
         catch (error) {
-            reply.status(500).send({
-                success: false,
-                error: {
-                    code: "RELATIONSHIP_FULL_FETCH_FAILED",
-                    message: "Failed to fetch relationship details",
-                    details: error instanceof Error ? error.message : "Unknown error",
-                },
-            });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "RELATIONSHIP_FULL_FETCH_FAILED",
+                message: "Failed to fetch relationship details",
+                details,
+            }));
         }
     });
     // Alias: /graph/relationships/:relationshipId -> /graph/relationship/:relationshipId
@@ -297,8 +617,6 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                         code: "INVALID_REQUEST",
                         message: "Request body must be a valid JSON object",
                     },
-                    requestId: request.id,
-                    timestamp: new Date().toISOString(),
                 });
             }
             if (!params.query ||
@@ -309,8 +627,6 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                         code: "INVALID_REQUEST",
                         message: "Query parameter is required and cannot be empty",
                     },
-                    requestId: request.id,
-                    timestamp: new Date().toISOString(),
                 });
             }
             // Ensure query is a string
@@ -351,16 +667,12 @@ export async function registerGraphRoutes(app, kgService, dbService) {
         }
         catch (error) {
             console.error("Graph search error:", error);
-            reply.status(500).send({
-                success: false,
-                error: {
-                    code: "GRAPH_SEARCH_FAILED",
-                    message: "Failed to perform graph search",
-                    details: error instanceof Error ? error.message : "Unknown error",
-                },
-                requestId: request.id,
-                timestamp: new Date().toISOString(),
-            });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "GRAPH_SEARCH_FAILED",
+                message: "Failed to perform graph search",
+                details,
+            }));
         }
     });
     // GET /api/graph/examples/{entityId} - Get usage examples and tests
@@ -387,8 +699,6 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                         code: "INVALID_REQUEST",
                         message: "Entity ID is required and must be a non-empty string",
                     },
-                    requestId: request.id,
-                    timestamp: new Date().toISOString(),
                 });
             }
             // Retrieve examples from knowledge graph
@@ -401,42 +711,33 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                         code: "ENTITY_NOT_FOUND",
                         message: "Entity not found",
                     },
-                    requestId: request.id,
-                    timestamp: new Date().toISOString(),
                 });
             }
-            // Check if examples exist
-            if (Array.isArray(examples.usageExamples) &&
-                examples.usageExamples.length === 0 &&
-                Array.isArray(examples.testExamples) &&
-                examples.testExamples.length === 0) {
-                return reply.status(404).send({
-                    success: false,
-                    error: {
-                        code: "EXAMPLES_NOT_FOUND",
-                        message: "No examples found for the specified entity",
-                    },
-                    requestId: request.id,
-                    timestamp: new Date().toISOString(),
-                });
-            }
+            const sanitizedExamples = {
+                ...examples,
+                usageExamples: Array.isArray(examples.usageExamples)
+                    ? examples.usageExamples
+                    : [],
+                testExamples: Array.isArray(examples.testExamples)
+                    ? examples.testExamples
+                    : [],
+                relatedPatterns: Array.isArray(examples.relatedPatterns)
+                    ? examples.relatedPatterns
+                    : [],
+            };
             reply.send({
                 success: true,
-                data: examples,
+                data: sanitizedExamples,
             });
         }
         catch (error) {
             console.error("Examples retrieval error:", error);
-            reply.status(500).send({
-                success: false,
-                error: {
-                    code: "EXAMPLES_RETRIEVAL_FAILED",
-                    message: "Failed to retrieve usage examples",
-                    details: error instanceof Error ? error.message : "Unknown error",
-                },
-                requestId: request.id,
-                timestamp: new Date().toISOString(),
-            });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "EXAMPLES_RETRIEVAL_FAILED",
+                message: "Failed to retrieve usage examples",
+                details,
+            }));
         }
     });
     // GET /api/graph/dependencies/{entityId} - Analyze dependency relationships
@@ -463,8 +764,6 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                         code: "INVALID_REQUEST",
                         message: "Entity ID is required and must be a non-empty string",
                     },
-                    requestId: request.id,
-                    timestamp: new Date().toISOString(),
                 });
             }
             // Analyze dependencies using graph queries
@@ -477,44 +776,36 @@ export async function registerGraphRoutes(app, kgService, dbService) {
                         code: "ENTITY_NOT_FOUND",
                         message: "Entity not found",
                     },
-                    requestId: request.id,
-                    timestamp: new Date().toISOString(),
                 });
             }
-            // Check if analysis has any meaningful data
-            if ((!analysis.directDependencies ||
-                analysis.directDependencies.length === 0) &&
-                (!analysis.indirectDependencies ||
-                    analysis.indirectDependencies.length === 0) &&
-                (!analysis.reverseDependencies ||
-                    analysis.reverseDependencies.length === 0)) {
-                return reply.status(404).send({
-                    success: false,
-                    error: {
-                        code: "DEPENDENCIES_NOT_FOUND",
-                        message: "No dependency information found for the specified entity",
-                    },
-                    requestId: request.id,
-                    timestamp: new Date().toISOString(),
-                });
-            }
+            const sanitizedAnalysis = {
+                ...analysis,
+                directDependencies: Array.isArray(analysis.directDependencies)
+                    ? analysis.directDependencies
+                    : [],
+                indirectDependencies: Array.isArray(analysis.indirectDependencies)
+                    ? analysis.indirectDependencies
+                    : [],
+                reverseDependencies: Array.isArray(analysis.reverseDependencies)
+                    ? analysis.reverseDependencies
+                    : [],
+                circularDependencies: Array.isArray(analysis.circularDependencies)
+                    ? analysis.circularDependencies
+                    : [],
+            };
             reply.send({
                 success: true,
-                data: analysis,
+                data: sanitizedAnalysis,
             });
         }
         catch (error) {
             console.error("Dependency analysis error:", error);
-            reply.status(500).send({
-                success: false,
-                error: {
-                    code: "DEPENDENCY_ANALYSIS_FAILED",
-                    message: "Failed to analyze dependencies",
-                    details: error instanceof Error ? error.message : "Unknown error",
-                },
-                requestId: request.id,
-                timestamp: new Date().toISOString(),
-            });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "DEPENDENCY_ANALYSIS_FAILED",
+                message: "Failed to analyze dependencies",
+                details,
+            }));
         }
     });
     // GET /api/graph/entities - List all entities with filtering
@@ -533,15 +824,35 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             },
         },
     }, async (request, reply) => {
+        var _a;
         try {
             const query = request.query;
             // Parse tags if provided
             const tags = query.tags
                 ? query.tags.split(",").map((t) => t.trim())
                 : undefined;
+            const typeParam = (_a = query.type) === null || _a === void 0 ? void 0 : _a.trim();
+            let entityTypeFilter;
+            let symbolKindFilter;
+            if (typeParam) {
+                const lowerType = typeParam.toLowerCase();
+                if (GRAPH_ENTITY_TYPE_LOOKUP[lowerType]) {
+                    entityTypeFilter = GRAPH_ENTITY_TYPE_LOOKUP[lowerType];
+                }
+                else if (GRAPH_SYMBOL_KIND_LOOKUP[lowerType]) {
+                    entityTypeFilter = "symbol";
+                    symbolKindFilter = GRAPH_SYMBOL_KIND_LOOKUP[lowerType];
+                }
+                else {
+                    // Fall back to treating unknown types as symbol kinds for forward compatibility
+                    entityTypeFilter = "symbol";
+                    symbolKindFilter = typeParam;
+                }
+            }
             // Query entities from knowledge graph
             const { entities, total } = await kgService.listEntities({
-                type: query.type,
+                type: entityTypeFilter,
+                kind: symbolKindFilter,
                 language: query.language,
                 path: query.path,
                 tags,
@@ -560,14 +871,12 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             });
         }
         catch (error) {
-            reply.status(500).send({
-                success: false,
-                error: {
-                    code: "ENTITIES_LIST_FAILED",
-                    message: "Failed to list entities",
-                    details: error instanceof Error ? error.message : "Unknown error",
-                },
-            });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "ENTITIES_LIST_FAILED",
+                message: "Failed to list entities",
+                details,
+            }));
         }
     });
     // GET /api/graph/relationships - List relationships with filtering
@@ -607,14 +916,12 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             });
         }
         catch (error) {
-            reply.status(500).send({
-                success: false,
-                error: {
-                    code: "RELATIONSHIPS_LIST_FAILED",
-                    message: "Failed to list relationships",
-                    details: error instanceof Error ? error.message : "Unknown error",
-                },
-            });
+            const details = error instanceof Error ? error.message : "Unknown error";
+            reply.status(500).send(buildErrorResponse(request, {
+                code: "RELATIONSHIPS_LIST_FAILED",
+                message: "Failed to list relationships",
+                details,
+            }));
         }
     });
 }

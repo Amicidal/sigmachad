@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import path from "path";
 import fs from "fs/promises";
-import { ASTParser } from "@/services/ASTParser";
+import { ASTParser } from "../../../src/services/knowledge/ASTParser";
 import { RelationshipType } from "@/models/relationships";
 import { noiseConfig } from "@/config/noise";
 

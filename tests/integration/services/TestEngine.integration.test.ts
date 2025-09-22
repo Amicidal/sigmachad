@@ -8,9 +8,9 @@ import {
   TestEngine,
   TestResult,
   TestSuiteResult,
-} from "../../../src/services/TestEngine";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/DatabaseService";
+} from "../../../src/services/testing/TestEngine";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
+import { DatabaseService } from "../../../src/services/core/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

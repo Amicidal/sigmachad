@@ -27,9 +27,9 @@ import {
   ConflictResolutionResult,
 } from "@/services/ConflictResolution";
 import { KnowledgeGraphService } from "@/services/KnowledgeGraphService";
-import { ASTParser } from "@/services/ASTParser";
+import { ASTParser } from "../../../src/services/knowledge/ASTParser";
 import { DatabaseService } from "@/services/DatabaseService";
-import { FileChange } from "@/services/FileWatcher";
+import { FileChange } from "../../../src/services/core/FileWatcher";
 import { RelationshipType, SESSION_RELATIONSHIP_TYPES } from "@/models/relationships";
 import path from "path";
 import fs from "fs/promises";

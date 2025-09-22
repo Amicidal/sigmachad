@@ -1,4 +1,4 @@
-import { KnowledgeGraphService } from "../services/KnowledgeGraphService.js";
+import { KnowledgeGraphService } from "../services/knowledge/KnowledgeGraphService.js";
 import type { EntityTimelineResult } from "../models/types.js";
 
 export type TemporalValidationIssueType =

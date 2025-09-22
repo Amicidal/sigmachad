@@ -22,12 +22,12 @@ import {
   MaintenanceService,
   MaintenanceTask,
   MaintenanceResult,
-} from "../../../src/services/MaintenanceService";
+} from "../../../src/services/core/MaintenanceService";
 import {
   DatabaseService,
   DatabaseConfig,
-} from "../../../src/services/DatabaseService";
-import { KnowledgeGraphService } from "../../../src/services/KnowledgeGraphService";
+} from "../../../src/services/core/DatabaseService";
+import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
 import * as crypto from "crypto";
 
 // Import realistic mocks

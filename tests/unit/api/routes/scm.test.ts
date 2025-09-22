@@ -29,7 +29,7 @@ const scmServiceMocks: {
 
 var ExportedValidationError: any;
 
-vi.mock("../../../../src/services/SCMService.js", () => {
+vi.mock("../../../../src/services/scm/SCMService.js", () => {
   class MockValidationError extends Error {
     details: string[];
 

@@ -4,7 +4,7 @@ import { noiseConfig } from "../config/noise.js";
  * Defaults are chosen to match prior constants so existing tests remain stable.
  */
 export function scoreInferredEdge(features) {
-    const { toId, fromFileRel, usedTypeChecker, isExported, nameLength, importDepth } = features;
+    const { toId, fromFileRel, usedTypeChecker, isExported, nameLength, importDepth, } = features;
     // Base score by resolution bucket
     let score;
     if (toId.startsWith("external:")) {
@@ -38,12 +38,14 @@ export function scoreInferredEdge(features) {
             score += noiseConfig.AST_BOOST_EXPORTED;
         }
         // Name length step (above min length)
-        if (typeof nameLength === 'number' && Number.isFinite(nameLength)) {
+        if (typeof nameLength === "number" && Number.isFinite(nameLength)) {
             const over = Math.max(0, nameLength - 3);
             score += Math.min(10, over) * noiseConfig.AST_STEP_NAME_LEN;
         }
         // Import depth penalty (if available)
-        if (typeof importDepth === 'number' && Number.isFinite(importDepth) && importDepth > 0) {
+        if (typeof importDepth === "number" &&
+            Number.isFinite(importDepth) &&
+            importDepth > 0) {
             score -= importDepth * noiseConfig.AST_PENALTY_IMPORT_DEPTH;
         }
     }
@@ -52,11 +54,15 @@ export function scoreInferredEdge(features) {
     }
     // Phase 3: lightweight calibration via env overrides
     try {
-        const mult = parseFloat(process.env.AST_CONF_MULTIPLIER || '1');
+        const mult = parseFloat(process.env.AST_CONF_MULTIPLIER || "1");
         if (Number.isFinite(mult))
             score *= mult;
-        const minClamp = process.env.AST_CONF_MIN ? parseFloat(process.env.AST_CONF_MIN) : undefined;
-        const maxClamp = process.env.AST_CONF_MAX ? parseFloat(process.env.AST_CONF_MAX) : undefined;
+        const minClamp = process.env.AST_CONF_MIN
+            ? parseFloat(process.env.AST_CONF_MIN)
+            : undefined;
+        const maxClamp = process.env.AST_CONF_MAX
+            ? parseFloat(process.env.AST_CONF_MAX)
+            : undefined;
         if (Number.isFinite(minClamp))
             score = Math.max(score, minClamp);
         if (Number.isFinite(maxClamp))
@@ -69,6 +75,8 @@ export function scoreInferredEdge(features) {
     return Math.max(0, Math.min(1, score));
 }
 function normalizePath(p) {
-    return String(p || "").replace(/\\/g, "/").replace(/\/+/g, "/");
+    return String(p || "")
+        .replace(/\\/g, "/")
+        .replace(/\/+/g, "/");
 }
 //# sourceMappingURL=confidence.js.map

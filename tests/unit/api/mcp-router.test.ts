@@ -13,18 +13,18 @@ import {
 } from '../../test-utils.js';
 
 // Mock external dependencies
-vi.mock('../../../src/services/KnowledgeGraphService.js');
-vi.mock('../../../src/services/DatabaseService.js');
-vi.mock('../../../src/services/ASTParser.js');
-vi.mock('../../../src/services/TestEngine.js');
-vi.mock('../../../src/services/SecurityScanner.js');
+vi.mock('../../../src/services/knowledge/KnowledgeGraphService.js');
+vi.mock('../../../src/services/core/DatabaseService.js');
+vi.mock('../../../src/services/knowledge/ASTParser.js');
+vi.mock('../../../src/services/testing/TestEngine.js');
+vi.mock('../../../src/services/testing/SecurityScanner.js');
 
 // Import mocked services
-import type { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService.js';
-import type { DatabaseService } from '../../../src/services/DatabaseService.js';
-import type { ASTParser } from '../../../src/services/ASTParser.js';
-import type { TestEngine } from '../../../src/services/TestEngine.js';
-import type { SecurityScanner } from '../../../src/services/SecurityScanner.js';
+import type { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
+import type { DatabaseService } from '../../../src/services/core/DatabaseService.js';
+import type { ASTParser } from '../../../src/services/knowledge/ASTParser.js';
+import type { TestEngine } from '../../../src/services/testing/TestEngine.js';
+import type { SecurityScanner } from '../../../src/services/testing/SecurityScanner.js';
 import { makeRealisticKgService } from '../../test-utils/kg-realistic';
 
 describe('MCPRouter', () => {

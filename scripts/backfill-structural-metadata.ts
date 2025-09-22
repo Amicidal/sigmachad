@@ -5,7 +5,7 @@ import "dotenv/config";
 import {
   createDatabaseConfig,
   DatabaseService,
-} from "../src/services/DatabaseService.js";
+} from "../src/services/core/DatabaseService.js";
 import {
   computeStructuralBackfillUpdate,
   type StructuralRelationshipSnapshot,
