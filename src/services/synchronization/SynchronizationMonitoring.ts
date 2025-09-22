@@ -10,12 +10,12 @@ import {
   SyncConflict,
   type CheckpointMetricsSnapshot,
 } from './SynchronizationCoordinator.js';
-import { RelationshipType } from '../models/relationships.js';
-import { Conflict } from './ConflictResolution.js';
+import { RelationshipType } from '../../models/relationships.js';
+import { Conflict } from '../scm/ConflictResolution.js';
 import type {
   SessionCheckpointJobMetrics,
   SessionCheckpointJobSnapshot,
-} from '../jobs/SessionCheckpointJob.js';
+} from '../../jobs/SessionCheckpointJob.js';
 
 export interface SyncMetrics {
   operationsTotal: number;

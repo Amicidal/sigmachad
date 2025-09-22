@@ -8,10 +8,10 @@ import path from "path";
 import fs from "fs/promises";
 import fsSync from "fs";
 import crypto from "crypto";
-import { RelationshipType, } from "../models/relationships.js";
-import { normalizeCodeEdge, canonicalRelationshipId, } from "../utils/codeEdges.js";
-import { noiseConfig } from "../config/noise.js";
-import { scoreInferredEdge } from "../utils/confidence.js";
+import { RelationshipType, } from "../../models/relationships.js";
+import { normalizeCodeEdge, canonicalRelationshipId, } from "../../utils/codeEdges.js";
+import { noiseConfig } from "../../config/noise.js";
+import { scoreInferredEdge } from "../../utils/confidence.js";
 export class ASTParser {
     takeTcBudget() {
         if (!Number.isFinite(this.tcBudgetRemaining))

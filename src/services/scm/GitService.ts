@@ -6,7 +6,7 @@ import type {
   SCMStatusSummary,
   SCMBranchInfo,
   SCMCommitLogEntry,
-} from "../models/types.js";
+} from "../../models/types.js";
 
 const execFileAsync = promisify(execFile);
 const FIELD_SEPARATOR = "\u001f";

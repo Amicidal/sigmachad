@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import * as crypto from "crypto";
 import {
   GraphRelationship,
   RelationshipType,
@@ -84,8 +84,8 @@ export function mergeEdgeLocations(
 }
 
 export function isCodeRelationship(type: RelationshipType): boolean {
-  // Handle legacy USES type
-  if (type === "USES") return true;
+  // Handle legacy USES type by converting to equivalent type
+  if ((type as string) === "USES") return true;
   return CODE_RELATIONSHIP_TYPE_SET.has(type);
 }
 

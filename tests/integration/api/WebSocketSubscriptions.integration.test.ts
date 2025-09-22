@@ -55,7 +55,7 @@ describe("WebSocket Subscriptions Integration", () => {
     }
 
     // Create services
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     fileWatcher = new FileWatcher({
       watchPaths: [testDir],
       debounceMs: 25,

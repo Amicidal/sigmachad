@@ -27,7 +27,14 @@ async function main() {
         await dbService.setupDatabase();
         // Initialize knowledge graph service
         console.log('🧠 Initializing knowledge graph service...');
-        const kgService = new KnowledgeGraphService(dbService);
+        // Extract Neo4j config for the new KnowledgeGraphService
+        const neo4jConfig = {
+            uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
+            username: process.env.NEO4J_USERNAME || 'neo4j',
+            password: process.env.NEO4J_PASSWORD || 'password',
+            database: process.env.NEO4J_DATABASE || 'neo4j',
+        };
+        const kgService = new KnowledgeGraphService(neo4jConfig);
         await kgService.initialize();
         // Initialize AST parser
         console.log('📝 Initializing AST parser...');

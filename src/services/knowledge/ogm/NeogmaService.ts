@@ -19,9 +19,7 @@ export class NeogmaService extends EventEmitter {
       username: config.username,
       password: config.password,
       database: config.database || 'neo4j',
-      // Additional Neogma-specific configuration
-      logger: process.env.NODE_ENV === 'development' ? console.log : undefined,
-    });
+    } as any);
 
     // Verify connection
     this.verifyConnection();

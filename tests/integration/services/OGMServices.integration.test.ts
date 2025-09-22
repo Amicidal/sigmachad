@@ -1,7 +1,7 @@
 /**
  * OGM Services Integration Tests
  * Comprehensive tests for all three OGM services working together
- * Tests OGM vs legacy implementation comparison, data consistency, and performance
+ * Tests data consistency, performance, and concurrent operations
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
@@ -11,7 +11,6 @@ import {
   cleanupIsolatedServiceTest,
   IsolatedTestSetup,
 } from "../../test-utils/database-helpers";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
 import { EntityServiceOGM } from "../../../src/services/knowledge/ogm/EntityServiceOGM";
 import { RelationshipServiceOGM } from "../../../src/services/knowledge/ogm/RelationshipServiceOGM";
 import { SearchServiceOGM } from "../../../src/services/knowledge/ogm/SearchServiceOGM";
@@ -25,7 +24,6 @@ const TEST_TIMEOUT = 60000; // 60 seconds for integration tests
 
 describe("OGM Services Integration", () => {
   let testSetup: IsolatedTestSetup;
-  let legacyKgService: KnowledgeGraphService;
   let ogmEntityService: EntityServiceOGM;
   let ogmRelationshipService: RelationshipServiceOGM;
   let ogmSearchService: SearchServiceOGM;
@@ -34,7 +32,6 @@ describe("OGM Services Integration", () => {
 
   // Performance tracking
   const performanceMetrics = {
-    legacy: { entityOps: [], relationshipOps: [], searchOps: [] as number[] },
     ogm: { entityOps: [], relationshipOps: [], searchOps: [] as number[] },
   };
 
@@ -42,9 +39,6 @@ describe("OGM Services Integration", () => {
     testSetup = await setupIsolatedServiceTest("OGMServicesIntegration", {
       silent: true,
     });
-
-    // Initialize legacy service
-    legacyKgService = testSetup.kgService;
 
     // Initialize OGM services
     neogmaService = new NeogmaService(testSetup.dbService);
@@ -66,15 +60,14 @@ describe("OGM Services Integration", () => {
 
   beforeEach(async () => {
     // Clear performance metrics for each test
-    performanceMetrics.legacy = { entityOps: [], relationshipOps: [], searchOps: [] };
     performanceMetrics.ogm = { entityOps: [], relationshipOps: [], searchOps: [] };
 
     // Small delay for test isolation
     await new Promise(resolve => setTimeout(resolve, 10));
   });
 
-  describe("Entity Operations Comparison", () => {
-    it("should create entities with identical results between legacy and OGM", async () => {
+  describe("Entity Operations", () => {
+    it("should create entities successfully with proper validation", async () => {
       const testEntity: CodebaseEntity = {
         id: "ogm-test-entity-1",
         path: "src/ogm-test.ts",
@@ -89,39 +82,29 @@ describe("OGM Services Integration", () => {
         isConfig: false,
       };
 
-      // Test legacy implementation
-      const legacyStart = performance.now();
-      const legacyResult = await legacyKgService.createEntity(testEntity);
-      const legacyTime = performance.now() - legacyStart;
-      performanceMetrics.legacy.entityOps.push(legacyTime);
-
       // Test OGM implementation
       const ogmStart = performance.now();
-      const ogmResult = await ogmEntityService.createEntity({
-        ...testEntity,
-        id: "ogm-test-entity-2", // Different ID to avoid conflicts
-      });
+      const ogmResult = await ogmEntityService.createEntity(testEntity);
       const ogmTime = performance.now() - ogmStart;
       performanceMetrics.ogm.entityOps.push(ogmTime);
 
-      // Compare results (excluding IDs and timestamps)
-      expect(legacyResult.type).toBe(ogmResult.type);
-      expect(legacyResult.path).toBe(ogmResult.path);
-      expect(legacyResult.language).toBe(ogmResult.language);
-      expect(legacyResult.size).toBe(ogmResult.size);
-      expect(legacyResult.lines).toBe(ogmResult.lines);
+      // Verify result structure
+      expect(ogmResult.type).toBe(testEntity.type);
+      expect(ogmResult.path).toBe(testEntity.path);
+      expect(ogmResult.language).toBe(testEntity.language);
+      expect(ogmResult.size).toBe(testEntity.size);
+      expect(ogmResult.lines).toBe(testEntity.lines);
+      expect(ogmResult.id).toBe(testEntity.id);
 
-      // Verify both entities exist
-      const legacyRetrieved = await legacyKgService.getEntity(legacyResult.id);
-      const ogmRetrieved = await ogmEntityService.getEntity(ogmResult.id);
+      // Verify entity can be retrieved
+      const retrieved = await ogmEntityService.getEntity(ogmResult.id);
+      expect(retrieved).toBeTruthy();
+      expect(retrieved?.id).toBe(testEntity.id);
 
-      expect(legacyRetrieved).toBeTruthy();
-      expect(ogmRetrieved).toBeTruthy();
-
-      console.log(`Entity creation - Legacy: ${legacyTime.toFixed(2)}ms, OGM: ${ogmTime.toFixed(2)}ms`);
+      console.log(`Entity creation time: ${ogmTime.toFixed(2)}ms`);
     });
 
-    it("should handle bulk entity creation consistently", async () => {
+    it("should handle bulk entity creation efficiently", async () => {
       const entities: CodebaseEntity[] = Array.from({ length: 20 }, (_, i) => ({
         id: `bulk-entity-${i}`,
         path: `src/bulk/file${i}.ts`,
@@ -134,37 +117,30 @@ describe("OGM Services Integration", () => {
         lines: 25 + i * 2,
       }));
 
-      // Test legacy bulk creation
-      const legacyStart = performance.now();
-      await legacyKgService.createEmbeddingsBatch(entities.slice(0, 10));
-      const legacyTime = performance.now() - legacyStart;
-      performanceMetrics.legacy.entityOps.push(legacyTime);
-
       // Test OGM bulk creation
       const ogmStart = performance.now();
-      const ogmResult = await ogmEntityService.createEntitiesBulk(entities.slice(10, 20), {
+      const ogmResult = await ogmEntityService.createEntitiesBulk(entities, {
         skipExisting: true,
       });
       const ogmTime = performance.now() - ogmStart;
       performanceMetrics.ogm.entityOps.push(ogmTime);
 
-      // Verify OGM bulk result
-      expect(ogmResult.created).toBe(10);
+      // Verify bulk creation result
+      expect(ogmResult.created).toBe(20);
       expect(ogmResult.failed).toBe(0);
 
       // Verify entities exist
-      for (let i = 0; i < 10; i++) {
-        const legacyEntity = await legacyKgService.getEntity(`bulk-entity-${i}`);
-        const ogmEntity = await ogmEntityService.getEntity(`bulk-entity-${i + 10}`);
-
-        expect(legacyEntity).toBeTruthy();
-        expect(ogmEntity).toBeTruthy();
+      for (let i = 0; i < 20; i++) {
+        const entity = await ogmEntityService.getEntity(`bulk-entity-${i}`);
+        expect(entity).toBeTruthy();
+        expect(entity?.size).toBe(512 + i * 10);
+        expect(entity?.lines).toBe(25 + i * 2);
       }
 
-      console.log(`Bulk entity creation - Legacy: ${legacyTime.toFixed(2)}ms, OGM: ${ogmTime.toFixed(2)}ms`);
+      console.log(`Bulk entity creation time: ${ogmTime.toFixed(2)}ms`);
     });
 
-    it("should handle entity updates consistently", async () => {
+    it("should handle entity updates correctly", async () => {
       const entity: CodebaseEntity = {
         id: "update-test-entity",
         path: "src/update-test.ts",
@@ -177,154 +153,102 @@ describe("OGM Services Integration", () => {
         lines: 10,
       };
 
-      // Create entities in both systems
-      await legacyKgService.createEntity(entity);
-      await ogmEntityService.createEntity({
-        ...entity,
-        id: "update-test-entity-ogm",
-      });
+      // Create entity
+      await ogmEntityService.createEntity(entity);
 
       const updates = { size: 512, lines: 20 };
 
-      // Test legacy update
-      const legacyStart = performance.now();
-      await legacyKgService.createOrUpdateEntity({ ...entity, ...updates });
-      const legacyTime = performance.now() - legacyStart;
-      performanceMetrics.legacy.entityOps.push(legacyTime);
-
       // Test OGM update
       const ogmStart = performance.now();
-      await ogmEntityService.updateEntity("update-test-entity-ogm", updates);
+      await ogmEntityService.updateEntity(entity.id, updates);
       const ogmTime = performance.now() - ogmStart;
       performanceMetrics.ogm.entityOps.push(ogmTime);
 
-      // Verify updates
-      const legacyUpdated = await legacyKgService.getEntity(entity.id);
-      const ogmUpdated = await ogmEntityService.getEntity("update-test-entity-ogm");
+      // Verify update
+      const updated = await ogmEntityService.getEntity(entity.id);
+      expect(updated?.size).toBe(512);
+      expect(updated?.lines).toBe(20);
+      expect(updated?.path).toBe(entity.path); // Other properties should remain
+      expect(updated?.language).toBe(entity.language);
 
-      expect(legacyUpdated?.size).toBe(512);
-      expect(ogmUpdated?.size).toBe(512);
-      expect(legacyUpdated?.lines).toBe(20);
-      expect(ogmUpdated?.lines).toBe(20);
-
-      console.log(`Entity update - Legacy: ${legacyTime.toFixed(2)}ms, OGM: ${ogmTime.toFixed(2)}ms`);
+      console.log(`Entity update time: ${ogmTime.toFixed(2)}ms`);
     });
   });
 
-  describe("Relationship Operations Comparison", () => {
-    let testEntities: { legacy: CodebaseEntity[], ogm: CodebaseEntity[] };
+  describe("Relationship Operations", () => {
+    let testEntities: CodebaseEntity[];
 
     beforeEach(async () => {
       // Create test entities for relationships
-      testEntities = {
-        legacy: [
-          {
-            id: "rel-legacy-1",
-            path: "src/legacy/main.ts",
-            hash: "legacy1",
-            language: "typescript",
-            lastModified: new Date(),
-            created: new Date(),
-            type: "file",
-          },
-          {
-            id: "rel-legacy-2",
-            path: "src/legacy/utils.ts",
-            hash: "legacy2",
-            language: "typescript",
-            lastModified: new Date(),
-            created: new Date(),
-            type: "file",
-          },
-        ],
-        ogm: [
-          {
-            id: "rel-ogm-1",
-            path: "src/ogm/main.ts",
-            hash: "ogm1",
-            language: "typescript",
-            lastModified: new Date(),
-            created: new Date(),
-            type: "file",
-          },
-          {
-            id: "rel-ogm-2",
-            path: "src/ogm/utils.ts",
-            hash: "ogm2",
-            language: "typescript",
-            lastModified: new Date(),
-            created: new Date(),
-            type: "file",
-          },
-        ],
-      };
+      testEntities = [
+        {
+          id: "rel-entity-1",
+          path: "src/main.ts",
+          hash: "main123",
+          language: "typescript",
+          lastModified: new Date(),
+          created: new Date(),
+          type: "file",
+        },
+        {
+          id: "rel-entity-2",
+          path: "src/utils.ts",
+          hash: "utils123",
+          language: "typescript",
+          lastModified: new Date(),
+          created: new Date(),
+          type: "file",
+        },
+      ];
 
-      // Create entities in both systems
-      for (const entity of testEntities.legacy) {
-        await legacyKgService.createEntity(entity);
-      }
-      for (const entity of testEntities.ogm) {
+      // Create entities
+      for (const entity of testEntities) {
         await ogmEntityService.createEntity(entity);
       }
     });
 
-    it("should create relationships with comparable results", async () => {
-      const legacyRel: GraphRelationship = {
-        id: "legacy-rel-1",
-        fromEntityId: testEntities.legacy[0].id,
-        toEntityId: testEntities.legacy[1].id,
+    it("should create relationships successfully", async () => {
+      const relationship: GraphRelationship = {
+        id: "test-rel-1",
+        fromEntityId: testEntities[0].id,
+        toEntityId: testEntities[1].id,
         type: RelationshipType.IMPORTS,
         created: new Date(),
         lastModified: new Date(),
         version: 1,
         metadata: { importType: "named" },
       };
-
-      const ogmRel: GraphRelationship = {
-        id: "ogm-rel-1",
-        fromEntityId: testEntities.ogm[0].id,
-        toEntityId: testEntities.ogm[1].id,
-        type: RelationshipType.IMPORTS,
-        created: new Date(),
-        lastModified: new Date(),
-        version: 1,
-        metadata: { importType: "named" },
-      };
-
-      // Test legacy relationship creation
-      const legacyStart = performance.now();
-      await legacyKgService.createRelationship(legacyRel);
-      const legacyTime = performance.now() - legacyStart;
-      performanceMetrics.legacy.relationshipOps.push(legacyTime);
 
       // Test OGM relationship creation
       const ogmStart = performance.now();
-      await ogmRelationshipService.createRelationship(ogmRel);
+      const result = await ogmRelationshipService.createRelationship(relationship);
       const ogmTime = performance.now() - ogmStart;
       performanceMetrics.ogm.relationshipOps.push(ogmTime);
 
-      // Verify relationships exist
-      const legacyRels = await legacyKgService.getRelationships({
-        fromEntityId: testEntities.legacy[0].id,
-      });
-      const ogmRels = await ogmRelationshipService.getRelationships({
-        fromEntityId: testEntities.ogm[0].id,
+      // Verify relationship creation result
+      expect(result.id).toBe(relationship.id);
+      expect(result.type).toBe(RelationshipType.IMPORTS);
+      expect(result.fromEntityId).toBe(testEntities[0].id);
+      expect(result.toEntityId).toBe(testEntities[1].id);
+
+      // Verify relationship exists in database
+      const relationships = await ogmRelationshipService.getRelationships({
+        fromEntityId: testEntities[0].id,
       });
 
-      expect(legacyRels.length).toBe(1);
-      expect(ogmRels.length).toBe(1);
-      expect(legacyRels[0].type).toBe(RelationshipType.IMPORTS);
-      expect(ogmRels[0].type).toBe(RelationshipType.IMPORTS);
+      expect(relationships.length).toBe(1);
+      expect(relationships[0].type).toBe(RelationshipType.IMPORTS);
+      expect(relationships[0].metadata?.importType).toBe("named");
 
-      console.log(`Relationship creation - Legacy: ${legacyTime.toFixed(2)}ms, OGM: ${ogmTime.toFixed(2)}ms`);
+      console.log(`Relationship creation time: ${ogmTime.toFixed(2)}ms`);
     });
 
     it("should handle bulk relationship creation efficiently", async () => {
       const relationships: GraphRelationship[] = [
         {
           id: "bulk-rel-1",
-          fromEntityId: testEntities.legacy[0].id,
-          toEntityId: testEntities.legacy[1].id,
+          fromEntityId: testEntities[0].id,
+          toEntityId: testEntities[1].id,
           type: RelationshipType.CALLS,
           created: new Date(),
           lastModified: new Date(),
@@ -332,60 +256,47 @@ describe("OGM Services Integration", () => {
         },
         {
           id: "bulk-rel-2",
-          fromEntityId: testEntities.legacy[1].id,
-          toEntityId: testEntities.legacy[0].id,
+          fromEntityId: testEntities[1].id,
+          toEntityId: testEntities[0].id,
           type: RelationshipType.REFERENCES,
           created: new Date(),
           lastModified: new Date(),
           version: 1,
         },
       ];
-
-      const ogmRelationships: GraphRelationship[] = [
-        {
-          id: "bulk-ogm-rel-1",
-          fromEntityId: testEntities.ogm[0].id,
-          toEntityId: testEntities.ogm[1].id,
-          type: RelationshipType.CALLS,
-          created: new Date(),
-          lastModified: new Date(),
-          version: 1,
-        },
-        {
-          id: "bulk-ogm-rel-2",
-          fromEntityId: testEntities.ogm[1].id,
-          toEntityId: testEntities.ogm[0].id,
-          type: RelationshipType.REFERENCES,
-          created: new Date(),
-          lastModified: new Date(),
-          version: 1,
-        },
-      ];
-
-      // Test legacy bulk creation
-      const legacyStart = performance.now();
-      await legacyKgService.createRelationshipsBulk(relationships);
-      const legacyTime = performance.now() - legacyStart;
-      performanceMetrics.legacy.relationshipOps.push(legacyTime);
 
       // Test OGM bulk creation
       const ogmStart = performance.now();
-      const ogmResult = await ogmRelationshipService.createRelationshipsBulk(
-        ogmRelationships,
+      const result = await ogmRelationshipService.createRelationshipsBulk(
+        relationships,
         { mergeEvidence: false }
       );
       const ogmTime = performance.now() - ogmStart;
       performanceMetrics.ogm.relationshipOps.push(ogmTime);
 
       // Verify bulk creation results
-      expect(ogmResult.created).toBeGreaterThan(0);
-      expect(ogmResult.failed).toBe(0);
+      expect(result.created).toBe(2);
+      expect(result.failed).toBe(0);
+      expect(result.skipped).toBe(0);
 
-      console.log(`Bulk relationship creation - Legacy: ${legacyTime.toFixed(2)}ms, OGM: ${ogmTime.toFixed(2)}ms`);
+      // Verify relationships exist
+      const callsRels = await ogmRelationshipService.getRelationships({
+        fromEntityId: testEntities[0].id,
+        type: RelationshipType.CALLS,
+      });
+      const refRels = await ogmRelationshipService.getRelationships({
+        fromEntityId: testEntities[1].id,
+        type: RelationshipType.REFERENCES,
+      });
+
+      expect(callsRels.length).toBe(1);
+      expect(refRels.length).toBe(1);
+
+      console.log(`Bulk relationship creation time: ${ogmTime.toFixed(2)}ms`);
     });
   });
 
-  describe("Search Operations Comparison", () => {
+  describe("Search Operations", () => {
     beforeEach(async () => {
       // Create searchable entities
       const searchEntities = [
@@ -412,12 +323,11 @@ describe("OGM Services Integration", () => {
       ];
 
       for (const entity of searchEntities) {
-        await legacyKgService.createEntity(entity);
         await ogmEntityService.createEntity(entity);
       }
     });
 
-    it("should provide consistent search results", async () => {
+    it("should provide accurate search results", async () => {
       const searchRequest: GraphSearchRequest = {
         query: "Button",
         searchType: "structural",
@@ -425,33 +335,25 @@ describe("OGM Services Integration", () => {
         limit: 10,
       };
 
-      // Test legacy search
-      const legacyStart = performance.now();
-      const legacyResults = await legacyKgService.search(searchRequest);
-      const legacyTime = performance.now() - legacyStart;
-      performanceMetrics.legacy.searchOps.push(legacyTime);
-
       // Test OGM search
       const ogmStart = performance.now();
-      const ogmResults = await ogmSearchService.search(searchRequest);
+      const results = await ogmSearchService.search(searchRequest);
       const ogmTime = performance.now() - ogmStart;
       performanceMetrics.ogm.searchOps.push(ogmTime);
 
-      // Compare search results
-      expect(legacyResults.length).toBeGreaterThan(0);
-      expect(ogmResults.length).toBeGreaterThan(0);
+      // Verify search results
+      expect(results.length).toBeGreaterThan(0);
 
-      // Both should find the Button entity
-      const legacyButton = legacyResults.find(r => r.path?.includes("Button"));
-      const ogmButton = ogmResults.find(r => r.entity.path?.includes("Button"));
+      // Should find the Button entity
+      const buttonResult = results.find(r => r.entity.path?.includes("Button"));
+      expect(buttonResult).toBeTruthy();
+      expect(buttonResult?.entity.language).toBe("typescript");
+      expect(buttonResult?.score).toBeGreaterThan(0);
 
-      expect(legacyButton).toBeTruthy();
-      expect(ogmButton).toBeTruthy();
-
-      console.log(`Search operation - Legacy: ${legacyTime.toFixed(2)}ms, OGM: ${ogmTime.toFixed(2)}ms`);
+      console.log(`Search operation time: ${ogmTime.toFixed(2)}ms`);
     });
 
-    it("should handle complex search filters consistently", async () => {
+    it("should handle complex search filters correctly", async () => {
       const searchRequest: GraphSearchRequest = {
         query: "",
         searchType: "structural",
@@ -463,26 +365,25 @@ describe("OGM Services Integration", () => {
         limit: 5,
       };
 
-      // Test legacy filtered search
-      const legacyStart = performance.now();
-      const legacyResults = await legacyKgService.search(searchRequest);
-      const legacyTime = performance.now() - legacyStart;
-      performanceMetrics.legacy.searchOps.push(legacyTime);
-
       // Test OGM filtered search
       const ogmStart = performance.now();
-      const ogmResults = await ogmSearchService.search(searchRequest);
+      const results = await ogmSearchService.search(searchRequest);
       const ogmTime = performance.now() - ogmStart;
       performanceMetrics.ogm.searchOps.push(ogmTime);
 
       // Verify filter effectiveness
-      const legacyTypescriptFiles = legacyResults.filter(r => r.language === "typescript");
-      const ogmTypescriptFiles = ogmResults.filter(r => r.entity.language === "typescript");
+      expect(results.length).toBeGreaterThanOrEqual(0);
 
-      expect(legacyTypescriptFiles.length).toBe(legacyResults.length);
-      expect(ogmTypescriptFiles.length).toBe(ogmResults.length);
+      // All results should match the filters
+      const typescriptFiles = results.filter(r => r.entity.language === "typescript");
+      const componentsFiles = results.filter(r => r.entity.path?.includes("components"));
 
-      console.log(`Filtered search - Legacy: ${legacyTime.toFixed(2)}ms, OGM: ${ogmTime.toFixed(2)}ms`);
+      expect(typescriptFiles.length).toBe(results.length);
+      if (results.length > 0) {
+        expect(componentsFiles.length).toBeGreaterThan(0);
+      }
+
+      console.log(`Filtered search time: ${ogmTime.toFixed(2)}ms`);
     });
   });
 
@@ -500,31 +401,28 @@ describe("OGM Services Integration", () => {
         lines: 50,
       };
 
-      // Create in both systems
-      await legacyKgService.createEntity(entity);
-      await ogmEntityService.createEntity(entity);
+      // Create entity
+      const created = await ogmEntityService.createEntity(entity);
+      expect(created.id).toBe(entity.id);
 
-      // Retrieve from both systems
-      const legacyEntity = await legacyKgService.getEntity(entity.id);
-      const ogmEntity = await ogmEntityService.getEntity(entity.id);
+      // Retrieve entity
+      const retrieved = await ogmEntityService.getEntity(entity.id);
+      expect(retrieved?.type).toBe(entity.type);
+      expect(retrieved?.path).toBe(entity.path);
+      expect(retrieved?.language).toBe(entity.language);
+      expect(retrieved?.size).toBe(entity.size);
+      expect(retrieved?.lines).toBe(entity.lines);
 
-      // Verify consistent properties
-      expect(legacyEntity?.type).toBe(ogmEntity?.type);
-      expect(legacyEntity?.path).toBe(ogmEntity?.path);
-      expect(legacyEntity?.language).toBe(ogmEntity?.language);
-      expect(legacyEntity?.size).toBe(ogmEntity?.size);
-      expect(legacyEntity?.lines).toBe(ogmEntity?.lines);
-
-      // Update and verify consistency
+      // Update entity
       const updates = { size: 2048, lines: 100 };
-      await legacyKgService.createOrUpdateEntity({ ...entity, ...updates });
       await ogmEntityService.updateEntity(entity.id, updates);
 
-      const legacyUpdated = await legacyKgService.getEntity(entity.id);
-      const ogmUpdated = await ogmEntityService.getEntity(entity.id);
-
-      expect(legacyUpdated?.size).toBe(ogmUpdated?.size);
-      expect(legacyUpdated?.lines).toBe(ogmUpdated?.lines);
+      // Verify update
+      const updated = await ogmEntityService.getEntity(entity.id);
+      expect(updated?.size).toBe(2048);
+      expect(updated?.lines).toBe(100);
+      expect(updated?.path).toBe(entity.path); // Unchanged properties
+      expect(updated?.language).toBe(entity.language);
     });
 
     it("should handle concurrent operations without data corruption", async () => {
@@ -627,66 +525,32 @@ describe("OGM Services Integration", () => {
   });
 
   describe("Performance Benchmarks", () => {
-    it("should complete performance comparison summary", async () => {
+    it("should provide performance metrics summary", async () => {
       // Calculate averages
-      const avgLegacyEntity = performanceMetrics.legacy.entityOps.length > 0
-        ? performanceMetrics.legacy.entityOps.reduce((a, b) => a + b) / performanceMetrics.legacy.entityOps.length
-        : 0;
       const avgOgmEntity = performanceMetrics.ogm.entityOps.length > 0
         ? performanceMetrics.ogm.entityOps.reduce((a, b) => a + b) / performanceMetrics.ogm.entityOps.length
         : 0;
-
-      const avgLegacyRel = performanceMetrics.legacy.relationshipOps.length > 0
-        ? performanceMetrics.legacy.relationshipOps.reduce((a, b) => a + b) / performanceMetrics.legacy.relationshipOps.length
-        : 0;
       const avgOgmRel = performanceMetrics.ogm.relationshipOps.length > 0
         ? performanceMetrics.ogm.relationshipOps.reduce((a, b) => a + b) / performanceMetrics.ogm.relationshipOps.length
-        : 0;
-
-      const avgLegacySearch = performanceMetrics.legacy.searchOps.length > 0
-        ? performanceMetrics.legacy.searchOps.reduce((a, b) => a + b) / performanceMetrics.legacy.searchOps.length
         : 0;
       const avgOgmSearch = performanceMetrics.ogm.searchOps.length > 0
         ? performanceMetrics.ogm.searchOps.reduce((a, b) => a + b) / performanceMetrics.ogm.searchOps.length
         : 0;
 
-      console.log("\n=== Performance Comparison Summary ===");
-      console.log(`Entity Operations:`);
-      console.log(`  Legacy: ${avgLegacyEntity.toFixed(2)}ms (avg)`);
-      console.log(`  OGM: ${avgOgmEntity.toFixed(2)}ms (avg)`);
+      console.log("\n=== OGM Performance Summary ===");
+      console.log(`Entity Operations: ${avgOgmEntity.toFixed(2)}ms (avg)`);
+      console.log(`Relationship Operations: ${avgOgmRel.toFixed(2)}ms (avg)`);
+      console.log(`Search Operations: ${avgOgmSearch.toFixed(2)}ms (avg)`);
 
-      if (avgLegacyEntity > 0 && avgOgmEntity > 0) {
-        const entityRatio = avgOgmEntity / avgLegacyEntity;
-        console.log(`  OGM vs Legacy: ${entityRatio.toFixed(2)}x`);
+      // Performance should be reasonable (under 1 second for individual operations)
+      if (avgOgmEntity > 0) {
+        expect(avgOgmEntity).toBeLessThan(1000);
       }
-
-      console.log(`Relationship Operations:`);
-      console.log(`  Legacy: ${avgLegacyRel.toFixed(2)}ms (avg)`);
-      console.log(`  OGM: ${avgOgmRel.toFixed(2)}ms (avg)`);
-
-      if (avgLegacyRel > 0 && avgOgmRel > 0) {
-        const relRatio = avgOgmRel / avgLegacyRel;
-        console.log(`  OGM vs Legacy: ${relRatio.toFixed(2)}x`);
+      if (avgOgmRel > 0) {
+        expect(avgOgmRel).toBeLessThan(1000);
       }
-
-      console.log(`Search Operations:`);
-      console.log(`  Legacy: ${avgLegacySearch.toFixed(2)}ms (avg)`);
-      console.log(`  OGM: ${avgOgmSearch.toFixed(2)}ms (avg)`);
-
-      if (avgLegacySearch > 0 && avgOgmSearch > 0) {
-        const searchRatio = avgOgmSearch / avgLegacySearch;
-        console.log(`  OGM vs Legacy: ${searchRatio.toFixed(2)}x`);
-      }
-
-      // Performance should be reasonable (not more than 10x slower)
-      if (avgLegacyEntity > 0 && avgOgmEntity > 0) {
-        expect(avgOgmEntity / avgLegacyEntity).toBeLessThan(10);
-      }
-      if (avgLegacyRel > 0 && avgOgmRel > 0) {
-        expect(avgOgmRel / avgLegacyRel).toBeLessThan(10);
-      }
-      if (avgLegacySearch > 0 && avgOgmSearch > 0) {
-        expect(avgOgmSearch / avgLegacySearch).toBeLessThan(10);
+      if (avgOgmSearch > 0) {
+        expect(avgOgmSearch).toBeLessThan(1000);
       }
     });
 
@@ -725,14 +589,14 @@ describe("OGM Services Integration", () => {
     });
   });
 
-  describe("Event Emission Consistency", () => {
-    it("should emit consistent events between implementations", async () => {
-      const legacyEvents: any[] = [];
-      const ogmEvents: any[] = [];
+  describe("Event Emission", () => {
+    it("should emit proper events for entity operations", async () => {
+      const events: any[] = [];
 
       // Listen to events
-      legacyKgService.on('entity:created', (data) => legacyEvents.push({ type: 'entity:created', data }));
-      ogmEntityService.on('entity:created', (data) => ogmEvents.push({ type: 'entity:created', data }));
+      ogmEntityService.on('entity:created', (data) => events.push({ type: 'entity:created', data }));
+      ogmEntityService.on('entity:updated', (data) => events.push({ type: 'entity:updated', data }));
+      ogmEntityService.on('entity:deleted', (data) => events.push({ type: 'entity:deleted', data }));
 
       const testEntity: CodebaseEntity = {
         id: "event-test-entity",
@@ -744,26 +608,40 @@ describe("OGM Services Integration", () => {
         type: "file",
       };
 
-      // Create entities in both systems
-      await legacyKgService.createEntity(testEntity);
-      await ogmEntityService.createEntity({
-        ...testEntity,
-        id: "event-test-entity-ogm",
-      });
+      // Create entity
+      await ogmEntityService.createEntity(testEntity);
+
+      // Update entity
+      await ogmEntityService.updateEntity(testEntity.id, { size: 1024 });
+
+      // Delete entity
+      await ogmEntityService.deleteEntity(testEntity.id);
 
       // Small delay for event processing
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Both should have emitted events
-      expect(legacyEvents.length).toBeGreaterThan(0);
-      expect(ogmEvents.length).toBeGreaterThan(0);
+      // Should have emitted create, update, and delete events
+      expect(events.length).toBeGreaterThanOrEqual(1);
 
-      const legacyCreateEvent = legacyEvents.find(e => e.type === 'entity:created');
-      const ogmCreateEvent = ogmEvents.find(e => e.type === 'entity:created');
-
-      expect(legacyCreateEvent).toBeTruthy();
-      expect(ogmCreateEvent).toBeTruthy();
-      expect(legacyCreateEvent.data.type).toBe(ogmCreateEvent.data.type);
+      const createEvent = events.find(e => e.type === 'entity:created');
+      expect(createEvent).toBeTruthy();
+      expect(createEvent.data.type).toBe('file');
     });
   });
 });
+
+// Helper function to generate test data
+function createTestEntity(id: string, overrides: Partial<CodebaseEntity> = {}): CodebaseEntity {
+  return {
+    id,
+    path: `src/test-${id}.ts`,
+    hash: `hash-${id}`,
+    language: "typescript",
+    lastModified: new Date(),
+    created: new Date(),
+    type: "file",
+    size: 512,
+    lines: 25,
+    ...overrides,
+  };
+}

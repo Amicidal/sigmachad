@@ -3,7 +3,7 @@
  * Parses various test framework output formats into standardized test results
  */
 
-import { TestSuiteResult, TestResult } from "./testing/TestEngine.js";
+import { TestSuiteResult, TestResult } from "./TestEngine.js";
 import * as fs from "fs/promises";
 
 export interface ParsedTestSuite {

@@ -58,7 +58,7 @@ describeBench("Performance Benchmarks Integration", () => {
     }
 
     // Create services
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     // Create API Gateway
     apiGateway = new APIGateway(kgService, dbService);
     app = apiGateway.getApp();

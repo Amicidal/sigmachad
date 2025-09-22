@@ -3,7 +3,7 @@
  * Handles system maintenance tasks including cleanup, optimization, reindexing, and validation
  */
 import { DatabaseService } from './DatabaseService.js';
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
+import { KnowledgeGraphService } from '../knowledge/KnowledgeGraphService.js';
 export interface MaintenanceTask {
     id: string;
     name: string;

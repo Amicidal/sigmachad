@@ -72,7 +72,7 @@ describe('History routes (integration)', () => {
   beforeEach(async () => {
     if (skipSuite) return;
     await clearTestData(dbService, { silent: true });
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     await kgService.initialize();
 
     app = Fastify();

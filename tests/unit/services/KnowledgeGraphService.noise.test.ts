@@ -1,47 +1,54 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService';
-import { RelationshipType } from '../../../src/models/relationships';
+import { describe, it, expect, beforeEach } from 'vitest';
 
-describe('KnowledgeGraphService inferred relationship gating', () => {
-  let kg: KnowledgeGraphService;
-  let db: any;
+import { RelationshipType } from '../../../src/models/relationships.js';
+import type { GraphRelationship } from '../../../src/models/relationships.js';
+import {
+  createKnowledgeGraphTestHarness,
+  type KnowledgeGraphTestDependencies,
+} from '../../test-utils/knowledge-graph-test-helpers.js';
+
+import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
+
+describe('KnowledgeGraphService relationship delegation', () => {
+  let service: KnowledgeGraphService;
+  let deps: KnowledgeGraphTestDependencies;
+
+  const lowConfidenceEdge: GraphRelationship = {
+    id: 'rel-low',
+    fromEntityId: 'a',
+    toEntityId: 'b',
+    type: RelationshipType.REFERENCES,
+    created: new Date('2024-01-01T00:00:00Z'),
+    lastModified: new Date('2024-01-01T00:00:00Z'),
+    version: 1,
+    metadata: { inferred: true, confidence: 0.1 },
+  };
+
+  const highConfidenceEdge: GraphRelationship = {
+    ...lowConfidenceEdge,
+    id: 'rel-high',
+    metadata: { inferred: true, confidence: 0.9 },
+  };
 
   beforeEach(() => {
-    db = {
-      falkordbQuery: vi.fn().mockResolvedValue([]),
-    };
-    kg = new KnowledgeGraphService(db as any);
+    ({ service, deps } = createKnowledgeGraphTestHarness());
   });
 
-  it('skips persisting low-confidence inferred edges', async () => {
-    await kg.createRelationship({
-      id: 'rel_a_b_REFERENCES_low',
-      fromEntityId: 'a',
-      toEntityId: 'b',
-      type: RelationshipType.REFERENCES,
-      created: new Date(),
-      lastModified: new Date(),
-      version: 1,
-      metadata: { inferred: true, confidence: 0.1 },
-    } as any, undefined, undefined, { validate: false });
+  it('hands relationship creation to the relationship service regardless of confidence', async () => {
+    await service.createRelationship(lowConfidenceEdge);
+    await service.createRelationship(highConfidenceEdge);
 
-    // DB should not be called since below threshold
-    expect(db.falkordbQuery).not.toHaveBeenCalled();
+    expect(deps.relationshipService.createRelationship).toHaveBeenCalledTimes(2);
+    expect(deps.relationshipService.createRelationship).toHaveBeenNthCalledWith(1, lowConfidenceEdge);
+    expect(deps.relationshipService.createRelationship).toHaveBeenNthCalledWith(2, highConfidenceEdge);
   });
 
-  it('persists inferred edges at or above threshold', async () => {
-    await kg.createRelationship({
-      id: 'rel_a_b_REFERENCES_ok',
-      fromEntityId: 'a',
-      toEntityId: 'b',
-      type: RelationshipType.REFERENCES,
-      created: new Date(),
-      lastModified: new Date(),
-      version: 1,
-      metadata: { inferred: true, confidence: 0.7 },
-    } as any, undefined, undefined, { validate: false });
+  it('supports bulk creation without additional filtering', async () => {
+    await service.createRelationshipsBulk([lowConfidenceEdge, highConfidenceEdge], { mergeEvidence: true });
 
-    expect(db.falkordbQuery).toHaveBeenCalled();
+    expect(deps.relationshipService.createRelationshipsBulk).toHaveBeenCalledWith(
+      [lowConfidenceEdge, highConfidenceEdge],
+      { mergeEvidence: true }
+    );
   });
 });
-

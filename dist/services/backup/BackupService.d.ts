@@ -41,6 +41,7 @@ interface BackupIntegrityMetadata {
         actual: string;
     };
     cause?: unknown;
+    storageProvider?: string;
 }
 interface BackupIntegrityResult {
     passed: boolean;
@@ -58,13 +59,20 @@ interface RestoreResult {
     backupId: string;
     status: "in_progress" | "completed" | "failed" | "dry_run_completed";
     success: boolean;
-    changes: Array<Record<string, unknown>>;
+    changes: ComponentValidation[];
     estimatedDuration: string;
     integrityCheck?: RestoreIntegrityCheck;
     error?: RestoreErrorDetails;
     token?: string;
     tokenExpiresAt?: Date;
     requiresApproval?: boolean;
+}
+interface ComponentValidation {
+    component: string;
+    action: "validate" | "restored";
+    status: "valid" | "warning" | "invalid" | "missing" | "completed";
+    details: string;
+    metadata?: Record<string, unknown>;
 }
 export interface RestorePreviewToken {
     token: string;
@@ -81,10 +89,13 @@ export interface RestorePreviewResult {
     backupId: string;
     token: string;
     success: boolean;
+    status: "in_progress" | "completed" | "failed" | "dry_run_completed";
     expiresAt: Date;
-    changes: Array<Record<string, unknown>>;
+    tokenExpiresAt?: Date;
+    changes: ComponentValidation[];
     estimatedDuration: string;
     integrityCheck?: RestoreIntegrityCheck;
+    error?: RestoreErrorDetails;
 }
 export interface RestoreApprovalPolicy {
     requireSecondApproval: boolean;

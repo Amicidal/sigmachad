@@ -66,7 +66,13 @@
       "Bash({} ;)",
       "Bash(/Users/Coding/Desktop/sigmachad/src/health-check.ts)",
       "Bash(npm run type-check:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(while read file)",
+      "Bash(node:*)",
+      "Bash(npx tsx:*)",
+      "Bash(chmod:*)",
+      "Bash(./tests/integration/astparser/run-tests.sh:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

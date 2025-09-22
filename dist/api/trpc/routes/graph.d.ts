@@ -123,8 +123,8 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
     }, {
-        items: any;
-        total: any;
+        items: import("../../../models/entities.js").Entity[];
+        total: number;
     }>;
     getDependencies: import("@trpc/server").BuildProcedure<"query", {
         _config: import("@trpc/server").RootConfig<{

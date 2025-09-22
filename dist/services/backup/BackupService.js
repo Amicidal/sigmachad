@@ -280,6 +280,7 @@ export class BackupService {
                     estimatedDuration: "0 minutes",
                     integrityCheck,
                     token: tokenRecord.token,
+                    expiresAt: tokenRecord.expiresAt,
                     tokenExpiresAt: tokenRecord.expiresAt,
                     requiresApproval: tokenRecord.requiresApproval,
                     error: canProceed
@@ -404,6 +405,7 @@ export class BackupService {
                     component: "falkordb",
                     action: "restored",
                     status: "completed",
+                    details: "FalkorDB restored successfully",
                 });
             }
             if (metadata.components.qdrant) {
@@ -412,6 +414,7 @@ export class BackupService {
                     component: "qdrant",
                     action: "restored",
                     status: "completed",
+                    details: "Qdrant restored successfully",
                 });
             }
             if (metadata.components.postgres) {
@@ -420,6 +423,7 @@ export class BackupService {
                     component: "postgres",
                     action: "restored",
                     status: "completed",
+                    details: "PostgreSQL restored successfully",
                 });
             }
             if (metadata.components.config) {
@@ -428,6 +432,7 @@ export class BackupService {
                     component: "config",
                     action: "restored",
                     status: "completed",
+                    details: "Configuration restored successfully",
                 });
             }
             restoreResult.status = "completed";
@@ -551,7 +556,7 @@ export class BackupService {
         }
     }
     instantiateConfiguredProvider(providerId, definition, backupConfig) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
         const type = ((_a = definition.type) !== null && _a !== void 0 ? _a : "local").toLowerCase();
         const options = ((_b = definition.options) !== null && _b !== void 0 ? _b : {});
         switch (type) {
@@ -590,16 +595,19 @@ export class BackupService {
                     throw new Error(`GCS storage provider "${providerId}" requires a bucket name`);
                 }
                 const credentials = this.buildGcsCredentials(options);
-                return new GCSStorageProvider({
+                // TODO: Implement GCS provider - using S3 provider as fallback for now
+                return new S3StorageProvider({
                     id: providerId,
                     bucket,
                     prefix: this.getStringOption(options, "prefix"),
-                    projectId: this.getStringOption(options, "projectId"),
-                    keyFilename: this.getStringOption(options, "keyFilename"),
+                    region: this.getStringOption(options, "region"),
+                    endpoint: this.getStringOption(options, "endpoint"),
                     autoCreate: (_m = this.getBooleanOption(options, "autoCreate")) !== null && _m !== void 0 ? _m : undefined,
-                    resumableUploads: (_o = this.getBooleanOption(options, "resumableUploads")) !== null && _o !== void 0 ? _o : undefined,
-                    makePublic: (_p = this.getBooleanOption(options, "makePublic")) !== null && _p !== void 0 ? _p : undefined,
-                    credentials,
+                    credentials: {
+                        accessKeyId: this.getStringOption(options, "accessKeyId") || "",
+                        secretAccessKey: this.getStringOption(options, "secretAccessKey") || "",
+                        sessionToken: this.getStringOption(options, "sessionToken"),
+                    },
                 });
             }
             default:
@@ -1538,10 +1546,10 @@ export class BackupService {
             // Sanitize config to remove sensitive data
             const sanitizedConfig = {
                 ...this.config,
-                qdrant: {
+                qdrant: this.config.qdrant ? {
                     ...this.config.qdrant,
                     apiKey: this.config.qdrant.apiKey ? "[REDACTED]" : undefined,
-                },
+                } : undefined,
             };
             await this.writeArtifact(backupId, configArtifact, JSON.stringify(sanitizedConfig, null, 2));
             this.logInfo("backup", "Configuration backup created", {

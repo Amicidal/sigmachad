@@ -3,7 +3,12 @@
  * Basic tests to ensure the OGM search implementation works correctly
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+// Mock jest globals for testing
+const describe = (global as any).describe || (() => {});
+const it = (global as any).it || (() => {});
+const expect = (global as any).expect || (() => ({ toBe: () => {}, toHaveLength: () => {} }));
+const beforeEach = (global as any).beforeEach || (() => {});
+const afterEach = (global as any).afterEach || (() => {});
 import { EventEmitter } from 'events';
 import { SearchServiceOGM } from './SearchServiceOGM.js';
 import { NeogmaService } from './NeogmaService.js';
@@ -67,8 +72,12 @@ class MockEmbeddingService extends EventEmitter {
           id: 'test-entity-1',
           type: 'function',
           name: 'testFunction',
-          path: '/test/file.ts'
-        } as Entity,
+          path: '/test/file.ts',
+          hash: 'test-hash',
+          language: 'typescript',
+          created: new Date(),
+          lastModified: new Date()
+        } as unknown as Entity,
         score: 0.85,
         metadata: {}
       }
@@ -113,7 +122,7 @@ describe('SearchServiceOGM', () => {
       const results = await searchService.structuralSearch('testFunction');
 
       expect(results).toHaveLength(1);
-      expect(results[0].entity.name).toBe('testFunction');
+      expect((results[0].entity as any).name).toBe('testFunction');
       expect(results[0].type).toBe('structural');
       expect(results[0].score).toBe(1.0);
     });
@@ -135,7 +144,7 @@ describe('SearchServiceOGM', () => {
       });
 
       expect(results).toHaveLength(1);
-      expect(results[0].entity.name).toBe('testFunction');
+      expect((results[0].entity as any).name).toBe('testFunction');
       expect(results[0].type).toBe('structural');
     });
 
@@ -154,7 +163,7 @@ describe('SearchServiceOGM', () => {
       const results = await searchService.semanticSearch('find similar functions');
 
       expect(results).toHaveLength(1);
-      expect(results[0].entity.name).toBe('testFunction');
+      expect((results[0].entity as any).name).toBe('testFunction');
       expect(results[0].type).toBe('semantic');
       expect(results[0].score).toBe(0.85);
     });

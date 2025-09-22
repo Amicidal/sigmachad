@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import * as crypto from "crypto";
 import { RelationshipType, CODE_RELATIONSHIP_TYPES, isDocumentationRelationshipType, isPerformanceRelationshipType, isSessionRelationshipType, isStructuralRelationshipType, } from "../models/relationships.js";
 import { sanitizeEnvironment } from "./environment.js";
 const CODE_RELATIONSHIP_TYPE_SET = new Set(CODE_RELATIONSHIP_TYPES);
@@ -58,7 +58,7 @@ export function mergeEdgeLocations(a = [], b = [], limit = 20) {
     return out;
 }
 export function isCodeRelationship(type) {
-    // Handle legacy USES type
+    // Handle legacy USES type by converting to equivalent type
     if (type === "USES")
         return true;
     return CODE_RELATIONSHIP_TYPE_SET.has(type);

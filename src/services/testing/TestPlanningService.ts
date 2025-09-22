@@ -1,16 +1,16 @@
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { RelationshipType, type GraphRelationship } from "../models/relationships.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { RelationshipType, type GraphRelationship } from "../../models/relationships.js";
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestSpec,
-} from "../models/types.js";
+} from "../../models/types.js";
 import type {
   CoverageMetrics,
   Entity,
   Spec,
   Test,
-} from "../models/entities.js";
+} from "../../models/entities.js";
 
 export class SpecNotFoundError extends Error {
   public readonly code = "SPEC_NOT_FOUND";

@@ -40,7 +40,7 @@ describe("DocumentationParser Integration", () => {
 
     // Initialize services
     dbService = await setupTestDatabase();
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     docParser = new DocumentationParser(kgService, dbService);
 
     // Ensure database is healthy

@@ -1,4 +1,4 @@
-export { default as BackupService } from './BackupService.js';
-export { default as LocalFilesystemStorageProvider } from './LocalFilesystemStorageProvider.js';
-export { default as S3StorageProvider } from './S3StorageProvider.js';
+export { BackupService } from './BackupService.js';
+export { LocalFilesystemStorageProvider } from './LocalFilesystemStorageProvider.js';
+export { S3StorageProvider } from './S3StorageProvider.js';
 //# sourceMappingURL=index.js.map

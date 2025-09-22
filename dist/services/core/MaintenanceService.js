@@ -3,8 +3,8 @@
  * Handles system maintenance tasks including cleanup, optimization, reindexing, and validation
  */
 import { MaintenanceMetrics } from './metrics/MaintenanceMetrics.js';
-import { MaintenanceOperationError } from './BackupService.js';
-import { TemporalHistoryValidator } from '../jobs/TemporalHistoryValidator.js';
+import { MaintenanceOperationError } from '../backup/BackupService.js';
+import { TemporalHistoryValidator } from '../../jobs/TemporalHistoryValidator.js';
 export class MaintenanceService {
     constructor(dbService, kgService) {
         this.dbService = dbService;
@@ -141,8 +141,8 @@ export class MaintenanceService {
             stats.vacuumedTables = 1;
             changes.push({ type: 'postgres_vacuum', tables: 'all' });
             // 3. Optimize Redis/FalkorDB memory
-            const falkorClient = this.dbService.getFalkorDBClient();
-            await falkorClient.sendCommand(['MEMORY', 'PURGE']);
+            const falkorClient = this.dbService.getFalkorDBService();
+            await falkorClient.command('MEMORY', 'PURGE');
             changes.push({ type: 'redis_memory_optimized' });
         }
         catch (error) {

@@ -4,25 +4,25 @@
  * Implements Phase 5.2 requirements for test integration
  */
 
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "./core/DatabaseService.js";
-import { TestResultParser } from "./testing/TestResultParser.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
+import { TestResultParser } from "./TestResultParser.js";
 import {
   Test,
   TestExecution,
   TestPerformanceMetrics,
   CoverageMetrics,
   TestHistoricalData,
-} from "../models/entities.js";
+} from "../../models/entities.js";
 import {
   PerformanceRelationship,
   PerformanceMetricSample,
   PerformanceTrend,
   RelationshipType,
-} from "../models/relationships.js";
-import { noiseConfig } from "../config/noise.js";
-import { sanitizeEnvironment } from "../utils/environment.js";
-import { normalizeMetricIdForId } from "../utils/codeEdges.js";
+} from "../../models/relationships.js";
+import { noiseConfig } from "../../config/noise.js";
+import { sanitizeEnvironment } from "../../utils/environment.js";
+import { normalizeMetricIdForId } from "../../utils/codeEdges.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -101,7 +101,7 @@ interface PerformanceRelationshipOptions {
 
 export class TestEngine {
   private parser: TestResultParser;
-  private perfRelBuffer: import("../models/relationships.js").GraphRelationship[] = [];
+  private perfRelBuffer: import("../../models/relationships.js").GraphRelationship[] = [];
   private perfIncidentSeeds: Set<string> = new Set();
   private testSessionSequences: Map<string, number> = new Map();
 
@@ -272,11 +272,10 @@ export class TestEngine {
       return;
     }
 
-    const { checkpointId } = await this.kgService.createCheckpoint(
-      seeds,
-      "incident",
-      Math.max(1, Math.min(5, Math.floor(hops)))
-    );
+    const { checkpointId } = await this.kgService.createCheckpoint(seeds, {
+      type: "incident",
+      hops: Math.max(1, Math.min(5, Math.floor(hops)))
+    });
     console.log(
       `📌 Incident checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`
     );
@@ -354,7 +353,7 @@ export class TestEngine {
               created: timestamp,
               lastModified: timestamp,
               version: 1,
-            } as any, undefined, undefined, { validate: false });
+            } as any);
           } catch {}
         }
       }
@@ -506,9 +505,7 @@ export class TestEngine {
       relationship.impactSeverity = options.impactSeverity;
     }
 
-    await this.kgService.createRelationship(relationship, undefined, undefined, {
-      validate: false,
-    });
+    await this.kgService.createRelationship(relationship);
   }
 
   private buildExecutionEnvironment(
@@ -1821,38 +1818,28 @@ export class TestEngine {
       };
 
       // Create explicit coverage edge for analytics to consume
-      await this.kgService.createRelationship(
-        {
-          id: `${testEntity.id}_covers_${testEntity.targetSymbol}`,
-          fromEntityId: testEntity.id,
-          toEntityId: testEntity.targetSymbol,
-          type: RelationshipType.COVERAGE_PROVIDES,
-          created: new Date(),
-          lastModified: new Date(),
-          version: 1,
-          metadata: coverageMetadata,
-        } as any,
-        undefined,
-        undefined,
-        { validate: false }
-      );
+      await this.kgService.createRelationship({
+        id: `${testEntity.id}_covers_${testEntity.targetSymbol}`,
+        fromEntityId: testEntity.id,
+        toEntityId: testEntity.targetSymbol,
+        type: RelationshipType.COVERAGE_PROVIDES,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+        metadata: coverageMetadata,
+      } as any);
 
       // Maintain TESTS edge for legacy consumers while sharing the same metadata shape
-      await this.kgService.createRelationship(
-        {
-          id: `${testEntity.id}_tests_${testEntity.targetSymbol}`,
-          fromEntityId: testEntity.id,
-          toEntityId: testEntity.targetSymbol,
-          type: RelationshipType.TESTS,
-          created: new Date(),
-          lastModified: new Date(),
-          version: 1,
-          metadata: coverageMetadata,
-        } as any,
-        undefined,
-        undefined,
-        { validate: false }
-      );
+      await this.kgService.createRelationship({
+        id: `${testEntity.id}_tests_${testEntity.targetSymbol}`,
+        fromEntityId: testEntity.id,
+        toEntityId: testEntity.targetSymbol,
+        type: RelationshipType.TESTS,
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
+        metadata: coverageMetadata,
+      } as any);
     } catch (error) {
       // If we can't create the relationship, just skip it
       console.warn(

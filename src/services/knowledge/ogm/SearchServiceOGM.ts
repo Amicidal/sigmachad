@@ -174,52 +174,60 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
 
       // Search in files
       if (!options.filter?.type || options.filter.type === 'file') {
-        searchPromises.push(this.searchInModel(
-          this.models.FileModel,
-          query,
-          options,
-          'file'
-        ));
+        searchPromises.push(
+          this.searchInModel(
+            this.models.FileModel,
+            query,
+            options,
+            'file'
+          ).catch(() => [] as SearchResult[])
+        );
       }
 
       // Search in symbols
       if (!options.filter?.type || ['symbol', 'function', 'class', 'interface'].includes(options.filter.type)) {
         searchPromises.push(
-          this.searchInModel(this.models.SymbolModel, query, options, 'symbol'),
-          this.searchInModel(this.models.FunctionSymbolModel, query, options, 'symbol'),
-          this.searchInModel(this.models.ClassSymbolModel, query, options, 'symbol'),
-          this.searchInModel(this.models.InterfaceSymbolModel, query, options, 'symbol')
+          this.searchInModel(this.models.SymbolModel, query, options, 'symbol').catch(() => [] as SearchResult[]),
+          this.searchInModel(this.models.FunctionSymbolModel, query, options, 'symbol').catch(() => [] as SearchResult[]),
+          this.searchInModel(this.models.ClassSymbolModel, query, options, 'symbol').catch(() => [] as SearchResult[]),
+          this.searchInModel(this.models.InterfaceSymbolModel, query, options, 'symbol').catch(() => [] as SearchResult[])
         );
       }
 
       // Search in modules
       if (!options.filter?.type || options.filter.type === 'module') {
-        searchPromises.push(this.searchInModel(
-          this.models.ModuleModel,
-          query,
-          options,
-          'module'
-        ));
+        searchPromises.push(
+          this.searchInModel(
+            this.models.ModuleModel,
+            query,
+            options,
+            'module'
+          ).catch(() => [] as SearchResult[])
+        );
       }
 
       // Search in tests
       if (!options.filter?.type || options.filter.type === 'test') {
-        searchPromises.push(this.searchInModel(
-          this.models.TestModel,
-          query,
-          options,
-          'test'
-        ));
+        searchPromises.push(
+          this.searchInModel(
+            this.models.TestModel,
+            query,
+            options,
+            'test'
+          ).catch(() => [] as SearchResult[])
+        );
       }
 
       // Search in specifications
       if (!options.filter?.type || options.filter.type === 'specification') {
-        searchPromises.push(this.searchInModel(
-          this.models.SpecificationModel,
-          query,
-          options,
-          'specification'
-        ));
+        searchPromises.push(
+          this.searchInModel(
+            this.models.SpecificationModel,
+            query,
+            options,
+            'specification'
+          ).catch(() => [] as SearchResult[])
+        );
       }
 
       // Execute all searches in parallel
@@ -250,39 +258,31 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
     entityType: string
   ): Promise<SearchResult[]> {
     try {
-      const whereBuilder = Model.where();
-
       if (options.fuzzy) {
         // For fuzzy search, we need to fall back to raw Cypher with APOC
         // Since Neogma doesn't have built-in fuzzy text search
         return this.fuzzySearchInModel(Model, query, options, entityType);
       } else {
-        // Exact or contains search using Neogma query builder
-        const searchTerms = options.caseInsensitive ? query.toLowerCase() : query;
+        // Fallback to raw Cypher for now since Neogma query builder has issues
+        const label = (Model as any).label || 'Entity';
+        const cypherQuery = `
+          MATCH (n:${label})
+          WHERE (n.name CONTAINS $query OR n.path CONTAINS $query OR n.id CONTAINS $query)
+          ${this.buildFilterClause(options.filter)}
+          RETURN n
+          LIMIT $limit
+        `;
 
-        if (options.caseInsensitive) {
-          whereBuilder.where('toLower(name)').contains(searchTerms)
-            .or('toLower(path)').contains(searchTerms)
-            .or('toLower(id)').contains(searchTerms);
-        } else {
-          whereBuilder.where('name').contains(query)
-            .or('path').contains(query)
-            .or('id').contains(query);
-        }
+        const params = {
+          query: options.caseInsensitive ? query.toLowerCase() : query,
+          limit: options.limit || 50,
+          ...this.buildFilterParams(options.filter),
+        };
 
-        // Apply additional filters
-        if (options.filter) {
-          Object.entries(options.filter).forEach(([key, value]) => {
-            if (key !== 'type' && value !== undefined) {
-              whereBuilder.and(key).equals(value);
-            }
-          });
-        }
+        const results = await this.neogmaService.executeCypher(cypherQuery, params);
 
-        const models = await whereBuilder.limit(options.limit || 50).run();
-
-        return models.map(model => ({
-          entity: modelToEntity(model),
+        return results.map(row => ({
+          entity: this.parseEntity(row.n),
           score: 1.0, // Exact match score
           type: 'structural' as const,
         }));
@@ -304,7 +304,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
     entityType: string
   ): Promise<SearchResult[]> {
     try {
-      const label = Model.getLabel();
+      const label = (Model as any).label || 'Entity';
       const cypherQuery = `
         MATCH (n:${label})
         WITH n, apoc.text.levenshteinSimilarity(

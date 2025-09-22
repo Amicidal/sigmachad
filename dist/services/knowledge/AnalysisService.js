@@ -13,8 +13,8 @@ export class AnalysisService extends EventEmitter {
      */
     async analyzeImpact(request) {
         const startTime = Date.now();
-        const entityIds = request.entityIds;
-        const maxDepth = request.depth || 3;
+        const entityIds = request.changes.map(c => c.entityId);
+        const maxDepth = request.maxDepth || 3;
         // Get direct impact
         const directImpactQuery = `
       UNWIND $entityIds AS entityId
@@ -89,24 +89,27 @@ export class AnalysisService extends EventEmitter {
         const metrics = await this.calculateImpactMetrics(entityIds, transitiveImpacted);
         // Build impact analysis result
         const analysis = {
-            entityIds,
-            impactedEntities: transitiveImpacted.map(t => t.entity),
-            metrics: {
-                directImpact: directImpacted.length,
-                transitiveImpact: transitiveImpacted.length,
-                cascadeDepth: Math.max(...transitiveImpacted.map(t => t.depth), 0),
-                affectedTests: affectedTests.length,
-                affectedSpecs: affectedSpecs.length,
-                affectedDocs: affectedDocs.length,
-                criticalPaths: metrics.criticalPaths,
-                riskScore: metrics.riskScore,
+            directImpact: directImpacted.map(e => ({
+                entities: [e],
+                severity: "medium",
+                reason: "Direct dependency"
+            })),
+            cascadingImpact: transitiveImpacted.map(t => ({
+                level: t.depth,
+                entities: [t.entity],
+                relationship: "DEPENDS_ON",
+                confidence: 0.8
+            })),
+            testImpact: {
+                affectedTests: affectedTests,
+                requiredUpdates: affectedTests.map(t => t.id),
+                coverageImpact: affectedTests.length > 0 ? 0.8 : 0
             },
-            affectedTests,
-            affectedSpecs,
-            affectedDocs,
-            cascades: this.identifyCascades(transitiveImpacted),
-            criticalPaths: await this.findCriticalPaths(entityIds, maxDepth),
-            analysisTime: Date.now() - startTime,
+            documentationImpact: {
+                staleDocs: affectedDocs,
+                missingDocs: [],
+                updatePriority: affectedDocs.length > 0 ? "high" : "low"
+            }
         };
         this.emit('impact:analyzed', {
             entityIds,
@@ -191,10 +194,10 @@ export class AnalysisService extends EventEmitter {
       LIMIT $limit
     `;
         const result = await this.neo4j.executeCypher(algorithmQuery, {
-            fromId: query.fromEntityId,
-            toId: query.toEntityId,
+            fromId: query.startEntityId,
+            toId: query.endEntityId,
             relationshipTypes: ((_a = query.relationshipTypes) === null || _a === void 0 ? void 0 : _a.join('|')) || '',
-            limit: query.maxPaths || 5,
+            limit: 5,
         });
         const paths = result.map(r => ({
             nodes: r.path.nodes.map((n) => this.parseEntity(n)),

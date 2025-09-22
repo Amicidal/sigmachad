@@ -154,7 +154,7 @@ export class APIGateway {
         }
     }
     setupMiddleware() {
-        this.app.decorateRequest("auth", null);
+        this.app.decorateRequest("auth", undefined);
         // Preflight handler to return 200 (tests expect 200, not default 204)
         this.app.addHook("onRequest", async (request, reply) => {
             if (request.method === "OPTIONS") {
@@ -996,12 +996,12 @@ export class APIGateway {
         const runCheckpoint = async () => {
             try {
                 const since = new Date(Date.now() - dayMs);
-                const seeds = await this.kgService.findRecentEntityIds(since, 200);
+                const seeds = await this.kgService.findRecentEntityIds(200);
                 if (seeds.length === 0) {
                     console.log('📌 Daily checkpoint skipped: no recent entities');
                     return;
                 }
-                const { checkpointId } = await this.kgService.createCheckpoint(seeds, 'daily', hops);
+                const { checkpointId } = await this.kgService.createCheckpoint(seeds, { type: 'daily', hops });
                 console.log(`📌 Daily checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`);
             }
             catch (e) {

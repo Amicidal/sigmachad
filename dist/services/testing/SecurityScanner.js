@@ -3,7 +3,7 @@
  * Performs security scanning, vulnerability detection, and security monitoring
  */
 import { EventEmitter } from "events";
-import { noiseConfig } from "../config/noise.js";
+import { noiseConfig } from "../../config/noise.js";
 import * as fs from "fs";
 import { createHash } from "crypto";
 export class SecurityScanner extends EventEmitter {

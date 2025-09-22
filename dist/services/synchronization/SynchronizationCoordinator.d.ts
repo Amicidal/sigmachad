@@ -3,14 +3,14 @@
  * Central orchestrator for graph synchronization operations
  */
 import { EventEmitter } from "events";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { ASTParser } from "./knowledge/ASTParser.js";
-import { DatabaseService } from "./core/DatabaseService.js";
-import { FileChange } from "./core/FileWatcher.js";
-import { GraphRelationship } from "../models/relationships.js";
-import { ConflictResolution as ConflictResolutionService, Conflict } from "./scm/ConflictResolution.js";
-import { RollbackCapabilities } from "./scm/RollbackCapabilities.js";
-import { SessionCheckpointJobRunner, type SessionCheckpointJobMetrics, type SessionCheckpointJobSnapshot } from "../jobs/SessionCheckpointJob.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { ASTParser } from "../knowledge/ASTParser.js";
+import { DatabaseService } from "../core/DatabaseService.js";
+import { FileChange } from "../core/FileWatcher.js";
+import { GraphRelationship } from "../../models/relationships.js";
+import { ConflictResolution as ConflictResolutionService, Conflict } from "../scm/ConflictResolution.js";
+import { RollbackCapabilities } from "../scm/RollbackCapabilities.js";
+import { SessionCheckpointJobRunner, type SessionCheckpointJobMetrics, type SessionCheckpointJobSnapshot } from "../../jobs/SessionCheckpointJob.js";
 export interface SyncOperation {
     id: string;
     type: "full" | "incremental" | "partial";
@@ -103,7 +103,7 @@ export declare class SynchronizationCoordinator extends EventEmitter {
     private sessionSequence;
     private checkpointJobRunner;
     private anomalyResolutionMode;
-    constructor(kgService: KnowledgeGraphService, astParser: ASTParser, dbService: DatabaseService, conflictResolution: ConflictResolutionService, rollbackCapabilities?: RollbackCapabilities, checkpointJobRunner?: SessionCheckpointJobRunner);
+    constructor(kgService: KnowledgeGraphService, astParser: ASTParser, dbService: DatabaseService, conflictResolution: ConflictResolutionService, rollbackCapabilities?: RollbackCapabilities | undefined, checkpointJobRunner?: SessionCheckpointJobRunner);
     private setupEventHandlers;
     private nextSessionSequence;
     private createCheckpointJobOptions;

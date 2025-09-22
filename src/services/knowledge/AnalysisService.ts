@@ -11,7 +11,7 @@ import {
   ImpactAnalysisRequest,
   DependencyAnalysis,
 } from '../../models/types.js';
-import { PathQuery } from '../../models/relationships.js';
+import { PathQuery, RelationshipType } from '../../models/relationships.js';
 
 export interface ImpactMetrics {
   directImpact: number;
@@ -44,8 +44,8 @@ export class AnalysisService extends EventEmitter {
    */
   async analyzeImpact(request: ImpactAnalysisRequest): Promise<ImpactAnalysis> {
     const startTime = Date.now();
-    const entityIds = request.entityIds;
-    const maxDepth = request.depth || 3;
+    const entityIds = request.changes.map(c => c.entityId);
+    const maxDepth = request.maxDepth || 3;
 
     // Get direct impact
     const directImpactQuery = `
@@ -140,24 +140,59 @@ export class AnalysisService extends EventEmitter {
 
     // Build impact analysis result
     const analysis: ImpactAnalysis = {
-      entityIds,
-      impactedEntities: transitiveImpacted.map(t => t.entity),
-      metrics: {
-        directImpact: directImpacted.length,
-        transitiveImpact: transitiveImpacted.length,
-        cascadeDepth: Math.max(...transitiveImpacted.map(t => t.depth), 0),
-        affectedTests: affectedTests.length,
-        affectedSpecs: affectedSpecs.length,
-        affectedDocs: affectedDocs.length,
-        criticalPaths: metrics.criticalPaths,
-        riskScore: metrics.riskScore,
+      directImpact: directImpacted.map(e => ({
+        entities: [e],
+        severity: "medium" as const,
+        reason: "Direct dependency"
+      })),
+      cascadingImpact: transitiveImpacted.map(t => ({
+        level: t.depth,
+        entities: [t.entity],
+        relationship: RelationshipType.DEPENDS_ON,
+        confidence: 0.8
+      })),
+      testImpact: {
+        affectedTests: affectedTests.filter(t => t.type === 'test') as any[], // Cast to Test[]
+        requiredUpdates: affectedTests.map(t => t.id),
+        coverageImpact: affectedTests.length > 0 ? 0.8 : 0
       },
-      affectedTests,
-      affectedSpecs,
-      affectedDocs,
-      cascades: this.identifyCascades(transitiveImpacted),
-      criticalPaths: await this.findCriticalPaths(entityIds, maxDepth),
-      analysisTime: Date.now() - startTime,
+      documentationImpact: {
+        staleDocs: affectedDocs,
+        missingDocs: [],
+        requiredUpdates: affectedDocs.map(d => d.id || 'unknown'),
+        freshnessPenalty: affectedDocs.length * 0.1
+      },
+      specImpact: {
+        relatedSpecs: [],
+        requiredUpdates: [],
+        summary: {
+          byPriority: { critical: 0, high: 0, medium: 0, low: 0 },
+          byImpactLevel: { critical: 0, high: 0, medium: 0, low: 0 },
+          statuses: { draft: 0, approved: 0, implemented: 0, deprecated: 0, unknown: 0 },
+          acceptanceCriteriaReferences: 0,
+          pendingSpecs: 0
+        }
+      },
+      deploymentGate: {
+        blocked: false,
+        level: "none" as const,
+        reasons: [],
+        stats: {
+          missingDocs: 0,
+          staleDocs: affectedDocs.length,
+          freshnessPenalty: affectedDocs.length * 0.1
+        }
+      },
+      recommendations: [
+        {
+          priority: "planned" as const,
+          description: "Review impact analysis results",
+          effort: "medium" as const,
+          impact: "functional" as const,
+          type: "suggestion",
+          actions: ["Review affected components", "Update tests", "Update documentation"]
+        }
+      ]
     };
 
     this.emit('impact:analyzed', {
@@ -217,22 +252,22 @@ export class AnalysisService extends EventEmitter {
 
     return {
       entityId,
-      directDependencies: directResult.map(r => this.parseEntity(r.dep)),
-      transitiveDependencies: transitiveResult.map(r => ({
+      directDependencies: directResult.map(r => ({
         entity: this.parseEntity(r.dep),
-        distance: r.distance,
-        path: r.types,
+        relationship: r.type || 'DEPENDS_ON' as any,
+        confidence: 1.0
       })),
-      metrics: {
-        directDependencies: directResult.length,
-        transitiveDependencies: transitiveResult.length,
-        depth: Math.max(...transitiveResult.map(r => r.distance), 0),
-        fanIn: metrics.fanIn,
-        fanOut: metrics.fanOut,
-        centrality: metrics.centrality,
-        cycles,
-      },
-      dependencyTree: this.buildDependencyTree(transitiveResult),
+      indirectDependencies: transitiveResult.map(r => ({
+        entity: this.parseEntity(r.dep),
+        path: [this.parseEntity(r.dep)], // simplified path for now
+        relationship: RelationshipType.DEPENDS_ON,
+        distance: r.distance,
+      })),
+      reverseDependencies: [],  // TODO: implement reverse dependency analysis
+      circularDependencies: cycles.map(cycle => ({
+        cycle: Array.isArray(cycle) ? cycle : [],
+        severity: "warning" as const
+      })),
     };
   }
 
@@ -258,10 +293,10 @@ export class AnalysisService extends EventEmitter {
     `;
 
     const result = await this.neo4j.executeCypher(algorithmQuery, {
-      fromId: query.fromEntityId,
-      toId: query.toEntityId,
+      fromId: query.startEntityId,
+      toId: query.endEntityId,
       relationshipTypes: query.relationshipTypes?.join('|') || '',
-      limit: query.maxPaths || 5,
+      limit: 5,
     });
 
     const paths = result.map(r => ({

@@ -4,10 +4,10 @@
  */
 
 import { DatabaseService } from './DatabaseService.js';
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
+import { KnowledgeGraphService } from '../knowledge/KnowledgeGraphService.js';
 import { MaintenanceMetrics } from './metrics/MaintenanceMetrics.js';
-import { MaintenanceOperationError } from './BackupService.js';
-import { TemporalHistoryValidator } from '../jobs/TemporalHistoryValidator.js';
+import { MaintenanceOperationError } from '../backup/BackupService.js';
+import { TemporalHistoryValidator } from '../../jobs/TemporalHistoryValidator.js';
 
 export interface MaintenanceTask {
   id: string;
@@ -133,11 +133,10 @@ export class MaintenanceService {
       }
 
       // 2. Remove dangling relationships
-      const danglingRelationships = await this.findDanglingRelationships();
-      for (const relId of danglingRelationships) {
-        await this.kgService.deleteRelationship(relId);
-        stats.relationshipsRemoved++;
-        changes.push({ type: 'relationship_removed', id: relId });
+      const danglingRelationshipsCount = await this.removeDanglingRelationships();
+      stats.relationshipsRemoved += danglingRelationshipsCount;
+      if (danglingRelationshipsCount > 0) {
+        changes.push({ type: 'dangling_relationships_removed', count: danglingRelationshipsCount });
       }
 
       // 3. Clean up old sync operation records from PostgreSQL
@@ -188,8 +187,8 @@ export class MaintenanceService {
       changes.push({ type: 'postgres_vacuum', tables: 'all' });
 
       // 3. Optimize Redis/FalkorDB memory
-      const falkorClient = this.dbService.getFalkorDBClient();
-      await falkorClient.sendCommand(['MEMORY', 'PURGE']);
+      const falkorClient = this.dbService.getFalkorDBService();
+      await falkorClient.command('MEMORY', 'PURGE');
       changes.push({ type: 'redis_memory_optimized' });
 
     } catch (error) {
@@ -275,7 +274,7 @@ export class MaintenanceService {
     try {
       // 1. Validate entity integrity
       const entitiesResult = await this.kgService.listEntities({ limit: 1000 });
-      for (const entity of entitiesResult.entities) {
+      for (const entity of entitiesResult.entities || entitiesResult.items || []) {
         if (!this.isValidEntity(entity)) {
           stats.invalidEntities++;
           changes.push({ type: 'invalid_entity', id: entity.id, issues: this.getEntityIssues(entity) });
@@ -371,20 +370,20 @@ export class MaintenanceService {
     }
   }
 
-  private async findDanglingRelationships(): Promise<string[]> {
+  private async removeDanglingRelationships(): Promise<number> {
     try {
-      // Find relationships pointing to non-existent entities
+      // Remove relationships pointing to non-existent entities
       const query = `
         MATCH (n)-[r]->(m)
         WHERE n.id IS NULL OR m.id IS NULL
-        RETURN r.id as id
-        LIMIT 100
+        DELETE r
+        RETURN count(r) as count
       `;
       const result = await this.dbService.falkordbQuery(query);
-      return result.map((row: any) => row.id);
+      return result[0]?.count || 0;
     } catch (error) {
-      console.warn('Failed to find dangling relationships:', error);
-      return [];
+      console.warn('Failed to remove dangling relationships:', error);
+      return 0;
     }
   }
 

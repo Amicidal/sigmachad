@@ -8,6 +8,7 @@ import { ASTParser } from '../../services/knowledge/ASTParser.js';
 import { FileWatcher } from '../../services/core/FileWatcher.js';
 import { TRPCContext } from './base.js';
 import type { FastifyRequest } from 'fastify';
+import { type AuthContext } from '../middleware/authentication.js';
 export declare const createTRPCContext: (opts: {
     kgService: KnowledgeGraphService;
     dbService: DatabaseService;
@@ -110,7 +111,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
-        }, Entity[]>;
+        }, import("../../models/entities.js").Entity[]>;
     }>;
     design: import("@trpc/server").CreateRouterInner<import("@trpc/server").RootConfig<{
         ctx: TRPCContext;
@@ -376,25 +377,6 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                     tags?: string[] | undefined;
                     metadata?: Record<string, any> | undefined;
                 };
-                relatedSpecs: {
-                    type?: "spec" | undefined;
-                    status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
-                    priority?: "high" | "medium" | "low" | "critical" | undefined;
-                    assignee?: string | null | undefined;
-                    tags?: string[] | undefined;
-                    id?: string | undefined;
-                    title?: string | undefined;
-                    description?: string | undefined;
-                    acceptanceCriteria?: string[] | undefined;
-                    updated?: Date | undefined;
-                    path?: string | undefined;
-                    hash?: string | undefined;
-                    language?: string | undefined;
-                    lastModified?: Date | undefined;
-                    created?: Date | undefined;
-                    metadata?: Record<string, any> | undefined;
-                }[];
-                affectedEntities: any[];
                 testCoverage: {
                     entityId: string;
                     overallCoverage: {
@@ -431,6 +413,25 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                         covers: string[];
                     }[];
                 };
+                relatedSpecs: {
+                    type?: "spec" | undefined;
+                    status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
+                    priority?: "high" | "medium" | "low" | "critical" | undefined;
+                    assignee?: string | null | undefined;
+                    tags?: string[] | undefined;
+                    id?: string | undefined;
+                    title?: string | undefined;
+                    description?: string | undefined;
+                    acceptanceCriteria?: string[] | undefined;
+                    updated?: Date | undefined;
+                    path?: string | undefined;
+                    hash?: string | undefined;
+                    language?: string | undefined;
+                    lastModified?: Date | undefined;
+                    created?: Date | undefined;
+                    metadata?: Record<string, any> | undefined;
+                }[];
+                affectedEntities: any[];
             };
             _output_out: {
                 spec: {
@@ -451,25 +452,6 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                     tags?: string[] | undefined;
                     metadata?: Record<string, any> | undefined;
                 };
-                relatedSpecs: {
-                    type?: "spec" | undefined;
-                    status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
-                    priority?: "high" | "medium" | "low" | "critical" | undefined;
-                    assignee?: string | null | undefined;
-                    tags?: string[] | undefined;
-                    id?: string | undefined;
-                    title?: string | undefined;
-                    description?: string | undefined;
-                    acceptanceCriteria?: string[] | undefined;
-                    updated?: Date | undefined;
-                    path?: string | undefined;
-                    hash?: string | undefined;
-                    language?: string | undefined;
-                    lastModified?: Date | undefined;
-                    created?: Date | undefined;
-                    metadata?: Record<string, any> | undefined;
-                }[];
-                affectedEntities: any[];
                 testCoverage: {
                     entityId: string;
                     overallCoverage: {
@@ -506,6 +488,25 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                         covers: string[];
                     }[];
                 };
+                relatedSpecs: {
+                    type?: "spec" | undefined;
+                    status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
+                    priority?: "high" | "medium" | "low" | "critical" | undefined;
+                    assignee?: string | null | undefined;
+                    tags?: string[] | undefined;
+                    id?: string | undefined;
+                    title?: string | undefined;
+                    description?: string | undefined;
+                    acceptanceCriteria?: string[] | undefined;
+                    updated?: Date | undefined;
+                    path?: string | undefined;
+                    hash?: string | undefined;
+                    language?: string | undefined;
+                    lastModified?: Date | undefined;
+                    created?: Date | undefined;
+                    metadata?: Record<string, any> | undefined;
+                }[];
+                affectedEntities: any[];
             };
         }, unknown>;
         listSpecs: import("@trpc/server").BuildProcedure<"query", {
@@ -714,8 +715,8 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            items: any;
-            total: any;
+            items: import("../../models/entities.js").Entity[];
+            total: number;
         }>;
         getDependencies: import("@trpc/server").BuildProcedure<"query", {
             _config: import("@trpc/server").RootConfig<{
@@ -828,7 +829,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 limit?: number | undefined;
@@ -859,7 +860,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: typeof import("@trpc/server").unsetMarker;
             _input_out: typeof import("@trpc/server").unsetMarker;
@@ -894,7 +895,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 paths?: string[] | undefined;
@@ -921,7 +922,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 type?: "search" | "relationships" | "entities" | "all" | undefined;
@@ -946,7 +947,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: typeof import("@trpc/server").unsetMarker;
             _input_out: typeof import("@trpc/server").unsetMarker;
@@ -975,7 +976,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 key: string;
@@ -1002,7 +1003,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: typeof import("@trpc/server").unsetMarker;
             _input_out: typeof import("@trpc/server").unsetMarker;
@@ -1023,7 +1024,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: typeof import("@trpc/server").unsetMarker;
             _input_out: typeof import("@trpc/server").unsetMarker;
@@ -1047,7 +1048,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 mode?: "quick" | "full" | undefined;
@@ -1079,7 +1080,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 reason?: "manual" | "daily" | "incident" | undefined;
@@ -1120,7 +1121,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 limit?: number | undefined;
@@ -1156,7 +1157,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1181,7 +1182,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1213,7 +1214,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1238,7 +1239,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1265,7 +1266,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 members: any[];
@@ -1296,7 +1297,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 astParser: ASTParser;
                 fileWatcher: FileWatcher;
                 authToken: string | undefined;
-                authContext: import("../middleware/authentication.js").AuthContext | undefined;
+                authContext: AuthContext | undefined;
             };
             _input_in: {
                 id: string;
@@ -1307,7 +1308,7 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
         }, {
-            success: any;
+            success: void;
         }>;
     }>;
     health: import("@trpc/server").BuildProcedure<"query", {

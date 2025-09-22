@@ -19,7 +19,11 @@ export const historyRouter = router({
     }))
         .mutation(async ({ input, ctx }) => {
         var _a;
-        const { checkpointId } = await ctx.kgService.createCheckpoint(input.seedEntities, input.reason, (_a = input.hops) !== null && _a !== void 0 ? _a : 2, input.window);
+        const { checkpointId } = await ctx.kgService.createCheckpoint(input.seedEntities, {
+            reason: input.reason,
+            hops: (_a = input.hops) !== null && _a !== void 0 ? _a : 2,
+            window: input.window
+        });
         return { checkpointId };
     }),
     // List checkpoints

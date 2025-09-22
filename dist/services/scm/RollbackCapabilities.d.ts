@@ -4,8 +4,8 @@
  */
 import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
 import { DatabaseService } from "./core/DatabaseService.js";
-import { Entity } from "../models/entities.js";
-import { GraphRelationship } from "../models/relationships.js";
+import { Entity } from "../../models/entities.js";
+import { GraphRelationship } from "../../models/relationships.js";
 export interface RollbackPoint {
     id: string;
     operationId: string;

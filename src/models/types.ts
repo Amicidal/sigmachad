@@ -88,6 +88,14 @@ export interface TemporalGraphQuery {
   maxDepth?: number;
 }
 
+export interface TraversalQuery {
+  startId: string;
+  until?: Date;
+  maxDepth?: number;
+  relationshipTypes?: string[];
+  nodeLabels?: string[];
+}
+
 export interface EntityTimelineEntry {
   versionId: string;
   timestamp: Date;

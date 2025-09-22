@@ -2,8 +2,8 @@
  * Conflict Resolution Service
  * Handles conflicts during graph synchronization operations
  */
-import { Entity } from "../models/entities.js";
-import { GraphRelationship } from "../models/relationships.js";
+import { Entity } from "../../models/entities.js";
+import { GraphRelationship } from "../../models/relationships.js";
 import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
 export interface Conflict {
     id: string;

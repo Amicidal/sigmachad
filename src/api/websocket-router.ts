@@ -1030,8 +1030,6 @@ export class WebSocketRouter extends EventEmitter {
 
         if (retriesRemaining > 0) {
           setTimeout(() => trySend(retriesRemaining - 1), 10);
-        } else if (socket.readyState === WebSocket.OPEN) {
-          socket.send(json);
         }
       } catch (error) {
         console.error(

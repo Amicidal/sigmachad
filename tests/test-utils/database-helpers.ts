@@ -24,7 +24,8 @@ export interface IsolatedOGMTestSetup extends IsolatedTestSetup {
   ogmServices: OGMTestSetup;
 }
 
-// Extended setup with both legacy and OGM services for comparison testing
+// Legacy comparison setup - deprecated since OGM migration
+// @deprecated Use IsolatedOGMTestSetup instead
 export interface IsolatedComparisonTestSetup extends IsolatedTestSetup {
   comparisonServices: ComparisonTestSetup;
 }
@@ -43,7 +44,7 @@ export async function setupIsolatedServiceTest(
     silent: options.silent,
   });
 
-  const kgService = new KnowledgeGraphService(dbService, testContext);
+  const kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
   await kgService.initialize();
 
   return { dbService, testContext, kgService };
@@ -81,6 +82,7 @@ export async function setupIsolatedOGMTest(
 
 /**
  * Setup isolated test environment with both legacy and OGM services for comparison
+ * @deprecated Use setupIsolatedOGMTest instead - legacy comparison no longer needed
  */
 export async function setupIsolatedComparisonTest(
   serviceName: string,
@@ -119,6 +121,7 @@ export async function cleanupIsolatedOGMTest(
 
 /**
  * Cleanup isolated comparison test environment
+ * @deprecated Use cleanupIsolatedOGMTest instead
  */
 export async function cleanupIsolatedComparisonTest(
   setup: IsolatedComparisonTestSetup,
@@ -1173,7 +1176,7 @@ export async function insertTestFixtures(
   try {
     const now = Date.now();
     const toIso = (offsetMs: number) => new Date(now - offsetMs).toISOString();
-    const kgService = new KnowledgeGraphService(dbService);
+    const kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
 
     const entities = [
       {

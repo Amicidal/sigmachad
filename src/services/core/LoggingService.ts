@@ -1,22 +1,22 @@
 import * as fs from "fs/promises";
 import {
   getInstrumentationDispatcher,
-} from "./logging/InstrumentationDispatcher.js";
+} from "../logging/InstrumentationDispatcher.js";
 import type {
   InstrumentationConsumer,
   InstrumentationEvent,
   InstrumentationSubscription,
   DispatcherMetrics,
   OriginalConsoleMethods,
-} from "./logging/InstrumentationDispatcher.js";
-import { FileSink } from "./logging/FileSink.js";
+} from "../logging/InstrumentationDispatcher.js";
+import { FileSink } from "../logging/FileSink.js";
 import type {
   FileSinkOptions,
   FileSinkMetrics,
   FileSystemFacade,
-} from "./logging/FileSink.js";
-import { sanitizeData, serializeLogEntry } from "./logging/serialization.js";
-import type { SerializationOptions } from "./logging/serialization.js";
+} from "../logging/FileSink.js";
+import { sanitizeData, serializeLogEntry } from "../logging/serialization.js";
+import type { SerializationOptions } from "../logging/serialization.js";
 
 export interface LogEntry {
   timestamp: Date;

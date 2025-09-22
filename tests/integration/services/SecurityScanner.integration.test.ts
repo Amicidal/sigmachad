@@ -25,7 +25,7 @@ describe("SecurityScanner Integration", () => {
 
   beforeAll(async () => {
     dbService = await setupTestDatabase();
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     await kgService.initialize();
     securityScanner = new SecurityScanner(dbService, kgService);
     await securityScanner.initialize();

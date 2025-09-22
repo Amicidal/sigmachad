@@ -27,7 +27,7 @@ describe('History/Admin new endpoints + tRPC parity', () => {
     dbService = await setupTestDatabase();
     const isHealthy = await checkDatabaseHealth(dbService);
     if (!isHealthy) throw new Error('DB not healthy');
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     apiGateway = new APIGateway(kgService, dbService);
     app = apiGateway.getApp();
     await apiGateway.start();

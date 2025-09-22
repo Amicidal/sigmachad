@@ -116,10 +116,9 @@ export function createEntityModel<T extends Entity>(
   return ModelFactory(
     {
       label: config.label,
-      schema: fullSchema,
+      schema: fullSchema as any,
       primaryKeyField: 'id',
-      indices,
-    },
+    } as any,
     neogma
   );
 }
@@ -173,10 +172,10 @@ export function entityToModelProps(entity: Entity): Record<string, any> {
   const props: Record<string, any> = { ...entity };
 
   // Ensure dates are in proper format
-  if (entity.created instanceof Date) {
+  if ('created' in entity && entity.created instanceof Date) {
     props.created = entity.created.toISOString();
   }
-  if (entity.lastModified instanceof Date) {
+  if ('lastModified' in entity && entity.lastModified instanceof Date) {
     props.lastModified = entity.lastModified.toISOString();
   }
 

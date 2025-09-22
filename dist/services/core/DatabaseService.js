@@ -35,6 +35,28 @@ export class DatabaseService {
         }
         return this.redisService;
     }
+    // Backward compatibility methods for migration
+    getFalkorDBService() {
+        if (!this.initialized) {
+            throw new Error("Database not initialized");
+        }
+        return this.neo4jService;
+    }
+    getQdrantService() {
+        if (!this.initialized) {
+            throw new Error("Database not initialized");
+        }
+        // Return a compatibility wrapper that provides a getClient() method
+        return {
+            getClient: () => this.qdrant,
+        };
+    }
+    getQdrantClient() {
+        if (!this.initialized) {
+            throw new Error("Database not initialized");
+        }
+        return this.qdrant;
+    }
     // Direct client/pool getters for convenience
     getNeo4jDriver() {
         if (!this.initialized) {

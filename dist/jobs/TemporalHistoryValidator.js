@@ -21,7 +21,7 @@ export class TemporalHistoryValidator {
                 offset,
             });
             totalEntities = total;
-            if (entities.length === 0) {
+            if (!entities || entities.length === 0) {
                 break;
             }
             for (const entity of entities) {

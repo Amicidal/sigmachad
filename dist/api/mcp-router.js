@@ -606,7 +606,7 @@ export class MCPRouter {
                 const { entities, total } = await this.kgService.listEntities({
                     limit,
                 });
-                return { total, count: entities.length, entities };
+                return { total, count: (entities === null || entities === void 0 ? void 0 : entities.length) || 0, entities: entities || [] };
             },
         });
         this.registerTool({
@@ -636,7 +636,7 @@ export class MCPRouter {
             },
             handler: async (params) => {
                 const limit = typeof params.limit === "number" ? params.limit : 20;
-                const { relationships, total } = await this.kgService.listRelationships({ fromEntity: params.entityId, limit });
+                const { relationships, total } = await this.kgService.listRelationships({ fromEntityId: params.entityId, limit });
                 return { total, count: relationships.length, relationships };
             },
         });
@@ -1202,7 +1202,7 @@ export class MCPRouter {
             const result = await this.kgService.findDefinition(symbolId);
             return {
                 ...result,
-                message: result.source
+                message: result && 'source' in result && result.source
                     ? `Definition resolved to ${result.source.id}`
                     : "Definition not found",
             };
@@ -2056,7 +2056,8 @@ export class MCPRouter {
             ? Math.max(1, Math.min(8, Math.floor(params.maxDepth)))
             : undefined;
         try {
-            const analysis = await this.kgService.analyzeImpact(changes, {
+            const analysis = await this.kgService.analyzeImpact({
+                changes,
                 includeIndirect,
                 maxDepth,
             });
@@ -2080,7 +2081,7 @@ export class MCPRouter {
         }
         catch (error) {
             console.error("Error in handleImpactAnalysis:", error);
-            const fallback = await this.kgService.analyzeImpact([], { includeIndirect: false });
+            const fallback = await this.kgService.analyzeImpact({ changes: [], includeIndirect: false });
             return {
                 ...fallback,
                 changes,

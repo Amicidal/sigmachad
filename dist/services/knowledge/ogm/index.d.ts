@@ -1,17 +1,12 @@
 /**
- * OGM Migration Components
- * Exports all components needed for the Neo4j OGM migration
+ * Neo4j OGM Services
+ * Core OGM service implementations using Neogma
  */
 export { NeogmaService } from './NeogmaService.js';
 export { EntityServiceOGM } from './EntityServiceOGM.js';
+export { RelationshipServiceOGM } from './RelationshipServiceOGM.js';
 export { SearchServiceOGM } from './SearchServiceOGM.js';
-export { FeatureFlagService, getFeatureFlagService } from './FeatureFlags.js';
-export { MigrationTracker, getMigrationTracker } from './MigrationTracker.js';
-export { MigrationErrorHandler, getMigrationErrorHandler } from './ErrorHandler.js';
-export { EntityServiceAdapter, IEntityService } from './ServiceAdapter.js';
-export { SearchServiceAdapter } from './SearchServiceAdapter.js';
-export { MigrationCompatibilityTest } from './MigrationCompatibilityTest.js';
-export type { FeatureFlagConfig, ServiceMetrics, MigrationMetrics, OperationRecord, ErrorContext, ErrorHandlingStrategy, CompatibilityTestResult, CompatibilityReport } from './FeatureFlags.js';
 export type { ListEntitiesOptions, BulkCreateOptions } from './EntityServiceOGM.js';
+export type { BulkRelationshipOptions, RelationshipStats, IRelationshipService } from './RelationshipServiceOGM.js';
 export type { ISearchService, StructuralSearchOptions, SearchResult, SemanticSearchOptions, PatternSearchOptions, SearchStats } from './ISearchService.js';
 //# sourceMappingURL=index.d.ts.map

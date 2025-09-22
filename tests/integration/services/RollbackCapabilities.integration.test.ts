@@ -25,7 +25,7 @@ describe('RollbackCapabilities Integration', () => {
     dbService = await setupTestDatabase();
 
     // Initialize knowledge graph service
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
 
     // Initialize rollback service
     rollbackService = new RollbackCapabilities(kgService, dbService);

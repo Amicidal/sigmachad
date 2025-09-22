@@ -1,9 +1,9 @@
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "./core/DatabaseService.js";
-import { noiseConfig } from "../config/noise.js";
-import { RelationshipType } from "../models/relationships.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
+import { noiseConfig } from "../../config/noise.js";
+import { RelationshipType } from "../../models/relationships.js";
 import type {
   CreateSpecRequest,
   CreateSpecResponse,
@@ -11,8 +11,8 @@ import type {
   ListSpecsParams,
   UpdateSpecRequest,
   ValidationIssue,
-} from "../models/types.js";
-import type { Spec } from "../models/entities.js";
+} from "../../models/types.js";
+import type { Spec } from "../../models/entities.js";
 
 export interface SpecListResult {
   specs: Spec[];
@@ -61,7 +61,7 @@ export class SpecService {
       ]
     );
 
-    await this.kgService.createEntity(spec, { skipEmbedding: false });
+    await this.kgService.createEntity(spec);
     await this.refreshSpecRelationships(spec);
 
     return {
@@ -107,9 +107,9 @@ export class SpecService {
     );
 
     if (existing) {
-      await this.kgService.updateEntity(spec.id, spec, { skipEmbedding: false });
+      await this.kgService.updateEntity(spec.id, spec);
     } else {
-      await this.kgService.createEntity(spec, { skipEmbedding: false });
+      await this.kgService.createEntity(spec);
     }
 
     await this.refreshSpecRelationships(spec);
@@ -536,25 +536,20 @@ export class SpecService {
               (candidate as any).name ?? token
             );
             if (confidence < noiseConfig.MIN_INFERRED_CONFIDENCE) continue;
-            await this.kgService.createRelationship(
-              {
-                id: `rel_${spec.id}_${candidate.id}_${relationshipType}`,
-                fromEntityId: spec.id,
-                toEntityId: candidate.id,
-                type: relationshipType,
-                created: new Date(nowISO),
-                lastModified: new Date(nowISO),
-                version: 1,
-                metadata: {
-                  inferred: true,
-                  confidence,
-                  source,
-                },
-              } as any,
-              undefined,
-              undefined,
-              { validate: false }
-            );
+            await this.kgService.createRelationship({
+              id: `rel_${spec.id}_${candidate.id}_${relationshipType}`,
+              fromEntityId: spec.id,
+              toEntityId: candidate.id,
+              type: relationshipType,
+              created: new Date(nowISO),
+              lastModified: new Date(nowISO),
+              version: 1,
+              metadata: {
+                inferred: true,
+                confidence,
+                source,
+              },
+            } as any);
           }
         } catch (error) {
           console.warn(

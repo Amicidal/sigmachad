@@ -1,6 +1,6 @@
-import type { InstrumentationConsumer, InstrumentationEvent, DispatcherMetrics } from "./logging/InstrumentationDispatcher.js";
-import type { FileSinkOptions, FileSinkMetrics, FileSystemFacade } from "./logging/FileSink.js";
-import type { SerializationOptions } from "./logging/serialization.js";
+import type { InstrumentationConsumer, InstrumentationEvent, DispatcherMetrics } from "../logging/InstrumentationDispatcher.js";
+import type { FileSinkOptions, FileSinkMetrics, FileSystemFacade } from "../logging/FileSink.js";
+import type { SerializationOptions } from "../logging/serialization.js";
 export interface LogEntry {
     timestamp: Date;
     level: "error" | "warn" | "info" | "debug";

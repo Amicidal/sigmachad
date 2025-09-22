@@ -4,7 +4,7 @@
  */
 import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
 import { DatabaseService } from "./core/DatabaseService.js";
-import { DocumentationNode, BusinessDomain } from "../models/entities.js";
+import { DocumentationNode, BusinessDomain } from "../../models/entities.js";
 import { DocumentationIntelligenceProvider } from "./DocumentationIntelligenceProvider.js";
 export interface ParsedDocument {
     title: string;

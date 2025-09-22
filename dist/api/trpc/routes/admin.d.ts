@@ -18,9 +18,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
@@ -49,9 +49,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
@@ -84,9 +84,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
@@ -111,9 +111,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
@@ -136,9 +136,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
@@ -165,9 +165,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
@@ -192,9 +192,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
@@ -213,9 +213,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };
@@ -237,9 +237,9 @@ export declare const adminRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: {
             kgService: import("../../../services/index.js").KnowledgeGraphService;
-            dbService: import("../../../services/core/DatabaseService.js").DatabaseService;
-            astParser: import("../../../services/knowledge/ASTParser.js").ASTParser;
-            fileWatcher: import("../../../services/core/FileWatcher.js").FileWatcher;
+            dbService: import("../../../services/index.js").DatabaseService;
+            astParser: import("../../../services/index.js").ASTParser;
+            fileWatcher: import("../../../services/index.js").FileWatcher;
             authToken: string | undefined;
             authContext: import("../../middleware/authentication.js").AuthContext | undefined;
         };

@@ -23,6 +23,7 @@ import { BackupService } from "../services/backup/BackupService.js";
 import { LoggingService } from "../services/core/LoggingService.js";
 import { MaintenanceService } from "../services/core/MaintenanceService.js";
 import { ConfigurationService } from "../services/core/ConfigurationService.js";
+import { AuthContext } from "./middleware/authentication.js";
 
 // Import route handlers
 import { registerDesignRoutes } from "./routes/design.js";
@@ -104,7 +105,10 @@ export class APIGateway {
   private loggingService?: LoggingService;
   private maintenanceService?: MaintenanceService;
   private configurationService?: ConfigurationService;
-  private _historyIntervals: { prune?: NodeJS.Timeout; checkpoint?: NodeJS.Timeout } = {};
+  private _historyIntervals: {
+    prune?: NodeJS.Timeout;
+    checkpoint?: NodeJS.Timeout;
+  } = {};
   private healthCheckCache: { data: any; timestamp: number } | null = null;
   private readonly HEALTH_CACHE_TTL = 5000; // Cache health check for 5 seconds
   private scopeCatalog: ScopeCatalog;
@@ -243,7 +247,9 @@ export class APIGateway {
             const routesStr = String(anyApp.printRoutes());
             const m = String(method || "").toUpperCase();
             // Build a conservative regex to find exact METHOD + SPACE + PATH on a single line
-            const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const escape = (s: string) =>
+              s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            // eslint-disable-next-line no-useless-escape
             const pattern = new RegExp(
               `(^|\n)\s*${escape(m)}\s+${escape(path)}(\s|$)`,
               "m"
@@ -259,7 +265,7 @@ export class APIGateway {
   }
 
   private setupMiddleware(): void {
-    this.app.decorateRequest("auth", null);
+    this.app.decorateRequest("auth", undefined as AuthContext | undefined);
 
     // Preflight handler to return 200 (tests expect 200, not default 204)
     this.app.addHook("onRequest", async (request, reply) => {
@@ -330,9 +336,13 @@ export class APIGateway {
           request.url.startsWith("/api/v1/history");
         const token = process.env.ADMIN_API_TOKEN || "";
         if (needsAuth && token) {
-          const headerKey = (request.headers["x-api-key"] as string | undefined) || "";
-          const authz = (request.headers["authorization"] as string | undefined) || "";
-          const bearer = authz.toLowerCase().startsWith("bearer ") ? authz.slice(7) : authz;
+          const headerKey =
+            (request.headers["x-api-key"] as string | undefined) || "";
+          const authz =
+            (request.headers["authorization"] as string | undefined) || "";
+          const bearer = authz.toLowerCase().startsWith("bearer ")
+            ? authz.slice(7)
+            : authz;
           const ok = headerKey === token || bearer === token;
           if (!ok) {
             reply.status(401).send({
@@ -402,7 +412,10 @@ export class APIGateway {
       const authContext = authenticateRequest(request);
       request.auth = authContext;
 
-      const logDecision = (decision: "granted" | "denied", info?: Record<string, unknown>) => {
+      const logDecision = (
+        decision: "granted" | "denied",
+        info?: Record<string, unknown>
+      ) => {
         authContext.decision = decision;
         const auditPayload = {
           event: "auth.decision",
@@ -558,7 +571,8 @@ export class APIGateway {
           "Provided credentials do not include the required scopes",
           {
             reason: "insufficient_scope",
-            remediation: "Re-issue the token with the scopes demanded by this route",
+            remediation:
+              "Re-issue the token with the scopes demanded by this route",
             tokenType: authContext.tokenType,
             requiredScopes: requirement.scopes,
             providedScopes: authContext.scopes,
@@ -663,8 +677,8 @@ export class APIGateway {
         method: "POST",
         url: "/api/v1/sync",
         headers: {
-          "content-type": (request.headers["content-type"] as string) ||
-            "application/json",
+          "content-type":
+            (request.headers["content-type"] as string) || "application/json",
         },
         payload:
           typeof request.body === "string"
@@ -689,8 +703,8 @@ export class APIGateway {
         method: "POST",
         url: "/api/v1/sync/pause",
         headers: {
-          "content-type": (request.headers["content-type"] as string) ||
-            "application/json",
+          "content-type":
+            (request.headers["content-type"] as string) || "application/json",
         },
         payload:
           typeof request.body === "string"
@@ -706,8 +720,8 @@ export class APIGateway {
         method: "POST",
         url: "/api/v1/sync/resume",
         headers: {
-          "content-type": (request.headers["content-type"] as string) ||
-            "application/json",
+          "content-type":
+            (request.headers["content-type"] as string) || "application/json",
         },
         payload:
           typeof request.body === "string"
@@ -723,8 +737,8 @@ export class APIGateway {
         method: "POST",
         url: "/api/v1/sync",
         headers: {
-          "content-type": (request.headers["content-type"] as string) ||
-            "application/json",
+          "content-type":
+            (request.headers["content-type"] as string) || "application/json",
         },
         payload:
           typeof request.body === "string"
@@ -796,7 +810,9 @@ export class APIGateway {
         app.post("/auth/refresh", async (request, reply) => {
           const body = (request.body ?? {}) as { refreshToken?: string };
           const refreshToken =
-            typeof body.refreshToken === "string" ? body.refreshToken : undefined;
+            typeof body.refreshToken === "string"
+              ? body.refreshToken
+              : undefined;
 
           if (!refreshToken) {
             return sendAuthError(
@@ -808,7 +824,8 @@ export class APIGateway {
               {
                 reason: "missing_refresh_token",
                 detail: "Missing refreshToken in request payload",
-                remediation: "Include a valid refresh token in the request body",
+                remediation:
+                  "Include a valid refresh token in the request body",
                 tokenType: "jwt",
                 requiredScopes: ["session:refresh"],
               }
@@ -826,7 +843,8 @@ export class APIGateway {
               {
                 reason: "server_misconfigured",
                 detail: "JWT_SECRET is not configured",
-                remediation: "Set JWT_SECRET before invoking the refresh endpoint",
+                remediation:
+                  "Set JWT_SECRET before invoking the refresh endpoint",
                 requiredScopes: ["session:refresh"],
               }
             );
@@ -865,7 +883,9 @@ export class APIGateway {
                 ? ((payload as any).rotationId as string)
                 : undefined;
             const tokenExpiresAt =
-              typeof payload.exp === "number" ? (payload.exp as number) : undefined;
+              typeof payload.exp === "number"
+                ? (payload.exp as number)
+                : undefined;
 
             const validation = this.refreshSessionStore.validatePresentedToken(
               sessionIdFromPayload,
@@ -904,7 +924,8 @@ export class APIGateway {
             }
 
             const baseClaims = {
-              userId: payload.userId ?? payload.sub ?? payload.id ?? "unknown-user",
+              userId:
+                payload.userId ?? payload.sub ?? payload.id ?? "unknown-user",
               role: payload.role ?? "user",
               permissions: Array.isArray(payload.permissions)
                 ? (payload.permissions as string[])
@@ -916,14 +937,17 @@ export class APIGateway {
             };
 
             const resolvedSessionId =
-              typeof baseClaims.sessionId === "string" && baseClaims.sessionId.length > 0
+              typeof baseClaims.sessionId === "string" &&
+              baseClaims.sessionId.length > 0
                 ? baseClaims.sessionId
                 : sessionIdFromPayload ?? randomUUID();
             baseClaims.sessionId = resolvedSessionId;
 
-            const issuer = typeof payload.iss === "string" ? payload.iss : "memento";
+            const issuer =
+              typeof payload.iss === "string" ? payload.iss : "memento";
             const refreshExpiresInSeconds = 7 * 24 * 60 * 60;
-            const refreshExpiresAt = Math.floor(Date.now() / 1000) + refreshExpiresInSeconds;
+            const refreshExpiresAt =
+              Math.floor(Date.now() / 1000) + refreshExpiresInSeconds;
             const nextRotationId = this.refreshSessionStore.rotate(
               resolvedSessionId,
               refreshExpiresAt
@@ -961,7 +985,8 @@ export class APIGateway {
               isExpired ? "Refresh token has expired" : "Invalid refresh token",
               {
                 reason: isExpired ? "token_expired" : "invalid_token",
-                remediation: "Initiate a new login flow to obtain a fresh refresh token",
+                remediation:
+                  "Initiate a new login flow to obtain a fresh refresh token",
                 tokenType: "jwt",
                 providedScopes: undefined,
                 requiredScopes: ["session:refresh"],
@@ -1293,7 +1318,7 @@ export class APIGateway {
       try {
         await this.startHistorySchedulers();
       } catch (e) {
-        console.warn('History schedulers could not be started:', e);
+        console.warn("History schedulers could not be started:", e);
       }
     } catch (error) {
       console.error("Failed to start API Gateway:", error);
@@ -1311,9 +1336,13 @@ export class APIGateway {
 
     // Clear history schedulers
     try {
-      if (this._historyIntervals.prune) clearInterval(this._historyIntervals.prune);
-      if (this._historyIntervals.checkpoint) clearInterval(this._historyIntervals.checkpoint);
-    } catch {}
+      if (this._historyIntervals.prune)
+        clearInterval(this._historyIntervals.prune);
+      if (this._historyIntervals.checkpoint)
+        clearInterval(this._historyIntervals.checkpoint);
+    } catch {
+      // Ignore errors when clearing intervals
+    }
 
     await this.app.close();
     console.log("🛑 API Gateway stopped");
@@ -1340,16 +1369,27 @@ export class APIGateway {
   // Schedulers for daily prune and daily checkpoint
   private async startHistorySchedulers(): Promise<void> {
     const cfg = this.configurationService?.getHistoryConfig?.();
-    const enabled = cfg?.enabled ?? ((process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false');
+    const enabled =
+      cfg?.enabled ??
+      (process.env.HISTORY_ENABLED || "true").toLowerCase() !== "false";
     if (!enabled) {
-      console.log('🕒 History disabled; schedulers not started');
+      console.log("🕒 History disabled; schedulers not started");
       return;
     }
 
-    const retentionDays = cfg?.retentionDays ?? (parseInt(process.env.HISTORY_RETENTION_DAYS || '30', 10) || 30);
-    const hops = cfg?.checkpoint?.hops ?? (parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '2', 10) || 2);
-    const pruneHours = cfg?.schedule?.pruneIntervalHours ?? (parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || '24', 10) || 24);
-    const checkpointHours = cfg?.schedule?.checkpointIntervalHours ?? (parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || '24', 10) || 24);
+    const retentionDays =
+      cfg?.retentionDays ??
+      (parseInt(process.env.HISTORY_RETENTION_DAYS || "30", 10) || 30);
+    const hops =
+      cfg?.checkpoint?.hops ??
+      (parseInt(process.env.HISTORY_CHECKPOINT_HOPS || "2", 10) || 2);
+    const pruneHours =
+      cfg?.schedule?.pruneIntervalHours ??
+      (parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || "24", 10) || 24);
+    const checkpointHours =
+      cfg?.schedule?.checkpointIntervalHours ??
+      (parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || "24", 10) ||
+        24);
 
     // Daily prune at interval (24h)
     const dayMs = 24 * 60 * 60 * 1000;
@@ -1358,9 +1398,11 @@ export class APIGateway {
     const runPrune = async () => {
       try {
         const r = await this.kgService.pruneHistory(retentionDays);
-        console.log(`🧹 Daily prune completed: versions=${r.versionsDeleted}, edges=${r.edgesClosed}, checkpoints=${r.checkpointsDeleted}`);
+        console.log(
+          `🧹 Daily prune completed: versions=${r.versionsDeleted}, edges=${r.edgesClosed}, checkpoints=${r.checkpointsDeleted}`
+        );
       } catch (e) {
-        console.warn('Daily prune failed:', e);
+        console.warn("Daily prune failed:", e);
       }
     };
     this._historyIntervals.prune = setInterval(runPrune, pruneMs);
@@ -1368,21 +1410,30 @@ export class APIGateway {
     // Daily checkpoint: build seeds from last 24h modified entities (capped)
     const runCheckpoint = async () => {
       try {
-        const since = new Date(Date.now() - dayMs);
-        const seeds = await this.kgService.findRecentEntityIds(since, 200);
+        const seeds = await this.kgService.findRecentEntityIds(200);
         if (seeds.length === 0) {
-          console.log('📌 Daily checkpoint skipped: no recent entities');
+          console.log("📌 Daily checkpoint skipped: no recent entities");
           return;
         }
-        const { checkpointId } = await this.kgService.createCheckpoint(seeds, 'daily', hops);
-        console.log(`📌 Daily checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`);
+        const { checkpointId } = await this.kgService.createCheckpoint(seeds, {
+          type: "daily",
+          hops,
+        });
+        console.log(
+          `📌 Daily checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`
+        );
       } catch (e) {
-        console.warn('Daily checkpoint failed:', e);
+        console.warn("Daily checkpoint failed:", e);
       }
     };
-    this._historyIntervals.checkpoint = setInterval(runCheckpoint, checkpointMs);
+    this._historyIntervals.checkpoint = setInterval(
+      runCheckpoint,
+      checkpointMs
+    );
 
-    console.log(`🕒 History schedulers started (prune every ${pruneHours}h, checkpoint every ${checkpointHours}h)`);
+    console.log(
+      `🕒 History schedulers started (prune every ${pruneHours}h, checkpoint every ${checkpointHours}h)`
+    );
   }
 
   // Method to get current configuration

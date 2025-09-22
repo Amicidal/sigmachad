@@ -165,7 +165,7 @@ export const graphRouter = router({
         offset: 0,
       });
 
-      const filtered = entities.filter((cluster: any) => {
+      const filtered = (entities || []).filter((cluster: any) => {
         if (input.domain) {
           const domain = (cluster?.domain || cluster?.metadata?.domain || '').toString();
           if (!domain.toLowerCase().includes(input.domain.toLowerCase())) {

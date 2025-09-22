@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 export interface BackupFileStat {
     path: string;
     size: number;
@@ -20,7 +21,7 @@ export interface BackupStorageProvider {
     exists(relativePath: string): Promise<boolean>;
     stat(relativePath: string): Promise<BackupFileStat | null>;
     list(prefix?: string): Promise<string[]>;
-    createReadStream?: (relativePath: string, options?: BackupStorageReadOptions) => NodeJS.ReadableStream;
+    createReadStream?: (relativePath: string, options?: BackupStorageReadOptions) => Readable;
     createWriteStream?: (relativePath: string, options?: BackupStorageWriteOptions) => NodeJS.WritableStream;
 }
 export interface BackupStorageFactoryOptions {

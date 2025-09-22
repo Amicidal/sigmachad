@@ -1,5 +1,5 @@
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import type { TestPlanRequest, TestPlanResponse } from "../models/types.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import type { TestPlanRequest, TestPlanResponse } from "../../models/types.js";
 export declare class SpecNotFoundError extends Error {
     readonly code = "SPEC_NOT_FOUND";
     constructor(specId: string);

@@ -39,7 +39,7 @@ describe("APIGateway Integration", () => {
     }
 
     // Create knowledge graph service
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
 
     // Create API Gateway
     apiGateway = new APIGateway(kgService, dbService);

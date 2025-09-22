@@ -2,8 +2,8 @@
  * AST Parser Service for Memento
  * Parses TypeScript/JavaScript code using ts-morph and tree-sitter
  */
-import { Entity, Symbol as SymbolEntity } from "../models/entities.js";
-import { GraphRelationship } from "../models/relationships.js";
+import { Entity, Symbol as SymbolEntity } from "../../models/entities.js";
+import { GraphRelationship } from "../../models/relationships.js";
 export interface ParseResult {
     entities: Entity[];
     relationships: GraphRelationship[];

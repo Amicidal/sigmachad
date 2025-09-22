@@ -2,10 +2,10 @@
  * Security Scanner Service for Memento
  * Performs security scanning, vulnerability detection, and security monitoring
  */
-import { DatabaseService } from "./core/DatabaseService.js";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { SecurityIssue } from "../models/entities.js";
-import { SecurityScanRequest, SecurityScanResult, VulnerabilityReport } from "../models/types.js";
+import { DatabaseService } from "../core/DatabaseService.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { SecurityIssue } from "../../models/entities.js";
+import { SecurityScanRequest, SecurityScanResult, VulnerabilityReport } from "../../models/types.js";
 import { EventEmitter } from "events";
 export interface SecurityRule {
     id: string;

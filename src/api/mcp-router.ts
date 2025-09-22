@@ -24,7 +24,6 @@ import { existsSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Project } from "ts-morph";
-import { RelationshipType } from "../models/relationships.js";
 import {
   SpecNotFoundError,
   TestPlanningService,
@@ -212,7 +211,8 @@ export class MCPRouter {
         properties: {
           modulePath: {
             type: "string",
-            description: "Module path or entity id (e.g., file:src/app.ts:module)",
+            description:
+              "Module path or entity id (e.g., file:src/app.ts:module)",
           },
           includeFiles: {
             type: "boolean",
@@ -238,7 +238,8 @@ export class MCPRouter {
           },
           modulePathPrefix: {
             type: "string",
-            description: "Restrict children to modulePath/path starting with prefix",
+            description:
+              "Restrict children to modulePath/path starting with prefix",
           },
           limit: {
             type: "number",
@@ -367,7 +368,10 @@ export class MCPRouter {
         type: "object",
         properties: {
           pattern: { type: "string", description: "AST-Grep pattern" },
-          name: { type: "string", description: "Convenience: symbol name to find" },
+          name: {
+            type: "string",
+            description: "Convenience: symbol name to find",
+          },
           kinds: {
             type: "array",
             items: { type: "string", enum: ["function", "method"] },
@@ -382,18 +386,12 @@ export class MCPRouter {
           },
           selector: {
             type: "string",
-            description: "Optional AST kind selector (e.g., function_declaration)",
+            description:
+              "Optional AST kind selector (e.g., function_declaration)",
           },
           strictness: {
             type: "string",
-            enum: [
-              "cst",
-              "smart",
-              "ast",
-              "relaxed",
-              "signature",
-              "template",
-            ],
+            enum: ["cst", "smart", "ast", "relaxed", "signature", "template"],
             description: "Match strictness",
           },
           globs: {
@@ -444,11 +442,23 @@ export class MCPRouter {
       },
       handler: async (params: any) => {
         const name = String(params.name);
-        const kinds: string[] = Array.isArray(params.kinds) && params.kinds.length ? params.kinds : ["function", "method"];
-        const rawGlobs: string[] = Array.isArray(params.globs) ? params.globs : ["src/**/*.ts", "src/**/*.tsx"];
-        const globs = rawGlobs.filter((g) => typeof g === "string" && !g.includes(".."));
+        const kinds: string[] =
+          Array.isArray(params.kinds) && params.kinds.length
+            ? params.kinds
+            : ["function", "method"];
+        const rawGlobs: string[] = Array.isArray(params.globs)
+          ? params.globs
+          : ["src/**/*.ts", "src/**/*.tsx"];
+        const globs = rawGlobs.filter(
+          (g) => typeof g === "string" && !g.includes("..")
+        );
         const limit = Math.max(1, Math.min(500, Number(params.limit ?? 200)));
-        const matches = await this.searchWithTsMorph(name, kinds as any, globs, limit);
+        const matches = await this.searchWithTsMorph(
+          name,
+          kinds as any,
+          globs,
+          limit
+        );
         return { success: true, count: matches.length, matches };
       },
     });
@@ -472,45 +482,95 @@ export class MCPRouter {
       },
       handler: async (params: any) => {
         const name = String(params.name);
-        const engines: string[] = Array.isArray(params.engines) && params.engines.length ? params.engines : ["graph", "ast-grep", "ts-morph"];
+        const engines: string[] =
+          Array.isArray(params.engines) && params.engines.length
+            ? params.engines
+            : ["graph", "ast-grep", "ts-morph"];
         const limit = Math.max(1, Math.min(500, Number(params.limit ?? 200)));
 
         const results: any = {};
 
         if (engines.includes("graph")) {
           try {
-            const entities = await this.kgService.search({ query: name, searchType: "structural", entityTypes: ["function" as any], limit });
-            const dedup = Array.from(new Map(entities.map((e: any) => [e.path, e])).values());
-            results.graph = { count: dedup.length, items: dedup.map((e: any) => ({ file: String((e.path || "").split(":")[0]), symbol: e.name, path: e.path })) };
+            const entities = await this.kgService.search({
+              query: name,
+              searchType: "structural",
+              entityTypes: ["function" as any],
+              limit,
+            });
+            const dedup = Array.from(
+              new Map(entities.map((e: any) => [e.path, e])).values()
+            );
+            results.graph = {
+              count: dedup.length,
+              items: dedup.map((e: any) => ({
+                file: String((e.path || "").split(":")[0]),
+                symbol: e.name,
+                path: e.path,
+              })),
+            };
           } catch (e) {
             results.graph = { error: (e as Error).message };
           }
         }
 
         if (engines.includes("ast-grep")) {
-          const ag = await this.runAstGrepOne({ pattern: `function ${name}($P, ...) { ... }`, selector: "function_declaration", lang: "ts", globs: [], includeText: false, timeoutMs: 5000, limit });
+          const ag = await this.runAstGrepOne({
+            pattern: `function ${name}($P, ...) { ... }`,
+            selector: "function_declaration",
+            lang: "ts",
+            globs: [],
+            includeText: false,
+            timeoutMs: 5000,
+            limit,
+          });
           // Attempt a method match using property_identifier within a class context
-          const ag2 = await this.runAstGrepOne({ pattern: `class $C { ${name}($P, ...) { ... } }`, selector: "property_identifier", lang: "ts", globs: [], includeText: false, timeoutMs: 5000, limit });
+          const ag2 = await this.runAstGrepOne({
+            pattern: `class $C { ${name}($P, ...) { ... } }`,
+            selector: "property_identifier",
+            lang: "ts",
+            globs: [],
+            includeText: false,
+            timeoutMs: 5000,
+            limit,
+          });
           const all = [...ag.matches, ...ag2.matches];
           const dedupFiles = Array.from(new Set(all.map((m) => m.file)));
-          results["ast-grep"] = { count: all.length, files: dedupFiles, items: all };
+          results["ast-grep"] = {
+            count: all.length,
+            files: dedupFiles,
+            items: all,
+          };
         }
 
         if (engines.includes("ts-morph")) {
-          const tm = await this.searchWithTsMorph(name, ["function", "method"], ["src/**/*.ts", "src/**/*.tsx"], limit);
+          const tm = await this.searchWithTsMorph(
+            name,
+            ["function", "method"],
+            ["src/**/*.ts", "src/**/*.tsx"],
+            limit
+          );
           const dedupFiles = Array.from(new Set(tm.map((m) => m.file)));
-          results["ts-morph"] = { count: tm.length, files: dedupFiles, items: tm };
+          results["ts-morph"] = {
+            count: tm.length,
+            files: dedupFiles,
+            items: tm,
+          };
         }
 
         // ripgrep engine removed
 
         // Simple union summary by files
-        const fileSets = Object.entries(results).reduce((acc: Record<string, Set<string>>, [k, v]: any) => {
-          if (v && Array.isArray(v.files)) acc[k] = new Set(v.files);
-          return acc;
-        }, {});
+        const fileSets = Object.entries(results).reduce(
+          (acc: Record<string, Set<string>>, [k, v]: any) => {
+            if (v && Array.isArray(v.files)) acc[k] = new Set(v.files);
+            return acc;
+          },
+          {}
+        );
         const unionFiles = new Set<string>();
-        for (const s of Object.values(fileSets)) for (const f of s as Set<string>) unionFiles.add(f);
+        for (const s of Object.values(fileSets))
+          for (const f of s as Set<string>) unionFiles.add(f);
         results.summary = { unionFileCount: unionFiles.size };
 
         return results;
@@ -691,7 +751,11 @@ export class MCPRouter {
         const { entities, total } = await this.kgService.listEntities({
           limit,
         });
-        return { total, count: entities.length, entities };
+        return {
+          total,
+          count: entities?.length || 0,
+          entities: entities || [],
+        };
       },
     });
 
@@ -723,7 +787,7 @@ export class MCPRouter {
       handler: async (params: any) => {
         const limit = typeof params.limit === "number" ? params.limit : 20;
         const { relationships, total } = await this.kgService.listRelationships(
-          { fromEntity: params.entityId, limit }
+          { fromEntityId: params.entityId, limit }
         );
         return { total, count: relationships.length, relationships };
       },
@@ -1153,7 +1217,9 @@ export class MCPRouter {
       };
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : String(error ?? "Unknown error");
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Unknown error");
       console.error("Error in handleCreateSpec:", error);
       throw new McpError(
         ErrorCode.InternalError,
@@ -1231,9 +1297,7 @@ export class MCPRouter {
 
     try {
       const modulePath =
-        typeof params?.modulePath === "string"
-          ? params.modulePath.trim()
-          : "";
+        typeof params?.modulePath === "string" ? params.modulePath.trim() : "";
       if (!modulePath) {
         throw new Error("modulePath is required");
       }
@@ -1248,9 +1312,11 @@ export class MCPRouter {
           : undefined;
       const limit = this.parseNumericLimit(params?.limit);
 
-      const options: Parameters<KnowledgeGraphService["listModuleChildren"]>[1] =
-        {};
-      if (typeof includeFiles === "boolean") options.includeFiles = includeFiles;
+      const options: Parameters<
+        KnowledgeGraphService["listModuleChildren"]
+      >[1] = {};
+      if (typeof includeFiles === "boolean")
+        options.includeFiles = includeFiles;
       if (typeof includeSymbols === "boolean")
         options.includeSymbols = includeSymbols;
       if (languages.length === 1) {
@@ -1270,7 +1336,10 @@ export class MCPRouter {
         options.limit = limit;
       }
 
-      const result = await this.kgService.listModuleChildren(modulePath, options);
+      const result = await this.kgService.listModuleChildren(
+        modulePath,
+        options
+      );
       const childCount = Array.isArray(result.children)
         ? result.children.length
         : 0;
@@ -1303,8 +1372,8 @@ export class MCPRouter {
       }
 
       const resolvedOnly = this.parseBooleanFlag(params?.resolvedOnly);
-      const languages = this.parseStringArrayFlag(params?.language).map((value) =>
-        value.toLowerCase()
+      const languages = this.parseStringArrayFlag(params?.language).map(
+        (value) => value.toLowerCase()
       );
       const symbolKinds = this.parseStringArrayFlag(params?.symbolKind).map(
         (value) => value.toLowerCase()
@@ -1322,7 +1391,8 @@ export class MCPRouter {
       const limit = this.parseNumericLimit(params?.limit);
 
       const options: Parameters<KnowledgeGraphService["listImports"]>[1] = {};
-      if (typeof resolvedOnly === "boolean") options.resolvedOnly = resolvedOnly;
+      if (typeof resolvedOnly === "boolean")
+        options.resolvedOnly = resolvedOnly;
       if (languages.length === 1) {
         options.language = languages[0];
       } else if (languages.length > 1) {
@@ -1359,7 +1429,9 @@ export class MCPRouter {
       }
 
       const result = await this.kgService.listImports(entityId, options);
-      const importCount = Array.isArray(result.imports) ? result.imports.length : 0;
+      const importCount = Array.isArray(result.imports)
+        ? result.imports.length
+        : 0;
 
       return {
         ...result,
@@ -1392,9 +1464,10 @@ export class MCPRouter {
 
       return {
         ...result,
-        message: result.source
-          ? `Definition resolved to ${result.source.id}`
-          : "Definition not found",
+        message:
+          result && "source" in result && result.source
+            ? `Definition resolved to ${(result as any).source.id}`
+            : "Definition not found",
       };
     } catch (error) {
       console.error("Error in handleFindDefinition:", error);
@@ -1421,9 +1494,7 @@ export class MCPRouter {
   private parseStringArrayFlag(value: unknown): string[] {
     if (Array.isArray(value)) {
       return value
-        .flatMap((entry) =>
-          typeof entry === "string" ? entry.split(",") : []
-        )
+        .flatMap((entry) => (typeof entry === "string" ? entry.split(",") : []))
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0);
     }
@@ -1836,8 +1907,9 @@ export class MCPRouter {
     const request: TestPlanRequest = {
       specId: params.specId,
       testTypes: Array.isArray(params.testTypes)
-        ? params.testTypes.filter((type: unknown) =>
-            type === "unit" || type === "integration" || type === "e2e"
+        ? params.testTypes.filter(
+            (type: unknown) =>
+              type === "unit" || type === "integration" || type === "e2e"
           )
         : undefined,
       coverage:
@@ -1879,14 +1951,10 @@ export class MCPRouter {
           return fallbackPlan;
         }
 
-        throw new McpError(
-          ErrorCode.InternalError,
-          "Tool execution failed",
-          {
-            code: error.code,
-            message: `Specification ${request.specId} not found`,
-          }
-        );
+        throw new McpError(ErrorCode.InternalError, "Tool execution failed", {
+          code: error.code,
+          message: `Specification ${request.specId} not found`,
+        });
       }
 
       console.error("Error in handlePlanTests:", error);
@@ -1898,9 +1966,7 @@ export class MCPRouter {
     }
   }
 
-  private async generateFallbackTestPlan(
-    request: TestPlanRequest
-  ): Promise<{
+  private async generateFallbackTestPlan(request: TestPlanRequest): Promise<{
     specId: string;
     testPlan: {
       unitTests: TestPlanResponse["testPlan"]["unitTests"];
@@ -1952,9 +2018,7 @@ export class MCPRouter {
           ? parsed.title.trim()
           : this.humanizeSpecId(safeSpecId),
       description:
-        typeof parsed?.description === "string"
-          ? parsed.description
-          : "",
+        typeof parsed?.description === "string" ? parsed.description : "",
       acceptanceCriteria: Array.isArray(parsed?.acceptanceCriteria)
         ? parsed.acceptanceCriteria
             .map((criterion: unknown) =>
@@ -1968,12 +2032,16 @@ export class MCPRouter {
         typeof parsed?.priority === "string"
           ? (parsed.priority as Spec["priority"])
           : ("medium" as Spec["priority"]),
-    } satisfies Pick<Spec, "id" | "title" | "description" | "acceptanceCriteria" | "priority">;
+    } satisfies Pick<
+      Spec,
+      "id" | "title" | "description" | "acceptanceCriteria" | "priority"
+    >;
 
     const requestedTypes = new Set<"unit" | "integration" | "e2e">(
       Array.isArray(request.testTypes) && request.testTypes.length > 0
-        ? request.testTypes.filter((type): type is "unit" | "integration" | "e2e" =>
-            type === "unit" || type === "integration" || type === "e2e"
+        ? request.testTypes.filter(
+            (type): type is "unit" | "integration" | "e2e" =>
+              type === "unit" || type === "integration" || type === "e2e"
           )
         : ["unit", "integration", "e2e"]
     );
@@ -2014,17 +2082,12 @@ export class MCPRouter {
 
     const unitTests = requestedTypes.has("unit")
       ? criteria.map((criterion, index) =>
-          baseTestSpec(
-            "unit",
-            `Unit • AC${index + 1}`,
-            criterion,
-            {
-              assertions: [
-                `Should satisfy acceptance criterion #${index + 1}`,
-                `Handles error and edge cases for: ${criterion}`,
-              ],
-            }
-          )
+          baseTestSpec("unit", `Unit • AC${index + 1}`, criterion, {
+            assertions: [
+              `Should satisfy acceptance criterion #${index + 1}`,
+              `Handles error and edge cases for: ${criterion}`,
+            ],
+          })
         )
       : [];
 
@@ -2074,9 +2137,7 @@ export class MCPRouter {
                 "Throughput meets baseline service level objective",
                 "Degradation alerts fire if threshold breached",
               ],
-              dataRequirements: [
-                "Load profile mirroring production scale",
-              ],
+              dataRequirements: ["Load profile mirroring production scale"],
             }
           ),
         ]
@@ -2115,17 +2176,15 @@ export class MCPRouter {
       },
       estimatedCoverage,
       changedFiles: [],
-      message: rows.length > 0
-        ? `Generated heuristic test plan for specification ${normalizedSpec.id}`
-        : `Generated heuristic test plan for missing specification ${normalizedSpec.id}`,
+      message:
+        rows.length > 0
+          ? `Generated heuristic test plan for specification ${normalizedSpec.id}`
+          : `Generated heuristic test plan for missing specification ${normalizedSpec.id}`,
     };
   }
 
   private humanizeSpecId(specId: string): string {
-    const cleaned = specId
-      .replace(/[-_]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const cleaned = specId.replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
     if (cleaned.length === 0) {
       return "Untitled Specification";
     }
@@ -2444,7 +2503,8 @@ export class MCPRouter {
         : undefined;
 
     try {
-      const analysis = await this.kgService.analyzeImpact(changes, {
+      const analysis = await this.kgService.analyzeImpact({
+        changes,
         includeIndirect,
         maxDepth,
       });
@@ -2487,7 +2547,10 @@ export class MCPRouter {
       };
     } catch (error) {
       console.error("Error in handleImpactAnalysis:", error);
-      const fallback = await this.kgService.analyzeImpact([], { includeIndirect: false });
+      const fallback = await this.kgService.analyzeImpact({
+        changes: [],
+        includeIndirect: false,
+      });
       return {
         ...fallback,
         changes,
@@ -2503,7 +2566,6 @@ export class MCPRouter {
       };
     }
   }
-
 
   private calculateRiskLevel(
     directImpact: any[],
@@ -2545,7 +2607,9 @@ export class MCPRouter {
     return this.riskScoreToLabel(score);
   }
 
-  private riskLevelToScore(level: "low" | "medium" | "high" | "critical"): number {
+  private riskLevelToScore(
+    level: "low" | "medium" | "high" | "critical"
+  ): number {
     switch (level) {
       case "critical":
         return 3;
@@ -2558,7 +2622,9 @@ export class MCPRouter {
     }
   }
 
-  private riskScoreToLabel(score: number): "low" | "medium" | "high" | "critical" {
+  private riskScoreToLabel(
+    score: number
+  ): "low" | "medium" | "high" | "critical" {
     if (score >= 3) return "critical";
     if (score >= 2) return "high";
     if (score >= 1) return "medium";
@@ -2767,7 +2833,11 @@ export class MCPRouter {
           created: new Date(),
           lastModified: new Date(),
           version: 1,
-          metadata: { inferred: true, confidence: 0.6, source: 'mcp-doc-cluster' }
+          metadata: {
+            inferred: true,
+            confidence: 0.6,
+            source: "mcp-doc-cluster",
+          },
         } as any);
 
         // Also link cluster to any business domains described by this document
@@ -2785,7 +2855,11 @@ export class MCPRouter {
               created: new Date(),
               lastModified: new Date(),
               version: 1,
-              metadata: { inferred: true, confidence: 0.6, source: 'mcp-cluster-domain' }
+              metadata: {
+                inferred: true,
+                confidence: 0.6,
+                source: "mcp-cluster-domain",
+              },
             } as any);
           }
         } catch {}
@@ -2800,7 +2874,11 @@ export class MCPRouter {
             created: new Date(),
             lastModified: new Date(),
             version: 1,
-            metadata: { inferred: true, confidence: 0.6, source: 'mcp-cluster-member' }
+            metadata: {
+              inferred: true,
+              confidence: 0.6,
+              source: "mcp-cluster-member",
+            },
           } as any);
         }
       }
@@ -2850,8 +2928,10 @@ export class MCPRouter {
 
           // If doc looks like a specification/design, also mark implements-spec
           try {
-            const docType = (docEntity as any).docType || '';
-            const isSpec = ["design-doc", "api-docs", "architecture"].includes(String(docType));
+            const docType = (docEntity as any).docType || "";
+            const isSpec = ["design-doc", "api-docs", "architecture"].includes(
+              String(docType)
+            );
             if (isSpec) {
               await this.kgService.createRelationship({
                 id: `rel_${codeEntity.id}_${docEntity.id}_IMPLEMENTS_SPEC`,
@@ -2930,8 +3010,7 @@ export class MCPRouter {
           if (!Array.isArray(body) && (request as any).validationError) {
             const validationError = (request as any).validationError;
             const message =
-              validationError?.message ||
-              "Invalid MCP request payload";
+              validationError?.message || "Invalid MCP request payload";
             return reply.status(200).send({
               jsonrpc: "2.0",
               id: null,
@@ -3232,8 +3311,14 @@ export class MCPRouter {
     const selector: string | undefined = params.selector;
     const strictness: string | undefined = params.strictness;
     const includeText: boolean = Boolean(params.includeText);
-    const timeoutMs: number = Math.max(1000, Math.min(20000, Number(params.timeoutMs ?? 5000)));
-    const limit: number = Math.max(1, Math.min(500, Number(params.limit ?? 200)));
+    const timeoutMs: number = Math.max(
+      1000,
+      Math.min(20000, Number(params.timeoutMs ?? 5000))
+    );
+    const limit: number = Math.max(
+      1,
+      Math.min(500, Number(params.limit ?? 200))
+    );
 
     // Determine search root and optional user-provided globs
     const srcRoot = this.getSrcRoot();
@@ -3246,7 +3331,10 @@ export class MCPRouter {
     // Convenience: if name provided and no custom pattern, try function+method by name
     if (!params.pattern && params.name) {
       const name: string = String(params.name);
-      const kinds: string[] = Array.isArray(params.kinds) && params.kinds.length ? params.kinds : ["function", "method"];
+      const kinds: string[] =
+        Array.isArray(params.kinds) && params.kinds.length
+          ? params.kinds
+          : ["function", "method"];
       let matches: any[] = [];
 
       // Try ast-grep first
@@ -3280,11 +3368,20 @@ export class MCPRouter {
 
       // Fallback to ts-morph if nothing found
       if (matches.length === 0) {
-        const fallback = await this.searchWithTsMorph(name, kinds as any, globs, limit);
+        const fallback = await this.searchWithTsMorph(
+          name,
+          kinds as any,
+          globs,
+          limit
+        );
         matches = matches.concat(fallback);
       }
 
-      return { success: true, count: Math.min(matches.length, limit), matches: matches.slice(0, limit) };
+      return {
+        success: true,
+        count: Math.min(matches.length, limit),
+        matches: matches.slice(0, limit),
+      };
     }
 
     const pattern: string = String(params.pattern || "");
@@ -3293,7 +3390,12 @@ export class MCPRouter {
     // Resolve ast-grep binary
     const cwd = process.cwd();
     const binCandidates = [
-      path.join(cwd, "node_modules", ".bin", process.platform === "win32" ? "sg.cmd" : "sg"),
+      path.join(
+        cwd,
+        "node_modules",
+        ".bin",
+        process.platform === "win32" ? "sg.cmd" : "sg"
+      ),
       process.platform === "win32" ? "sg.cmd" : "sg", // if globally available in PATH
     ];
 
@@ -3307,110 +3409,116 @@ export class MCPRouter {
     const brewSg = brewCandidates.find((p) => existsSync(p));
 
     // Small helper to execute the actual search with a chosen binary
-    const runWith = (bin: string) => new Promise((resolve, reject) => {
-      const args: string[] = [];
+    const runWith = (bin: string) =>
+      new Promise((resolve, reject) => {
+        const args: string[] = [];
 
-      if (bin === "npx") {
-        // Use a remote package explicitly to avoid local broken binaries
-        args.push("-y", "-p", "@ast-grep/cli@0.39.5", "sg");
-      }
+        if (bin === "npx") {
+          // Use a remote package explicitly to avoid local broken binaries
+          args.push("-y", "-p", "@ast-grep/cli@0.39.5", "sg");
+        }
 
-      args.push(
-        "run",
-        "-l",
-        String(lang),
-        "-p",
-        String(pattern)
-      );
+        args.push("run", "-l", String(lang), "-p", String(pattern));
 
-      if (selector) {
-        args.push("--selector", selector);
-      }
-      if (strictness) {
-        args.push("--strictness", strictness);
-      }
+        if (selector) {
+          args.push("--selector", selector);
+        }
+        if (strictness) {
+          args.push("--strictness", strictness);
+        }
 
-      // Always ask for JSON stream for structured results
-      args.push("--json=stream");
+        // Always ask for JSON stream for structured results
+        args.push("--json=stream");
 
-      // Supply globs only if provided explicitly
-      for (const g of globs) {
-        // Restrict to repo files: if a glob tries to escape, ignore it
-        if (g.includes("..")) continue;
-        args.push("--globs", g);
-      }
+        // Supply globs only if provided explicitly
+        for (const g of globs) {
+          // Restrict to repo files: if a glob tries to escape, ignore it
+          if (g.includes("..")) continue;
+          args.push("--globs", g);
+        }
 
-      // Search root
-      args.push(srcRoot);
+        // Search root
+        args.push(srcRoot);
 
-      // Filter PATH to avoid local node_modules/.bin shadowing npx-installed binaries
-      const filteredPath = (process.env.PATH || '')
-        .split(path.delimiter)
-        .filter((p) => !p.endsWith(path.join('node_modules', '.bin')))
-        .join(path.delimiter);
+        // Filter PATH to avoid local node_modules/.bin shadowing npx-installed binaries
+        const filteredPath = (process.env.PATH || "")
+          .split(path.delimiter)
+          .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
+          .join(path.delimiter);
 
-      const child = spawn(bin, args, {
-        cwd,
-        env: { ...process.env, PATH: filteredPath },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+        const child = spawn(bin, args, {
+          cwd,
+          env: { ...process.env, PATH: filteredPath },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
 
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-      }, timeoutMs);
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+        }, timeoutMs);
 
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (d) => (stdout += d.toString()));
-      child.stderr.on("data", (d) => (stderr += d.toString()));
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (d) => (stdout += d.toString()));
+        child.stderr.on("data", (d) => (stderr += d.toString()));
 
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        // Parse JSONL
-        const matches: Array<{
-          file: string;
-          range?: any;
-          text?: string;
-          metavariables?: Record<string, any>;
-        }> = [];
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          // Parse JSONL
+          const matches: Array<{
+            file: string;
+            range?: any;
+            text?: string;
+            metavariables?: Record<string, any>;
+          }> = [];
 
-        const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
-        for (const line of lines) {
-          try {
-            const obj = JSON.parse(line);
-            matches.push({
-              file: obj.file,
-              range: obj.range,
-              text: includeText ? obj.text : undefined,
-              metavariables: obj.metavariables,
+          const lines = stdout
+            .split(/\r?\n/)
+            .filter((l) => l.trim().length > 0);
+          for (const line of lines) {
+            try {
+              const obj = JSON.parse(line);
+              matches.push({
+                file: obj.file,
+                range: obj.range,
+                text: includeText ? obj.text : undefined,
+                metavariables: obj.metavariables,
+              });
+            } catch {}
+            if (matches.length >= limit) break;
+          }
+
+          const warn = stderr.trim();
+          const suspicious =
+            code !== 0 ||
+            /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(
+              warn
+            );
+
+          if (matches.length === 0 && suspicious) {
+            // Treat as a failure to allow fallback to another binary strategy
+            return reject(
+              new Error(warn.slice(0, 2000) || "ast-grep execution failed")
+            );
+          }
+
+          // Empty matches but no error is a valid result
+          if (matches.length === 0) {
+            return resolve({
+              success: true,
+              count: 0,
+              matches: [],
+              warning: warn.slice(0, 2000) || undefined,
             });
-          } catch {}
-          if (matches.length >= limit) break;
-        }
+          }
 
-        const warn = stderr.trim();
-        const suspicious =
-          code !== 0 ||
-          /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(warn);
+          return resolve({ success: true, count: matches.length, matches });
+        });
 
-        if (matches.length === 0 && suspicious) {
-          // Treat as a failure to allow fallback to another binary strategy
-          return reject(new Error(warn.slice(0, 2000) || "ast-grep execution failed"));
-        }
-
-        // Empty matches but no error is a valid result
-        if (matches.length === 0) {
-          return resolve({ success: true, count: 0, matches: [], warning: warn.slice(0, 2000) || undefined });
-        }
-
-        return resolve({ success: true, count: matches.length, matches });
+        child.on("error", (err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
       });
-
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-    });
 
     // Try binaries in order: Homebrew -> PATH -> local -> npx
     const attempts: string[] = [];
@@ -3430,7 +3538,9 @@ export class MCPRouter {
       success: false,
       count: 0,
       matches: [],
-      error: `ast-grep unavailable. Install '@ast-grep/cli' (sg). Reason: ${lastErr?.message || lastErr}`,
+      error: `ast-grep unavailable. Install '@ast-grep/cli' (sg). Reason: ${
+        lastErr?.message || lastErr
+      }`,
     } as any;
   }
 
@@ -3457,62 +3567,84 @@ export class MCPRouter {
       limit,
     } = opts;
     // Helper to run ast-grep with a given binary name/path
-    const runWith = () => new Promise<{ matches: any[]; warning?: string }>((resolve, reject) => {
-      const baseArgs: string[] = ["run", "-l", String(lang), "-p", String(pattern)];
-      if (selector) baseArgs.push("--selector", selector);
-      if (strictness) baseArgs.push("--strictness", strictness);
-      baseArgs.push("--json=stream");
-      // Only add globs if provided
-      for (const g of globs) baseArgs.push("--globs", g);
-      baseArgs.push(srcRoot);
+    const runWith = () =>
+      new Promise<{ matches: any[]; warning?: string }>((resolve, reject) => {
+        const baseArgs: string[] = [
+          "run",
+          "-l",
+          String(lang),
+          "-p",
+          String(pattern),
+        ];
+        if (selector) baseArgs.push("--selector", selector);
+        if (strictness) baseArgs.push("--strictness", strictness);
+        baseArgs.push("--json=stream");
+        // Only add globs if provided
+        for (const g of globs) baseArgs.push("--globs", g);
+        baseArgs.push(srcRoot);
 
-      const filteredPath = (process.env.PATH || "")
-        .split(path.delimiter)
-        .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
-        .join(path.delimiter);
+        const filteredPath = (process.env.PATH || "")
+          .split(path.delimiter)
+          .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
+          .join(path.delimiter);
 
-      // We'll choose the command outside in a loop; default to PATH sg here
-      const cmd = process.platform === "win32" ? "sg.cmd" : "sg";
-      const args = baseArgs;
-      const child = spawn(cmd, args, { cwd, env: { ...process.env, PATH: filteredPath }, stdio: ["ignore", "pipe", "pipe"] });
-      const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (d) => (stdout += d.toString()));
-      child.stderr.on("data", (d) => (stderr += d.toString()));
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        const matches: any[] = [];
-        const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
-        for (const line of lines) {
-          try {
-            const obj = JSON.parse(line);
-            matches.push({
-              file: obj.file,
-              range: obj.range,
-              text: includeText ? obj.text : undefined,
-              metavariables: obj.metavariables,
-            });
-          } catch {}
-          if (matches.length >= limit) break;
-        }
-        const warn = stderr.trim();
-        const suspicious =
-          code !== 0 ||
-          /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(warn);
-        if (matches.length === 0 && suspicious) {
-          return reject(new Error(warn.slice(0, 2000) || "ast-grep execution failed"));
-        }
-        resolve({ matches, warning: warn.slice(0, 2000) || undefined });
+        // We'll choose the command outside in a loop; default to PATH sg here
+        const cmd = process.platform === "win32" ? "sg.cmd" : "sg";
+        const args = baseArgs;
+        const child = spawn(cmd, args, {
+          cwd,
+          env: { ...process.env, PATH: filteredPath },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (d) => (stdout += d.toString()));
+        child.stderr.on("data", (d) => (stderr += d.toString()));
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          const matches: any[] = [];
+          const lines = stdout
+            .split(/\r?\n/)
+            .filter((l) => l.trim().length > 0);
+          for (const line of lines) {
+            try {
+              const obj = JSON.parse(line);
+              matches.push({
+                file: obj.file,
+                range: obj.range,
+                text: includeText ? obj.text : undefined,
+                metavariables: obj.metavariables,
+              });
+            } catch {}
+            if (matches.length >= limit) break;
+          }
+          const warn = stderr.trim();
+          const suspicious =
+            code !== 0 ||
+            /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(
+              warn
+            );
+          if (matches.length === 0 && suspicious) {
+            return reject(
+              new Error(warn.slice(0, 2000) || "ast-grep execution failed")
+            );
+          }
+          resolve({ matches, warning: warn.slice(0, 2000) || undefined });
+        });
+        child.on("error", (e) => {
+          clearTimeout(timer);
+          reject(e);
+        });
       });
-      child.on("error", (e) => {
-        clearTimeout(timer);
-        reject(e);
-      });
-    });
 
     // Attempt binaries in order
-    const localSg = path.join(cwd, "node_modules", ".bin", process.platform === "win32" ? "sg.cmd" : "sg");
+    const localSg = path.join(
+      cwd,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "sg.cmd" : "sg"
+    );
     const hasLocal = existsSync(localSg);
     const brewCandidates = [
       process.platform === "darwin" ? "/opt/homebrew/bin/sg" : "",
@@ -3525,33 +3657,62 @@ export class MCPRouter {
       .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
       .join(path.delimiter);
 
-    const attempt = (cmd: string) => new Promise<{ matches: any[]; warning?: string }>((resolve, reject) => {
-      const args = ["run", "-l", String(lang), "-p", String(pattern)];
-      if (selector) args.push("--selector", selector);
-      if (strictness) args.push("--strictness", strictness);
-      args.push("--json=stream");
-      for (const g of globs) args.push("--globs", g);
-      args.push(srcRoot);
-      const child = spawn(cmd, args, { cwd, env: { ...process.env, PATH: filteredPath }, stdio: ["ignore", "pipe", "pipe"] });
-      const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-      let stdout = ""; let stderr = "";
-      child.stdout.on("data", (d) => (stdout += d.toString()));
-      child.stderr.on("data", (d) => (stderr += d.toString()));
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
-        const matches: any[] = [];
-        for (const line of lines) {
-          try { const obj = JSON.parse(line); matches.push({ file: obj.file, range: obj.range, text: includeText ? obj.text : undefined, metavariables: obj.metavariables }); } catch {}
-          if (matches.length >= limit) break;
-        }
-        const warn = stderr.trim();
-        const suspicious = code !== 0 || /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(warn);
-        if (matches.length === 0 && suspicious) return reject(new Error(warn.slice(0, 2000) || "ast-grep execution failed"));
-        return resolve({ matches, warning: warn.slice(0, 2000) || undefined });
+    const attempt = (cmd: string) =>
+      new Promise<{ matches: any[]; warning?: string }>((resolve, reject) => {
+        const args = ["run", "-l", String(lang), "-p", String(pattern)];
+        if (selector) args.push("--selector", selector);
+        if (strictness) args.push("--strictness", strictness);
+        args.push("--json=stream");
+        for (const g of globs) args.push("--globs", g);
+        args.push(srcRoot);
+        const child = spawn(cmd, args, {
+          cwd,
+          env: { ...process.env, PATH: filteredPath },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (d) => (stdout += d.toString()));
+        child.stderr.on("data", (d) => (stderr += d.toString()));
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          const lines = stdout
+            .split(/\r?\n/)
+            .filter((l) => l.trim().length > 0);
+          const matches: any[] = [];
+          for (const line of lines) {
+            try {
+              const obj = JSON.parse(line);
+              matches.push({
+                file: obj.file,
+                range: obj.range,
+                text: includeText ? obj.text : undefined,
+                metavariables: obj.metavariables,
+              });
+            } catch {}
+            if (matches.length >= limit) break;
+          }
+          const warn = stderr.trim();
+          const suspicious =
+            code !== 0 ||
+            /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(
+              warn
+            );
+          if (matches.length === 0 && suspicious)
+            return reject(
+              new Error(warn.slice(0, 2000) || "ast-grep execution failed")
+            );
+          return resolve({
+            matches,
+            warning: warn.slice(0, 2000) || undefined,
+          });
+        });
+        child.on("error", (e) => {
+          clearTimeout(timer);
+          reject(e);
+        });
       });
-      child.on("error", (e) => { clearTimeout(timer); reject(e); });
-    });
 
     const attempts: string[] = [];
     if (haveBrew) attempts.push(haveBrew);
@@ -3560,33 +3721,78 @@ export class MCPRouter {
     // npx as a last resort
     let lastErr: any = null;
     for (const bin of attempts) {
-      try { return await attempt(bin); } catch (e: any) { lastErr = e; }
+      try {
+        return await attempt(bin);
+      } catch (e: any) {
+        lastErr = e;
+      }
     }
     // npx
     try {
       return await new Promise((resolve, reject) => {
-        const args: string[] = ["-y", "-p", "@ast-grep/cli@0.39.5", "sg", "run", "-l", String(lang), "-p", String(pattern)];
+        const args: string[] = [
+          "-y",
+          "-p",
+          "@ast-grep/cli@0.39.5",
+          "sg",
+          "run",
+          "-l",
+          String(lang),
+          "-p",
+          String(pattern),
+        ];
         if (selector) args.push("--selector", selector);
         if (strictness) args.push("--strictness", strictness);
         args.push("--json=stream");
         for (const g of globs) args.push("--globs", g);
         args.push(srcRoot);
-        const child = spawn("npx", args, { cwd, env: { ...process.env, PATH: filteredPath }, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn("npx", args, {
+          cwd,
+          env: { ...process.env, PATH: filteredPath },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
         const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-        let stdout = ""; let stderr = "";
+        let stdout = "";
+        let stderr = "";
         child.stdout.on("data", (d) => (stdout += d.toString()));
         child.stderr.on("data", (d) => (stderr += d.toString()));
         child.on("close", (code) => {
           clearTimeout(timer);
-          const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+          const lines = stdout
+            .split(/\r?\n/)
+            .filter((l) => l.trim().length > 0);
           const matches: any[] = [];
-          for (const line of lines) { try { const obj = JSON.parse(line); matches.push({ file: obj.file, range: obj.range, text: includeText ? obj.text : undefined, metavariables: obj.metavariables }); } catch {} if (matches.length >= limit) break; }
+          for (const line of lines) {
+            try {
+              const obj = JSON.parse(line);
+              matches.push({
+                file: obj.file,
+                range: obj.range,
+                text: includeText ? obj.text : undefined,
+                metavariables: obj.metavariables,
+              });
+            } catch {}
+            if (matches.length >= limit) break;
+          }
           const warn = stderr.trim();
-          const suspicious = code !== 0 || /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(warn);
-          if (matches.length === 0 && suspicious) return reject(new Error(warn.slice(0, 2000) || "ast-grep execution failed"));
-          return resolve({ matches, warning: warn.slice(0, 2000) || undefined });
+          const suspicious =
+            code !== 0 ||
+            /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(
+              warn
+            );
+          if (matches.length === 0 && suspicious)
+            return reject(
+              new Error(warn.slice(0, 2000) || "ast-grep execution failed")
+            );
+          return resolve({
+            matches,
+            warning: warn.slice(0, 2000) || undefined,
+          });
         });
-        child.on("error", (e) => { clearTimeout(timer); reject(e); });
+        child.on("error", (e) => {
+          clearTimeout(timer);
+          reject(e);
+        });
       });
     } catch (e: any) {
       return { matches: [], warning: String(e?.message || e) };
@@ -3600,10 +3806,16 @@ export class MCPRouter {
     limit: number
   ): Promise<any[]> {
     try {
-      const project = new Project({ useInMemoryFileSystem: false, skipAddingFilesFromTsConfig: true });
+      const project = new Project({
+        useInMemoryFileSystem: false,
+        skipAddingFilesFromTsConfig: true,
+      });
       // Ensure absolute globs
       const srcRoot = this.getSrcRoot();
-      const absGlobs = globs && globs.length ? globs : [path.join(srcRoot, "**/*.ts"), path.join(srcRoot, "**/*.tsx")];
+      const absGlobs =
+        globs && globs.length
+          ? globs
+          : [path.join(srcRoot, "**/*.ts"), path.join(srcRoot, "**/*.tsx")];
       project.addSourceFilesAtPaths(absGlobs);
       const sourceFiles = project.getSourceFiles();
       const results: any[] = [];
@@ -3613,7 +3825,10 @@ export class MCPRouter {
             if (fn.getName() === name && fn.getBody()) {
               results.push({
                 file: sf.getFilePath(),
-                range: { start: fn.getStartLineNumber(), end: fn.getEndLineNumber() },
+                range: {
+                  start: fn.getStartLineNumber(),
+                  end: fn.getEndLineNumber(),
+                },
                 metavariables: { NAME: { text: name } },
               });
               if (results.length >= limit) return results;
@@ -3626,7 +3841,10 @@ export class MCPRouter {
               if (m.getName() === name && m.getBody()) {
                 results.push({
                   file: sf.getFilePath(),
-                  range: { start: m.getStartLineNumber(), end: m.getEndLineNumber() },
+                  range: {
+                    start: m.getStartLineNumber(),
+                    end: m.getEndLineNumber(),
+                  },
                   metavariables: { NAME: { text: name } },
                 });
                 if (results.length >= limit) return results;
@@ -3871,7 +4089,9 @@ export class MCPRouter {
       }
 
       if (validationErrors.length > 0) {
-        const message = `Parameter validation errors: ${validationErrors.join(", ")}`;
+        const message = `Parameter validation errors: ${validationErrors.join(
+          ", "
+        )}`;
         this.recordExecution(
           toolName,
           startTime,
@@ -4049,7 +4269,9 @@ export class MCPRouter {
           }
 
           const payload =
-            toolResult && typeof toolResult === "object" && "result" in toolResult
+            toolResult &&
+            typeof toolResult === "object" &&
+            "result" in toolResult
               ? (toolResult as any).result
               : toolResult;
 

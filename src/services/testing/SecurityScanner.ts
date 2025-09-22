@@ -3,21 +3,21 @@
  * Performs security scanning, vulnerability detection, and security monitoring
  */
 
-import { DatabaseService } from "./core/DatabaseService.js";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
 import {
   SecurityIssue,
   Vulnerability,
   CodebaseEntity,
   File,
-} from "../models/entities.js";
+} from "../../models/entities.js";
 import {
   SecurityScanRequest,
   SecurityScanResult,
   VulnerabilityReport,
-} from "../models/types.js";
+} from "../../models/types.js";
 import { EventEmitter } from "events";
-import { noiseConfig } from "../config/noise.js";
+import { noiseConfig } from "../../config/noise.js";
 import * as fs from "fs";
 import * as path from "path";
 import { createHash } from "crypto";

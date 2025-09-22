@@ -4,8 +4,8 @@
  */
 import { DatabaseConfig, INeo4jService, IPostgreSQLService, IRedisService, IDatabaseHealthCheck } from "../database/index.js";
 import type { BulkQueryMetrics } from "../database/index.js";
-import type { PerformanceHistoryOptions, PerformanceHistoryRecord, SCMCommitRecord } from "../models/types.js";
-import type { PerformanceRelationship } from "../models/relationships.js";
+import type { PerformanceHistoryOptions, PerformanceHistoryRecord, SCMCommitRecord } from "../../models/types.js";
+import type { PerformanceRelationship } from "../../models/relationships.js";
 export type { DatabaseConfig } from "../database/index.js";
 export interface DatabaseQueryResult {
     rows?: any[];
@@ -61,6 +61,9 @@ export declare class DatabaseService {
     getNeo4jService(): INeo4jService;
     getPostgreSQLService(): IPostgreSQLService;
     getRedisService(): IRedisService | undefined;
+    getFalkorDBService(): INeo4jService;
+    getQdrantService(): any;
+    getQdrantClient(): any;
     getNeo4jDriver(): any;
     getPostgresPool(): any;
     initialize(): Promise<void>;

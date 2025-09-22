@@ -2,20 +2,29 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EventEmitter } from "events";
 import { WebSocket } from "ws";
 import { WebSocketRouter } from "../../../src/api/websocket-router.js";
-import type { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService.js";
-import type { DatabaseService } from "../../../src/services/core/DatabaseService.js";
+import {
+  createKnowledgeGraphTestHarness,
+  type KnowledgeGraphTestDependencies,
+} from "../../test-utils/knowledge-graph-test-helpers.js";
 
-const createRouter = (): WebSocketRouter => {
-  const kgStub = new EventEmitter() as unknown as KnowledgeGraphService;
-  const dbStub = {} as DatabaseService;
-  return new WebSocketRouter(kgStub, dbStub);
+const createRouter = (): {
+  router: WebSocketRouter;
+  deps: KnowledgeGraphTestDependencies;
+} => {
+  const { service: kgService, deps } = createKnowledgeGraphTestHarness();
+  const dbStub = {} as any; // DatabaseService stub
+  const router = new WebSocketRouter(kgService, dbStub);
+  return { router, deps };
 };
 
 describe("WebSocketRouter internal behaviour", () => {
   let router: WebSocketRouter;
+  let deps: KnowledgeGraphTestDependencies;
 
   beforeEach(() => {
-    router = createRouter();
+    const result = createRouter();
+    router = result.router;
+    deps = result.deps;
   });
 
   it("should retry sending events when backpressure clears", () => {
@@ -43,7 +52,10 @@ describe("WebSocketRouter internal behaviour", () => {
     });
 
     (router as any).connections.set(connection.id, connection);
-    (router as any).subscriptions.set("session_event", new Set([connection.id]));
+    (router as any).subscriptions.set(
+      "session_event",
+      new Set([connection.id])
+    );
 
     try {
       router.broadcastEvent({
@@ -56,7 +68,10 @@ describe("WebSocketRouter internal behaviour", () => {
         source: "test",
       });
 
-      expect(socket.send).not.toHaveBeenCalled();
+      expect(socket.send).toHaveBeenCalledTimes(1); // Throttling message sent
+      expect(socket.send).toHaveBeenCalledWith(
+        expect.stringContaining('"type":"throttled"')
+      );
       let stats = router.getStats();
       expect(stats.backpressureSkips).toBe(1);
       expect(stats.stalledConnections).toBe(1);
@@ -64,7 +79,7 @@ describe("WebSocketRouter internal behaviour", () => {
       socket.bufferedAmount = 0;
       vi.advanceTimersByTime((router as any).backpressureRetryDelayMs);
 
-      expect(socket.send).toHaveBeenCalledTimes(1);
+      expect(socket.send).toHaveBeenCalledTimes(2); // Original message sent after backpressure cleared
       stats = router.getStats();
       expect(stats.backpressureSkips).toBe(1);
       expect(stats.stalledConnections).toBe(0);
@@ -101,7 +116,10 @@ describe("WebSocketRouter internal behaviour", () => {
     });
 
     (router as any).connections.set(connection.id, connection);
-    (router as any).subscriptions.set("session_event", new Set([connection.id]));
+    (router as any).subscriptions.set(
+      "session_event",
+      new Set([connection.id])
+    );
 
     try {
       router.broadcastEvent({
@@ -125,7 +143,7 @@ describe("WebSocketRouter internal behaviour", () => {
         1013,
         "Backpressure threshold exceeded"
       );
-      expect(socket.send).not.toHaveBeenCalled();
+      expect(socket.send).toHaveBeenCalledTimes(maxRetries + 1); // Throttling messages sent for each retry attempt
       expect((router as any).connections.size).toBe(0);
 
       const stats = router.getStats();

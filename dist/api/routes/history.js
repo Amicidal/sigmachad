@@ -164,14 +164,13 @@ export async function registerHistoryRoutes(app, kgService, _dbService) {
             },
         },
     }, async (request, reply) => {
-        var _a;
         try {
             const body = request.body;
             const seedEntities = Array.isArray(body.seedEntities) ? body.seedEntities : [];
             const reason = String(body.reason || 'manual');
             const hops = typeof body.hops === 'number' ? Math.floor(body.hops) : undefined;
             const window = body.window;
-            const { checkpointId } = await kgService.createCheckpoint(seedEntities, reason, (_a = hops) !== null && _a !== void 0 ? _a : 2, window);
+            const { checkpointId } = await kgService.createCheckpoint(seedEntities, { reason, hops: hops !== null && hops !== void 0 ? hops : 2, window });
             reply.status(201).send({ success: true, data: { checkpointId } });
         }
         catch (error) {
@@ -189,7 +188,7 @@ export async function registerHistoryRoutes(app, kgService, _dbService) {
             const { id } = request.params;
             const q = request.query;
             const includeRelationships = (q === null || q === void 0 ? void 0 : q.includeRelationships) !== false;
-            const exported = await kgService.exportCheckpoint(id, { includeRelationships });
+            const exported = await kgService.exportCheckpoint(id);
             if (!exported) {
                 reply.status(404).send({ success: false, error: { code: 'CHECKPOINT_NOT_FOUND', message: 'Checkpoint not found' } });
                 return;
@@ -213,7 +212,7 @@ export async function registerHistoryRoutes(app, kgService, _dbService) {
                 reply.status(400).send({ success: false, error: { code: 'INVALID_PAYLOAD', message: 'Expected { checkpoint, members, relationships? }' } });
                 return;
             }
-            const result = await kgService.importCheckpoint(body, { useOriginalId });
+            const result = await kgService.importCheckpoint(body);
             reply.status(201).send({ success: true, data: result });
         }
         catch (error) {
@@ -266,14 +265,16 @@ export async function registerHistoryRoutes(app, kgService, _dbService) {
         try {
             const { id } = request.params;
             const q = request.query;
-            const limit = (q === null || q === void 0 ? void 0 : q.limit) !== undefined ? Number(q.limit) : undefined;
-            const offset = (q === null || q === void 0 ? void 0 : q.offset) !== undefined ? Number(q.offset) : undefined;
+            const limit = (q === null || q === void 0 ? void 0 : q.limit) !== undefined ? Number(q.limit) : 50;
+            const offset = (q === null || q === void 0 ? void 0 : q.offset) !== undefined ? Number(q.offset) : 0;
             const cp = await kgService.getCheckpoint(id);
             if (!cp) {
                 reply.status(404).send({ success: false, error: { code: 'CHECKPOINT_NOT_FOUND', message: 'Checkpoint not found' } });
                 return;
             }
-            const { items, total } = await kgService.getCheckpointMembers(id, { limit, offset });
+            const members = await kgService.getCheckpointMembers(id);
+            const total = members.length;
+            const items = members.slice(offset, offset + limit);
             reply.send({ success: true, data: { checkpoint: cp, members: items, totalMembers: total } });
         }
         catch (error) {
@@ -311,11 +312,8 @@ export async function registerHistoryRoutes(app, kgService, _dbService) {
     }, async (request, reply) => {
         try {
             const { id } = request.params;
-            const ok = await kgService.deleteCheckpoint(id);
-            if (!ok) {
-                reply.status(404).send({ success: false, error: { code: 'CHECKPOINT_NOT_FOUND', message: 'Checkpoint not found' } });
-                return;
-            }
+            await kgService.deleteCheckpoint(id);
+            // Deletion successful since no exception was thrown
             reply.status(204).send();
         }
         catch (error) {
@@ -638,7 +636,7 @@ export async function registerHistoryRoutes(app, kgService, _dbService) {
                 impactOptions.sequenceNumberMax === undefined) {
                 impactOptions.sequenceNumberMax = sequenceRange.to;
             }
-            const impacts = await kgService.getSessionImpacts(sessionId, impactOptions);
+            const impacts = await kgService.getSessionImpacts(sessionId);
             reply.send({ success: true, data: impacts });
         }
         catch (error) {

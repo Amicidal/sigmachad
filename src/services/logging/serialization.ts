@@ -1,4 +1,4 @@
-import { LogEntry } from "../LoggingService.js";
+import { LogEntry } from "../core/LoggingService.js";
 
 export interface SerializationOptions {
   maxDepth?: number;

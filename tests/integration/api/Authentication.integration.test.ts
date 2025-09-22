@@ -42,7 +42,7 @@ describe('Authentication & Authorization Integration', () => {
     }
 
     // Create services
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
 
     // Create API Gateway with authentication enabled
     apiGateway = new APIGateway(kgService, dbService);

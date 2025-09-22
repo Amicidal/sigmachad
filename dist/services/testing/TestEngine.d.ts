@@ -3,9 +3,9 @@
  * Comprehensive test management, analysis, and integration service
  * Implements Phase 5.2 requirements for test integration
  */
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "./core/DatabaseService.js";
-import { TestPerformanceMetrics, CoverageMetrics } from "../models/entities.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
+import { TestPerformanceMetrics, CoverageMetrics } from "../../models/entities.js";
 export interface TestResult {
     testId: string;
     testSuite: string;

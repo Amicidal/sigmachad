@@ -13,6 +13,7 @@ import type { FastifyRequest } from 'fastify';
 import {
   authenticateRequest,
   authenticateHeaders,
+  type AuthContext,
 } from '../middleware/authentication.js';
 
 // Create tRPC context
@@ -25,7 +26,7 @@ export const createTRPCContext = async (opts: {
 }): Promise<TRPCContext> => {
   // Derive authentication context from the inbound request headers
   let authToken: string | undefined;
-  let authContext = undefined;
+  let authContext: AuthContext | undefined = undefined;
   try {
     if (opts.req) {
       authContext = authenticateRequest(opts.req);

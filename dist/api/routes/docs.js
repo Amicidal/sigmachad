@@ -107,7 +107,7 @@ export async function registerDocsRoutes(app, kgService, dbService, docParser) {
                         const allowedIds = new Set(allowed.map((s) => s.id));
                         for (const r of rels) {
                             if (!allowedIds.has(r.fromEntityId)) {
-                                await kgService.deleteRelationship(r.id);
+                                await kgService.deleteRelationship(r.fromEntityId, r.toEntityId, r.type);
                                 pruned++;
                             }
                         }

@@ -87,7 +87,7 @@ export class SearchServiceOGM extends EventEmitter {
                 results = await this.structuralSearch(request.query, {
                     limit: request.limit,
                     filter: request.filters,
-                    fuzzy: request.searchType === 'structural',
+                    fuzzy: false,
                 });
                 break;
             case 'semantic':
@@ -100,13 +100,9 @@ export class SearchServiceOGM extends EventEmitter {
                 results = await this.hybridSearch(request);
                 break;
         }
-        // Apply post-processing
-        if (request.sortBy) {
-            results = this.sortResults(results, request.sortBy);
-        }
-        if (request.groupBy) {
-            results = this.groupResults(results, request.groupBy);
-        }
+        // Apply post-processing (if needed)
+        // Note: sortBy and groupBy are not part of GraphSearchRequest interface
+        // These would be handled by the API layer if needed
         // Cache and return
         this.searchCache.set(request, results);
         this.emit('search:completed', {
@@ -268,7 +264,7 @@ export class SearchServiceOGM extends EventEmitter {
             this.structuralSearch(request.query, {
                 limit: request.limit ? Math.ceil(request.limit / 2) : 25,
                 filter: request.filters,
-                fuzzy: request.searchType === 'structural',
+                fuzzy: false,
             }),
             this.semanticSearch(request.query, {
                 limit: request.limit ? Math.ceil(request.limit / 2) : 25,

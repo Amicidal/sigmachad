@@ -41,7 +41,7 @@ describe('Admin Restore Endpoints', () => {
       throw new Error('Database health check failed - cannot run integration tests');
     }
 
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     apiGateway = new APIGateway(kgService, dbService);
     app = apiGateway.getApp();
     await apiGateway.start();

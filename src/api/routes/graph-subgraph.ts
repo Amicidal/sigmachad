@@ -17,12 +17,12 @@ export async function registerGraphViewerRoutes(app: FastifyInstance, kg: Knowle
       const { entities } = await kg.listEntities({ type, limit, offset: 0 });
 
       // Fetch relationships among these entities (bounded)
-      const idSet = new Set(entities.map((e: any) => e.id));
+      const idSet = new Set((entities || []).map((e: any) => e.id));
       // Pull a larger page of relationships and then filter
       const { relationships } = await kg.listRelationships({ limit: Math.min(limit * 3, 10000), offset: 0 });
       const subRels = relationships.filter((r: any) => idSet.has(r.fromEntityId) && idSet.has(r.toEntityId));
 
-      reply.send({ success: true, data: { nodes: entities, edges: subRels } });
+      reply.send({ success: true, data: { nodes: entities || [], edges: subRels } });
     } catch (e: any) {
       reply.code(500).send({ success: false, error: { code: 'SUBGRAPH_FAILED', message: e?.message || 'Failed to build subgraph' } });
     }

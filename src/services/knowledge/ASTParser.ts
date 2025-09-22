@@ -17,17 +17,17 @@ import {
   InterfaceSymbol,
   TypeAliasSymbol,
   Symbol as SymbolEntity,
-} from "../models/entities.js";
+} from "../../models/entities.js";
 import {
   GraphRelationship,
   RelationshipType,
-} from "../models/relationships.js";
+} from "../../models/relationships.js";
 import {
   normalizeCodeEdge,
   canonicalRelationshipId,
-} from "../utils/codeEdges.js";
-import { noiseConfig } from "../config/noise.js";
-import { scoreInferredEdge } from "../utils/confidence.js";
+} from "../../utils/codeEdges.js";
+import { noiseConfig } from "../../config/noise.js";
+import { scoreInferredEdge } from "../../utils/confidence.js";
 
 export interface ParseResult {
   entities: Entity[];
@@ -298,7 +298,7 @@ export class ASTParser {
         "types/**/*.d.ts",
       ]);
       this.tsProject.resolveSourceFileDependencies();
-    } catch (error) {
+    } catch {
       // Non-fatal: fallback to per-file parsing
     }
   }
@@ -1266,7 +1266,7 @@ export class ASTParser {
           importSymbolMap
         );
         relationships.push(...refRels);
-      } catch (e) {
+      } catch {
         // Non-fatal: continue without reference relationships
       }
 
@@ -4110,7 +4110,7 @@ export class ASTParser {
     sourceFile: SourceFile,
     fileEntity: File,
     importMap?: Map<string, string>,
-    importSymbolMap?: Map<string, string>
+    _importSymbolMap?: Map<string, string>
   ): GraphRelationship[] {
     const relationships: GraphRelationship[] = [];
 
@@ -4130,31 +4130,31 @@ export class ASTParser {
           const abs = modSf.getFilePath();
           const rel = path.relative(process.cwd(), abs);
           relationships.push(
-              this.createRelationship(
-                fileEntity.id,
-                `file:${rel}:${path.basename(rel)}`,
-                RelationshipType.IMPORTS,
-                {
-                  importKind: "side-effect",
-                  module: moduleSpecifier,
-                  language: fileEntity.language,
-                }
-              )
-            );
-          } else {
-            relationships.push(
-              this.createRelationship(
-                fileEntity.id,
-                `import:${moduleSpecifier}:*`,
-                RelationshipType.IMPORTS,
-                {
-                  importKind: "side-effect",
-                  module: moduleSpecifier,
-                  language: fileEntity.language,
-                }
-              )
-            );
-          }
+            this.createRelationship(
+              fileEntity.id,
+              `file:${rel}:${path.basename(rel)}`,
+              RelationshipType.IMPORTS,
+              {
+                importKind: "side-effect",
+                module: moduleSpecifier,
+                language: fileEntity.language,
+              }
+            )
+          );
+        } else {
+          relationships.push(
+            this.createRelationship(
+              fileEntity.id,
+              `import:${moduleSpecifier}:*`,
+              RelationshipType.IMPORTS,
+              {
+                importKind: "side-effect",
+                module: moduleSpecifier,
+                language: fileEntity.language,
+              }
+            )
+          );
+        }
       }
 
       // Default import
@@ -4201,35 +4201,35 @@ export class ASTParser {
       if (ns) {
         const alias = ns.getText();
         const target = alias ? importMap?.get(alias) : undefined;
-          if (target) {
-            relationships.push(
-              this.createRelationship(
-                fileEntity.id,
-                `file:${target}:*`,
-                RelationshipType.IMPORTS,
-                {
-                  importKind: "namespace",
-                  alias,
-                  module: moduleSpecifier,
-                  language: fileEntity.language,
-                }
-              )
-            );
-          } else {
-            relationships.push(
-              this.createRelationship(
-                fileEntity.id,
-                `import:${moduleSpecifier}:*`,
-                RelationshipType.IMPORTS,
-                {
-                  importKind: "namespace",
-                  alias,
-                  module: moduleSpecifier,
-                  language: fileEntity.language,
-                }
-              )
-            );
-          }
+        if (target) {
+          relationships.push(
+            this.createRelationship(
+              fileEntity.id,
+              `file:${target}:*`,
+              RelationshipType.IMPORTS,
+              {
+                importKind: "namespace",
+                alias,
+                module: moduleSpecifier,
+                language: fileEntity.language,
+              }
+            )
+          );
+        } else {
+          relationships.push(
+            this.createRelationship(
+              fileEntity.id,
+              `import:${moduleSpecifier}:*`,
+              RelationshipType.IMPORTS,
+              {
+                importKind: "namespace",
+                alias,
+                module: moduleSpecifier,
+                language: fileEntity.language,
+              }
+            )
+          );
+        }
       }
 
       // Named imports

@@ -188,13 +188,7 @@ export class SessionCheckpointJobRunner extends EventEmitter {
     this.safeEmit("jobEnqueued", { jobId: job.id, payload: job.payload });
 
     void this.kgService
-      .annotateSessionRelationshipsWithCheckpoint(payload.sessionId, seedIds, {
-        status: "pending",
-        reason: payload.reason,
-        hopCount: payload.hopCount,
-        seedEntityIds: seedIds,
-        triggeredBy: payload.triggeredBy,
-      })
+      .annotateSessionRelationshipsWithCheckpoint(payload.sessionId, "pending")
       .catch((error) => {
         this.logger("pending_annotation_failed", {
           jobId: job.id,
@@ -364,9 +358,11 @@ export class SessionCheckpointJobRunner extends EventEmitter {
     try {
       const checkpoint = await this.kgService.createCheckpoint(
         job.payload.seedEntityIds,
-        job.payload.reason,
-        job.payload.hopCount,
-        job.payload.window
+        {
+          reason: job.payload.reason,
+          hops: job.payload.hopCount,
+          window: job.payload.window
+        }
       );
       checkpointId = checkpoint?.checkpointId;
 
@@ -376,17 +372,7 @@ export class SessionCheckpointJobRunner extends EventEmitter {
 
       await this.kgService.annotateSessionRelationshipsWithCheckpoint(
         job.payload.sessionId,
-        job.payload.seedEntityIds,
-        {
-          status: "completed",
-          checkpointId,
-          reason: job.payload.reason,
-          hopCount: job.payload.hopCount,
-          attempts: job.attempts,
-          seedEntityIds: job.payload.seedEntityIds,
-          jobId: job.id,
-          triggeredBy: job.payload.triggeredBy,
-        }
+        checkpointId
       );
 
       if (this.rollbackCapabilities && typeof this.rollbackCapabilities.registerCheckpointLink === "function") {
@@ -504,17 +490,7 @@ export class SessionCheckpointJobRunner extends EventEmitter {
 
     if (seedEntityIds.length > 0) {
       try {
-        await this.kgService.annotateSessionRelationshipsWithCheckpoint(sessionId, seedEntityIds, {
-          status: "manual_intervention",
-          checkpointId,
-          reason,
-          hopCount,
-          attempts: job.attempts,
-          seedEntityIds,
-          jobId: job.id,
-          error: errorMessage,
-          triggeredBy,
-        });
+        await this.kgService.annotateSessionRelationshipsWithCheckpoint(sessionId, checkpointId || "manual_intervention");
       } catch (annotationError) {
         this.logger("manual_annotation_failed", {
           jobId: job.id,

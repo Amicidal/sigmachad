@@ -898,8 +898,8 @@ export async function registerGraphRoutes(app, kgService, dbService) {
             const query = request.query;
             // Query relationships from knowledge graph
             const { relationships, total } = await kgService.listRelationships({
-                fromEntity: query.fromEntity,
-                toEntity: query.toEntity,
+                fromEntityId: query.fromEntity,
+                toEntityId: query.toEntity,
                 type: query.type,
                 limit: query.limit,
                 offset: query.offset,

@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { noiseConfig } from "../config/noise.js";
-import { RelationshipType } from "../models/relationships.js";
+import { noiseConfig } from "../../config/noise.js";
+import { RelationshipType } from "../../models/relationships.js";
 export class SpecService {
     constructor(kgService, dbService) {
         this.kgService = kgService;
@@ -27,7 +27,7 @@ export class SpecService {
             spec.created.toISOString(),
             spec.updated.toISOString(),
         ]);
-        await this.kgService.createEntity(spec, { skipEmbedding: false });
+        await this.kgService.createEntity(spec);
         await this.refreshSpecRelationships(spec);
         return {
             specId: spec.id,
@@ -65,10 +65,10 @@ export class SpecService {
             spec.updated.toISOString(),
         ]);
         if (existing) {
-            await this.kgService.updateEntity(spec.id, spec, { skipEmbedding: false });
+            await this.kgService.updateEntity(spec.id, spec);
         }
         else {
-            await this.kgService.createEntity(spec, { skipEmbedding: false });
+            await this.kgService.createEntity(spec);
         }
         await this.refreshSpecRelationships(spec);
         return { spec, created: !existing };
@@ -440,7 +440,7 @@ export class SpecService {
                                 confidence,
                                 source,
                             },
-                        }, undefined, undefined, { validate: false });
+                        });
                     }
                 }
                 catch (error) {

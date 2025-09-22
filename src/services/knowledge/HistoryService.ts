@@ -521,4 +521,648 @@ export class HistoryService extends EventEmitter {
       endNodeId: rel.end,
     };
   }
+
+  /**
+   * Get checkpoint details
+   */
+  async getCheckpoint(checkpointId: string): Promise<CheckpointInfo | null> {
+    const query = `
+      MATCH (c:Checkpoint {id: $checkpointId})
+      OPTIONAL MATCH (c)-[:INCLUDES]->(m)
+      WITH c, count(m) as memberCount
+      RETURN c, memberCount
+    `;
+
+    const result = await this.neo4j.executeCypher(query, { checkpointId });
+    if (result.length === 0) return null;
+
+    const row = result[0];
+    return {
+      id: row.c.properties.id,
+      timestamp: new Date(row.c.properties.timestamp),
+      reason: row.c.properties.reason,
+      seedEntities: JSON.parse(row.c.properties.seedEntities || '[]'),
+      memberCount: row.memberCount,
+      metadata: row.c.properties.metadata
+        ? JSON.parse(row.c.properties.metadata)
+        : undefined,
+    };
+  }
+
+  /**
+   * Get checkpoint members
+   */
+  async getCheckpointMembers(checkpointId: string): Promise<Entity[]> {
+    const query = `
+      MATCH (c:Checkpoint {id: $checkpointId})-[:INCLUDES]->(m:Entity)
+      RETURN m
+    `;
+
+    const result = await this.neo4j.executeCypher(query, { checkpointId });
+    return result.map(row => this.parseEntity(row.m));
+  }
+
+  /**
+   * Get checkpoint summary
+   */
+  async getCheckpointSummary(checkpointId: string): Promise<{
+    checkpoint: CheckpointInfo;
+    members: Entity[];
+    stats: {
+      entityTypes: Record<string, number>;
+      totalRelationships: number;
+      relationshipTypes: Record<string, number>;
+    };
+  } | null> {
+    const checkpoint = await this.getCheckpoint(checkpointId);
+    if (!checkpoint) return null;
+
+    const members = await this.getCheckpointMembers(checkpointId);
+
+    // Get stats
+    const statsQuery = `
+      MATCH (c:Checkpoint {id: $checkpointId})-[:INCLUDES]->(m:Entity)
+      OPTIONAL MATCH (m)-[r]->()
+      RETURN
+        m.type as entityType,
+        type(r) as relType,
+        count(r) as relCount
+    `;
+
+    const statsResult = await this.neo4j.executeCypher(statsQuery, { checkpointId });
+
+    const entityTypes: Record<string, number> = {};
+    const relationshipTypes: Record<string, number> = {};
+    let totalRelationships = 0;
+
+    statsResult.forEach(row => {
+      if (row.entityType) {
+        entityTypes[row.entityType] = (entityTypes[row.entityType] || 0) + 1;
+      }
+      if (row.relType && row.relCount > 0) {
+        relationshipTypes[row.relType] = (relationshipTypes[row.relType] || 0) + row.relCount;
+        totalRelationships += row.relCount;
+      }
+    });
+
+    return {
+      checkpoint,
+      members,
+      stats: {
+        entityTypes,
+        totalRelationships,
+        relationshipTypes,
+      },
+    };
+  }
+
+  /**
+   * Delete checkpoint
+   */
+  async deleteCheckpoint(checkpointId: string): Promise<void> {
+    const query = `
+      MATCH (c:Checkpoint {id: $checkpointId})
+      DETACH DELETE c
+    `;
+
+    await this.neo4j.executeCypher(query, { checkpointId });
+    this.emit('checkpoint:deleted', { checkpointId });
+  }
+
+  /**
+   * Export checkpoint data
+   */
+  async exportCheckpoint(checkpointId: string): Promise<{
+    checkpoint: CheckpointInfo;
+    entities: Entity[];
+    relationships: any[];
+  } | null> {
+    const checkpoint = await this.getCheckpoint(checkpointId);
+    if (!checkpoint) return null;
+
+    const entities = await this.getCheckpointMembers(checkpointId);
+
+    // Get relationships between checkpoint members
+    const relQuery = `
+      MATCH (c:Checkpoint {id: $checkpointId})-[:INCLUDES]->(from:Entity)
+      MATCH (c)-[:INCLUDES]->(to:Entity)
+      MATCH (from)-[r]->(to)
+      RETURN r, from.id as fromId, to.id as toId
+    `;
+
+    const relResult = await this.neo4j.executeCypher(relQuery, { checkpointId });
+    const relationships = relResult.map(row => ({
+      ...this.parseRelationship(row.r),
+      fromId: row.fromId,
+      toId: row.toId,
+    }));
+
+    return {
+      checkpoint,
+      entities,
+      relationships,
+    };
+  }
+
+  /**
+   * Import checkpoint data
+   */
+  async importCheckpoint(checkpointData: {
+    checkpoint: CheckpointInfo;
+    entities: Entity[];
+    relationships: any[];
+  }): Promise<string> {
+    const { checkpoint, entities, relationships } = checkpointData;
+
+    // Import entities first
+    for (const entity of entities) {
+      const query = `
+        MERGE (e:Entity {id: $id})
+        SET e += $properties
+      `;
+      await this.neo4j.executeCypher(query, {
+        id: entity.id,
+        properties: entity,
+      });
+    }
+
+    // Import relationships
+    for (const rel of relationships) {
+      const query = `
+        MATCH (from:Entity {id: $fromId})
+        MATCH (to:Entity {id: $toId})
+        MERGE (from)-[r:${rel.type}]->(to)
+        SET r += $properties
+      `;
+      await this.neo4j.executeCypher(query, {
+        fromId: rel.fromId,
+        toId: rel.toId,
+        properties: rel.properties || {},
+      });
+    }
+
+    // Create checkpoint node
+    const checkpointId = `imported_${Date.now().toString(36)}`;
+    await this.neo4j.executeCypher(
+      `
+      MERGE (c:Checkpoint {id: $id})
+      SET c.timestamp = $timestamp
+      SET c.reason = $reason
+      SET c.seedEntities = $seeds
+      SET c.description = $description
+      SET c.metadata = $metadata
+      SET c.imported = true
+      `,
+      {
+        id: checkpointId,
+        timestamp: checkpoint.timestamp.toISOString(),
+        reason: checkpoint.reason,
+        seeds: JSON.stringify(checkpoint.seedEntities),
+        description: `Imported checkpoint from ${checkpoint.id}`,
+        metadata: JSON.stringify(checkpoint.metadata || {}),
+      }
+    );
+
+    // Link entities to checkpoint
+    const entityIds = entities.map(e => e.id);
+    if (entityIds.length > 0) {
+      await this.neo4j.executeCypher(
+        `
+        MATCH (c:Checkpoint {id: $checkpointId})
+        UNWIND $entityIds AS entityId
+        MATCH (e:Entity {id: entityId})
+        MERGE (c)-[:INCLUDES]->(e)
+        `,
+        { checkpointId, entityIds }
+      );
+    }
+
+    this.emit('checkpoint:imported', { checkpointId, entityCount: entities.length });
+    return checkpointId;
+  }
+
+  /**
+   * Get entity timeline
+   */
+  async getEntityTimeline(
+    entityId: string,
+    options?: { since?: Date; until?: Date; limit?: number }
+  ): Promise<{
+    entity: Entity | null;
+    versions: VersionInfo[];
+    relationships: any[];
+  }> {
+    // Get entity
+    const entityQuery = `MATCH (e:Entity {id: $entityId}) RETURN e`;
+    const entityResult = await this.neo4j.executeCypher(entityQuery, { entityId });
+    const entity = entityResult.length > 0 ? this.parseEntity(entityResult[0].e) : null;
+
+    // Get versions
+    const where: string[] = ['v.entityId = $entityId'];
+    const params: Record<string, any> = { entityId };
+
+    if (options?.since) {
+      where.push('v.timestamp >= $since');
+      params.since = options.since.toISOString();
+    }
+
+    if (options?.until) {
+      where.push('v.timestamp <= $until');
+      params.until = options.until.toISOString();
+    }
+
+    const versionQuery = `
+      MATCH (v:Version)
+      WHERE ${where.join(' AND ')}
+      RETURN v
+      ORDER BY v.timestamp DESC
+      LIMIT $limit
+    `;
+
+    params.limit = options?.limit || 100;
+
+    const versionResult = await this.neo4j.executeCypher(versionQuery, params);
+    const versions = versionResult.map(row => ({
+      id: row.v.properties.id,
+      entityId: row.v.properties.entityId,
+      hash: row.v.properties.hash,
+      timestamp: new Date(row.v.properties.timestamp),
+      changeSetId: row.v.properties.changeSetId,
+      path: row.v.properties.path,
+      language: row.v.properties.language,
+    }));
+
+    // Get relationship timeline
+    const relQuery = `
+      MATCH (e:Entity {id: $entityId})-[r]-()
+      WHERE r.validFrom IS NOT NULL
+      RETURN r, startNode(r).id as fromId, endNode(r).id as toId
+      ORDER BY r.validFrom DESC
+      LIMIT $limit
+    `;
+
+    const relResult = await this.neo4j.executeCypher(relQuery, { entityId, limit: params.limit });
+    const relationships = relResult.map(row => ({
+      ...this.parseRelationship(row.r),
+      fromId: row.fromId,
+      toId: row.toId,
+    }));
+
+    return { entity, versions, relationships };
+  }
+
+  /**
+   * Get relationship timeline
+   */
+  async getRelationshipTimeline(
+    relationshipId: string,
+    options?: { since?: Date; until?: Date; limit?: number }
+  ): Promise<any[]> {
+    const where: string[] = ['r.id = $relationshipId'];
+    const params: Record<string, any> = { relationshipId };
+
+    if (options?.since) {
+      where.push('r.validFrom >= $since');
+      params.since = options.since.toISOString();
+    }
+
+    if (options?.until) {
+      where.push('r.validTo <= $until');
+      params.until = options.until.toISOString();
+    }
+
+    const query = `
+      MATCH ()-[r]->()
+      WHERE ${where.join(' AND ')}
+      RETURN r, startNode(r).id as fromId, endNode(r).id as toId
+      ORDER BY r.validFrom DESC
+      LIMIT $limit
+    `;
+
+    params.limit = options?.limit || 100;
+
+    const result = await this.neo4j.executeCypher(query, params);
+    return result.map(row => ({
+      ...this.parseRelationship(row.r),
+      fromId: row.fromId,
+      toId: row.toId,
+    }));
+  }
+
+  /**
+   * Get session timeline
+   */
+  async getSessionTimeline(
+    sessionId: string,
+    options?: { since?: Date; until?: Date; limit?: number }
+  ): Promise<{
+    versions: VersionInfo[];
+    relationships: any[];
+    checkpoints: CheckpointInfo[];
+  }> {
+    const where: string[] = [];
+    const params: Record<string, any> = { sessionId };
+
+    if (options?.since) {
+      where.push('timestamp >= $since');
+      params.since = options.since.toISOString();
+    }
+
+    if (options?.until) {
+      where.push('timestamp <= $until');
+      params.until = options.until.toISOString();
+    }
+
+    const whereClause = where.length > 0 ? `AND ${where.join(' AND ')}` : '';
+
+    // Get versions for session
+    const versionQuery = `
+      MATCH (v:Version)
+      WHERE v.changeSetId = $sessionId ${whereClause}
+      RETURN v
+      ORDER BY v.timestamp DESC
+      LIMIT $limit
+    `;
+
+    params.limit = options?.limit || 100;
+
+    const versionResult = await this.neo4j.executeCypher(versionQuery, params);
+    const versions = versionResult.map(row => ({
+      id: row.v.properties.id,
+      entityId: row.v.properties.entityId,
+      hash: row.v.properties.hash,
+      timestamp: new Date(row.v.properties.timestamp),
+      changeSetId: row.v.properties.changeSetId,
+      path: row.v.properties.path,
+      language: row.v.properties.language,
+    }));
+
+    // Get relationships for session
+    const relQuery = `
+      MATCH ()-[r]->()
+      WHERE r.changeSetId = $sessionId ${whereClause}
+      RETURN r, startNode(r).id as fromId, endNode(r).id as toId
+      ORDER BY r.validFrom DESC
+      LIMIT $limit
+    `;
+
+    const relResult = await this.neo4j.executeCypher(relQuery, params);
+    const relationships = relResult.map(row => ({
+      ...this.parseRelationship(row.r),
+      fromId: row.fromId,
+      toId: row.toId,
+    }));
+
+    // Get checkpoints (if any mention this session)
+    const checkpointQuery = `
+      MATCH (c:Checkpoint)
+      WHERE c.metadata CONTAINS $sessionId ${whereClause}
+      OPTIONAL MATCH (c)-[:INCLUDES]->(m)
+      WITH c, count(m) as memberCount
+      RETURN c, memberCount
+      ORDER BY c.timestamp DESC
+      LIMIT $limit
+    `;
+
+    const checkpointResult = await this.neo4j.executeCypher(checkpointQuery, params);
+    const checkpoints = checkpointResult.map(row => ({
+      id: row.c.properties.id,
+      timestamp: new Date(row.c.properties.timestamp),
+      reason: row.c.properties.reason,
+      seedEntities: JSON.parse(row.c.properties.seedEntities || '[]'),
+      memberCount: row.memberCount,
+      metadata: row.c.properties.metadata
+        ? JSON.parse(row.c.properties.metadata)
+        : undefined,
+    }));
+
+    return { versions, relationships, checkpoints };
+  }
+
+  /**
+   * Get session impacts
+   */
+  async getSessionImpacts(sessionId: string): Promise<{
+    entitiesModified: Entity[];
+    relationshipsCreated: any[];
+    relationshipsClosed: any[];
+    metrics: {
+      totalEntities: number;
+      totalRelationships: number;
+      timespan?: { start: Date; end: Date };
+    };
+  }> {
+    // Get entities modified in session
+    const entityQuery = `
+      MATCH (v:Version {changeSetId: $sessionId})-[:VERSION_OF]->(e:Entity)
+      RETURN DISTINCT e
+    `;
+
+    const entityResult = await this.neo4j.executeCypher(entityQuery, { sessionId });
+    const entitiesModified = entityResult.map(row => this.parseEntity(row.e));
+
+    // Get relationships created in session
+    const createdQuery = `
+      MATCH ()-[r]->()
+      WHERE r.changeSetId = $sessionId AND r.validFrom IS NOT NULL
+      RETURN r, startNode(r).id as fromId, endNode(r).id as toId
+    `;
+
+    const createdResult = await this.neo4j.executeCypher(createdQuery, { sessionId });
+    const relationshipsCreated = createdResult.map(row => ({
+      ...this.parseRelationship(row.r),
+      fromId: row.fromId,
+      toId: row.toId,
+    }));
+
+    // Get relationships closed in session (if any)
+    const closedQuery = `
+      MATCH ()-[r]->()
+      WHERE r.changeSetId = $sessionId AND r.validTo IS NOT NULL
+      RETURN r, startNode(r).id as fromId, endNode(r).id as toId
+    `;
+
+    const closedResult = await this.neo4j.executeCypher(closedQuery, { sessionId });
+    const relationshipsClosed = closedResult.map(row => ({
+      ...this.parseRelationship(row.r),
+      fromId: row.fromId,
+      toId: row.toId,
+    }));
+
+    // Calculate metrics
+    const timestamps = [
+      ...relationshipsCreated.map(r => r.properties?.validFrom).filter(Boolean),
+      ...relationshipsClosed.map(r => r.properties?.validTo).filter(Boolean),
+    ].map(t => new Date(t));
+
+    const timespan = timestamps.length > 0 ? {
+      start: new Date(Math.min(...timestamps.map(t => t.getTime()))),
+      end: new Date(Math.max(...timestamps.map(t => t.getTime()))),
+    } : undefined;
+
+    return {
+      entitiesModified,
+      relationshipsCreated,
+      relationshipsClosed,
+      metrics: {
+        totalEntities: entitiesModified.length,
+        totalRelationships: relationshipsCreated.length + relationshipsClosed.length,
+        timespan,
+      },
+    };
+  }
+
+  /**
+   * Get sessions affecting an entity
+   */
+  async getSessionsAffectingEntity(
+    entityId: string,
+    options?: { since?: Date; until?: Date; limit?: number }
+  ): Promise<{
+    sessions: string[];
+    details: Array<{
+      sessionId: string;
+      versionCount: number;
+      relationshipCount: number;
+      timespan: { start: Date; end: Date };
+    }>;
+  }> {
+    const where: string[] = ['v.entityId = $entityId'];
+    const params: Record<string, any> = { entityId };
+
+    if (options?.since) {
+      where.push('v.timestamp >= $since');
+      params.since = options.since.toISOString();
+    }
+
+    if (options?.until) {
+      where.push('v.timestamp <= $until');
+      params.until = options.until.toISOString();
+    }
+
+    const query = `
+      MATCH (v:Version)
+      WHERE ${where.join(' AND ')} AND v.changeSetId IS NOT NULL
+      OPTIONAL MATCH (e:Entity {id: $entityId})-[r]->()
+      WHERE r.changeSetId = v.changeSetId
+      WITH v.changeSetId as sessionId,
+           count(DISTINCT v) as versionCount,
+           count(DISTINCT r) as relationshipCount,
+           min(v.timestamp) as startTime,
+           max(v.timestamp) as endTime
+      RETURN sessionId, versionCount, relationshipCount, startTime, endTime
+      ORDER BY startTime DESC
+      LIMIT $limit
+    `;
+
+    params.limit = options?.limit || 50;
+
+    const result = await this.neo4j.executeCypher(query, params);
+
+    const details = result.map(row => ({
+      sessionId: row.sessionId,
+      versionCount: row.versionCount,
+      relationshipCount: row.relationshipCount,
+      timespan: {
+        start: new Date(row.startTime),
+        end: new Date(row.endTime),
+      },
+    }));
+
+    const sessions = [...new Set(details.map(d => d.sessionId))];
+
+    return { sessions, details };
+  }
+
+  /**
+   * Get changes for a session
+   */
+  async getChangesForSession(
+    sessionId: string,
+    options?: { entityTypes?: string[]; relationshipTypes?: string[]; limit?: number }
+  ): Promise<{
+    versions: VersionInfo[];
+    relationships: any[];
+    summary: {
+      entitiesAffected: number;
+      relationshipsAffected: number;
+      entityTypes: Record<string, number>;
+      relationshipTypes: Record<string, number>;
+    };
+  }> {
+    // Get versions
+    const versionQuery = `
+      MATCH (v:Version {changeSetId: $sessionId})
+      MATCH (v)-[:VERSION_OF]->(e:Entity)
+      ${options?.entityTypes ? 'WHERE e.type IN $entityTypes' : ''}
+      RETURN v, e.type as entityType
+      ORDER BY v.timestamp DESC
+      LIMIT $limit
+    `;
+
+    const versionParams: any = { sessionId, limit: options?.limit || 100 };
+    if (options?.entityTypes) {
+      versionParams.entityTypes = options.entityTypes;
+    }
+
+    const versionResult = await this.neo4j.executeCypher(versionQuery, versionParams);
+    const versions = versionResult.map(row => ({
+      id: row.v.properties.id,
+      entityId: row.v.properties.entityId,
+      hash: row.v.properties.hash,
+      timestamp: new Date(row.v.properties.timestamp),
+      changeSetId: row.v.properties.changeSetId,
+      path: row.v.properties.path,
+      language: row.v.properties.language,
+    }));
+
+    // Get relationships
+    const relQuery = `
+      MATCH ()-[r]->()
+      WHERE r.changeSetId = $sessionId
+      ${options?.relationshipTypes ? 'AND type(r) IN $relationshipTypes' : ''}
+      RETURN r, type(r) as relType, startNode(r).id as fromId, endNode(r).id as toId
+      ORDER BY r.validFrom DESC
+      LIMIT $limit
+    `;
+
+    const relParams: any = { sessionId, limit: options?.limit || 100 };
+    if (options?.relationshipTypes) {
+      relParams.relationshipTypes = options.relationshipTypes;
+    }
+
+    const relResult = await this.neo4j.executeCypher(relQuery, relParams);
+    const relationships = relResult.map(row => ({
+      ...this.parseRelationship(row.r),
+      fromId: row.fromId,
+      toId: row.toId,
+    }));
+
+    // Build summary
+    const entityTypes: Record<string, number> = {};
+    const relationshipTypes: Record<string, number> = {};
+
+    versionResult.forEach(row => {
+      if (row.entityType) {
+        entityTypes[row.entityType] = (entityTypes[row.entityType] || 0) + 1;
+      }
+    });
+
+    relResult.forEach(row => {
+      if (row.relType) {
+        relationshipTypes[row.relType] = (relationshipTypes[row.relType] || 0) + 1;
+      }
+    });
+
+    return {
+      versions,
+      relationships,
+      summary: {
+        entitiesAffected: new Set(versions.map(v => v.entityId)).size,
+        relationshipsAffected: relationships.length,
+        entityTypes,
+        relationshipTypes,
+      },
+    };
+  }
 }

@@ -156,7 +156,8 @@ export async function registerImpactRoutes(app, kgService, dbService) {
                 }
             }
             const sanitizedDepth = sanitizeDepth(params.maxDepth);
-            const analysis = await kgService.analyzeImpact(params.changes, {
+            const analysis = await kgService.analyzeImpact({
+                changes: params.changes,
                 includeIndirect: params.includeIndirect !== false,
                 maxDepth: sanitizedDepth,
             });
@@ -206,12 +207,13 @@ export async function registerImpactRoutes(app, kgService, dbService) {
             const recentEntityIds = await kgService.findRecentEntityIds(parsedSince, sanitizedLimit);
             const records = [];
             for (const entityId of recentEntityIds) {
-                const analysis = await kgService.analyzeImpact([
-                    {
-                        entityId,
-                        changeType: "modify",
-                    },
-                ], {
+                const analysis = await kgService.analyzeImpact({
+                    changes: [
+                        {
+                            entityId,
+                            changeType: "modify",
+                        },
+                    ],
                     includeIndirect: includeIndirect !== false,
                     maxDepth: sanitizedDepth,
                 });
@@ -338,13 +340,14 @@ export async function registerImpactRoutes(app, kgService, dbService) {
             const { entityId } = request.params;
             const { changeType, includeIndirect, maxDepth, signatureChange } = request.query;
             const sanitizedDepth = sanitizeDepth(maxDepth);
-            const analysis = await kgService.analyzeImpact([
-                {
-                    entityId,
-                    changeType: changeType || "modify",
-                    signatureChange: signatureChange === true,
-                },
-            ], {
+            const analysis = await kgService.analyzeImpact({
+                changes: [
+                    {
+                        entityId,
+                        changeType: changeType || "modify",
+                        signatureChange: signatureChange === true,
+                    },
+                ],
                 includeIndirect: includeIndirect !== false,
                 maxDepth: sanitizedDepth,
             });
@@ -444,7 +447,8 @@ export async function registerImpactRoutes(app, kgService, dbService) {
                     signatureChange: change.signatureChange === true,
                 }));
                 const sanitizedDepth = sanitizeDepth(scenario.maxDepth);
-                const analysis = await kgService.analyzeImpact(sanitizedChanges, {
+                const analysis = await kgService.analyzeImpact({
+                    changes: sanitizedChanges,
                     includeIndirect: scenario.includeIndirect !== false,
                     maxDepth: sanitizedDepth,
                 });

@@ -79,7 +79,7 @@ export class EntityServiceOGM extends EventEmitter {
     if ('testType' in entity) {
       return this.models.TestModel;
     }
-    if ('priority' in entity && entity.type === 'specification') {
+    if ('priority' in entity && entity.type === 'spec') {
       return this.models.SpecificationModel;
     }
     if ('title' in entity && entity.type === 'documentation') {
@@ -97,16 +97,19 @@ export class EntityServiceOGM extends EventEmitter {
       const Model = this.getModelForEntity(entity);
       const props = entityToModelProps(entity);
 
-      // Use Neogma's findOrCreateOne for upsert behavior
-      const instance = await Model.findOrCreateOne(
-        {
-          where: { id: entity.id },
-          properties: props,
-        },
-        {
-          properties: props,
+      // Try to find existing entity first, then create if not found
+      let instance;
+      try {
+        const instances = await Model.findMany({ where: { id: entity.id }, limit: 1 });
+        if (instances.length === 0) {
+          instance = await Model.createOne(props);
+        } else {
+          instance = instances[0];
         }
-      );
+      } catch (error) {
+        // If find fails, try to create
+        instance = await Model.createOne(props);
+      }
 
       const created = modelToEntity<Entity>(instance);
       this.emit('entity:created', created);
@@ -130,19 +133,20 @@ export class EntityServiceOGM extends EventEmitter {
 
       const Model = this.getModelForEntity(existing);
       const props = entityToModelProps({ ...existing, ...updates });
-      delete props.id; // Don't update the ID
+      delete (props as any).id; // Don't update the ID
 
       // Update using Neogma
-      const instance = await Model.update(
-        { where: { id } },
-        { properties: { ...props, lastModified: new Date().toISOString() } }
+      const instances = await Model.update(
+        { ...props, lastModified: new Date().toISOString() },
+        { where: { id } as any }
       );
+      const instance = Array.isArray(instances) ? instances[0] : instances;
 
-      if (!instance || instance.length === 0) {
+      if (!instance) {
         throw new Error(`Failed to update entity: ${id}`);
       }
 
-      const updated = modelToEntity<Entity>(instance[0]);
+      const updated = modelToEntity<Entity>(Array.isArray(instance) ? instance[0] : instance);
       this.emit('entity:updated', updated);
       return updated;
     } catch (error) {
@@ -212,7 +216,7 @@ export class EntityServiceOGM extends EventEmitter {
     total: number;
   }> {
     try {
-      const where: Record<string, any> = {};
+      const where: any = {};
 
       if (options.type) {
         where.type = options.type;
@@ -239,26 +243,17 @@ export class EntityServiceOGM extends EventEmitter {
       // Get count for pagination
       const countResult = await Model.findMany({
         where,
-        options: {
-          limit: null, // No limit for counting
-        },
       });
       const total = countResult.length;
 
       // Get paginated results
       const instances = await Model.findMany({
         where,
-        options: {
-          limit: options.limit || 100,
-          skip: options.offset || 0,
-          order: options.orderBy
-            ? [
-                {
-                  [options.orderBy]: options.orderDirection || 'ASC',
-                },
-              ]
-            : undefined,
-        },
+        limit: options.limit || 100,
+        skip: options.offset || 0,
+        order: options.orderBy
+          ? [[options.orderBy, options.orderDirection || 'ASC']]
+          : undefined,
       });
 
       const items = instances.map(instance => modelToEntity<Entity>(instance));
@@ -358,41 +353,55 @@ export class EntityServiceOGM extends EventEmitter {
 
             if (options.skipExisting) {
               // Create only if not exists
-              const createdInstances = await Model.createMany(props, {
-                validate: false, // Skip validation for performance
-              });
-              created += createdInstances.length;
+              const createdInstances = [];
+              for (const p of props) {
+                try {
+                  const existing = await Model.findMany({ where: { id: (p as any).id }, limit: 1 });
+                  if (existing.length === 0) {
+                    const newInstance = await Model.createOne(p);
+                    createdInstances.push(newInstance);
+                    created++;
+                  }
+                } catch (error) {
+                  failed++;
+                }
+              }
               return createdInstances;
             } else if (options.updateExisting) {
               // Upsert behavior
-              const upserted = await Promise.all(
-                props.map(async p => {
-                  const existing = await Model.findOne({
-                    where: { id: p.id },
-                  });
-                  if (existing) {
+              const upserted = [];
+              for (const p of props) {
+                try {
+                  const existing = await Model.findMany({ where: { id: (p as any).id }, limit: 1 });
+                  if (existing.length > 0) {
                     await Model.update(
-                      { where: { id: p.id } },
-                      { properties: p }
+                      p,
+                      { where: { id: (p as any).id } as any }
                     );
                     updated++;
                   } else {
-                    await Model.create(p);
+                    const newInstance = await Model.createOne(p);
+                    upserted.push(newInstance);
                     created++;
                   }
-                })
-              );
+                } catch (error) {
+                  failed++;
+                }
+              }
               return upserted;
             } else {
               // Create all (may fail on duplicates)
-              try {
-                const createdInstances = await Model.createMany(props);
-                created += createdInstances.length;
-                return createdInstances;
-              } catch (error) {
-                failed += batch.length;
-                return [];
+              const createdInstances = [];
+              for (const p of props) {
+                try {
+                  const newInstance = await Model.createOne(p);
+                  createdInstances.push(newInstance);
+                  created++;
+                } catch (error) {
+                  failed++;
+                }
               }
+              return createdInstances;
             }
           }
         );
@@ -423,7 +432,7 @@ export class EntityServiceOGM extends EventEmitter {
       const Model = this.getModelForEntity(properties as Entity);
 
       const instances = await Model.findMany({
-        where: properties,
+        where: properties as any,
       });
 
       return instances.map(instance => modelToEntity<Entity>(instance));
@@ -445,7 +454,7 @@ export class EntityServiceOGM extends EventEmitter {
 
     for (const entity of entities) {
       const Model = this.getModelForEntity(entity);
-      const modelName = Model.name || 'EntityModel';
+      const modelName = (Model as any).name || 'EntityModel';
 
       if (!groups.has(modelName)) {
         groups.set(modelName, []);

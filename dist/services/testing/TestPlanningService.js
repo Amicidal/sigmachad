@@ -1,4 +1,4 @@
-import { RelationshipType } from "../models/relationships.js";
+import { RelationshipType } from "../../models/relationships.js";
 export class SpecNotFoundError extends Error {
     constructor(specId) {
         super(`Specification ${specId} was not found`);

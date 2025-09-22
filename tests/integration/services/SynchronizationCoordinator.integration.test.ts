@@ -54,7 +54,7 @@ describe('SynchronizationCoordinator Integration', () => {
     dbService = await setupTestDatabase({ silent: true });
 
     // Initialize knowledge graph service
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
 
     // Initialize AST parser
     astParser = new ASTParser();

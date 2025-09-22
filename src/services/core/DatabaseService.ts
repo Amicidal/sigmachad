@@ -15,8 +15,8 @@ import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
   SCMCommitRecord,
-} from "../models/types.js";
-import type { PerformanceRelationship } from "../models/relationships.js";
+} from "../../models/types.js";
+import type { PerformanceRelationship } from "../../models/relationships.js";
 import { Neo4jService } from "../database/Neo4jService.js";
 import { PostgreSQLService } from "../database/PostgreSQLService.js";
 import { RedisService } from "../database/RedisService.js";
@@ -109,6 +109,31 @@ export class DatabaseService {
       throw new Error("Database not initialized");
     }
     return this.redisService;
+  }
+
+  // Backward compatibility methods for migration
+  getFalkorDBService(): INeo4jService {
+    if (!this.initialized) {
+      throw new Error("Database not initialized");
+    }
+    return this.neo4jService;
+  }
+
+  getQdrantService(): any {
+    if (!this.initialized) {
+      throw new Error("Database not initialized");
+    }
+    // Return a compatibility wrapper that provides a getClient() method
+    return {
+      getClient: () => this.qdrant,
+    };
+  }
+
+  getQdrantClient(): any {
+    if (!this.initialized) {
+      throw new Error("Database not initialized");
+    }
+    return this.qdrant;
   }
 
   // Direct client/pool getters for convenience

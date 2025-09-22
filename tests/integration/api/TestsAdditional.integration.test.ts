@@ -27,7 +27,7 @@ describe('Tests API Additional Endpoints', () => {
     dbService = await setupTestDatabase();
     const isHealthy = await checkDatabaseHealth(dbService);
     if (!isHealthy) throw new Error('Database health check failed');
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     apiGateway = new APIGateway(kgService, dbService);
     app = apiGateway.getApp();
     await apiGateway.start();

@@ -97,6 +97,76 @@ export declare class Neo4jService extends EventEmitter {
     private convertPath;
     private buildGdsConfigString;
     /**
+     * Get index health status
+     */
+    getIndexHealth(): Promise<{
+        indexes: Array<{
+            name: string;
+            status: string;
+            type: string;
+            labels: string[];
+            properties: string[];
+            populationPercent?: number;
+        }>;
+        summary: {
+            total: number;
+            online: number;
+            failed: number;
+            populating: number;
+        };
+    }>;
+    /**
+     * Ensure graph indexes are created
+     */
+    ensureGraphIndexes(): Promise<void>;
+    /**
+     * Run performance benchmarks
+     */
+    runBenchmarks(options?: {
+        includeWrites?: boolean;
+        sampleSize?: number;
+        timeout?: number;
+    }): Promise<{
+        readPerformance: {
+            simpleNodeQuery: {
+                avgMs: number;
+                operations: number;
+            };
+            relationshipTraversal: {
+                avgMs: number;
+                operations: number;
+            };
+            indexLookup: {
+                avgMs: number;
+                operations: number;
+            };
+            aggregationQuery: {
+                avgMs: number;
+                operations: number;
+            };
+        };
+        writePerformance?: {
+            nodeCreation: {
+                avgMs: number;
+                operations: number;
+            };
+            relationshipCreation: {
+                avgMs: number;
+                operations: number;
+            };
+            bulkInsert: {
+                avgMs: number;
+                operations: number;
+            };
+        };
+        databaseStats: {
+            nodeCount: number;
+            relationshipCount: number;
+            indexCount: number;
+            memoryUsage?: string;
+        };
+    }>;
+    /**
      * Close the driver connection
      */
     close(): Promise<void>;

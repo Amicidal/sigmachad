@@ -2,7 +2,7 @@
  * Test Result Parser
  * Parses various test framework output formats into standardized test results
  */
-import { TestSuiteResult } from "./testing/TestEngine.js";
+import { TestSuiteResult } from "./TestEngine.js";
 export interface ParsedTestSuite {
     suiteName: string;
     timestamp: Date;

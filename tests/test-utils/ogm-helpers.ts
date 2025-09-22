@@ -22,6 +22,7 @@ export interface OGMTestSetup {
   embeddingService: EmbeddingService;
 }
 
+// @deprecated Legacy comparison interface - no longer needed after OGM migration
 export interface ComparisonTestSetup extends OGMTestSetup {
   legacyKgService: KnowledgeGraphService;
 }
@@ -31,10 +32,10 @@ export interface ComparisonTestSetup extends OGMTestSetup {
  */
 export async function setupOGMServices(
   dbService: DatabaseService,
-  testContext?: TestIsolationContext
+  _testContext?: TestIsolationContext
 ): Promise<OGMTestSetup> {
   // Initialize NeogmaService
-  const neogmaService = new NeogmaService(dbService, testContext);
+  const neogmaService = new NeogmaService(dbService.getConfig().neo4j);
   await neogmaService.initialize();
 
   // Initialize EmbeddingService
@@ -59,6 +60,7 @@ export async function setupOGMServices(
 
 /**
  * Initialize both OGM and legacy services for comparison testing
+ * @deprecated Use setupOGMServices instead - legacy comparison no longer needed
  */
 export async function setupComparisonServices(
   dbService: DatabaseService,
@@ -67,7 +69,7 @@ export async function setupComparisonServices(
   const ogmServices = await setupOGMServices(dbService, testContext);
 
   // Initialize legacy KnowledgeGraphService
-  const legacyKgService = new KnowledgeGraphService(dbService, testContext);
+  const legacyKgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
   await legacyKgService.initialize();
 
   return {
@@ -307,6 +309,7 @@ export class PerformanceTracker {
 
 /**
  * Compare operation results between legacy and OGM implementations
+ * @deprecated Legacy comparison function - no longer needed after OGM migration
  */
 export async function compareImplementations<T>(
   operationName: string,
@@ -463,18 +466,16 @@ export function generateRealisticTestData(scale: 'small' | 'medium' | 'large' = 
 
 /**
  * Cleanup test data
+ * @deprecated Use OGM services directly for cleanup instead
  */
 export async function cleanupTestData(
   services: Partial<ComparisonTestSetup>,
   entityIds: string[],
   relationshipIds: string[]
 ): Promise<void> {
-  // Clean up entities
+  // Clean up entities with OGM services only (legacy service no longer used)
   for (const id of entityIds) {
     try {
-      if (services.legacyKgService) {
-        await services.legacyKgService.deleteEntity(id);
-      }
       if (services.entityService) {
         await services.entityService.deleteEntity(id);
       }

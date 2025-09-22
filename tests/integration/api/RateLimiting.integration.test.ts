@@ -42,7 +42,7 @@ describe('Rate Limiting Integration', () => {
     }
 
     // Create services
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
 
     // Create API Gateway with rate limiting enabled
     apiGateway = new APIGateway(kgService, dbService);

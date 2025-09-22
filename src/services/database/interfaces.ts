@@ -88,6 +88,10 @@ export interface DatabaseConfig {
   redis?: {
     url: string;
   };
+  qdrant?: {
+    url?: string;
+    apiKey?: string;
+  };
   backups?: BackupConfiguration;
 }
 

@@ -267,25 +267,6 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
                 tags?: string[] | undefined;
                 metadata?: Record<string, any> | undefined;
             };
-            relatedSpecs: {
-                type?: "spec" | undefined;
-                status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
-                priority?: "high" | "medium" | "low" | "critical" | undefined;
-                assignee?: string | null | undefined;
-                tags?: string[] | undefined;
-                id?: string | undefined;
-                title?: string | undefined;
-                description?: string | undefined;
-                acceptanceCriteria?: string[] | undefined;
-                updated?: Date | undefined;
-                path?: string | undefined;
-                hash?: string | undefined;
-                language?: string | undefined;
-                lastModified?: Date | undefined;
-                created?: Date | undefined;
-                metadata?: Record<string, any> | undefined;
-            }[];
-            affectedEntities: any[];
             testCoverage: {
                 entityId: string;
                 overallCoverage: {
@@ -322,6 +303,25 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
                     covers: string[];
                 }[];
             };
+            relatedSpecs: {
+                type?: "spec" | undefined;
+                status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
+                priority?: "high" | "medium" | "low" | "critical" | undefined;
+                assignee?: string | null | undefined;
+                tags?: string[] | undefined;
+                id?: string | undefined;
+                title?: string | undefined;
+                description?: string | undefined;
+                acceptanceCriteria?: string[] | undefined;
+                updated?: Date | undefined;
+                path?: string | undefined;
+                hash?: string | undefined;
+                language?: string | undefined;
+                lastModified?: Date | undefined;
+                created?: Date | undefined;
+                metadata?: Record<string, any> | undefined;
+            }[];
+            affectedEntities: any[];
         };
         _output_out: {
             spec: {
@@ -342,25 +342,6 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
                 tags?: string[] | undefined;
                 metadata?: Record<string, any> | undefined;
             };
-            relatedSpecs: {
-                type?: "spec" | undefined;
-                status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
-                priority?: "high" | "medium" | "low" | "critical" | undefined;
-                assignee?: string | null | undefined;
-                tags?: string[] | undefined;
-                id?: string | undefined;
-                title?: string | undefined;
-                description?: string | undefined;
-                acceptanceCriteria?: string[] | undefined;
-                updated?: Date | undefined;
-                path?: string | undefined;
-                hash?: string | undefined;
-                language?: string | undefined;
-                lastModified?: Date | undefined;
-                created?: Date | undefined;
-                metadata?: Record<string, any> | undefined;
-            }[];
-            affectedEntities: any[];
             testCoverage: {
                 entityId: string;
                 overallCoverage: {
@@ -397,6 +378,25 @@ export declare const designRouter: import("@trpc/server").CreateRouterInner<impo
                     covers: string[];
                 }[];
             };
+            relatedSpecs: {
+                type?: "spec" | undefined;
+                status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
+                priority?: "high" | "medium" | "low" | "critical" | undefined;
+                assignee?: string | null | undefined;
+                tags?: string[] | undefined;
+                id?: string | undefined;
+                title?: string | undefined;
+                description?: string | undefined;
+                acceptanceCriteria?: string[] | undefined;
+                updated?: Date | undefined;
+                path?: string | undefined;
+                hash?: string | undefined;
+                language?: string | undefined;
+                lastModified?: Date | undefined;
+                created?: Date | undefined;
+                metadata?: Record<string, any> | undefined;
+            }[];
+            affectedEntities: any[];
         };
     }, unknown>;
     listSpecs: import("@trpc/server").BuildProcedure<"query", {

@@ -1,4 +1,4 @@
-import { DocumentationIntent, DocumentationNodeType, DocumentationSource } from "../models/relationships.js";
+import { DocumentationIntent, DocumentationNodeType, DocumentationSource } from "../../models/relationships.js";
 export interface DocumentationIntelligenceRequest {
     content: string;
     format: "markdown" | "plaintext" | "rst" | "asciidoc";

@@ -25,6 +25,7 @@ export interface IRelationshipService extends EventEmitter {
         failed: number;
     }>;
     getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
+    getRelationshipById(relationshipId: string): Promise<GraphRelationship | null>;
     deleteRelationship(fromId: string, toId: string, type: RelationshipType): Promise<void>;
     updateRelationshipAuxiliary(relId: string, rel: GraphRelationship): Promise<void>;
     mergeNormalizedDuplicates(): Promise<number>;
@@ -37,6 +38,9 @@ export interface IRelationshipService extends EventEmitter {
         evidence: any[];
         locations?: any[];
     }>): Promise<void>;
+    getEdgeEvidenceNodes(relationshipId: string, limit?: number): Promise<any[]>;
+    getEdgeSites(relationshipId: string, limit?: number): Promise<any[]>;
+    getEdgeCandidates(relationshipId: string, limit?: number): Promise<any[]>;
 }
 export declare class RelationshipServiceOGM extends EventEmitter implements IRelationshipService {
     private neogmaService;
@@ -121,5 +125,21 @@ export declare class RelationshipServiceOGM extends EventEmitter implements IRel
      * Build bulk create query for relationships
      */
     private buildBulkCreateQuery;
+    /**
+     * Get a single relationship by its ID
+     */
+    getRelationshipById(relationshipId: string): Promise<GraphRelationship | null>;
+    /**
+     * Get evidence nodes for a relationship edge
+     */
+    getEdgeEvidenceNodes(relationshipId: string, limit?: number): Promise<any[]>;
+    /**
+     * Get edge sites for a relationship (locations where the relationship is used)
+     */
+    getEdgeSites(relationshipId: string, limit?: number): Promise<any[]>;
+    /**
+     * Get edge candidates for a relationship (potential relationship targets)
+     */
+    getEdgeCandidates(relationshipId: string, limit?: number): Promise<any[]>;
 }
 //# sourceMappingURL=RelationshipServiceOGM.d.ts.map

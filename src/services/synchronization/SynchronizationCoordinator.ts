@@ -5,29 +5,29 @@
 
 import { EventEmitter } from "events";
 import crypto from "crypto";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { ASTParser } from "./knowledge/ASTParser.js";
-import { DatabaseService } from "./core/DatabaseService.js";
-import { FileChange } from "./core/FileWatcher.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { ASTParser } from "../knowledge/ASTParser.js";
+import { DatabaseService } from "../core/DatabaseService.js";
+import { FileChange } from "../core/FileWatcher.js";
 import {
   GraphRelationship,
   RelationshipType,
-} from "../models/relationships.js";
-import { TimeRangeParams } from "../models/types.js";
-import { GitService } from "./scm/GitService.js";
+} from "../../models/relationships.js";
+import { TimeRangeParams } from "../../models/types.js";
+import { GitService } from "../scm/GitService.js";
 import {
   ConflictResolution as ConflictResolutionService,
   Conflict,
-} from "./scm/ConflictResolution.js";
-import { RollbackCapabilities } from "./scm/RollbackCapabilities.js";
+} from "../scm/ConflictResolution.js";
+import { RollbackCapabilities } from "../scm/RollbackCapabilities.js";
 import {
   SessionCheckpointJobRunner,
   type SessionCheckpointJobMetrics,
   type SessionCheckpointJobSnapshot,
-} from "../jobs/SessionCheckpointJob.js";
-import type { SessionCheckpointJobOptions } from "../jobs/SessionCheckpointJob.js";
-import { PostgresSessionCheckpointJobStore } from "../jobs/persistence/PostgresSessionCheckpointJobStore.js";
-import { canonicalRelationshipId } from "../utils/codeEdges.js";
+} from "../../jobs/SessionCheckpointJob.js";
+import type { SessionCheckpointJobOptions } from "../../jobs/SessionCheckpointJob.js";
+import { PostgresSessionCheckpointJobStore } from "../../jobs/persistence/PostgresSessionCheckpointJobStore.js";
+import { canonicalRelationshipId } from "../../utils/codeEdges.js";
 
 export interface SyncOperation {
   id: string;
@@ -151,7 +151,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   // Collect relationships that couldn't be resolved during per-file processing
   private unresolvedRelationships: Array<{
-    relationship: import("../models/relationships.js").GraphRelationship;
+    relationship: import("../../models/relationships.js").GraphRelationship;
     sourceFilePath?: string;
   }> = [];
 
@@ -1349,7 +1349,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     // Ensure a Module entity exists for the root package if applicable (best-effort)
     try {
-      const { ModuleIndexer } = await import("./knowledge/ModuleIndexer.js");
+      const { ModuleIndexer } = await import("../knowledge/ModuleIndexer.js");
       const mi = new ModuleIndexer(this.kgService);
       await mi.indexRootPackage().catch(() => {});
     } catch {}
@@ -1555,12 +1555,7 @@ export class SynchronizationCoordinator extends EventEmitter {
             // Fallback to per-relationship creation if bulk fails
             for (const r of resolved) {
               try {
-                await this.kgService.createRelationship(
-                  r as any,
-                  undefined,
-                  undefined,
-                  { validate: false }
-                );
+                await this.kgService.createRelationship(r as any);
                 operation.relationshipsCreated++;
               } catch (err) {
                 operation.errors.push({
@@ -1716,7 +1711,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Track entities to embed in batch and session relationships buffer
     const toEmbed: any[] = [];
     const sessionRelBuffer: Array<
-      import("../models/relationships.js").GraphRelationship
+      import("../../models/relationships.js").GraphRelationship
     > = [];
     const sessionSequenceLocal = new Map<string, number>();
     const allocateSessionSequence = () => {
@@ -1821,7 +1816,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         graphRelationship
       );
       sessionRelBuffer.push(
-        relationship as import("../models/relationships.js").GraphRelationship
+        relationship as import("../../models/relationships.js").GraphRelationship
       );
       this.recordSessionSequence(
         sessionId,
@@ -1989,9 +1984,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                     parseResult.isIncremental &&
                     parseResult.updatedEntities?.includes(entity)
                   ) {
-                    await this.kgService.updateEntity(entity.id, entity, {
-                      skipEmbedding: true,
-                    });
+                    await this.kgService.updateEntity(entity.id, entity);
                     operation.entitiesUpdated++;
                     toEmbed.push(entity);
                   } else {
@@ -2054,46 +2047,37 @@ export class SynchronizationCoordinator extends EventEmitter {
                     // Before deletion, attach temporal relationship to change and session impact
                     const now2 = new Date();
                     try {
-                      await this.kgService.createRelationship(
-                        {
-                          id: `rel_${entity.id}_${changeId}_REMOVED_IN`,
-                          fromEntityId: entity.id,
-                          toEntityId: changeId,
-                          type: RelationshipType.REMOVED_IN as any,
-                          created: now2,
-                          lastModified: now2,
-                          version: 1,
-                        } as any,
-                        undefined,
-                        undefined,
-                        { validate: false }
-                      );
+                      await this.kgService.createRelationship({
+                        id: `rel_${entity.id}_${changeId}_REMOVED_IN`,
+                        fromEntityId: entity.id,
+                        toEntityId: changeId,
+                        type: RelationshipType.REMOVED_IN as any,
+                        created: now2,
+                        lastModified: now2,
+                        version: 1,
+                      } as any);
                     } catch {}
                     // Attach MODIFIED_BY with git metadata (best-effort)
                     try {
                       const git = new GitService();
                       const info = await git.getLastCommitInfo(change.path);
-                      await this.kgService.createRelationship(
-                        {
-                          id: `rel_${entity.id}_${sessionId}_MODIFIED_BY`,
-                          fromEntityId: entity.id,
-                          toEntityId: sessionId,
-                          type: RelationshipType.MODIFIED_BY as any,
-                          created: now2,
-                          lastModified: now2,
-                          version: 1,
-                          metadata: info
-                            ? {
-                                author: info.author,
-                                email: info.email,
-                                commitHash: info.hash,
-                                date: info.date,
-                              }
-                            : { source: "sync" },
-                        } as any,
-                        undefined,
-                        undefined,
-                        { validate: false }
+                      await this.kgService.createRelationship({
+                        id: `rel_${entity.id}_${sessionId}_MODIFIED_BY`,
+                        fromEntityId: entity.id,
+                        toEntityId: sessionId,
+                        type: RelationshipType.MODIFIED_BY as any,
+                        created: now2,
+                        lastModified: now2,
+                        version: 1,
+                        metadata: info
+                          ? {
+                              author: info.author,
+                              email: info.email,
+                              commitHash: info.hash,
+                              date: info.date,
+                            }
+                          : { source: "sync" },
+                      } as any
                       );
                     } catch {}
                     try {
@@ -2229,8 +2213,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                       } catch {}
 
                       try {
-                        await this.kgService.createRelationship(
-                          {
+                        await this.kgService.createRelationship({
                             id: `rel_${ent.id}_${changeId}_MODIFIED_IN`,
                             fromEntityId: ent.id,
                             toEntityId: changeId,
@@ -2238,18 +2221,13 @@ export class SynchronizationCoordinator extends EventEmitter {
                             created: now,
                             lastModified: now,
                             version: 1,
-                          } as any,
-                          undefined,
-                          undefined,
-                          { validate: false }
-                        );
+                          } as any);
                       } catch {}
                       // Attach MODIFIED_BY with git metadata (best-effort)
                       try {
                         const git = new GitService();
                         const info = await git.getLastCommitInfo(change.path);
-                        await this.kgService.createRelationship(
-                          {
+                        await this.kgService.createRelationship({
                             id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
                             fromEntityId: ent.id,
                             toEntityId: sessionId,
@@ -2265,11 +2243,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                   date: info.date,
                                 }
                               : { source: "sync" },
-                          } as any,
-                          undefined,
-                          undefined,
-                          { validate: false }
-                        );
+                          } as any);
                       } catch {}
                       changedSeeds.add(ent.id);
                     } catch (err) {
@@ -2375,8 +2349,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                     .addedEntities as any[]) {
                     try {
                       const now3 = new Date();
-                      await this.kgService.createRelationship(
-                        {
+                      await this.kgService.createRelationship({
                           id: `rel_${ent.id}_${changeId}_CREATED_IN`,
                           fromEntityId: ent.id,
                           toEntityId: changeId,
@@ -2384,17 +2357,12 @@ export class SynchronizationCoordinator extends EventEmitter {
                           created: now3,
                           lastModified: now3,
                           version: 1,
-                        } as any,
-                        undefined,
-                        undefined,
-                        { validate: false }
-                      );
+                        } as any);
                       // Also MODIFIED_BY with git metadata (best-effort)
                       try {
                         const git = new GitService();
                         const info = await git.getLastCommitInfo(change.path);
-                        await this.kgService.createRelationship(
-                          {
+                        await this.kgService.createRelationship({
                             id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
                             fromEntityId: ent.id,
                             toEntityId: sessionId,
@@ -2410,11 +2378,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                   date: info.date,
                                 }
                               : { source: "sync" },
-                          } as any,
-                          undefined,
-                          undefined,
-                          { validate: false }
-                        );
+                          } as any);
                       } catch {}
                       let stateTransitionNew: Record<string, any> | undefined =
                         {
@@ -2475,10 +2439,7 @@ export class SynchronizationCoordinator extends EventEmitter {
             case "delete":
               // Handle file deletion
               try {
-                const fileEntities = await this.kgService.getEntitiesByFile(
-                  change.path,
-                  { includeSymbols: true }
-                );
+                const fileEntities = await this.kgService.getEntitiesByFile(change.path);
 
                 for (const entity of fileEntities) {
                   await this.kgService.deleteEntity(entity.id);

@@ -1,6 +1,6 @@
-import { GitService } from "./scm/GitService.js";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "./core/DatabaseService.js";
+import { GitService } from "./GitService.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
 import type {
   CommitPRRequest,
   CommitPRResponse,
@@ -10,16 +10,16 @@ import type {
   SCMPushResult,
   SCMCommitLogEntry,
   ValidationResult,
-} from "../models/types.js";
-import { RelationshipType } from "../models/relationships.js";
-import type { GraphRelationship } from "../models/relationships.js";
-import type { Change, Entity, Test, Spec } from "../models/entities.js";
+} from "../../models/types.js";
+import { RelationshipType } from "../../models/relationships.js";
+import type { GraphRelationship } from "../../models/relationships.js";
+import type { Change, Entity, Test, Spec } from "../../models/entities.js";
 import {
   SCMProvider,
   SCMProviderResult,
   SCMProviderNotConfiguredError,
   SCMProviderPullRequestPayload,
-} from "./scm/SCMProvider.js";
+} from "./SCMProvider.js";
 
 type CommitValidation = {
   title: string;

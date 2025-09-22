@@ -1,4 +1,4 @@
-import type { SCMStatusSummary, SCMBranchInfo, SCMCommitLogEntry } from "../models/types.js";
+import type { SCMStatusSummary, SCMBranchInfo, SCMCommitLogEntry } from "../../models/types.js";
 export interface CommitInfo {
     hash: string;
     author: string;

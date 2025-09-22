@@ -354,7 +354,14 @@ export class EmbeddingService extends EventEmitter {
       }
 
       vector = result[0].embedding;
+      if (!vector) {
+        throw new Error(`Invalid embedding for entity: ${entityId}`);
+      }
       this.cache.set(entityId, vector);
+    }
+
+    if (!vector) {
+      throw new Error(`No valid embedding found for entity: ${entityId}`);
     }
 
     // Exclude the source entity from results
@@ -373,8 +380,8 @@ export class EmbeddingService extends EventEmitter {
     }
 
     try {
-      const vector = await embeddingService.generateEmbedding(content);
-      return vector;
+      const result = await embeddingService.generateEmbedding(content);
+      return result.embedding;
     } catch (error) {
       console.error('Failed to generate embedding:', error);
       // Return random unit vector as fallback
@@ -417,7 +424,7 @@ export class EmbeddingService extends EventEmitter {
     const parts: string[] = [];
 
     // Add name and type
-    if (entity.name) parts.push(`Name: ${entity.name}`);
+    if ('name' in entity && entity.name) parts.push(`Name: ${entity.name}`);
     if (entity.type) parts.push(`Type: ${entity.type}`);
 
     // Add description if available
@@ -443,7 +450,7 @@ export class EmbeddingService extends EventEmitter {
     }
 
     // Add metadata if available
-    if (entity.metadata) {
+    if ('metadata' in entity && entity.metadata) {
       parts.push(`Metadata: ${JSON.stringify(entity.metadata)}`);
     }
 

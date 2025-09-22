@@ -41,7 +41,7 @@ describe('Admin API Endpoints Integration', () => {
     }
 
     // Create services
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     fileWatcher = new FileWatcher(kgService, dbService);
     astParser = new ASTParser();
     conflictResolver = new ConflictResolution(kgService);

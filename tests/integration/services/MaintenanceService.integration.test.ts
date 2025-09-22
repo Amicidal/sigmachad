@@ -27,7 +27,7 @@ describe('MaintenanceService Integration', () => {
     dbService = await setupTestDatabase();
 
     // Initialize knowledge graph service
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
 
     // Initialize maintenance service
     maintenanceService = new MaintenanceService(dbService, kgService);

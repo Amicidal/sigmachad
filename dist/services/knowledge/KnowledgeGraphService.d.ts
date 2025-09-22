@@ -1,10 +1,27 @@
 /**
  * Knowledge Graph Service
  * Facade that orchestrates all specialized graph services
+ * Now using only OGM implementations - legacy code removed
  */
 import { EventEmitter } from 'events';
-import { Neo4jConfig } from './Neo4jService.js';
-import { SearchService } from './SearchService.js';
+import { Neo4jService, Neo4jConfig } from './Neo4jService.js';
+import { NeogmaService } from './ogm/NeogmaService.js';
+import { EntityServiceOGM } from './ogm/EntityServiceOGM.js';
+import { RelationshipServiceOGM } from './ogm/RelationshipServiceOGM.js';
+import { SearchServiceOGM } from './ogm/SearchServiceOGM.js';
+import { EmbeddingService } from './EmbeddingService.js';
+import { HistoryService } from './HistoryService.js';
+import { AnalysisService } from './AnalysisService.js';
+interface KnowledgeGraphDependencies {
+    neo4j?: Neo4jService;
+    neogma?: NeogmaService;
+    entityService?: EntityServiceOGM;
+    relationshipService?: RelationshipServiceOGM;
+    searchService?: SearchServiceOGM;
+    embeddingService?: EmbeddingService;
+    historyService?: HistoryService;
+    analysisService?: AnalysisService;
+}
 import { Entity } from '../../models/entities.js';
 import { GraphRelationship, RelationshipQuery, PathQuery } from '../../models/relationships.js';
 import { GraphSearchRequest, ImpactAnalysisRequest, ImpactAnalysis, DependencyAnalysis } from '../../models/types.js';
@@ -14,24 +31,14 @@ export declare class KnowledgeGraphService extends EventEmitter {
     private entities;
     private relationships;
     private embeddings;
-    search: SearchService;
+    private searchService;
     private history;
     private analysis;
-    private featureFlags;
-    private tracker;
-    constructor(config?: Neo4jConfig);
-    /**
-     * Initialize entity service with OGM support
-     */
-    private initializeEntityService;
+    constructor(config?: Neo4jConfig, overrides?: KnowledgeGraphDependencies);
     /**
      * Initialize database with necessary indexes and constraints
      */
     private initializeDatabase;
-    /**
-     * Log current migration status
-     */
-    private logMigrationStatus;
     /**
      * Setup event forwarding from sub-services
      */
@@ -40,6 +47,9 @@ export declare class KnowledgeGraphService extends EventEmitter {
         skipEmbedding?: boolean;
     }): Promise<Entity>;
     updateEntity(id: string, updates: Partial<Entity>): Promise<Entity>;
+    createOrUpdateEntity(entity: Entity, options?: {
+        skipEmbedding?: boolean;
+    }): Promise<Entity>;
     getEntity(id: string): Promise<Entity | null>;
     deleteEntity(id: string): Promise<void>;
     listEntities(options?: any): Promise<{
@@ -51,8 +61,10 @@ export declare class KnowledgeGraphService extends EventEmitter {
     createRelationship(relationship: GraphRelationship): Promise<GraphRelationship>;
     createRelationshipsBulk(relationships: GraphRelationship[], options?: any): Promise<any>;
     getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
+    queryRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
     deleteRelationship(fromId: string, toId: string, type: any): Promise<void>;
     searchEntities(request: GraphSearchRequest): Promise<any[]>;
+    search(request: GraphSearchRequest): Promise<Entity[]>;
     semanticSearch(query: string, options?: any): Promise<any[]>;
     structuralSearch(query: string, options?: any): Promise<any[]>;
     findSymbolsByName(name: string, options?: any): Promise<Entity[]>;
@@ -67,6 +79,18 @@ export declare class KnowledgeGraphService extends EventEmitter {
     listCheckpoints(options?: any): Promise<any>;
     getHistoryMetrics(): Promise<any>;
     timeTravelTraversal(query: any): Promise<any>;
+    exportCheckpoint(checkpointId: string): Promise<any>;
+    importCheckpoint(checkpointData: any): Promise<any>;
+    getCheckpoint(checkpointId: string): Promise<any>;
+    getCheckpointMembers(checkpointId: string): Promise<any>;
+    getCheckpointSummary(checkpointId: string): Promise<any>;
+    deleteCheckpoint(checkpointId: string): Promise<void>;
+    getEntityTimeline(entityId: string, options?: any): Promise<any>;
+    getRelationshipTimeline(relationshipId: string, options?: any): Promise<any>;
+    getSessionTimeline(sessionId: string, options?: any): Promise<any>;
+    getSessionImpacts(sessionId: string): Promise<any>;
+    getSessionsAffectingEntity(entityId: string, options?: any): Promise<any>;
+    getChangesForSession(sessionId: string, options?: any): Promise<any>;
     createEmbedding(entity: Entity): Promise<any>;
     updateEmbedding(entityId: string, content?: string): Promise<void>;
     deleteEmbedding(entityId: string): Promise<void>;
@@ -78,32 +102,9 @@ export declare class KnowledgeGraphService extends EventEmitter {
     ensureIndices(): Promise<void>;
     mergeNormalizedDuplicates(): Promise<number>;
     markInactiveEdgesNotSeenSince(since: Date): Promise<number>;
-    /**
-     * Get current migration status across all services
-     */
-    getMigrationStatus(): {
-        featureFlags: any;
-        migrationMetrics: any;
-        services: {
-            entity: any;
-        };
-    };
-    /**
-     * Get migration health summary
-     */
-    getMigrationHealth(): any;
-    /**
-     * Force switch to legacy implementation (for debugging)
-     */
-    forceLegacyMode(): void;
-    /**
-     * Force switch to OGM implementation (for debugging)
-     */
-    forceOGMMode(): void;
-    /**
-     * Reset migration metrics (for testing)
-     */
-    resetMigrationMetrics(): void;
+    getIndexHealth(): Promise<any>;
+    ensureGraphIndexes(): Promise<void>;
+    runBenchmarks(options?: any): Promise<any>;
     close(): Promise<void>;
     initialize(): Promise<void>;
     getEntitiesByFile(filePath: string): Promise<Entity[]>;
@@ -111,8 +112,9 @@ export declare class KnowledgeGraphService extends EventEmitter {
     upsertEdgeEvidenceBulk(updates: any[]): Promise<void>;
     openEdge(fromId: string, toId: string, type: any, ts?: Date, changeSetId?: string): Promise<void>;
     closeEdge(fromId: string, toId: string, type: any, ts?: Date): Promise<void>;
+    annotateSessionRelationshipsWithCheckpoint(sessionId: string, checkpointId: string, relationshipIds?: string[], timestamp?: Date): Promise<void>;
+    createSessionCheckpointLink(sessionId: string, checkpointId: string, metadata?: Record<string, any>): Promise<void>;
     findRecentEntityIds(limit?: number): Promise<string[]>;
-    search(request: GraphSearchRequest): Promise<Entity[]>;
     findEntitiesByType(entityType: string): Promise<Entity[]>;
     listRelationships(query: RelationshipQuery): Promise<{
         relationships: GraphRelationship[];
@@ -127,5 +129,11 @@ export declare class KnowledgeGraphService extends EventEmitter {
         entityId?: string;
     }>;
     findDefinition(symbolId: string): Promise<Entity | null>;
+    getRelationshipById(relationshipId: string): Promise<GraphRelationship | null>;
+    getEdgeEvidenceNodes(relationshipId: string, limit?: number): Promise<any[]>;
+    getEdgeSites(relationshipId: string, limit?: number): Promise<any[]>;
+    getEdgeCandidates(relationshipId: string, limit?: number): Promise<any[]>;
+    repairPreviousVersionLink(versionId: string): Promise<void>;
 }
+export {};
 //# sourceMappingURL=KnowledgeGraphService.d.ts.map

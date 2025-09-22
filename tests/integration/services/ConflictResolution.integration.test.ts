@@ -26,7 +26,7 @@ describe("ConflictResolution Integration", () => {
 
   beforeAll(async () => {
     dbService = await setupTestDatabase();
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     conflictResolution = new ConflictResolution(kgService);
 
     const isHealthy = await checkDatabaseHealth(dbService);

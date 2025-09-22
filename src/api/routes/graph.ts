@@ -6,6 +6,7 @@
 import { FastifyInstance } from "fastify";
 import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
 import { DatabaseService } from "../../services/core/DatabaseService.js";
+import { RelationshipType } from "../../models/relationships.js";
 
 const GRAPH_ENTITY_TYPE_LOOKUP: Record<string, string> = {
   change: "change",
@@ -1166,9 +1167,9 @@ export async function registerGraphRoutes(
 
         // Query relationships from knowledge graph
         const { relationships, total } = await kgService.listRelationships({
-          fromEntity: query.fromEntity,
-          toEntity: query.toEntity,
-          type: query.type,
+          fromEntityId: query.fromEntity,
+          toEntityId: query.toEntity,
+          type: query.type as RelationshipType | undefined,
           limit: query.limit,
           offset: query.offset,
         });

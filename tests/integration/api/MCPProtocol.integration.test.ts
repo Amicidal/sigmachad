@@ -31,7 +31,7 @@ describe('MCP Protocol Integration', () => {
     }
 
     // Create services
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
 
     // Create API Gateway with MCP support
     apiGateway = new APIGateway(kgService, dbService);

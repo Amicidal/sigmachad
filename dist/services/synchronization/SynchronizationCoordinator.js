@@ -4,11 +4,11 @@
  */
 import { EventEmitter } from "events";
 import crypto from "crypto";
-import { RelationshipType, } from "../models/relationships.js";
-import { GitService } from "./scm/GitService.js";
-import { SessionCheckpointJobRunner, } from "../jobs/SessionCheckpointJob.js";
-import { PostgresSessionCheckpointJobStore } from "../jobs/persistence/PostgresSessionCheckpointJobStore.js";
-import { canonicalRelationshipId } from "../utils/codeEdges.js";
+import { RelationshipType, } from "../../models/relationships.js";
+import { GitService } from "../scm/GitService.js";
+import { SessionCheckpointJobRunner, } from "../../jobs/SessionCheckpointJob.js";
+import { PostgresSessionCheckpointJobStore } from "../../jobs/persistence/PostgresSessionCheckpointJobStore.js";
+import { canonicalRelationshipId } from "../../utils/codeEdges.js";
 class OperationCancelledError extends Error {
     constructor(operationId) {
         super(`Operation ${operationId} cancelled`);
@@ -999,7 +999,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         this.emit("syncProgress", operation, { phase: "scanning", progress: 0 });
         // Ensure a Module entity exists for the root package if applicable (best-effort)
         try {
-            const { ModuleIndexer } = await import("./knowledge/ModuleIndexer.js");
+            const { ModuleIndexer } = await import("../knowledge/ModuleIndexer.js");
             const mi = new ModuleIndexer(this.kgService);
             await mi.indexRootPackage().catch(() => { });
         }
@@ -1176,7 +1176,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                         // Fallback to per-relationship creation if bulk fails
                         for (const r of resolved) {
                             try {
-                                await this.kgService.createRelationship(r, undefined, undefined, { validate: false });
+                                await this.kgService.createRelationship(r);
                                 operation.relationshipsCreated++;
                             }
                             catch (err) {
@@ -1512,9 +1512,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                 try {
                                     if (parseResult.isIncremental &&
                                         ((_a = parseResult.updatedEntities) === null || _a === void 0 ? void 0 : _a.includes(entity))) {
-                                        await this.kgService.updateEntity(entity.id, entity, {
-                                            skipEmbedding: true,
-                                        });
+                                        await this.kgService.updateEntity(entity.id, entity);
                                         operation.entitiesUpdated++;
                                         toEmbed.push(entity);
                                     }
@@ -1580,7 +1578,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                                 created: now2,
                                                 lastModified: now2,
                                                 version: 1,
-                                            }, undefined, undefined, { validate: false });
+                                            });
                                         }
                                         catch (_e) { }
                                         // Attach MODIFIED_BY with git metadata (best-effort)
@@ -1603,7 +1601,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                                         date: info.date,
                                                     }
                                                     : { source: "sync" },
-                                            }, undefined, undefined, { validate: false });
+                                            });
                                         }
                                         catch (_f) { }
                                         try {
@@ -1727,7 +1725,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                                     created: now,
                                                     lastModified: now,
                                                     version: 1,
-                                                }, undefined, undefined, { validate: false });
+                                                });
                                             }
                                             catch (_l) { }
                                             // Attach MODIFIED_BY with git metadata (best-effort)
@@ -1750,7 +1748,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                                             date: info.date,
                                                         }
                                                         : { source: "sync" },
-                                                }, undefined, undefined, { validate: false });
+                                                });
                                             }
                                             catch (_m) { }
                                             changedSeeds.add(ent.id);
@@ -1846,7 +1844,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                                 created: now3,
                                                 lastModified: now3,
                                                 version: 1,
-                                            }, undefined, undefined, { validate: false });
+                                            });
                                             // Also MODIFIED_BY with git metadata (best-effort)
                                             try {
                                                 const git = new GitService();
@@ -1867,7 +1865,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                                                             date: info.date,
                                                         }
                                                         : { source: "sync" },
-                                                }, undefined, undefined, { validate: false });
+                                                });
                                             }
                                             catch (_p) { }
                                             let stateTransitionNew = {
@@ -1925,7 +1923,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                         case "delete":
                             // Handle file deletion
                             try {
-                                const fileEntities = await this.kgService.getEntitiesByFile(change.path, { includeSymbols: true });
+                                const fileEntities = await this.kgService.getEntitiesByFile(change.path);
                                 for (const entity of fileEntities) {
                                     await this.kgService.deleteEntity(entity.id);
                                     operation.entitiesDeleted++;

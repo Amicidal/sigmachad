@@ -708,8 +708,10 @@ describe("Test Routes", () => {
       );
       expect(mockReply.send).toHaveBeenCalledWith({
         success: true,
-        data: mockMetrics,
-        history: mockHistory,
+        data: {
+          metrics: mockMetrics,
+          history: mockHistory,
+        },
       });
     });
 
@@ -876,14 +878,16 @@ describe("Test Routes", () => {
       expect(mockReply.send).toHaveBeenCalledWith({
         success: true,
         data: {
-          averageExecutionTime: 0,
-          p95ExecutionTime: 0,
-          successRate: 0,
-          trend: "stable",
-          benchmarkComparisons: [],
-          historicalData: [],
+          metrics: {
+            averageExecutionTime: 0,
+            p95ExecutionTime: 0,
+            successRate: 0,
+            trend: "stable",
+            benchmarkComparisons: [],
+            historicalData: [],
+          },
+          history: [],
         },
-        history: [],
       });
     });
   });

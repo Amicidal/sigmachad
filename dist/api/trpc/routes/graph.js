@@ -151,7 +151,7 @@ export const graphRouter = router({
             limit: input.limit,
             offset: 0,
         });
-        const filtered = entities.filter((cluster) => {
+        const filtered = (entities || []).filter((cluster) => {
             var _a;
             if (input.domain) {
                 const domain = ((cluster === null || cluster === void 0 ? void 0 : cluster.domain) || ((_a = cluster === null || cluster === void 0 ? void 0 : cluster.metadata) === null || _a === void 0 ? void 0 : _a.domain) || '').toString();

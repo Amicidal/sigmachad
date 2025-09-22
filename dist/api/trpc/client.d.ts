@@ -95,7 +95,7 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 };
                 _output_in: typeof import("@trpc/server").unsetMarker;
                 _output_out: typeof import("@trpc/server").unsetMarker;
-            }, Entity[]>>;
+            }, import("../../models/entities.js").Entity[]>>;
         };
     };
     design: {
@@ -364,25 +364,6 @@ export declare const createTRPCClient: (baseUrl: string) => {
                         tags?: string[] | undefined;
                         metadata?: Record<string, any> | undefined;
                     };
-                    relatedSpecs: {
-                        type?: "spec" | undefined;
-                        status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
-                        priority?: "high" | "medium" | "low" | "critical" | undefined;
-                        assignee?: string | null | undefined;
-                        tags?: string[] | undefined;
-                        id?: string | undefined;
-                        title?: string | undefined;
-                        description?: string | undefined;
-                        acceptanceCriteria?: string[] | undefined;
-                        updated?: Date | undefined;
-                        path?: string | undefined;
-                        hash?: string | undefined;
-                        language?: string | undefined;
-                        lastModified?: Date | undefined;
-                        created?: Date | undefined;
-                        metadata?: Record<string, any> | undefined;
-                    }[];
-                    affectedEntities: any[];
                     testCoverage: {
                         entityId: string;
                         overallCoverage: {
@@ -419,6 +400,25 @@ export declare const createTRPCClient: (baseUrl: string) => {
                             covers: string[];
                         }[];
                     };
+                    relatedSpecs: {
+                        type?: "spec" | undefined;
+                        status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
+                        priority?: "high" | "medium" | "low" | "critical" | undefined;
+                        assignee?: string | null | undefined;
+                        tags?: string[] | undefined;
+                        id?: string | undefined;
+                        title?: string | undefined;
+                        description?: string | undefined;
+                        acceptanceCriteria?: string[] | undefined;
+                        updated?: Date | undefined;
+                        path?: string | undefined;
+                        hash?: string | undefined;
+                        language?: string | undefined;
+                        lastModified?: Date | undefined;
+                        created?: Date | undefined;
+                        metadata?: Record<string, any> | undefined;
+                    }[];
+                    affectedEntities: any[];
                 };
                 _output_out: {
                     spec: {
@@ -439,25 +439,6 @@ export declare const createTRPCClient: (baseUrl: string) => {
                         tags?: string[] | undefined;
                         metadata?: Record<string, any> | undefined;
                     };
-                    relatedSpecs: {
-                        type?: "spec" | undefined;
-                        status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
-                        priority?: "high" | "medium" | "low" | "critical" | undefined;
-                        assignee?: string | null | undefined;
-                        tags?: string[] | undefined;
-                        id?: string | undefined;
-                        title?: string | undefined;
-                        description?: string | undefined;
-                        acceptanceCriteria?: string[] | undefined;
-                        updated?: Date | undefined;
-                        path?: string | undefined;
-                        hash?: string | undefined;
-                        language?: string | undefined;
-                        lastModified?: Date | undefined;
-                        created?: Date | undefined;
-                        metadata?: Record<string, any> | undefined;
-                    }[];
-                    affectedEntities: any[];
                     testCoverage: {
                         entityId: string;
                         overallCoverage: {
@@ -494,6 +475,25 @@ export declare const createTRPCClient: (baseUrl: string) => {
                             covers: string[];
                         }[];
                     };
+                    relatedSpecs: {
+                        type?: "spec" | undefined;
+                        status?: "deprecated" | "draft" | "approved" | "implemented" | undefined;
+                        priority?: "high" | "medium" | "low" | "critical" | undefined;
+                        assignee?: string | null | undefined;
+                        tags?: string[] | undefined;
+                        id?: string | undefined;
+                        title?: string | undefined;
+                        description?: string | undefined;
+                        acceptanceCriteria?: string[] | undefined;
+                        updated?: Date | undefined;
+                        path?: string | undefined;
+                        hash?: string | undefined;
+                        language?: string | undefined;
+                        lastModified?: Date | undefined;
+                        created?: Date | undefined;
+                        metadata?: Record<string, any> | undefined;
+                    }[];
+                    affectedEntities: any[];
                 };
             }, unknown>>;
         };
@@ -707,8 +707,8 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _output_in: typeof import("@trpc/server").unsetMarker;
                 _output_out: typeof import("@trpc/server").unsetMarker;
             }, {
-                items: any;
-                total: any;
+                items: import("../../models/entities.js").Entity[];
+                total: number;
             }>>;
         };
         getDependencies: {
@@ -822,9 +822,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -855,9 +855,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -892,9 +892,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -921,9 +921,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -948,9 +948,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -979,9 +979,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1008,9 +1008,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1031,9 +1031,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1057,9 +1057,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1086,9 +1086,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1129,9 +1129,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1167,9 +1167,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1194,9 +1194,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1228,9 +1228,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1255,9 +1255,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1284,9 +1284,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1317,9 +1317,9 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _meta: object;
                 _ctx_out: {
                     kgService: import("../../services/index.js").KnowledgeGraphService;
-                    dbService: import("../../services/core/DatabaseService.js").DatabaseService;
-                    astParser: import("../../services/knowledge/ASTParser.js").ASTParser;
-                    fileWatcher: import("../../services/core/FileWatcher.js").FileWatcher;
+                    dbService: import("../../services/index.js").DatabaseService;
+                    astParser: import("../../services/index.js").ASTParser;
+                    fileWatcher: import("../../services/index.js").FileWatcher;
                     authToken: string | undefined;
                     authContext: import("../middleware/authentication.js").AuthContext | undefined;
                 };
@@ -1332,7 +1332,7 @@ export declare const createTRPCClient: (baseUrl: string) => {
                 _output_in: typeof import("@trpc/server").unsetMarker;
                 _output_out: typeof import("@trpc/server").unsetMarker;
             }, {
-                success: any;
+                success: void;
             }>>;
         };
     };

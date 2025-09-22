@@ -48,7 +48,7 @@ async function main() {
   await dbService.initialize();
   await dbService.setupDatabase();
 
-  const kgService = new KnowledgeGraphService(dbService);
+  const kgService = new KnowledgeGraphService(dbConfig.neo4j);
   await kgService.initialize();
 
   const astParser = new ASTParser();

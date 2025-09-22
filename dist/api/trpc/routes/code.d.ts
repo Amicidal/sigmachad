@@ -91,6 +91,6 @@ export declare const codeRouter: import("@trpc/server").CreateRouterInner<import
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
-    }, Entity[]>;
+    }, import("../../../models/entities.js").Entity[]>;
 }>;
 //# sourceMappingURL=code.d.ts.map

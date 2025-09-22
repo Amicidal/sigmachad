@@ -209,7 +209,8 @@ export async function registerImpactRoutes(
 
         const sanitizedDepth = sanitizeDepth(params.maxDepth);
 
-        const analysis = await kgService.analyzeImpact(params.changes, {
+        const analysis = await kgService.analyzeImpact({
+          changes: params.changes,
           includeIndirect: params.includeIndirect !== false,
           maxDepth: sanitizedDepth,
         });
@@ -269,7 +270,6 @@ export async function registerImpactRoutes(
         const sanitizedDepth = sanitizeDepth(maxDepth);
 
         const recentEntityIds = await kgService.findRecentEntityIds(
-          parsedSince,
           sanitizedLimit
         );
 
@@ -283,18 +283,16 @@ export async function registerImpactRoutes(
         }>;
 
         for (const entityId of recentEntityIds) {
-          const analysis = await kgService.analyzeImpact(
-            [
+          const analysis = await kgService.analyzeImpact({
+            changes: [
               {
                 entityId,
                 changeType: "modify",
               },
             ],
-            {
-              includeIndirect: includeIndirect !== false,
-              maxDepth: sanitizedDepth,
-            }
-          );
+            includeIndirect: includeIndirect !== false,
+            maxDepth: sanitizedDepth,
+          });
 
           const entity = await kgService.getEntity(entityId).catch(() => null);
           const entitySummary = entity
@@ -441,18 +439,17 @@ export async function registerImpactRoutes(
 
         const sanitizedDepth = sanitizeDepth(maxDepth);
 
-        const analysis = await kgService.analyzeImpact(
-          [
+        const analysis = await kgService.analyzeImpact({
+          changes: [
             {
               entityId,
               changeType: changeType || "modify",
               signatureChange: signatureChange === true,
             },
           ],
-          {
-            includeIndirect: includeIndirect !== false,
-            maxDepth: sanitizedDepth,
-          }
+          includeIndirect: includeIndirect !== false,
+          maxDepth: sanitizedDepth,
+        }
         );
 
         const entity = await kgService.getEntity(entityId).catch(() => null);
@@ -582,7 +579,8 @@ export async function registerImpactRoutes(
 
           const sanitizedDepth = sanitizeDepth(scenario.maxDepth);
 
-          const analysis = await kgService.analyzeImpact(sanitizedChanges, {
+          const analysis = await kgService.analyzeImpact({
+            changes: sanitizedChanges,
             includeIndirect: scenario.includeIndirect !== false,
             maxDepth: sanitizedDepth,
           });

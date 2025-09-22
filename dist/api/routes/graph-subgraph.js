@@ -8,11 +8,11 @@ export async function registerGraphViewerRoutes(app, kg, _db) {
             // Fetch entities with optional type filter
             const { entities } = await kg.listEntities({ type, limit, offset: 0 });
             // Fetch relationships among these entities (bounded)
-            const idSet = new Set(entities.map((e) => e.id));
+            const idSet = new Set((entities || []).map((e) => e.id));
             // Pull a larger page of relationships and then filter
             const { relationships } = await kg.listRelationships({ limit: Math.min(limit * 3, 10000), offset: 0 });
             const subRels = relationships.filter((r) => idSet.has(r.fromEntityId) && idSet.has(r.toEntityId));
-            reply.send({ success: true, data: { nodes: entities, edges: subRels } });
+            reply.send({ success: true, data: { nodes: entities || [], edges: subRels } });
         }
         catch (e) {
             reply.code(500).send({ success: false, error: { code: 'SUBGRAPH_FAILED', message: (e === null || e === void 0 ? void 0 : e.message) || 'Failed to build subgraph' } });

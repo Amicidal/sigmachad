@@ -565,5 +565,105 @@ export class RelationshipServiceOGM extends EventEmitter {
       RETURN count(r) as count
     `;
     }
+    /**
+     * Get a single relationship by its ID
+     */
+    async getRelationshipById(relationshipId) {
+        try {
+            const query = `
+        MATCH (from)-[r {id: $relationshipId}]->(to)
+        RETURN r, from, to
+      `;
+            const result = await this.neogmaService.executeCypher(query, {
+                relationshipId,
+            });
+            if (result.length === 0) {
+                return null;
+            }
+            return this.parseRelationshipFromNeo4j(result[0]);
+        }
+        catch (error) {
+            this.emit('error', { operation: 'getRelationshipById', relationshipId, error });
+            throw error;
+        }
+    }
+    /**
+     * Get evidence nodes for a relationship edge
+     */
+    async getEdgeEvidenceNodes(relationshipId, limit = 200) {
+        try {
+            const query = `
+        MATCH (from)-[r {id: $relationshipId}]->(to)
+        WITH r
+        WHERE r.evidence IS NOT NULL
+        UNWIND r.evidence AS evidence
+        RETURN evidence
+        LIMIT $limit
+      `;
+            const result = await this.neogmaService.executeCypher(query, {
+                relationshipId,
+                limit,
+            });
+            return result.map(row => row.evidence);
+        }
+        catch (error) {
+            this.emit('error', { operation: 'getEdgeEvidenceNodes', relationshipId, error });
+            // Return empty array on error rather than throwing
+            console.warn(`Failed to get evidence nodes for relationship ${relationshipId}:`, error);
+            return [];
+        }
+    }
+    /**
+     * Get edge sites for a relationship (locations where the relationship is used)
+     */
+    async getEdgeSites(relationshipId, limit = 50) {
+        try {
+            const query = `
+        MATCH (from)-[r {id: $relationshipId}]->(to)
+        WITH r
+        WHERE r.locations IS NOT NULL
+        UNWIND r.locations AS location
+        RETURN location
+        LIMIT $limit
+      `;
+            const result = await this.neogmaService.executeCypher(query, {
+                relationshipId,
+                limit,
+            });
+            return result.map(row => row.location);
+        }
+        catch (error) {
+            this.emit('error', { operation: 'getEdgeSites', relationshipId, error });
+            // Return empty array on error rather than throwing
+            console.warn(`Failed to get edge sites for relationship ${relationshipId}:`, error);
+            return [];
+        }
+    }
+    /**
+     * Get edge candidates for a relationship (potential relationship targets)
+     */
+    async getEdgeCandidates(relationshipId, limit = 50) {
+        try {
+            const query = `
+        MATCH (from)-[r {id: $relationshipId}]->(to)
+        WITH from, to, type(r) as relType
+        MATCH (from)-[similar]->(candidates)
+        WHERE type(similar) = relType AND candidates <> to
+        RETURN DISTINCT candidates
+        LIMIT $limit
+      `;
+            const result = await this.neogmaService.executeCypher(query, {
+                relationshipId,
+                limit,
+            });
+            return result.map(row => row.candidates);
+        }
+        catch (error) {
+            this.emit('error', { operation: 'getEdgeCandidates', relationshipId, error });
+            // Return empty array on error rather than throwing
+            console.warn(`Failed to get edge candidates for relationship ${relationshipId}:`, error);
+            return [];
+        }
+    }
 }
 //# sourceMappingURL=RelationshipServiceOGM.js.map

@@ -1,7 +1,7 @@
 import { GitService } from "./scm/GitService.js";
 import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
 import { DatabaseService } from "./core/DatabaseService.js";
-import type { CommitPRRequest, CommitPRResponse, SCMCommitRecord, SCMStatusSummary, SCMBranchInfo, SCMPushResult, SCMCommitLogEntry } from "../models/types.js";
+import type { CommitPRRequest, CommitPRResponse, SCMCommitRecord, SCMStatusSummary, SCMBranchInfo, SCMPushResult, SCMCommitLogEntry } from "../../models/types.js";
 import { SCMProvider } from "./scm/SCMProvider.js";
 export declare class ValidationError extends Error {
     readonly details: string[];

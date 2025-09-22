@@ -104,7 +104,7 @@ async function main(): Promise<void> {
   await dbService.initialize();
   await dbService.setupDatabase();
 
-  const kgService = new KnowledgeGraphService(dbService);
+  const kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
   await kgService.initialize();
 
   const validator = new TemporalHistoryValidator(kgService);

@@ -4,9 +4,9 @@
  */
 
 import crypto from "crypto";
-import { Entity } from "../models/entities.js";
-import { GraphRelationship } from "../models/relationships.js";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
+import { Entity } from "../../models/entities.js";
+import { GraphRelationship } from "../../models/relationships.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
 
 export interface Conflict {
   id: string;

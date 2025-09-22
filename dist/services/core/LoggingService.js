@@ -1,7 +1,7 @@
 import * as fs from "fs/promises";
-import { getInstrumentationDispatcher, } from "./logging/InstrumentationDispatcher.js";
-import { FileSink } from "./logging/FileSink.js";
-import { sanitizeData, serializeLogEntry } from "./logging/serialization.js";
+import { getInstrumentationDispatcher, } from "../logging/InstrumentationDispatcher.js";
+import { FileSink } from "../logging/FileSink.js";
+import { sanitizeData, serializeLogEntry } from "../logging/serialization.js";
 const DEFAULT_MAX_LOGS_IN_MEMORY = 10000;
 function normalizeOptions(input) {
     var _a, _b, _c;

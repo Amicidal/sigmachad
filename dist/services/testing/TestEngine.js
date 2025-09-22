@@ -3,11 +3,11 @@
  * Comprehensive test management, analysis, and integration service
  * Implements Phase 5.2 requirements for test integration
  */
-import { TestResultParser } from "./testing/TestResultParser.js";
-import { RelationshipType, } from "../models/relationships.js";
-import { noiseConfig } from "../config/noise.js";
-import { sanitizeEnvironment } from "../utils/environment.js";
-import { normalizeMetricIdForId } from "../utils/codeEdges.js";
+import { TestResultParser } from "./TestResultParser.js";
+import { RelationshipType, } from "../../models/relationships.js";
+import { noiseConfig } from "../../config/noise.js";
+import { sanitizeEnvironment } from "../../utils/environment.js";
+import { normalizeMetricIdForId } from "../../utils/codeEdges.js";
 import * as fs from "fs/promises";
 export class TestEngine {
     constructor(kgService, dbService) {
@@ -155,7 +155,10 @@ export class TestEngine {
             console.warn("KnowledgeGraphService#createCheckpoint not available; skipping incident checkpoint.");
             return;
         }
-        const { checkpointId } = await this.kgService.createCheckpoint(seeds, "incident", Math.max(1, Math.min(5, Math.floor(hops))));
+        const { checkpointId } = await this.kgService.createCheckpoint(seeds, {
+            type: "incident",
+            hops: Math.max(1, Math.min(5, Math.floor(hops)))
+        });
         console.log(`📌 Incident checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`);
     }
     /**
@@ -217,7 +220,7 @@ export class TestEngine {
                             created: timestamp,
                             lastModified: timestamp,
                             version: 1,
-                        }, undefined, undefined, { validate: false });
+                        });
                     }
                     catch (_a) { }
                 }
@@ -335,9 +338,7 @@ export class TestEngine {
         if (options.impactSeverity) {
             relationship.impactSeverity = options.impactSeverity;
         }
-        await this.kgService.createRelationship(relationship, undefined, undefined, {
-            validate: false,
-        });
+        await this.kgService.createRelationship(relationship);
     }
     buildExecutionEnvironment(result, timestamp) {
         var _a, _b, _c;
@@ -1379,7 +1380,7 @@ export class TestEngine {
                 lastModified: new Date(),
                 version: 1,
                 metadata: coverageMetadata,
-            }, undefined, undefined, { validate: false });
+            });
             // Maintain TESTS edge for legacy consumers while sharing the same metadata shape
             await this.kgService.createRelationship({
                 id: `${testEntity.id}_tests_${testEntity.targetSymbol}`,
@@ -1390,7 +1391,7 @@ export class TestEngine {
                 lastModified: new Date(),
                 version: 1,
                 metadata: coverageMetadata,
-            }, undefined, undefined, { validate: false });
+            });
         }
         catch (error) {
             // If we can't create the relationship, just skip it

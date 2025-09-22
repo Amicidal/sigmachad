@@ -1,7 +1,7 @@
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "./core/DatabaseService.js";
-import type { CreateSpecRequest, CreateSpecResponse, GetSpecResponse, ListSpecsParams, UpdateSpecRequest, ValidationIssue } from "../models/types.js";
-import type { Spec } from "../models/entities.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
+import type { CreateSpecRequest, CreateSpecResponse, GetSpecResponse, ListSpecsParams, UpdateSpecRequest, ValidationIssue } from "../../models/types.js";
+import type { Spec } from "../../models/entities.js";
 export interface SpecListResult {
     specs: Spec[];
     pagination: {

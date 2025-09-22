@@ -4,9 +4,9 @@
  */
 import { EventEmitter } from 'events';
 import { SyncOperation, SyncError, SyncConflict, type CheckpointMetricsSnapshot } from './SynchronizationCoordinator.js';
-import { RelationshipType } from '../models/relationships.js';
-import { Conflict } from './ConflictResolution.js';
-import type { SessionCheckpointJobMetrics, SessionCheckpointJobSnapshot } from '../jobs/SessionCheckpointJob.js';
+import { RelationshipType } from '../../models/relationships.js';
+import { Conflict } from '../scm/ConflictResolution.js';
+import type { SessionCheckpointJobMetrics, SessionCheckpointJobSnapshot } from '../../jobs/SessionCheckpointJob.js';
 export interface SyncMetrics {
     operationsTotal: number;
     operationsSuccessful: number;

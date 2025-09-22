@@ -5,7 +5,7 @@
 import { marked } from "marked";
 import { readFileSync } from "fs";
 import { join, extname, basename } from "path";
-import { RelationshipType, } from "../models/relationships.js";
+import { RelationshipType, } from "../../models/relationships.js";
 import { HeuristicDocumentationIntelligenceProvider, } from "./DocumentationIntelligenceProvider.js";
 export class DocumentationParser {
     constructor(kgService, dbService, intelligenceProvider) {

@@ -39,7 +39,7 @@ describe("Code Validation API Integration", () => {
     }
 
     // Create services
-    kgService = new KnowledgeGraphService(dbService);
+    kgService = new KnowledgeGraphService(dbService.getConfig().neo4j);
     testEngine = new TestEngine(kgService, dbService);
 
     // Create API Gateway
