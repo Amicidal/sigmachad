@@ -10,12 +10,23 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { KnowledgeGraphService } from "../../src/services/knowledge/KnowledgeGraphService.js";
 import { RelationshipType } from "../../src/models/relationships.js";
+import { setupOGMServices, ComparisonTestSetup, OGMTestSetup } from "./ogm-helpers.js";
 
 // Integration test utilities for services that need to use database isolation
 export interface IsolatedTestSetup {
   dbService: DatabaseService;
   testContext: TestIsolationContext;
   kgService: KnowledgeGraphService;
+}
+
+// Extended setup with OGM services for comprehensive testing
+export interface IsolatedOGMTestSetup extends IsolatedTestSetup {
+  ogmServices: OGMTestSetup;
+}
+
+// Extended setup with both legacy and OGM services for comparison testing
+export interface IsolatedComparisonTestSetup extends IsolatedTestSetup {
+  comparisonServices: ComparisonTestSetup;
 }
 
 /**
@@ -50,6 +61,75 @@ export async function cleanupIsolatedServiceTest(
     setup.testContext,
     options
   );
+}
+
+/**
+ * Setup isolated test environment with OGM services
+ */
+export async function setupIsolatedOGMTest(
+  serviceName: string,
+  options: { silent?: boolean } = {}
+): Promise<IsolatedOGMTestSetup> {
+  const baseSetup = await setupIsolatedServiceTest(serviceName, options);
+  const ogmServices = await setupOGMServices(baseSetup.dbService, baseSetup.testContext);
+
+  return {
+    ...baseSetup,
+    ogmServices,
+  };
+}
+
+/**
+ * Setup isolated test environment with both legacy and OGM services for comparison
+ */
+export async function setupIsolatedComparisonTest(
+  serviceName: string,
+  options: { silent?: boolean } = {}
+): Promise<IsolatedComparisonTestSetup> {
+  const baseSetup = await setupIsolatedServiceTest(serviceName, options);
+
+  // Setup OGM services
+  const ogmServices = await setupOGMServices(baseSetup.dbService, baseSetup.testContext);
+
+  const comparisonServices: ComparisonTestSetup = {
+    ...ogmServices,
+    legacyKgService: baseSetup.kgService,
+  };
+
+  return {
+    ...baseSetup,
+    comparisonServices,
+  };
+}
+
+/**
+ * Cleanup isolated OGM test environment
+ */
+export async function cleanupIsolatedOGMTest(
+  setup: IsolatedOGMTestSetup,
+  options: { silent?: boolean } = {}
+): Promise<void> {
+  // Close OGM services if they have cleanup methods
+  if (setup.ogmServices.neogmaService && typeof setup.ogmServices.neogmaService.close === 'function') {
+    await setup.ogmServices.neogmaService.close();
+  }
+
+  await cleanupIsolatedServiceTest(setup, options);
+}
+
+/**
+ * Cleanup isolated comparison test environment
+ */
+export async function cleanupIsolatedComparisonTest(
+  setup: IsolatedComparisonTestSetup,
+  options: { silent?: boolean } = {}
+): Promise<void> {
+  // Close OGM services if they have cleanup methods
+  if (setup.comparisonServices.neogmaService && typeof setup.comparisonServices.neogmaService.close === 'function') {
+    await setup.comparisonServices.neogmaService.close();
+  }
+
+  await cleanupIsolatedServiceTest(setup, options);
 }
 
 export interface ClearTestDataOptions {

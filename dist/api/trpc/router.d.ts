@@ -731,8 +731,8 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
                 depth?: number | undefined;
             };
             _input_out: {
-                entityId: string;
                 depth: number;
+                entityId: string;
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
@@ -769,12 +769,12 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _meta: object;
             _ctx_out: TRPCContext;
             _input_in: {
-                entityId: string;
                 changeType: "delete" | "modify" | "refactor";
+                entityId: string;
             };
             _input_out: {
-                entityId: string;
                 changeType: "delete" | "modify" | "refactor";
+                entityId: string;
             };
             _output_in: typeof import("@trpc/server").unsetMarker;
             _output_out: typeof import("@trpc/server").unsetMarker;
@@ -1125,15 +1125,15 @@ export declare const appRouter: import("@trpc/server").CreateRouterInner<import(
             _input_in: {
                 limit?: number | undefined;
                 offset?: number | undefined;
-                since?: Date | undefined;
                 reason?: string | undefined;
+                since?: Date | undefined;
                 until?: Date | undefined;
             } | undefined;
             _input_out: {
                 limit?: number | undefined;
                 offset?: number | undefined;
-                since?: Date | undefined;
                 reason?: string | undefined;
+                since?: Date | undefined;
                 until?: Date | undefined;
             } | undefined;
             _output_in: typeof import("@trpc/server").unsetMarker;

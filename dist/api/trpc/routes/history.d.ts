@@ -68,15 +68,15 @@ export declare const historyRouter: import("@trpc/server").CreateRouterInner<imp
         _input_in: {
             limit?: number | undefined;
             offset?: number | undefined;
-            since?: Date | undefined;
             reason?: string | undefined;
+            since?: Date | undefined;
             until?: Date | undefined;
         } | undefined;
         _input_out: {
             limit?: number | undefined;
             offset?: number | undefined;
-            since?: Date | undefined;
             reason?: string | undefined;
+            since?: Date | undefined;
             until?: Date | undefined;
         } | undefined;
         _output_in: typeof import("@trpc/server").unsetMarker;

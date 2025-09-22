@@ -6,6 +6,11 @@
 import { EventEmitter } from 'events';
 import { Neo4jService, Neo4jConfig } from './Neo4jService.js';
 import { EntityService } from './EntityService.js';
+import { NeogmaService } from './ogm/NeogmaService.js';
+import { EntityServiceOGM } from './ogm/EntityServiceOGM.js';
+import { EntityServiceAdapter, IEntityService } from './ogm/ServiceAdapter.js';
+import { getFeatureFlagService } from './ogm/FeatureFlags.js';
+import { getMigrationTracker } from './ogm/MigrationTracker.js';
 import { RelationshipService } from './RelationshipService.js';
 import { EmbeddingService } from './EmbeddingService.js';
 import { SearchService } from './SearchService.js';
@@ -28,12 +33,15 @@ import {
 
 export class KnowledgeGraphService extends EventEmitter {
   private neo4j: Neo4jService;
-  private entities: EntityService;
+  private neogma: NeogmaService | null = null;
+  private entities: IEntityService;
   private relationships: RelationshipService;
   private embeddings: EmbeddingService;
   public search: SearchService;
   private history: HistoryService;
   private analysis: AnalysisService;
+  private featureFlags = getFeatureFlagService();
+  private tracker = getMigrationTracker();
 
   constructor(config?: Neo4jConfig) {
     super();
@@ -45,9 +53,9 @@ export class KnowledgeGraphService extends EventEmitter {
       database: process.env.NEO4J_DATABASE || 'neo4j',
     };
 
-    // Initialize services
+    // Initialize services with OGM support
     this.neo4j = new Neo4jService(neo4jConfig);
-    this.entities = new EntityService(this.neo4j);
+    this.entities = this.initializeEntityService(neo4jConfig);
     this.relationships = new RelationshipService(this.neo4j);
     this.embeddings = new EmbeddingService(this.neo4j);
     this.search = new SearchService(this.neo4j, this.embeddings);
@@ -61,22 +69,78 @@ export class KnowledgeGraphService extends EventEmitter {
     this.initializeDatabase().catch(err =>
       console.error('Failed to initialize database:', err)
     );
+
+    // Log migration status
+    this.logMigrationStatus();
+  }
+
+  /**
+   * Initialize entity service with OGM support
+   */
+  private initializeEntityService(config: Neo4jConfig): IEntityService {
+    const legacyService = new EntityService(this.neo4j);
+
+    // Initialize OGM service if enabled
+    let ogmService: EntityServiceOGM | undefined;
+    if (this.featureFlags.isOGMEnabledForService('useOGMEntityService')) {
+      try {
+        this.neogma = new NeogmaService(config);
+        ogmService = new EntityServiceOGM(this.neogma);
+        console.log('[KnowledgeGraphService] OGM EntityService initialized');
+      } catch (error) {
+        console.error('[KnowledgeGraphService] Failed to initialize OGM EntityService:', error);
+        if (!this.featureFlags.isFallbackEnabled()) {
+          throw error;
+        }
+        console.warn('[KnowledgeGraphService] Falling back to legacy EntityService');
+      }
+    }
+
+    return new EntityServiceAdapter(legacyService, ogmService);
   }
 
   /**
    * Initialize database with necessary indexes and constraints
    */
   private async initializeDatabase(): Promise<void> {
-    await this.neo4j.createCommonIndexes();
-    await this.embeddings.initializeVectorIndex();
-    this.emit('database:initialized');
+    try {
+      await this.neo4j.createCommonIndexes();
+      await this.embeddings.initializeVectorIndex();
+
+      // Initialize OGM database setup if available
+      if (this.neogma) {
+        // OGM models should handle their own indexes
+        console.log('[KnowledgeGraphService] OGM database setup completed');
+      }
+
+      this.emit('database:initialized');
+    } catch (error) {
+      console.error('[KnowledgeGraphService] Database initialization failed:', error);
+      this.emit('database:error', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Log current migration status
+   */
+  private logMigrationStatus(): void {
+    if (this.featureFlags.shouldLogMetrics()) {
+      const status = this.featureFlags.getMigrationStatus();
+      console.log('[KnowledgeGraphService] Migration Status:', {
+        ogmEnabled: status.ogmEnabled,
+        servicesUsingOGM: status.servicesUsingOGM,
+        servicesUsingLegacy: status.servicesUsingLegacy,
+        fallbackEnabled: status.fallbackEnabled,
+      });
+    }
   }
 
   /**
    * Setup event forwarding from sub-services
    */
   private setupEventForwarding(): void {
-    // Forward entity events
+    // Forward entity events (including OGM-specific events)
     this.entities.on('entity:created', (data) => {
       this.emit('entity:created', data);
     });
@@ -85,6 +149,12 @@ export class KnowledgeGraphService extends EventEmitter {
     });
     this.entities.on('entity:deleted', (data) => {
       this.emit('entity:deleted', data);
+    });
+    this.entities.on('entities:bulk:created', (data) => {
+      this.emit('entities:bulk:created', data);
+    });
+    this.entities.on('ogm:error', (data) => {
+      this.emit('ogm:error', data);
     });
 
     // Forward relationship events
@@ -279,11 +349,15 @@ export class KnowledgeGraphService extends EventEmitter {
       this.embeddings.getEmbeddingStats(),
     ]);
 
+    // Include migration metrics
+    const migrationStats = this.tracker.getMetrics();
+
     return {
       database: dbStats,
       entities: entityStats,
       relationships: relStats,
       embeddings: embeddingStats,
+      migration: migrationStats,
     };
   }
 
@@ -307,10 +381,69 @@ export class KnowledgeGraphService extends EventEmitter {
     return this.relationships.markInactiveEdgesNotSeenSince(since);
   }
 
+  // ========== Migration Management ==========
+
+  /**
+   * Get current migration status across all services
+   */
+  getMigrationStatus(): {
+    featureFlags: any;
+    migrationMetrics: any;
+    services: {
+      entity: any;
+    };
+  } {
+    return {
+      featureFlags: this.featureFlags.getConfig(),
+      migrationMetrics: this.tracker.getMetrics(),
+      services: {
+        entity: (this.entities as EntityServiceAdapter).getMigrationStatus(),
+      },
+    };
+  }
+
+  /**
+   * Get migration health summary
+   */
+  getMigrationHealth(): any {
+    return this.tracker.getMigrationHealth();
+  }
+
+  /**
+   * Force switch to legacy implementation (for debugging)
+   */
+  forceLegacyMode(): void {
+    console.log('[KnowledgeGraphService] Forcing legacy mode');
+    this.featureFlags.updateConfig({ useOGM: false, useOGMEntityService: false });
+    (this.entities as EntityServiceAdapter).forceLegacy();
+  }
+
+  /**
+   * Force switch to OGM implementation (for debugging)
+   */
+  forceOGMMode(): void {
+    if (!this.neogma) {
+      throw new Error('OGM services not initialized');
+    }
+    console.log('[KnowledgeGraphService] Forcing OGM mode');
+    this.featureFlags.updateConfig({ useOGM: true, useOGMEntityService: true });
+    (this.entities as EntityServiceAdapter).forceOGM();
+  }
+
+  /**
+   * Reset migration metrics (for testing)
+   */
+  resetMigrationMetrics(): void {
+    this.tracker.reset();
+  }
+
   // ========== Cleanup ==========
 
   async close(): Promise<void> {
     await this.neo4j.close();
+    if (this.neogma) {
+      await this.neogma.close();
+    }
     this.emit('service:closed');
   }
 

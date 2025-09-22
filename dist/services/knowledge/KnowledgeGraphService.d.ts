@@ -10,17 +10,28 @@ import { GraphRelationship, RelationshipQuery, PathQuery } from '../../models/re
 import { GraphSearchRequest, ImpactAnalysisRequest, ImpactAnalysis, DependencyAnalysis } from '../../models/types.js';
 export declare class KnowledgeGraphService extends EventEmitter {
     private neo4j;
+    private neogma;
     private entities;
     private relationships;
     private embeddings;
     search: SearchService;
     private history;
     private analysis;
+    private featureFlags;
+    private tracker;
     constructor(config?: Neo4jConfig);
+    /**
+     * Initialize entity service with OGM support
+     */
+    private initializeEntityService;
     /**
      * Initialize database with necessary indexes and constraints
      */
     private initializeDatabase;
+    /**
+     * Log current migration status
+     */
+    private logMigrationStatus;
     /**
      * Setup event forwarding from sub-services
      */
@@ -67,6 +78,32 @@ export declare class KnowledgeGraphService extends EventEmitter {
     ensureIndices(): Promise<void>;
     mergeNormalizedDuplicates(): Promise<number>;
     markInactiveEdgesNotSeenSince(since: Date): Promise<number>;
+    /**
+     * Get current migration status across all services
+     */
+    getMigrationStatus(): {
+        featureFlags: any;
+        migrationMetrics: any;
+        services: {
+            entity: any;
+        };
+    };
+    /**
+     * Get migration health summary
+     */
+    getMigrationHealth(): any;
+    /**
+     * Force switch to legacy implementation (for debugging)
+     */
+    forceLegacyMode(): void;
+    /**
+     * Force switch to OGM implementation (for debugging)
+     */
+    forceOGMMode(): void;
+    /**
+     * Reset migration metrics (for testing)
+     */
+    resetMigrationMetrics(): void;
     close(): Promise<void>;
     initialize(): Promise<void>;
     getEntitiesByFile(filePath: string): Promise<Entity[]>;
@@ -77,9 +114,18 @@ export declare class KnowledgeGraphService extends EventEmitter {
     findRecentEntityIds(limit?: number): Promise<string[]>;
     search(request: GraphSearchRequest): Promise<Entity[]>;
     findEntitiesByType(entityType: string): Promise<Entity[]>;
-    listRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
-    listModuleChildren(moduleId: string): Promise<Entity[]>;
-    listImports(fileId: string): Promise<Entity[]>;
+    listRelationships(query: RelationshipQuery): Promise<{
+        relationships: GraphRelationship[];
+        total: number;
+    }>;
+    listModuleChildren(moduleId: string, options?: any): Promise<{
+        children: Entity[];
+        modulePath?: string;
+    }>;
+    listImports(fileId: string, options?: any): Promise<{
+        imports: Entity[];
+        entityId?: string;
+    }>;
     findDefinition(symbolId: string): Promise<Entity | null>;
 }
 //# sourceMappingURL=KnowledgeGraphService.d.ts.map

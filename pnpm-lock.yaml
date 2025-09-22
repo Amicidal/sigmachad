@@ -58,6 +58,9 @@ importers:
       neo4j-driver:
         specifier: ^5.28.2
         version: 5.28.2
+      neogma:
+        specifier: ^1.14.1
+        version: 1.14.1
       openai:
         specifier: ^5.16.0
         version: 5.16.0(ws@8.18.3)(zod@3.25.76)
@@ -891,6 +894,9 @@ packages:
   '@types/readdir-glob@1.1.5':
     resolution: {integrity: sha512-raiuEPUYqXu+nvtY2Pe8s8FEmZ3x5yAH4VkLdihcPdalvsHltomrRC9BzuStrJ9yk06470hS0Crw0f1pXqD+Hg==}
 
+  '@types/revalidator@0.3.12':
+    resolution: {integrity: sha512-DsA2jHfz73JaIROVoMDd/x7nVWXBmEdDSoXB4yQlDzv/NCBkFY2fMHkyE6DGrvooLDAFe5QI6l9Wq0TgdopMtg==}
+
   '@types/superagent@8.1.9':
     resolution: {integrity: sha512-pTVjI73witn+9ILmoJdajHGW2jkSaOzhiFYF1Rd3EQ94kymLqB9PjD9ISg7WaALC7+dCHT0FGe9T2LktLq/3GQ==}
 
@@ -1170,6 +1176,10 @@ packages:
   chokidar@4.0.3:
     resolution: {integrity: sha512-Qgzu8kfBvo+cA4962jnP1KkS6Dop5NS6g7R5LFYJr4b8Ub94PPQXUksCw9PvXoeXPRRddRNC5C1JQUR2SMGtnA==}
     engines: {node: '>= 14.16.0'}
+
+  clone@2.1.2:
+    resolution: {integrity: sha512-3Pe/CF1Nn94hyhIYpjtiLhdCoEoz0DqQ+988E9gmeEdQZlojxnOb74wctFyuwWQHzqyf9X7C7MG8juUpqBJT8w==}
+    engines: {node: '>=0.8'}
 
   cluster-key-slot@1.1.2:
     resolution: {integrity: sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA==}
@@ -1963,6 +1973,9 @@ packages:
   neo4j-driver@5.28.2:
     resolution: {integrity: sha512-nix4Canllf7Tl4FZL9sskhkKYoCp40fg7VsknSRTRgbm1JaE2F1Ej/c2nqlM06nqh3WrkI0ww3taVB+lem7w7w==}
 
+  neogma@1.14.1:
+    resolution: {integrity: sha512-rwfPLB32yyfURlsIPH43u5Udsx+lKkAysNAZj/tRLTjCxh5HlRwFiVroXCentSgUn5Z6ARbzP2+IEoni41hneQ==}
+
   node-addon-api@8.5.0:
     resolution: {integrity: sha512-/bRZty2mXUIFY/xU5HLvveNHlswNJej+RnxBjOMkidWfwZzgTbPG1E3K5TOxRLOR+5hX7bSofy8yf1hZevMS8A==}
     engines: {node: ^18 || ^20 || >= 21}
@@ -2262,6 +2275,10 @@ packages:
   reusify@1.1.0:
     resolution: {integrity: sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw==}
     engines: {iojs: '>=1.0.0', node: '>=0.10.0'}
+
+  revalidator@0.3.1:
+    resolution: {integrity: sha512-orq+Nw+V5pDpQwGEuN2n1AgJ+0A8WqhFHKt5KgkxfAowUKgO1CWV32IR3TNB4g9/FX3gJt9qBJO8DYlwonnB0Q==}
+    engines: {node: '>= 0.8.0'}
 
   rfdc@1.4.1:
     resolution: {integrity: sha512-q1b3N5QkRUWUl7iyylaaj3kOpIT0N2i9MqIEQXP73GVsN9cw3fdx8X63cEmWhJGi2PPCF23Ijp7ktmd39rawIA==}
@@ -2571,6 +2588,10 @@ packages:
 
   uuid@11.1.0:
     resolution: {integrity: sha512-0/A9rDy9P7cJ+8w1c9WD9V//9Wj15Ce2MPz8Ri6032usz+NfePxx5AcN3bN+r6ZL6jEo066/yNYB3tn4pQEx+A==}
+    hasBin: true
+
+  uuid@9.0.1:
+    resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
     hasBin: true
 
   vary@1.1.2:
@@ -3257,6 +3278,8 @@ snapshots:
     dependencies:
       '@types/node': 22.18.0
 
+  '@types/revalidator@0.3.12': {}
+
   '@types/superagent@8.1.9':
     dependencies:
       '@types/cookiejar': 2.1.5
@@ -3619,6 +3642,8 @@ snapshots:
   chokidar@4.0.3:
     dependencies:
       readdirp: 4.1.2
+
+  clone@2.1.2: {}
 
   cluster-key-slot@1.1.2: {}
 
@@ -4459,6 +4484,15 @@ snapshots:
       neo4j-driver-core: 5.28.2
       rxjs: 7.8.2
 
+  neogma@1.14.1:
+    dependencies:
+      '@types/revalidator': 0.3.12
+      clone: 2.1.2
+      dotenv: 16.6.1
+      neo4j-driver: 5.28.2
+      revalidator: 0.3.1
+      uuid: 9.0.1
+
   node-addon-api@8.5.0: {}
 
   node-fetch@2.7.0:
@@ -4728,6 +4762,8 @@ snapshots:
   ret@0.5.0: {}
 
   reusify@1.1.0: {}
+
+  revalidator@0.3.1: {}
 
   rfdc@1.4.1: {}
 
@@ -5090,6 +5126,8 @@ snapshots:
   util-deprecate@1.0.2: {}
 
   uuid@11.1.0: {}
+
+  uuid@9.0.1: {}
 
   vary@1.1.2: {}
 
