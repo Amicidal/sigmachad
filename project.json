@@ -1,0 +1,90 @@
+{
+  "$schema": "./node_modules/nx/schemas/project-schema.json",
+  "name": "memento",
+  "sourceRoot": "src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist",
+        "main": "src/index.ts",
+        "tsConfig": "tsconfig.json"
+      },
+      "dependsOn": ["^build"]
+    },
+    "serve": {
+      "executor": "@nx/node:node",
+      "defaultConfiguration": "development",
+      "options": {
+        "buildTarget": "memento:build"
+      },
+      "configurations": {
+        "development": {
+          "buildTarget": "memento:build:development"
+        },
+        "production": {
+          "buildTarget": "memento:build:production"
+        }
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["src/**/*.ts"]
+      }
+    },
+    "test": {
+      "executor": "@nx/vite:test",
+      "options": {
+        "config": "vitest.config.ts",
+        "reportsDirectory": "coverage"
+      }
+    },
+    "test:integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "RUN_INTEGRATION=1 NODE_ENV=test vitest run tests/integration",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "docker:up": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "docker compose up -d falkordb qdrant postgres redis"
+      }
+    },
+    "docker:down": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "docker compose down"
+      }
+    },
+    "docker:test-up": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "docker-compose -f docker-compose.test.yml up -d"
+      }
+    },
+    "docker:test-down": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "docker-compose -f docker-compose.test.yml down -v"
+      }
+    },
+    "sync": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx scripts/sync-knowledge-graph.ts"
+      }
+    },
+    "health": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx scripts/health-check.ts"
+      }
+    }
+  },
+  "implicitDependencies": ["core", "database", "knowledge", "api", "testing"]
+}

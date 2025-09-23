@@ -1,7 +1,7 @@
 # Temporal Relationship Blueprint
 
 ## 1. Overview
-Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFIED_IN`, `REMOVED_IN`, `OF`) provide the timeline backbone of the knowledge graph. They link entities to versions, sessions, and change records, enabling historical reconstruction, auditing, and rollback support.
+Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFIED_IN`, `REMOVED_IN`, `OF`) provide the timeline backbone of the knowledge graph. They link entities to versions and SCM changes, enabling historical reconstruction, auditing, and rollback support. (Ephemeral sessions ref via metadata anchors; no persistent ties.)
 
 ## 2. Current Gaps
 - Synchronization coordination tests still surface pending-state leaks during certain rollback paths; failure propagation work remains outstanding.
@@ -24,7 +24,7 @@ Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFI
 4. Support checkpointing by linking snapshots to captured subgraphs with consistent temporal metadata.
 
 ## 4. Inputs & Consumers
-- **Inputs**: SynchronizationCoordinator parsing cycles, SCM commit metadata, manual change annotations, rollback operations, session manager.
+- **Inputs**: SynchronizationCoordinator parsing cycles, SCM commit metadata, manual change annotations, rollback operations. (Ephemeral sessions excluded—no provenance.)
 - **Consumers**: History APIs (`src/api/routes/history.ts`), admin dashboards, rollback service, impact analysis, compliance auditors.
 
 ## 5. Schema & Metadata Requirements
@@ -49,8 +49,8 @@ Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFI
    - `closeEdge` sets `validTo`, marks `active=false`, increments `version`.
    - Both operations should run in transactions to avoid partial state (use `falkordbQuery` with multi-statement or explicit transactions).
 3. **Change Provenance**:
-   - For each change set (commit/session), create `change` entity node capturing metadata and link via `MODIFIED_BY`, `MODIFIED_IN`, `CREATED_IN`, `REMOVED_IN` relationships.
-   - Ensure ingestion populates these links when scanning diffs or applying patches.
+   - For each SCM change set (commit/PR), create `change` entity node capturing metadata and link via `MODIFIED_BY`, `MODIFIED_IN`, `CREATED_IN`, `REMOVED_IN` relationships.
+   - Ensure ingestion populates these links when scanning diffs or applying patches. (Session refs in Change metadata only—e.g., { sessionId, checkpointId } from anchors; no direct edges.)
 
 ## 7. Persistence & Consistency Considerations
 1. **Transactions**: Wrap version + edge updates per entity/change set to maintain invariants (no version gap). Consider using `FALKORDB` transaction support or emulating via steps with guards.

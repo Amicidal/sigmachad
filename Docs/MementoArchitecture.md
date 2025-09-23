@@ -31,11 +31,22 @@ Memento is a **local-first AI coding assistant** that provides comprehensive cod
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          Client Layer                                │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐         │
-│  │   Claude Code   │ │   OpenAI       │ │   VS Code       │         │
-│  │   (MCP)         │ │   (HTTP)       │ │   (WebSocket)   │         │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘         │
+│                    Orchestration Layer (Multi-Agent Control Plane)   │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐       │
+│  │   Orchestrator  │ │   Parallel      │ │ Human-in-Loop   │       │
+│  │ (Coordination)  │ │   Agents        │ │   UI (Vibe      │       │
+│  │                 │ │ (Parse/Test/    │ │   Kanban)       │       │
+│  │                 │ │    SCM)         │ │                 │       │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘       │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Client Layer                                │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐       │
+│  │   Claude Code   │ │   OpenAI       │ │   VS Code       │       │
+│  │   (MCP)         │ │   (HTTP)       │ │   (WebSocket)   │       │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘       │
 └─────────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
@@ -50,183 +61,53 @@ Memento is a **local-first AI coding assistant** that provides comprehensive cod
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                       Service Layer                                 │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐         │
-│  │   Knowledge     │ │   Test         │ │   Security      │         │
-│  │   Graph         │ │   Engine       │ │   Scanner       │         │
-│  │   Service       │ │                 │ │                 │         │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘         │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐       │
+│  │   Knowledge     │ │   Test         │ │   Security      │       │
+│  │   Graph         │ │   Engine       │ │   Scanner       │       │
+│  │   Service       │ │                 │ │   (Metadata-Only│       │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘       │
 └─────────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      Data Storage Layer                             │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐         │
-│  │   Graph DB      │ │   Vector DB     │ │   Document      │         │
-│  │   (Docker)      │ │   (Docker)      │ │   Store         │         │
-│  │   FalkorDB      │ │   Qdrant        │ │   (Docker)      │         │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘         │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐       │
+│  │   Graph DB      │ │   Vector DB     │ │   Document      │       │
+│  │   (Neo4j)       │ │   (Neo4j Native│ │   Store         │       │
+│  │   w/ APOC/GDS   │ │   ; Qdrant      │ │   (Postgres)    │       │
+│  │                 │ │    Standby)     │ │                 │       │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘       │
 └─────────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      Infrastructure Layer                           │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐         │
-│  │   File System   │ │   Git           │ │   Docker        │         │
-│  │   (Local)       │ │   (Local)       │ │   Compose       │         │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘         │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐       │
+│  │   File System   │ │   Git           │ │   Docker        │       │
+│  │   (Local)       │ │   (Local)       │ │   Compose       │       │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘       │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+- Orchestration as top-level control plane (coordinating clients/API/services); API Gateway as entrypoint below. Services execute, Storage (Neo4j primary, Qdrant standby) at bottom.
 
-## Technology Stack Decisions
+### Orchestration Layer (New)
+Memento transitions from single-agent KG queries to a multi-agent orchestration layer. This enables parallel task execution (parsing, testing, SCM) coordinated by the KG for real-time freshness.
 
-### Core Runtime
-- **Language**: TypeScript (Node.js)
-- **Runtime**: Node.js 18+ (LTS)
-- **Package Manager**: pnpm (for workspace management)
+- **Multi-Agent Orchestrator**: Spawns specialized agents (e.g., via Node.js workers) for subtasks, using KG events for sync.
+- **Parallelism**: Agents run concurrently—e.g., one updates KG from file changes while another generates tests—reducing bloat and verification time.
+- **Human-in-the-Loop**: UIs like Vibe Kanban monitor tasks (kanban boards for status/approval) via WebSocket, allowing intervention (e.g., approve commits).
 
-### Databases & Storage
-- **Graph Database**: FalkorDB (Redis-based graph database)
-  - **Why**: High performance, Redis compatibility, Cypher support
-  - **Alternatives Considered**: Neo4j, Amazon Neptune
-- **Vector Database**: Qdrant
-  - **Why**: Fast similarity search, metadata filtering, horizontal scaling
-  - **Alternatives Considered**: Pinecone, Weaviate
-- **Document Store**: PostgreSQL with JSONB
-  - **Why**: Structured data with flexible schemas, ACID compliance
-  - **Alternatives Considered**: MongoDB, DynamoDB
+### Lifecycle Gates
+    Impact
+        - Update KG anchors for sessions (metadata refs from Redis cache); security as entity metadata.
+        - Sessions: Ephemeral Redis (TTL to checkpoint) for live coord; discard post-emit.
+        - History: SCM changes to Change nodes; version snapshots with session refs in metadata (e.g., checkpointId from anchors).
 
-### Frameworks & Libraries
-
-#### Backend Framework
-- **Web Framework**: Fastify
-  - **Why**: High performance, plugin ecosystem, TypeScript support
-  - **Alternatives Considered**: Express, Koa
-
-#### Graph & Data Processing
-- **Graph Processing**: Cypher (FalkorDB)
-- **AST Parsing**: TypeScript Compiler API + ts-morph
-- **Vector Embeddings**: OpenAI Ada-002 or local models (Transformers.js)
-- **File Watching**: chokidar
-
-#### External Integrations
-- **LLM Integration**: OpenAI API + Anthropic Claude API
-- **Git Integration**: isomorphic-git
-- **Security Scanning**: ESLint security plugin, Semgrep, Snyk
-- **Test Frameworks**: Jest, Vitest (auto-detection)
-
-### Infrastructure & Deployment
-
-#### Containerization
-- **Container Runtime**: Docker
-- **Orchestration**: Docker Compose (development) / Kubernetes (production)
-- **Base Images**: Node.js Alpine Linux
-
-#### Deployment Options
-
-##### Primary: Local Development (Recommended)
-- **Containerized**: Docker Compose for all services
-- **Databases**: Local Docker containers for FalkorDB, Qdrant, PostgreSQL
-- **IDE Integration**: Direct WebSocket/HTTP connections
-- **File Access**: Direct filesystem access for code analysis
-
-##### Optional: Cloud Deployment (Enterprise/Team Features)
-- **Cloud Provider**: AWS/GCP/Azure (when scaling needed)
-- **Compute**: ECS Fargate / EKS / Cloud Run
-- **Storage**: RDS PostgreSQL, ElastiCache Redis, OpenSearch
-- **CDN**: CloudFront / Cloud CDN (for distributed teams)
-- **Monitoring**: CloudWatch / Cloud Monitoring
-
-#### Development Environment
-- **Local Development**: Docker Compose (primary workflow)
-- **IDE Integration**: VS Code extensions, direct API connections
-- **Package Management**: pnpm workspaces
-- **Hot Reload**: Development mode with file watching
-
-## Component Architecture
-
-### 1. MCP Server Component
-
-```typescript
-// src/mcp/server.ts
-import { Server } from '@modelcontextprotocol/sdk';
-
-class MementoMCPServer extends Server {
-  private knowledgeGraph: KnowledgeGraphService;
-  private testEngine: TestEngine;
-  private securityScanner: SecurityScanner;
-
-  async handleToolCall(toolName: string, params: any): Promise<any> {
-    switch (toolName) {
-      case 'design.create_spec':
-        return this.knowledgeGraph.createSpec(params);
-      case 'tests.plan_and_generate':
-        return this.testEngine.planTests(params);
-      case 'graph.search':
-        return this.knowledgeGraph.search(params);
-      // ... other tools
-    }
-  }
-}
-```
-
-### 2. Knowledge Graph Service
-
-```typescript
-// src/services/KnowledgeGraphService.ts
-import { FalkorDB } from 'falkordb';
-import { QdrantClient } from '@qdrant/js-client-rest';
-
-class KnowledgeGraphService {
-  private graphDb: FalkorDB;
-  private vectorDb: QdrantClient;
-  private fileWatcher: FileWatcher;
-
-  async initialize(): Promise<void> {
-    await this.graphDb.connect(process.env.FALKORDB_URL);
-    await this.vectorDb.connect(process.env.QDRANT_URL);
-    this.setupFileWatcher();
-  }
-
-  async createEntity(entity: CodebaseEntity): Promise<void> {
-    // Create graph node
-    await this.graphDb.query(`
-      CREATE (e:${entity.type} {id: $id, path: $path, ...})
-    `, entity);
-
-    // Create vector embedding
-    const embedding = await this.generateEmbedding(entity);
-    await this.vectorDb.upsert(entity.id, embedding);
-
-    // Update relationships
-    await this.updateRelationships(entity);
-  }
-}
-```
-
-### 3. API Gateway
-
-```typescript
-// src/api/gateway.ts
-import Fastify from 'fastify';
-import { MCPRouter } from './mcp-router';
-import { RestRouter } from './rest-router';
-
-class APIGateway {
-  private app: FastifyInstance;
-  private mcpRouter: MCPRouter;
-  private restRouter: RestRouter;
-
-  async start(port: number): Promise<void> {
-    // MCP endpoint
-    this.app.register(this.mcpRouter.register, { prefix: '/mcp' });
-
-    // REST API
-    this.app.register(this.restRouter.register, { prefix: '/api/v1' });
-
-    await this.app.listen({ port });
-  }
-}
-```
+### Human-in-the-Loop Integration (New)
+To incorporate human oversight:
+- **Vibe Kanban UI**: A WebSocket-connected kanban board visualizes agent tasks (cards: Parse/Test/SCM; columns: Pending/Running/Review/Done). KG provides real-time data (e.g., impact previews on cards). Humans drag to approve (e.g., SCM commit) or add notes (refine specs).
+- **Integration**: WebSocketRouter exposes /ui/task-status; UI queries KG for freshness.
+- **Flow**: Agent swarm runs → UI notifies human → Approve via API (e.g., POST /scm/approve) → Orchestrator resumes.
 
 ## Data Flow Architecture
 
@@ -268,11 +149,8 @@ File Event → Compare States → Find Affected → Apply Changes → Re-embed �
 - **Secret Management**: AWS Secrets Manager / HashiCorp Vault
 - **Data Sanitization**: Input validation and SQL injection prevention
 
-### Security Scanning Integration
-- **SAST**: Static Application Security Testing
-- **SCA**: Software Composition Analysis
-- **Container Scanning**: Vulnerability scanning for Docker images
-- **Secrets Detection**: Automated detection of exposed credentials
+### Security Scanning Integration (Metadata-Only)
+- **SAST/SCA**: Append results (e.g., Snyk/ESLint) as metadata on entities (e.g., `metadata.vulnerabilities` array: [{ id, severity, tool, fixed }]) during sync/gates. Query props for vulns; criticals trigger refactors. Offload full reports externally (Postgres/S3) by ID—no dedicated KG nodes/edges.
 
 ## Performance Architecture
 
@@ -301,6 +179,12 @@ File Event → Compare States → Find Affected → Apply Changes → Re-embed �
 - **File Sync Time**: < 5 seconds for typical file changes
 - **Concurrent Users**: Support 1000+ simultaneous connections
 
+### Multi-Agent Enhancements
+The orchestration layer now emphasizes multi-agent swarms (20+ agents for velocity):
+- **Ephemeral Sessions**: Redis cache for live coordination (TTL 15-60 min to checkpoint; pub-sub for handoffs). KG anchors summaries (metadata refs on clusters/specs for impacts/outcomes).
+- **Scaling**: Shared sessions for handoffs (e.g., Agent A impls → B tests via pub-sub); bridge queries join Redis + KG for context (e.g., "pass→break in cluster").
+- **Velocity**: No bloat—discard post-checkpoint; enables 100+ agents on 1k tasks/day. Checkpoints as refs in KG metadata for recovery.
+
 ## Monitoring & Observability
 
 ### Metrics Collection
@@ -308,6 +192,7 @@ File Event → Compare States → Find Affected → Apply Changes → Re-embed �
 - **System Metrics**: CPU, memory, disk usage
 - **Business Metrics**: API usage, user engagement
 - **Graph Metrics**: Node/relationship counts, query performance
+- **Session Metrics**: Active sessions (Redis count), checkpoint rate, multi-agent handoff success (via bridge)
 
 ### Logging Strategy
 - **Structured Logging**: JSON format with correlation IDs
@@ -461,6 +346,13 @@ spec:
             memory: "1Gi"
             cpu: "500m"
 ```
+
+### Storage
+    - Graph: Neo4j (core relationships/clusters/benchmarks; sparse session anchors, APOC/GDS for algos, native vectors for embeddings; Qdrant standby for advanced).
+    - Cache: Redis (ephemeral sessions—events/pub-sub, TTL 15-60 min; scales 100+ agents).
+    - Vector: Neo4j Native (primary; fallback to Qdrant if needed).
+    - Security: Metadata-only (no nodes); external scans appended to entities during sync/gates.
+    - History: Change/Version nodes for SCM (commits/PRs); ephemeral sessions ref via metadata anchors (no persistent ties).
 
 ## Directory Structure
 

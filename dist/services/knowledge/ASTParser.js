@@ -216,7 +216,7 @@ export class ASTParser {
             ]);
             this.tsProject.resolveSourceFileDependencies();
         }
-        catch (error) {
+        catch (_b) {
             // Non-fatal: fallback to per-file parsing
         }
     }
@@ -1042,7 +1042,7 @@ export class ASTParser {
                 const refRels = this.extractReferenceRelationships(sourceFile, fileEntity, localSymbols, importMap, importSymbolMap);
                 relationships.push(...refRels);
             }
-            catch (e) {
+            catch (_s) {
                 // Non-fatal: continue without reference relationships
             }
             // Extract import/export relationships with resolution to target files/symbols when possible
@@ -1064,7 +1064,7 @@ export class ASTParser {
                 this.removeFileFromIndexes(fileEntity.path);
                 this.addSymbolsToIndexes(fileEntity.path, syms);
             }
-            catch (_s) {
+            catch (_t) {
                 // ignore cache update errors
             }
         }
@@ -1086,7 +1086,7 @@ export class ASTParser {
                     console.log(`[ast-tc] ${rel} used ${this.tcBudgetSpent}/${noiseConfig.AST_MAX_TC_LOOKUPS_PER_FILE}`);
                 }
             }
-            catch (_t) { }
+            catch (_u) { }
         }
         return { entities, relationships, errors };
     }
@@ -3331,7 +3331,7 @@ export class ASTParser {
         }
         return relationships;
     }
-    extractImportRelationships(sourceFile, fileEntity, importMap, importSymbolMap) {
+    extractImportRelationships(sourceFile, fileEntity, importMap, _importSymbolMap) {
         const relationships = [];
         const imports = sourceFile.getImportDeclarations();
         for (const importDecl of imports) {

@@ -2,8 +2,8 @@
  * Rollback Capabilities Service
  * Handles reverting changes when synchronization operations fail
  */
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "./core/DatabaseService.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
 import { Entity } from "../../models/entities.js";
 import { GraphRelationship } from "../../models/relationships.js";
 export interface RollbackPoint {

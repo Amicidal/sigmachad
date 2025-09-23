@@ -23,10 +23,9 @@
 5. **Limited Instrumentation:** Lack of real-time lag/queue metrics makes scaling decisions reactive and manual.
 
 ## Re-Architecture Goals
-- Drive end-to-end ingestion latency (change observed → graph updated) under 500ms (800ms with AI parsing) for most nodes and edges at the 10 k LOC/minute load.
-- 
-- Remove single-process chokepoints so workload scales horizontally across workers.
-- Isolate heavyweight enrichment (embeddings, impact analysis) into asynchronous planes to keep core graph writes fast.
+- Drive end-to-end ingestion latency under 500ms for core (code/symbols/clusters); sessions ephemeral in Redis (low-write emits, TTL discard—no graph sync).
+- Remove single-process chokepoints; sessions via Redis pub-sub for multi-agent (100+ agents, 5k sessions/day).
+- Isolate enrichment; sessions don't block (async to cache, anchors optional to KG).
 - Provide precise SLO telemetry (queue depth, processing latency, DB utilization) for autoscaling.
 
 ## Proposed Architecture (Target)
@@ -62,9 +61,9 @@ File Events → Event Bus → Parse Workers → Ingestion Orchestrator → Graph
 
 **Future:**
 - Introduce an orchestration service that builds a dependency DAG from change fragments, then dispatches micro-batches to specialized workers:
-  - **Entity upsert workers:** aggregate entities per label/namespace and submit large Cypher `UNWIND` statements with retryable idempotency keys.
+  - **Entity upsert workers:** aggregate entities per label/namespace and submit large Cypher `UNWIND` statements with retryable idempotency keys (Neo4j APOC procedures for complex batches).
   - **Relationship workers:** resolve endpoints using an in-memory cache backed by Redis/Qdrant metadata; fall back to async reconciliation queue when targets missing.
-- Support multi-version concurrency control by stamping batches with transaction epochs; leverage database-side pipelines (FalkorDB procedures, Postgres COPY) for high throughput.
+- Support multi-version concurrency control by stamping batches with transaction epochs; leverage database-side pipelines (Neo4j APOC/GDS procedures for high-throughput writes).
 - Persist change metadata (session, commit hash, diff stats) separately to avoid polluting core graph writes.
 
 **Benefits:** Graph mutations become streaming-friendly, reducing round-trips and enabling safe parallelism.
@@ -74,8 +73,9 @@ File Events → Event Bus → Parse Workers → Ingestion Orchestrator → Graph
 
 **Future:**
 - Publish embedding tasks to a GPU-backed job queue with dynamic batch sizing (hundreds to thousands of entities per request) and SLA-based prioritization.
-- Store embeddings and vector metadata in a write-optimized staging table before promoting to production collections to avoid read interference.
-- Apply similar async handling for impact analysis, documentation extraction, and security scans.
+- Store embeddings and vector metadata in a write-optimized staging table before promoting to production collections to avoid read interference (Neo4j native vectors handle core embeddings; Qdrant on standby for advanced needs).
+- Apply similar async handling for impact analysis, documentation extraction, and security scans (e.g., metadata appends for vulns during sync—no dedicated nodes).
+- Sessions to Redis (ephemeral events, checkpoint summaries as metadata anchors to KG—no inline writes; low-overhead emits align with metadata-only security).
 
 **Benefits:** Core ingestion stays focused on structural graph consistency; enrichment scales independently based on hardware availability.
 

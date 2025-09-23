@@ -1,0 +1,40 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "database",
+  "sourceRoot": "packages/database/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "packages/database/dist",
+        "main": "packages/database/src/index.ts",
+        "tsConfig": "packages/database/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["packages/database/**/*.ts"]
+      }
+    },
+    "test": {
+      "executor": "@nx/vite:test",
+      "options": {
+        "config": "vitest.config.ts",
+        "reportsDirectory": "../../coverage/packages/database"
+      }
+    },
+    "dev": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "outputPath": "packages/database/dist",
+        "main": "packages/database/src/index.ts",
+        "tsConfig": "packages/database/tsconfig.json",
+        "watch": true
+      }
+    }
+  },
+  "implicitDependencies": ["core"]
+}

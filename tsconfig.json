@@ -1,38 +1,21 @@
 {
   "compilerOptions": {
-    "target": "ES2018",
-    "module": "Node16",
-    "moduleResolution": "node16",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "noImplicitAny": false,
-    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "declaration": true,
     "declarationMap": true,
-    "sourceMap": true,
     "outDir": "./dist",
     "resolveJsonModule": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "downlevelIteration": true,
     "types": ["node"],
-    "typeRoots": ["./node_modules/@types"],
-    "lib": ["ES2018"],
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"],
-      "@/api/*": ["src/api/*"],
-      "@/services/*": ["src/services/*"],
-      "@/models/*": ["src/models/*"],
-      "@/utils/*": ["src/utils/*"]
-    }
+    "typeRoots": ["./node_modules/@types"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "coverage"],
+  "include": ["src/**/*", "packages/*/src/**/*"],
   "ts-node": {
     "esm": true,
     "experimentalSpecifierResolution": "node"
-  }
+  },
+  "extends": "./tsconfig.base.json"
 }

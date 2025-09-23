@@ -10,15 +10,15 @@
 - Temporal lifecycle helpers and embedding maintenance reuse the scoped namespace, ensuring Qdrant deletes operate on the same namespaced identifiers as graph mutations.
 
 ## 3. Known Gaps
-- Redis namespace bindings exist (`GraphNamespaceConfig.redisPrefix` and `NamespaceScope.qualifyRedisKey`), but no cache keys are generated yet. We need either an integration plan for Redis-backed features or a decision to drop the surface area.
-- Service consumers still rely on tribal knowledge for namespace expectations. We owe them explicit guidance on valid inputs, emitted IDs, and cache semantics.
-- Namespace-aware tests cover entity fetches, but relationship pathways and Qdrant clean-up with mixed ID formats remain thin.
+- Redis namespace bindings exist (`GraphNamespaceConfig.redisPrefix` and `NamespaceScope.qualifyRedisKey`), but no cache keys are generated yet. We need either an integration plan for Redis-backed features (e.g., ephemeral sessions with TTL) or a decision to drop the surface area.
+  - Service consumers still rely on tribal knowledge for namespace expectations. We owe them explicit guidance on valid inputs, emitted IDs, and cache semantics.
+  - Namespace-aware tests cover entity fetches, but relationship pathways and Qdrant clean-up with mixed ID formats remain thin.
 
 ## 4. Desired Capabilities
 1. Make namespace behaviour self-service: callers should never care whether IDs are raw or prefixed and should have documentation that reflects that guarantee.
-2. Thread namespace metadata through secondary stores (Redis, future PostgreSQL helpers) from a single source of truth, or intentionally trim unused configuration.
-3. Keep lifecycle utilities (`initialize`, `shutdown`, scoped helpers) straightforward so harnesses do not need to instantiate multiple services to flush state.
-4. Ensure relationship canonicalisation and cache invalidation stay resilient as new edge types, temporal states, or aggregation jobs are introduced.
+2. Thread namespace metadata through secondary stores (Redis for ephemeral sessions/caches, future PostgreSQL helpers) from a single source of truth, or intentionally trim unused configuration.
+  3. Keep lifecycle utilities (`initialize`, `shutdown`, scoped helpers) straightforward so harnesses do not need to instantiate multiple services to flush state.
+  4. Ensure relationship canonicalisation and cache invalidation stay resilient as new edge types, temporal states, or aggregation jobs are introduced.
 
 ## 5. Immediate Follow-ups
 - Decide on the Redis story: either wire `namespaceScope.qualifyRedisKey()` into the caches we plan to keep warm, or remove the prefix fields and document the rationale.

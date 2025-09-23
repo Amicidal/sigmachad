@@ -18,8 +18,8 @@
    
 ### Architecture
     Language: TypeScript (Node.js)
-    Graph Database: FalkorDB
-    Vector Database: Qdrant
+    Graph Database: Neo4j (with APOC procedures, GDS algorithms, native vectors for embeddings; Qdrant standby for advanced vector needs)
+    Vector Database: Neo4j Native (fallback to Qdrant if scaling exceeds)
     Orchestration: Docker Compose
 
 ### Lifecycle Gates
@@ -39,18 +39,18 @@
         - Architecture policy engine (layering, banned imports/deps).
         - All tests must pass; coverage threshold must be met.
     Impact
-        - Update knowledge graph and vector index after accepted diffs.
-        - Detect stale imports/exports/re-exports and propose follow-up edits.
+        - Update KG with clusters (group implementations for specs) and attach benchmarks to track perf regressions.
+        - Auto-detect stale links via node IDs; propose updates without doc maintenance.
     Commit
         - Create branch/commit/PR with links to spec, tests, and validation report.
 
 ### Graph Schema
     Entities
-        - File, Directory, Module/Package, Symbol, Function, Class, Interface, TypeAlias, Test, Doc
+        - File, Directory, Module/Package, Symbol, Function, Class, Interface, TypeAlias, Test, Spec, SemanticCluster (for spec-attached implementation groups), Benchmark (perf tracking)
     Edges
-        - imports, exports, re-exports, defines, declares, calls, references, implements, extends, tested-by, belongs-to
+        - imports, exports, re-exports, defines, declares, calls, references, implements, tested-by, belongs-to, IMPLEMENTS_CLUSTER (spec to group), PERFORMS_FOR (benchmark to cluster/spec)
     Properties
-        - path, hash, language, signature, docstring, lastModified, owningModule, coverage
+        - path, hash, language, signature, docstring, lastModified, owningModule, coverage, cohesionScore (for clusters), trend (for benchmarks)
 
 ### Tooling API
     Exposed as an MCP server (Claude Code) and mirrored via HTTP function-calls (OpenAI).
@@ -71,7 +71,15 @@
         - bannedDependencies: disallowed packages or paths.
         - coverageMin: overall and changed-lines thresholds.
         - forbiddenPatterns: e.g., TODO returns, throw new Error('Not Implemented').
-        - security: basic dependency and code-level checks.
+        - security: Append external scan results (e.g., Snyk/ESLint) as metadata on entities during sync/gates; query metadata for vulns, refactor critical ones immediately. No dedicated KG nodes—keep lean.
+        - sessions: Ephemeral Redis cache for live coordination—store events (sequences, changeInfo, stateTransitions like pass→break, impacts) with TTL to next checkpoint (15-60 min) or fixed (discard after). KG anchors summaries (metadata refs on entities/clusters: {sessionId, outcome, checkpointId, keyImpacts}). Bridge service (SessionQueryService) joins for graph-aware queries (e.g., "isolate changes in active session").
+          - Scalability: Handles 100+ agents (5k sessions/day, 250k events/day) via Redis Cluster/sharding by agentId; zero long-term growth (TTL discards). KG <5% load (anchors only).
+          - Multi-Agent: Shared keys/pub-sub for handoffs (e.g., Agent A emits, B subscribes real-time). Ephemerality maximizes velocity—no bloat, focus on active swarms.
+          - Examples (Live Queries):
+            - Transitions: Redis: ZRANGE events:{sessionId} BY SCORE | filter 'pass' to 'broke'; Bridge: JOIN KG for affected cluster/spec (e.g., "Broke benchmark in this session").
+            - Isolation: Redis: HGET session:{id} | filter agentId; Bridge: Traverse KG anchors (e.g., "Session XYZ's impacts on spec Y").
+          - Checkpoints: Persist ref-only summary to KG metadata on emit; use for recovery/handover. Opt-in Postgres snapshot for failures (<5%).
+
         - docTemplate/testTemplate: shared templates for spec and test generation.
     Enforcement
         - Block direct file edits unless prior gates pass.
@@ -108,3 +116,7 @@
     Anti-Deception Heuristics
         - Detect trivial or stub implementations and block merging.
         - Require changed-lines coverage and diff-linked tests.
+
+### No-Maintenance Benefits
+- Specs link to clusters via IDs; refactors update cluster members automatically—no doc path edits needed.
+- Benchmarks attach to clusters/specs for progress tracking; regressions link to changes for root-cause.

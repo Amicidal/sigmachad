@@ -1,0 +1,21 @@
+{
+  "name": "@memento/parser",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./builders": "./src/builders/index.ts"
+  },
+  "dependencies": {
+    "@memento/core": "workspace:*",
+    "@memento/graph": "workspace:*",
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0",
+    "typescript": "^5.2.2"
+  },
+  "devDependencies": {
+    "@types/babel__traverse": "^7.20.0",
+    "@types/node": "^20.8.0"
+  }
+}

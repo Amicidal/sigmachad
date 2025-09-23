@@ -91,11 +91,10 @@ export class MaintenanceService {
                 changes.push({ type: 'entity_removed', id: entityId });
             }
             // 2. Remove dangling relationships
-            const danglingRelationships = await this.findDanglingRelationships();
-            for (const relId of danglingRelationships) {
-                await this.kgService.deleteRelationship(relId);
-                stats.relationshipsRemoved++;
-                changes.push({ type: 'relationship_removed', id: relId });
+            const danglingRelationshipsCount = await this.removeDanglingRelationships();
+            stats.relationshipsRemoved += danglingRelationshipsCount;
+            if (danglingRelationshipsCount > 0) {
+                changes.push({ type: 'dangling_relationships_removed', count: danglingRelationshipsCount });
             }
             // 3. Clean up old sync operation records from PostgreSQL
             await this.cleanupOldSyncRecords();
@@ -222,7 +221,7 @@ export class MaintenanceService {
         try {
             // 1. Validate entity integrity
             const entitiesResult = await this.kgService.listEntities({ limit: 1000 });
-            for (const entity of entitiesResult.entities) {
+            for (const entity of entitiesResult.entities || entitiesResult.items || []) {
                 if (!this.isValidEntity(entity)) {
                     stats.invalidEntities++;
                     changes.push({ type: 'invalid_entity', id: entity.id, issues: this.getEntityIssues(entity) });
@@ -308,21 +307,22 @@ export class MaintenanceService {
             return [];
         }
     }
-    async findDanglingRelationships() {
+    async removeDanglingRelationships() {
+        var _a;
         try {
-            // Find relationships pointing to non-existent entities
+            // Remove relationships pointing to non-existent entities
             const query = `
         MATCH (n)-[r]->(m)
         WHERE n.id IS NULL OR m.id IS NULL
-        RETURN r.id as id
-        LIMIT 100
+        DELETE r
+        RETURN count(r) as count
       `;
             const result = await this.dbService.falkordbQuery(query);
-            return result.map((row) => row.id);
+            return ((_a = result[0]) === null || _a === void 0 ? void 0 : _a.count) || 0;
         }
         catch (error) {
-            console.warn('Failed to find dangling relationships:', error);
-            return [];
+            console.warn('Failed to remove dangling relationships:', error);
+            return 0;
         }
     }
     async cleanupOldSyncRecords() {

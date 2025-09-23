@@ -10,7 +10,7 @@ export { EmbeddingService } from './EmbeddingService.js';
 export { HistoryService } from './HistoryService.js';
 export { AnalysisService } from './AnalysisService.js';
 // OGM Services (Primary Implementation)
-export { NeogmaService, EntityServiceOGM, RelationshipServiceOGM, SearchServiceOGM } from './ogm/index.js';
+export { NeogmaService, EntityServiceOGM, RelationshipServiceOGM, SearchServiceOGM } from '../knowledge-ogm/index.js';
 // Main facade service
 export { KnowledgeGraphService } from './KnowledgeGraphService.js';
 export { KnowledgeGraphService as default } from './KnowledgeGraphService.js';

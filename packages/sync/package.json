@@ -1,0 +1,23 @@
+{
+  "name": "@memento/sync",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./scm": "./src/scm/index.ts",
+    "./synchronization": "./src/synchronization/index.ts"
+  },
+  "dependencies": {
+    "@memento/core": "workspace:*",
+    "@memento/database": "workspace:*",
+    "@memento/graph": "workspace:*",
+    "simple-git": "^3.20.0",
+    "diff": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.0.8",
+    "@types/node": "^20.8.0",
+    "typescript": "^5.2.2"
+  }
+}

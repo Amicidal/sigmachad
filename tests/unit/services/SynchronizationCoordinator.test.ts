@@ -21,16 +21,19 @@ import {
   SyncConflict,
   SyncOptions,
   PartialUpdate,
-} from "@/services/SynchronizationCoordinator";
+} from "@/services/synchronization/SynchronizationCoordinator";
 import {
   Conflict,
   ConflictResolutionResult,
-} from "@/services/ConflictResolution";
-import { KnowledgeGraphService } from "@/services/KnowledgeGraphService";
+} from "@/services/scm/ConflictResolution";
+import { KnowledgeGraphService } from "@/services/knowledge/KnowledgeGraphService";
 import { ASTParser } from "../../../src/services/knowledge/ASTParser";
-import { DatabaseService } from "@/services/DatabaseService";
+import { DatabaseService } from "@/services/core/DatabaseService";
 import { FileChange } from "../../../src/services/core/FileWatcher";
-import { RelationshipType, SESSION_RELATIONSHIP_TYPES } from "@/models/relationships";
+import {
+  RelationshipType,
+  SESSION_RELATIONSHIP_TYPES,
+} from "@/models/relationships";
 import path from "path";
 import fs from "fs/promises";
 
@@ -157,40 +160,57 @@ class MockCheckpointJobRunner extends EventEmitter {
   enqueue = vi.fn(async (payload) => {
     this.metrics.enqueued += 1;
     const jobId = `job-${this.metrics.enqueued}`;
-    this.emit('jobEnqueued', { jobId, payload });
+    this.emit("jobEnqueued", { jobId, payload });
     return jobId;
   });
 
   getMetrics = vi.fn(() => ({ ...this.metrics }));
 
-  getDeadLetterJobs = vi.fn(() => this.deadLetters.map((job) => ({ ...job, payload: { ...job.payload } })));
+  getDeadLetterJobs = vi.fn(() =>
+    this.deadLetters.map((job) => ({ ...job, payload: { ...job.payload } }))
+  );
 
   simulateStarted(jobId: string, payload: any, attempts: number): void {
-    this.emit('jobStarted', { jobId, payload, attempts });
+    this.emit("jobStarted", { jobId, payload, attempts });
   }
 
-  simulateCompleted(jobId: string, payload: any, checkpointId: string, attempts: number): void {
+  simulateCompleted(
+    jobId: string,
+    payload: any,
+    checkpointId: string,
+    attempts: number
+  ): void {
     this.metrics.completed += 1;
-    this.emit('jobCompleted', { jobId, payload, checkpointId, attempts });
+    this.emit("jobCompleted", { jobId, payload, checkpointId, attempts });
   }
 
-  simulateAttemptFailed(jobId: string, payload: any, attempts: number, error: string): void {
+  simulateAttemptFailed(
+    jobId: string,
+    payload: any,
+    attempts: number,
+    error: string
+  ): void {
     this.metrics.retries += 1;
-    this.emit('jobAttemptFailed', { jobId, payload, attempts, error });
+    this.emit("jobAttemptFailed", { jobId, payload, attempts, error });
   }
 
-  simulateDeadLetter(jobId: string, payload: any, attempts: number, error: string): void {
+  simulateDeadLetter(
+    jobId: string,
+    payload: any,
+    attempts: number,
+    error: string
+  ): void {
     this.metrics.failed += 1;
     const record = {
       id: jobId,
       payload,
       attempts,
-      status: 'manual_intervention',
+      status: "manual_intervention",
       lastError: error,
     };
     this.deadLetters.push(record);
-    this.emit('jobFailed', { jobId, payload, attempts, error });
-    this.emit('jobDeadLettered', { jobId, payload, attempts, error });
+    this.emit("jobFailed", { jobId, payload, attempts, error });
+    this.emit("jobDeadLettered", { jobId, payload, attempts, error });
   }
 }
 
@@ -506,12 +526,16 @@ describe("SynchronizationCoordinator", () => {
         timestamp
       );
 
-      expect((coordinator as any).sessionSequenceState.has(sessionId)).toBe(true);
+      expect((coordinator as any).sessionSequenceState.has(sessionId)).toBe(
+        true
+      );
       expect((coordinator as any).sessionSequence.get(sessionId)).toBe(5);
 
       (coordinator as any).clearSessionTracking(sessionId);
 
-      expect((coordinator as any).sessionSequenceState.has(sessionId)).toBe(false);
+      expect((coordinator as any).sessionSequenceState.has(sessionId)).toBe(
+        false
+      );
       expect((coordinator as any).sessionSequence.has(sessionId)).toBe(false);
     });
   });
@@ -519,7 +543,8 @@ describe("SynchronizationCoordinator", () => {
   describe("Session relationship buffering", () => {
     it("retries bulk persistence after transient failures without dropping relationships", async () => {
       let failureInjected = false;
-      const originalBulk = mockKgService.createRelationshipsBulk.bind(mockKgService);
+      const originalBulk =
+        mockKgService.createRelationshipsBulk.bind(mockKgService);
       const bulkSpy = vi
         .spyOn(mockKgService, "createRelationshipsBulk")
         .mockImplementation(async (relationships: any[]) => {
@@ -551,23 +576,28 @@ describe("SynchronizationCoordinator", () => {
 
         expect(sessionRelationships.length).toBeGreaterThan(0);
 
-        const sessionBulkCalls = bulkSpy.mock.calls.filter(([rels]) =>
-          Array.isArray(rels) &&
-          rels.some((rel: any) => SESSION_RELATIONSHIP_TYPES.includes(rel.type))
+        const sessionBulkCalls = bulkSpy.mock.calls.filter(
+          ([rels]) =>
+            Array.isArray(rels) &&
+            rels.some((rel: any) =>
+              SESSION_RELATIONSHIP_TYPES.includes(rel.type)
+            )
         );
         expect(sessionBulkCalls.length).toBeGreaterThanOrEqual(2);
 
         const operation = coordinator.getOperationStatus(operationId);
-        expect(operation?.errors.some((error) =>
-          typeof error.message === "string" &&
-          error.message.includes("Bulk session rels failed")
-        )).toBe(true);
+        expect(
+          operation?.errors.some(
+            (error) =>
+              typeof error.message === "string" &&
+              error.message.includes("Bulk session rels failed")
+          )
+        ).toBe(true);
       } finally {
         bulkSpy.mockRestore();
       }
     });
   });
-
 
   describe("Full Synchronization Operations", () => {
     it("should start full synchronization and return operation ID", async () => {
@@ -653,7 +683,11 @@ describe("SynchronizationCoordinator", () => {
       const publish = vi.fn();
       const scheduleSpy = vi
         .spyOn(coordinator as any, "scheduleSessionCheckpoint")
-        .mockResolvedValue({ success: true, jobId: "job-success", sequenceNumber: 7 });
+        .mockResolvedValue({
+          success: true,
+          jobId: "job-success",
+          sequenceNumber: 7,
+        });
 
       await (coordinator as any).enqueueCheckpointWithNotification({
         sessionId: "session-success",
@@ -742,10 +776,14 @@ describe("SynchronizationCoordinator", () => {
 
       listener.mockClear();
 
-      mockCheckpointJobRunner.simulateStarted("job-1", {
-        sessionId: "session-metrics",
-        seedEntityIds: seeds,
-      }, 1);
+      mockCheckpointJobRunner.simulateStarted(
+        "job-1",
+        {
+          sessionId: "session-metrics",
+          seedEntityIds: seeds,
+        },
+        1
+      );
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ event: "job_started" })
       );
@@ -1451,9 +1489,9 @@ describe("SynchronizationCoordinator", () => {
 
       const operation = localCoordinator.getOperationStatus(operationId);
       expect(operation?.status).toBe("failed");
-      expect(
-        operation?.errors.some((err) => err.type === "rollback")
-      ).toBe(true);
+      expect(operation?.errors.some((err) => err.type === "rollback")).toBe(
+        true
+      );
     }, 10000);
   });
 

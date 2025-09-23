@@ -1,5 +1,5 @@
 import { RelationshipType } from "../../models/relationships.js";
-import { SCMProviderNotConfiguredError, } from "./scm/SCMProvider.js";
+import { SCMProviderNotConfiguredError, } from "./SCMProvider.js";
 export class ValidationError extends Error {
     constructor(details) {
         super(details.join("; "));

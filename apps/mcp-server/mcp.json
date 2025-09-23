@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "memento": {
+      "command": "node",
+      "args": ["dist/apps/mcp-server/main.js"],
+      "env": {
+        "NODE_ENV": "production"
+      },
+      "description": "Memento MCP server for codebase knowledge graph access"
+    }
+  }
+}

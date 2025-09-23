@@ -14,3 +14,15 @@
 - When debugging interactively, prefer quiet flags such as `pnpm vitest --run --reporter=basic` or target specific specs to minimize noise.
 
 Following this convention keeps Codex responsive and preserves earlier conversation history.
+
+## Monorepo Structure Rules
+
+- **Depth Limit**: No file paths deeper than 3 levels from workspace root (e.g., `packages/graph/src/utils.ts` = 3 levels: `packages/`, `graph/`, `src/utils.ts`). Exceptions: `node_modules/`, `dist/`.
+
+- **Import Restrictions**: No relative imports >3 `../` (e.g., `../../../` forbidden). Use path aliases for cross-package imports.
+
+- **Package Boundaries**: Services/libs in `packages/` must not import "downstream" (e.g., `core/` can't depend on `graph/`). No circular dependencies.
+
+- **File/Dir Limits**: No subdir >20 files (split if exceeded). Clean artifacts (e.g., `.backup` files) on commit.
+
+- **Enforcement Levels**: Warn on PRs, fail CI for violations.

@@ -1,59 +1,22 @@
 /**
  * History Service
- * Handles temporal versioning, checkpoints, and history pruning
+ * Facade that orchestrates temporal versioning, checkpoints, and history operations
+ * Refactored into modular components for better maintainability
  */
-import { EventEmitter } from 'events';
-import { Neo4jService } from './Neo4jService.js';
-import { Entity } from '../../models/entities.js';
-import { RelationshipType } from '../../models/relationships.js';
-import { TimeRangeParams, TraversalQuery } from '../../models/types.js';
-export interface CheckpointOptions {
-    reason: 'daily' | 'incident' | 'manual';
-    hops?: number;
-    window?: TimeRangeParams;
-    description?: string;
-}
-export interface VersionInfo {
-    id: string;
-    entityId: string;
-    hash: string;
-    timestamp: Date;
-    changeSetId?: string;
-    path?: string;
-    language?: string;
-}
-export interface CheckpointInfo {
-    id: string;
-    timestamp: Date;
-    reason: string;
-    seedEntities: string[];
-    memberCount: number;
-    metadata?: Record<string, any>;
-}
-export interface HistoryMetrics {
-    versions: number;
-    checkpoints: number;
-    checkpointMembers: {
-        avg: number;
-        min: number;
-        max: number;
-    };
-    temporalEdges: {
-        open: number;
-        closed: number;
-    };
-    lastPrune?: {
-        retentionDays: number;
-        cutoff: string;
-        versions: number;
-        closedEdges: number;
-        checkpoints: number;
-    };
-}
+import { EventEmitter } from "events";
+import { Neo4jService } from "./Neo4jService.js";
+import { Entity } from "../../models/entities.js";
+import { RelationshipType } from "../../models/relationships.js";
+import { TraversalQuery } from "../../models/types.js";
+import { CheckpointOptions, VersionInfo, CheckpointInfo, HistoryMetrics, CheckpointSummary, SessionImpact } from "./history/index.js";
+export { CheckpointOptions, VersionInfo, CheckpointInfo, HistoryMetrics, CheckpointSummary, SessionImpact, };
 export declare class HistoryService extends EventEmitter {
     private neo4j;
-    private readonly historyEnabled;
+    private versionManager;
+    private checkpointService;
+    private temporalQueryService;
     constructor(neo4j: Neo4jService);
+    private get historyEnabled();
     /**
      * Append a version for an entity
      */

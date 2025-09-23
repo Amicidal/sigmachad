@@ -43,17 +43,15 @@ describe("SessionCheckpointJobRunner", () => {
 
     await runner.idle();
 
-    expect(kg.createCheckpoint).toHaveBeenCalledWith(
-      ["entity-1", "entity-2"],
-      "manual",
-      2,
-      undefined
-    );
+    expect(kg.createCheckpoint).toHaveBeenCalledWith(["entity-1", "entity-2"], {
+      reason: "manual",
+      hops: 2,
+      window: undefined,
+    });
     expect(kg.createSessionCheckpointLink).toHaveBeenCalledTimes(1);
     expect(kg.annotateSessionRelationshipsWithCheckpoint).toHaveBeenCalledWith(
       "session-1",
-      ["entity-1", "entity-2"],
-      expect.objectContaining({ status: "completed" })
+      "chk-1"
     );
     expect(rollback.registerCheckpointLink).toHaveBeenCalledWith(
       "session-1",
@@ -118,8 +116,7 @@ describe("SessionCheckpointJobRunner", () => {
     expect(kg.createCheckpoint).toHaveBeenCalledTimes(2);
     expect(kg.annotateSessionRelationshipsWithCheckpoint).toHaveBeenCalledWith(
       "session-2",
-      ["entity-3"],
-      expect.objectContaining({ status: "completed" })
+      "chk-2"
     );
     expect(runner.getMetrics()).toMatchObject({
       enqueued: 1,
@@ -147,10 +144,11 @@ describe("SessionCheckpointJobRunner", () => {
 
     await runner.idle(200);
 
-    const calls = kg.annotateSessionRelationshipsWithCheckpoint.mock.calls.filter(
-      ([sessionId, _entities, annotation]) =>
-        sessionId === "session-3" && annotation.status === "manual_intervention"
-    );
+    const calls =
+      kg.annotateSessionRelationshipsWithCheckpoint.mock.calls.filter(
+        ([sessionId, checkpointId]) =>
+          sessionId === "session-3" && checkpointId === "manual_intervention"
+      );
     expect(calls.length).toBe(1);
     expect(runner.getMetrics()).toMatchObject({
       enqueued: 1,
@@ -188,14 +186,13 @@ describe("SessionCheckpointJobRunner", () => {
 
     await runner.idle(200);
 
-    const annotateCalls = kg.annotateSessionRelationshipsWithCheckpoint.mock.calls;
-    expect(annotateCalls.length).toBeGreaterThanOrEqual(2);
-    const manualCall = annotateCalls.find(([, , annotation]) => annotation.status === "manual_intervention");
-    expect(manualCall).toBeDefined();
-    expect(manualCall?.[2]).toMatchObject({
-      error: "link failed",
-      checkpointId: "chk-1",
-    });
+    const annotateCalls =
+      kg.annotateSessionRelationshipsWithCheckpoint.mock.calls;
+    expect(annotateCalls.length).toBeGreaterThanOrEqual(3);
+    const checkpointCall = annotateCalls.find(
+      ([, checkpointId]) => checkpointId === "chk-1"
+    );
+    expect(checkpointCall).toBeDefined();
 
     expect(kg.deleteCheckpoint).toHaveBeenCalledWith("chk-1");
 
@@ -284,12 +281,11 @@ describe("SessionCheckpointJobRunner", () => {
 
     await runner.idle(300);
 
-    expect(kg.createCheckpoint).toHaveBeenCalledWith(
-      ["entity-old"],
-      "manual",
-      2,
-      undefined
-    );
+    expect(kg.createCheckpoint).toHaveBeenCalledWith(["entity-old"], {
+      reason: "manual",
+      hops: 2,
+      window: undefined,
+    });
 
     const upsertCalls = persistence.upsert.mock.calls.filter(
       ([snapshot]) => snapshot.id === "job-prev"

@@ -2,47 +2,41 @@
  * Knowledge Graph Service
  * Facade that orchestrates all specialized graph services
  * Now using only OGM implementations - legacy code removed
+ * Refactored into modular components for better maintainability
  */
-import { EventEmitter } from 'events';
-import { Neo4jService, Neo4jConfig } from './Neo4jService.js';
-import { NeogmaService } from './ogm/NeogmaService.js';
-import { EntityServiceOGM } from './ogm/EntityServiceOGM.js';
-import { RelationshipServiceOGM } from './ogm/RelationshipServiceOGM.js';
-import { SearchServiceOGM } from './ogm/SearchServiceOGM.js';
-import { EmbeddingService } from './EmbeddingService.js';
-import { HistoryService } from './HistoryService.js';
-import { AnalysisService } from './AnalysisService.js';
+import { EventEmitter } from "events";
+import { Neo4jConfig } from "./Neo4jService.js";
 interface KnowledgeGraphDependencies {
-    neo4j?: Neo4jService;
-    neogma?: NeogmaService;
-    entityService?: EntityServiceOGM;
-    relationshipService?: RelationshipServiceOGM;
-    searchService?: SearchServiceOGM;
-    embeddingService?: EmbeddingService;
-    historyService?: HistoryService;
-    analysisService?: AnalysisService;
+    neo4j?: import("./Neo4jService.js").Neo4jService;
+    neogma?: import("./ogm/NeogmaService.js").NeogmaService;
+    entityService?: import("./ogm/EntityServiceOGM.js").EntityServiceOGM;
+    relationshipService?: import("./ogm/RelationshipServiceOGM.js").RelationshipServiceOGM;
+    searchService?: import("./ogm/SearchServiceOGM.js").SearchServiceOGM;
+    embeddingService?: import("./EmbeddingService.js").EmbeddingService;
+    historyService?: import("./HistoryService.js").HistoryService;
+    analysisService?: import("./AnalysisService.js").AnalysisService;
 }
-import { Entity } from '../../models/entities.js';
-import { GraphRelationship, RelationshipQuery, PathQuery } from '../../models/relationships.js';
-import { GraphSearchRequest, ImpactAnalysisRequest, ImpactAnalysis, DependencyAnalysis } from '../../models/types.js';
+import { Entity } from "../../models/entities.js";
+import { GraphRelationship, RelationshipQuery, PathQuery } from "../../models/relationships.js";
+import { GraphSearchRequest, ImpactAnalysisRequest, ImpactAnalysis, DependencyAnalysis } from "../../models/types.js";
 export declare class KnowledgeGraphService extends EventEmitter {
-    private neo4j;
-    private neogma;
-    private entities;
-    private relationships;
-    private embeddings;
-    private searchService;
-    private history;
-    private analysis;
+    private registry;
+    private eventOrchestrator;
+    private initializer;
+    private entityManager;
+    private relationshipManager;
+    private searchManager;
+    private historyManager;
+    private analysisManager;
+    private get neo4j();
+    private get neogma();
+    private get entities();
+    private get relationships();
+    private get embeddings();
+    private get searchService();
+    private get history();
+    private get analysis();
     constructor(config?: Neo4jConfig, overrides?: KnowledgeGraphDependencies);
-    /**
-     * Initialize database with necessary indexes and constraints
-     */
-    private initializeDatabase;
-    /**
-     * Setup event forwarding from sub-services
-     */
-    private setupEventForwarding;
     createEntity(entity: Entity, options?: {
         skipEmbedding?: boolean;
     }): Promise<Entity>;
@@ -134,6 +128,9 @@ export declare class KnowledgeGraphService extends EventEmitter {
     getEdgeSites(relationshipId: string, limit?: number): Promise<any[]>;
     getEdgeCandidates(relationshipId: string, limit?: number): Promise<any[]>;
     repairPreviousVersionLink(versionId: string): Promise<void>;
+    upsertRelationship(relationship: GraphRelationship): Promise<GraphRelationship>;
+    canonicalizeRelationship(relationship: GraphRelationship): Promise<GraphRelationship>;
+    finalizeScan(scanStart: Date): Promise<void>;
 }
 export {};
 //# sourceMappingURL=KnowledgeGraphService.d.ts.map

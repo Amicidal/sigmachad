@@ -1,7 +1,7 @@
 # Spec Relationship Blueprint
 
 ## 1. Overview
-Specification edges (`REQUIRES`, `IMPACTS`, `IMPLEMENTS_SPEC`) connect product requirements to implementation artifacts. They enable requirement traceability, impact analysis, and coverage tracking throughout the development lifecycle.
+Specification edges (`REQUIRES`, `IMPACTS`, `IMPLEMENTS_SPEC`, `IMPLEMENTS_CLUSTER`) connect product requirements to implementation artifacts. They enable requirement traceability, impact analysis, and coverage tracking. For multi-file specs, prefer `IMPLEMENTS_CLUSTER` to attach refactor-resilient groups of entities, avoiding per-symbol maintenance.
 
 ## 2. Current Gaps
 - Relationship query APIs (`KnowledgeGraphService.getRelationships`) still lack first-class filters for spec metadata (`impactLevel`, `priority`, `status`, acceptance criteria IDs, owner teams), limiting dashboards and automation even though the metadata is now persisted on each edge.
@@ -31,6 +31,7 @@ Specification edges (`REQUIRES`, `IMPACTS`, `IMPLEMENTS_SPEC`) connect product r
 | `ownerTeam` | string | Optional reference to team or squad.
 | `metadata.links` | array | URLs or doc references supporting the relationship.
 | `validatedAt`, `reviewedAt` | timestamp | Track gating events.
+| `clusterId` | string | Optional ID of SemanticCluster implementing this criterion (for group-level attachment) |
 
 ## 6. Normalization Strategy
 1. **Spec-edge normalization helper (follow-up)**: build a lightweight wrapper around `KnowledgeGraphService.createRelationship` for `REQUIRES`/`IMPACTS`/`IMPLEMENTS_SPEC` edges that
@@ -55,6 +56,7 @@ Specification edges (`REQUIRES`, `IMPACTS`, `IMPLEMENTS_SPEC`) connect product r
    - `getSpecCoverage(specId)` returning attached entities grouped by status.
    - `getSpecsAffectingEntity(entityId, { statusFilter })` for gating flows.
    - `getHighImpactSpecs({ limit, team })` to power dashboards.
+   - `getSpecClusters(specId)` returning attached clusters and member entities for implementation overview.
 4. Document additional parameters in API docs, providing sample queries for planning tools.
 5. Provide GraphQL/trpc schema updates if relevant to front-end clients.
 
@@ -89,3 +91,10 @@ Specification edges (`REQUIRES`, `IMPACTS`, `IMPLEMENTS_SPEC`) connect product r
 - How do we reconcile spec edges across branches/environments? Do we maintain environment-specific relationships?
 - What governance process is needed to manually override `priority`/`impactLevel` and keep history of changes?
 - How should archived/retired specs be represented—deactivate edges or move to separate type?
+
+**Cluster-based Implementation Retrieval:**
+```
+MATCH (spec:Spec {id: $specId})-[:IMPLEMENTS_CLUSTER]->(cluster:SemanticCluster)
+OPTIONAL MATCH (cluster)<-[:MEMBER_OF_CLUSTER]-(entity:CodebaseEntity)
+RETURN spec, cluster, collect(entity) as clusterMembers
+```

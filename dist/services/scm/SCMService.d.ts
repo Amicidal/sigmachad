@@ -1,8 +1,8 @@
-import { GitService } from "./scm/GitService.js";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "./core/DatabaseService.js";
+import { GitService } from "./GitService.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
 import type { CommitPRRequest, CommitPRResponse, SCMCommitRecord, SCMStatusSummary, SCMBranchInfo, SCMPushResult, SCMCommitLogEntry } from "../../models/types.js";
-import { SCMProvider } from "./scm/SCMProvider.js";
+import { SCMProvider } from "./SCMProvider.js";
 export declare class ValidationError extends Error {
     readonly details: string[];
     constructor(details: string[]);
@@ -12,7 +12,7 @@ export declare class SCMService {
     private readonly kgService;
     private readonly dbService;
     private readonly provider?;
-    constructor(git: GitService, kgService: KnowledgeGraphService, dbService: DatabaseService, provider?: SCMProvider);
+    constructor(git: GitService, kgService: KnowledgeGraphService, dbService: DatabaseService, provider?: SCMProvider | undefined);
     private gitMutex;
     private runWithGitLock;
     createCommitAndMaybePR(request: CommitPRRequest): Promise<CommitPRResponse>;

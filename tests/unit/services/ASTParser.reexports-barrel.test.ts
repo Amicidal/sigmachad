@@ -6,7 +6,7 @@ import { RelationshipType } from '@/models/relationships';
 
 describe('ASTParser barrel re-export resolution', () => {
   let parser: ASTParser;
-  const dir = path.join(__dirname, 'ast-parser', 'reexp');
+  const dir = path.join(path.join(__dirname, '..', 'ast-parser'), 'reexp');
   const fileA = path.join(dir, 'a.ts');
   const fileIndex = path.join(dir, 'index.ts');
   const fileConsumer = path.join(dir, 'consumer.ts');
@@ -32,7 +32,7 @@ describe('ASTParser barrel re-export resolution', () => {
     const rels = res.relationships.filter(r => r.type === RelationshipType.REFERENCES);
     const relStrs = rels.map(r => String(r.toEntityId));
     // Expect a reference pointing to the underlying a.ts:original via file: prefix
-    const targetSuffix = path.join('tests', 'unit', 'services', 'ast-parser', 'reexp', 'a.ts') + ':original';
+    const targetSuffix = path.join('tests', 'unit', 'ast-parser', 'reexp', 'a.ts') + ':original';
     const match = relStrs.find(s => s.startsWith('file:') && s.endsWith(':original') && s.includes('a.ts'));
     expect(match, `Expected file:*a.ts:original in ${JSON.stringify(relStrs)}`).toBeTruthy();
   });

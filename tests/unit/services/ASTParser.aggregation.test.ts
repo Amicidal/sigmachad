@@ -7,7 +7,7 @@ import { noiseConfig } from "@/config/noise";
 
 describe("ASTParser code edge aggregation", () => {
   let parser: ASTParser;
-  const dir = path.join(__dirname, "ast-parser", "aggregation");
+  const dir = path.join(path.join(__dirname, "..", "ast-parser"), "aggregation");
   const helperFile = path.join(dir, "helper.ts");
   const callerFile = path.join(dir, "caller.ts");
   const readsFile = path.join(dir, "reads.ts");

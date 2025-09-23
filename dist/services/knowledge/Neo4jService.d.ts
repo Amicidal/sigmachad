@@ -1,35 +1,15 @@
 /**
  * Neo4j Base Service
- * Handles raw Neo4j interactions, APOC procedures, and GDS algorithms
+ * Facade that orchestrates Neo4j operations through modular components
+ * Refactored into CypherExecutor, VectorService, and GdsService for better maintainability
  */
-import { EventEmitter } from 'events';
-export interface Neo4jConfig {
-    uri: string;
-    username: string;
-    password: string;
-    database?: string;
-    maxConnectionPoolSize?: number;
-}
-export interface CypherQueryOptions {
-    timeout?: number;
-    database?: string;
-}
-export interface VectorSearchOptions {
-    limit?: number;
-    minScore?: number;
-    filter?: Record<string, any>;
-}
-export interface GdsAlgorithmConfig {
-    nodeProjection?: string;
-    relationshipProjection?: string;
-    writeProperty?: string;
-    maxIterations?: number;
-    dampingFactor?: number;
-}
+import { EventEmitter } from "events";
+import { Neo4jConfig, CypherQueryOptions, VectorSearchOptions, GdsAlgorithmConfig, VectorIndexConfig, PathExpandConfig, BenchmarkOptions } from "./neo4j/index.js";
+export { Neo4jConfig, CypherQueryOptions, VectorSearchOptions, GdsAlgorithmConfig, VectorIndexConfig, PathExpandConfig, BenchmarkOptions, };
 export declare class Neo4jService extends EventEmitter {
-    private driver;
-    private database;
-    private readonly defaultTimeout;
+    private executor;
+    private vectorService;
+    private gdsService;
     constructor(config: Neo4jConfig);
     /**
      * Execute a Cypher query with parameters
@@ -53,7 +33,7 @@ export declare class Neo4jService extends EventEmitter {
     /**
      * Create or update a vector index
      */
-    createVectorIndex(indexName: string, label: string, propertyKey: string, dimensions: number, similarity?: 'euclidean' | 'cosine'): Promise<void>;
+    createVectorIndex(indexName: string, label: string, propertyKey: string, dimensions: number, similarity?: "euclidean" | "cosine"): Promise<void>;
     /**
      * Upsert vectors to Neo4j nodes
      */

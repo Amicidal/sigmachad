@@ -142,6 +142,7 @@ export class APIGateway {
                         const m = String(method || "").toUpperCase();
                         // Build a conservative regex to find exact METHOD + SPACE + PATH on a single line
                         const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                        // eslint-disable-next-line no-useless-escape
                         const pattern = new RegExp(`(^|\n)\s*${escape(m)}\s+${escape(path)}(\s|$)`, "m");
                         return pattern.test(routesStr);
                     }
@@ -204,7 +205,9 @@ export class APIGateway {
                 if (needsAuth && token) {
                     const headerKey = request.headers["x-api-key"] || "";
                     const authz = request.headers["authorization"] || "";
-                    const bearer = authz.toLowerCase().startsWith("bearer ") ? authz.slice(7) : authz;
+                    const bearer = authz.toLowerCase().startsWith("bearer ")
+                        ? authz.slice(7)
+                        : authz;
                     const ok = headerKey === token || bearer === token;
                     if (!ok) {
                         reply.status(401).send({
@@ -458,8 +461,7 @@ export class APIGateway {
                 method: "POST",
                 url: "/api/v1/sync",
                 headers: {
-                    "content-type": request.headers["content-type"] ||
-                        "application/json",
+                    "content-type": request.headers["content-type"] || "application/json",
                 },
                 payload: typeof request.body === "string"
                     ? request.body
@@ -483,8 +485,7 @@ export class APIGateway {
                 method: "POST",
                 url: "/api/v1/sync/pause",
                 headers: {
-                    "content-type": request.headers["content-type"] ||
-                        "application/json",
+                    "content-type": request.headers["content-type"] || "application/json",
                 },
                 payload: typeof request.body === "string"
                     ? request.body
@@ -499,8 +500,7 @@ export class APIGateway {
                 method: "POST",
                 url: "/api/v1/sync/resume",
                 headers: {
-                    "content-type": request.headers["content-type"] ||
-                        "application/json",
+                    "content-type": request.headers["content-type"] || "application/json",
                 },
                 payload: typeof request.body === "string"
                     ? request.body
@@ -515,8 +515,7 @@ export class APIGateway {
                 method: "POST",
                 url: "/api/v1/sync",
                 headers: {
-                    "content-type": request.headers["content-type"] ||
-                        "application/json",
+                    "content-type": request.headers["content-type"] || "application/json",
                 },
                 payload: typeof request.body === "string"
                     ? request.body
@@ -577,7 +576,9 @@ export class APIGateway {
             app.post("/auth/refresh", async (request, reply) => {
                 var _a, _b, _c, _d, _e;
                 const body = ((_a = request.body) !== null && _a !== void 0 ? _a : {});
-                const refreshToken = typeof body.refreshToken === "string" ? body.refreshToken : undefined;
+                const refreshToken = typeof body.refreshToken === "string"
+                    ? body.refreshToken
+                    : undefined;
                 if (!refreshToken) {
                     return sendAuthError(reply, request, 401, "INVALID_TOKEN", "Refresh token is required", {
                         reason: "missing_refresh_token",
@@ -618,7 +619,9 @@ export class APIGateway {
                     const rotationIdFromPayload = typeof (payload === null || payload === void 0 ? void 0 : payload.rotationId) === "string"
                         ? payload.rotationId
                         : undefined;
-                    const tokenExpiresAt = typeof payload.exp === "number" ? payload.exp : undefined;
+                    const tokenExpiresAt = typeof payload.exp === "number"
+                        ? payload.exp
+                        : undefined;
                     const validation = this.refreshSessionStore.validatePresentedToken(sessionIdFromPayload, rotationIdFromPayload, tokenExpiresAt);
                     if (!validation.ok) {
                         return sendAuthError(reply, request, 401, "TOKEN_REPLAY", "Refresh token has already been exchanged", {
@@ -649,7 +652,8 @@ export class APIGateway {
                             : ["session:refresh"],
                         sessionId: sessionIdFromPayload,
                     };
-                    const resolvedSessionId = typeof baseClaims.sessionId === "string" && baseClaims.sessionId.length > 0
+                    const resolvedSessionId = typeof baseClaims.sessionId === "string" &&
+                        baseClaims.sessionId.length > 0
                         ? baseClaims.sessionId
                         : sessionIdFromPayload !== null && sessionIdFromPayload !== void 0 ? sessionIdFromPayload : randomUUID();
                     baseClaims.sessionId = resolvedSessionId;
@@ -923,7 +927,7 @@ export class APIGateway {
                 await this.startHistorySchedulers();
             }
             catch (e) {
-                console.warn('History schedulers could not be started:', e);
+                console.warn("History schedulers could not be started:", e);
             }
         }
         catch (error) {
@@ -944,7 +948,9 @@ export class APIGateway {
             if (this._historyIntervals.checkpoint)
                 clearInterval(this._historyIntervals.checkpoint);
         }
-        catch (_a) { }
+        catch (_a) {
+            // Ignore errors when clearing intervals
+        }
         await this.app.close();
         console.log("🛑 API Gateway stopped");
     }
@@ -969,15 +975,16 @@ export class APIGateway {
     async startHistorySchedulers() {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
         const cfg = (_b = (_a = this.configurationService) === null || _a === void 0 ? void 0 : _a.getHistoryConfig) === null || _b === void 0 ? void 0 : _b.call(_a);
-        const enabled = (_c = cfg === null || cfg === void 0 ? void 0 : cfg.enabled) !== null && _c !== void 0 ? _c : ((process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false');
+        const enabled = (_c = cfg === null || cfg === void 0 ? void 0 : cfg.enabled) !== null && _c !== void 0 ? _c : (process.env.HISTORY_ENABLED || "true").toLowerCase() !== "false";
         if (!enabled) {
-            console.log('🕒 History disabled; schedulers not started');
+            console.log("🕒 History disabled; schedulers not started");
             return;
         }
-        const retentionDays = (_d = cfg === null || cfg === void 0 ? void 0 : cfg.retentionDays) !== null && _d !== void 0 ? _d : (parseInt(process.env.HISTORY_RETENTION_DAYS || '30', 10) || 30);
-        const hops = (_f = (_e = cfg === null || cfg === void 0 ? void 0 : cfg.checkpoint) === null || _e === void 0 ? void 0 : _e.hops) !== null && _f !== void 0 ? _f : (parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '2', 10) || 2);
-        const pruneHours = (_h = (_g = cfg === null || cfg === void 0 ? void 0 : cfg.schedule) === null || _g === void 0 ? void 0 : _g.pruneIntervalHours) !== null && _h !== void 0 ? _h : (parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || '24', 10) || 24);
-        const checkpointHours = (_k = (_j = cfg === null || cfg === void 0 ? void 0 : cfg.schedule) === null || _j === void 0 ? void 0 : _j.checkpointIntervalHours) !== null && _k !== void 0 ? _k : (parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || '24', 10) || 24);
+        const retentionDays = (_d = cfg === null || cfg === void 0 ? void 0 : cfg.retentionDays) !== null && _d !== void 0 ? _d : (parseInt(process.env.HISTORY_RETENTION_DAYS || "30", 10) || 30);
+        const hops = (_f = (_e = cfg === null || cfg === void 0 ? void 0 : cfg.checkpoint) === null || _e === void 0 ? void 0 : _e.hops) !== null && _f !== void 0 ? _f : (parseInt(process.env.HISTORY_CHECKPOINT_HOPS || "2", 10) || 2);
+        const pruneHours = (_h = (_g = cfg === null || cfg === void 0 ? void 0 : cfg.schedule) === null || _g === void 0 ? void 0 : _g.pruneIntervalHours) !== null && _h !== void 0 ? _h : (parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || "24", 10) || 24);
+        const checkpointHours = (_k = (_j = cfg === null || cfg === void 0 ? void 0 : cfg.schedule) === null || _j === void 0 ? void 0 : _j.checkpointIntervalHours) !== null && _k !== void 0 ? _k : (parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || "24", 10) ||
+            24);
         // Daily prune at interval (24h)
         const dayMs = 24 * 60 * 60 * 1000;
         const pruneMs = Math.max(1, pruneHours) * 60 * 60 * 1000;
@@ -988,24 +995,26 @@ export class APIGateway {
                 console.log(`🧹 Daily prune completed: versions=${r.versionsDeleted}, edges=${r.edgesClosed}, checkpoints=${r.checkpointsDeleted}`);
             }
             catch (e) {
-                console.warn('Daily prune failed:', e);
+                console.warn("Daily prune failed:", e);
             }
         };
         this._historyIntervals.prune = setInterval(runPrune, pruneMs);
         // Daily checkpoint: build seeds from last 24h modified entities (capped)
         const runCheckpoint = async () => {
             try {
-                const since = new Date(Date.now() - dayMs);
                 const seeds = await this.kgService.findRecentEntityIds(200);
                 if (seeds.length === 0) {
-                    console.log('📌 Daily checkpoint skipped: no recent entities');
+                    console.log("📌 Daily checkpoint skipped: no recent entities");
                     return;
                 }
-                const { checkpointId } = await this.kgService.createCheckpoint(seeds, { type: 'daily', hops });
+                const { checkpointId } = await this.kgService.createCheckpoint(seeds, {
+                    type: "daily",
+                    hops,
+                });
                 console.log(`📌 Daily checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`);
             }
             catch (e) {
-                console.warn('Daily checkpoint failed:', e);
+                console.warn("Daily checkpoint failed:", e);
             }
         };
         this._historyIntervals.checkpoint = setInterval(runCheckpoint, checkpointMs);

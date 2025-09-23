@@ -4,7 +4,7 @@
  */
 import { Entity } from "../../models/entities.js";
 import { GraphRelationship } from "../../models/relationships.js";
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
+import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
 export interface Conflict {
     id: string;
     type: "entity_version" | "entity_deletion" | "relationship_conflict" | "concurrent_modification";

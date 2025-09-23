@@ -1,0 +1,20 @@
+{
+  "name": "@memento/jobs",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./persistence": "./src/persistence/index.ts"
+  },
+  "dependencies": {
+    "@memento/core": "workspace:*",
+    "@memento/database": "workspace:*",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/node-cron": "^3.0.8",
+    "typescript": "^5.2.2"
+  }
+}

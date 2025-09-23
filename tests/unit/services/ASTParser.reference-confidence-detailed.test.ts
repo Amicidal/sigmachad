@@ -6,7 +6,7 @@ import { RelationshipType } from '@/models/relationships';
 
 describe('ASTParser detailed confidence for REFERENCES/DEPENDS_ON', () => {
   let parser: ASTParser;
-  const dir = path.join(__dirname, 'ast-parser', 'confidence');
+  const dir = path.join(path.join(__dirname, '..', 'ast-parser'), 'confidence');
   const localFile = path.join(dir, 'local.ts');
   const importedDef = path.join(dir, 'defs.ts');
   const importer = path.join(dir, 'importer.ts');

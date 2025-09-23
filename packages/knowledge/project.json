@@ -1,0 +1,40 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "knowledge",
+  "sourceRoot": "packages/knowledge/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "packages/knowledge/dist",
+        "main": "packages/knowledge/src/index.ts",
+        "tsConfig": "packages/knowledge/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["packages/knowledge/**/*.ts"]
+      }
+    },
+    "test": {
+      "executor": "@nx/vite:test",
+      "options": {
+        "config": "vitest.config.ts",
+        "reportsDirectory": "../../coverage/packages/knowledge"
+      }
+    },
+    "dev": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "outputPath": "packages/knowledge/dist",
+        "main": "packages/knowledge/src/index.ts",
+        "tsConfig": "packages/knowledge/tsconfig.json",
+        "watch": true
+      }
+    }
+  },
+  "implicitDependencies": ["core", "database"]
+}

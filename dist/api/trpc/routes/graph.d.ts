@@ -140,8 +140,8 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
             depth?: number | undefined;
         };
         _input_out: {
-            depth: number;
             entityId: string;
+            depth: number;
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;
@@ -178,12 +178,12 @@ export declare const graphRouter: import("@trpc/server").CreateRouterInner<impor
         _meta: object;
         _ctx_out: import("../base.js").TRPCContext;
         _input_in: {
-            changeType: "delete" | "modify" | "refactor";
             entityId: string;
+            changeType: "delete" | "modify" | "refactor";
         };
         _input_out: {
-            changeType: "delete" | "modify" | "refactor";
             entityId: string;
+            changeType: "delete" | "modify" | "refactor";
         };
         _output_in: typeof import("@trpc/server").unsetMarker;
         _output_out: typeof import("@trpc/server").unsetMarker;

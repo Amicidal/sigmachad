@@ -10,7 +10,7 @@ import { RelationshipType } from '@/models/relationships';
 
 describe('ASTParser noise heuristics', () => {
   let parser: ASTParser;
-  const tmpFile = path.join(__dirname, 'ast-parser', 'noise-heuristics.temp.ts');
+  const tmpFile = path.join(path.join(__dirname, '..', 'ast-parser'), 'noise-heuristics.temp.ts');
 
   beforeAll(async () => {
     parser = new ASTParser();

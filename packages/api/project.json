@@ -1,0 +1,40 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "api",
+  "sourceRoot": "packages/api/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "packages/api/dist",
+        "main": "packages/api/src/index.ts",
+        "tsConfig": "packages/api/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["packages/api/**/*.ts"]
+      }
+    },
+    "test": {
+      "executor": "@nx/vite:test",
+      "options": {
+        "config": "vitest.config.ts",
+        "reportsDirectory": "../../coverage/packages/api"
+      }
+    },
+    "dev": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "outputPath": "packages/api/dist",
+        "main": "packages/api/src/index.ts",
+        "tsConfig": "packages/api/tsconfig.json",
+        "watch": true
+      }
+    }
+  },
+  "implicitDependencies": ["core", "database", "knowledge"]
+}

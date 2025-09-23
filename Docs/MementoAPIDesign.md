@@ -868,19 +868,18 @@ The handler normalises graph traversal depth (`maxDepth` 1–8) and aggregates s
 
 ---
 
-## 6. Vector Database Operations
-
+## 6. Vector Database Operations (Neo4j Native)
 ### 6.1 Semantic Search
-**Endpoint:** `POST /api/vdb/search`
-**MCP Tool:** `vdb.search`
+**Endpoint:** `POST /api/graph/semantic-search`  // Updated path for Neo4j native
+**MCP Tool:** `graph.semantic_search`  // Renamed from vdb.search
 
-Performs semantic search with vector similarity.
+Performs semantic search using Neo4j native vectors.
 
 ```typescript
 interface VectorSearchRequest {
   query: string;
   entityTypes?: string[];
-  similarity?: number; // 0-1, minimum similarity threshold
+  similarity?: number;  // 0-1 threshold
   limit?: number;
   includeMetadata?: boolean;
   filters?: {
@@ -904,8 +903,10 @@ interface VectorSearchResult {
   };
 }
 
-async function vectorSearch(params: VectorSearchRequest): Promise<VectorSearchResult>
+async function semanticSearch(params: VectorSearchRequest): Promise<VectorSearchResult>
 ```
+
+**Note**: Uses Neo4j native vectors (db.index.vector.queryNodes); Qdrant on standby for advanced needs (e.g., >10M embeddings). Embeddings stored on entities (e.g., symbol vectors for semantic similarity).
 
 ---
 
@@ -1047,60 +1048,73 @@ async function getBusinessImpact(domainName: string, since?: Date): Promise<Busi
 
 ---
 
-## 9. Security Operations
+## 9. Security Operations (Metadata-Only)
+Security is handled via metadata on core entities (e.g., metadata.vulnerabilities array appended from external scans like Snyk/ESLint during sync/gates). No dedicated endpoints for full reports—query prop aggregates on entities/clusters. Critical vulns trigger refactors via gates (e.g., validate.run).
 
-### 9.1 Scan for Security Issues
-**Endpoint:** `POST /api/security/scan`
-**MCP Tool:** `security.scan`
+### 9.1 Get Security Metadata
+**Endpoint:** `GET /api/security/metadata/{entityId}`
+**MCP Tool:** `security.get_metadata`
 
-Scans entities for security vulnerabilities.
+Retrieves aggregated security metadata for an entity (e.g., vulns on File/Symbol/Cluster).
 
 ```typescript
-interface SecurityScanRequest {
-  entityIds?: string[];
-  scanTypes?: ('sast' | 'sca' | 'secrets' | 'dependency')[];
+interface SecurityMetadataRequest {
   severity?: ('critical' | 'high' | 'medium' | 'low')[];
+  fixed?: boolean;  // false for open vulns
 }
 
-interface SecurityScanResult {
-  issues: SecurityIssue[];
-  vulnerabilities: Vulnerability[];
-  summary: {
-    totalIssues: number;
-    bySeverity: Record<string, number>;
-    byType: Record<string, number>;
-  };
-}
-
-async function scanForSecurityIssues(params?: SecurityScanRequest): Promise<SecurityScanResult>
-```
-
-### 9.2 Get Vulnerability Report
-**Endpoint:** `GET /api/security/vulnerabilities`
-**MCP Tool:** `security.get_vulnerability_report`
-
-Retrieves vulnerability report for the entire codebase.
-
-```typescript
-interface VulnerabilityReport {
+interface SecurityMetadata {
+  entityId: string;
+  vulnerabilities: Array<{
+    id: string (e.g., 'CVE-123');
+    severity: string;
+    tool: string (e.g., 'snyk');
+    description: string;
+    fixed: boolean;
+    remediation: string;
+    scannedAt: string;
+    confidence: number;
+  }>;  // From entity.metadata.vulnerabilities
   summary: {
     total: number;
-    critical: number;
-    high: number;
-    medium: number;
-    low: number;
-  };
-  vulnerabilities: Vulnerability[];
-  byPackage: Record<string, Vulnerability[]>;
-  remediation: {
-    immediate: string[];
-    planned: string[];
-    monitoring: string[];
+    bySeverity: Record<string, number>;
+    unfixedCritical: number;
   };
 }
 
-async function getVulnerabilityReport(): Promise<VulnerabilityReport>
+async function getSecurityMetadata(entityId: string, params?: SecurityMetadataRequest): Promise<SecurityMetadata>
 ```
+
+**Example:**
+```typescript
+const metadata = await getSecurityMetadata('file-abc', { severity: ['critical', 'high'], fixed: false });
+// Returns aggregated from entity/clusters, e.g., { vulnerabilities: [{ id: 'CVE-123', severity: 'high', fixed: false }], summary: { total: 2, unfixedCritical: 1 } }
+```
+
+### 9.2 Scan and Append Security Metadata
+**Endpoint:** `POST /api/security/scan-metadata`
+**MCP Tool:** `security.scan_metadata`
+
+Triggers lightweight scan and appends to entity metadata (integrated with validate.run; no dedicated return—use getSecurityMetadata post-scan).
+
+```typescript
+interface SecurityScanMetadataRequest {
+  entityIds: string[];  // Or single ID
+  scanTypes?: ('sast' | 'sca' | 'secrets')[];  // e.g., ESLint/Snyk
+}
+
+interface SecurityScanMetadataResponse {
+  scannedEntities: number;
+  newVulnsAppended: number;
+  criticalCount: number;  // Triggers refactor if >0
+}
+
+async function scanAndAppendMetadata(params: SecurityScanMetadataRequest): Promise<SecurityScanMetadataResponse>
+```
+
+**Integration with Validation**:
+- In `validate.run` (Section 4.2): Includes security metadata append (e.g., scan during validation, check `metadata.vulnerabilities` for criticals; block if unfixed high-severity).
+- No full reports—offload to external (Postgres/S3) via ref in metadata (e.g., `externalRef: 'pg-report-uuid'`).
 
 ---
 
@@ -1253,76 +1267,4 @@ interface AuthenticatedRequest {
 
 ### Token lifecycle
 
-`POST /api/v1/auth/refresh` accepts `{ refreshToken }` and returns a fresh access token plus refresh token. Expired or malformed refresh tokens respond with `TOKEN_EXPIRED` or `INVALID_TOKEN` payloads to mirror the integration test contract.
-
-## Rate Limiting
-
-```typescript
-interface RateLimit {
-  limit: number;
-  remaining: number;
-  resetTime: Date;
-  retryAfter?: number;
-}
-
-// Headers returned:
-// X-RateLimit-Limit
-// X-RateLimit-Remaining
-// X-RateLimit-Reset
-// Retry-After (when limit exceeded)
-```
-
-## Webhooks & Real-time Updates
-
-```typescript
-interface WebhookConfig {
-  url: string;
-  events: ('sync.completed' | 'validation.failed' | 'security.alert')[];
-  secret: string;
-}
-
-interface RealTimeSubscription {
-  event: string;
-  filter?: any;
-  callback: (event: any) => void;
-}
-
-// WebSocket events:
-// sync:update - Real-time sync progress
-// validation:result - Validation completion
-// security:alert - New security issues
-// change:detected - Code changes detected
-```
-
-## Versioning
-
-The API follows semantic versioning:
-
-- **Major version** (v1, v2): Breaking changes
-- **Minor version** (v1.1, v1.2): New features, backward compatible
-- **Patch version** (v1.0.1): Bug fixes
-
-Version is specified in:
-- URL path: `/api/v1/design/create-spec`
-- Header: `Accept-Version: v1`
-- Query parameter: `?version=v1`
-
-## SDKs & Client Libraries
-
-Official client libraries available for:
-- **JavaScript/TypeScript**: `npm install @memento-ai/sdk`
-- **Python**: `pip install memento-ai`
-- **Java**: Maven dependency
-- **Go**: `go get github.com/memento-ai/go-sdk`
-
-## Support & Documentation
-
-- **Interactive API Documentation**: Available at `/api/docs`
-- **OpenAPI Specification**: Available at `/api/openapi.json`
-
-- **Community Forums**: `https://community.memento.ai`
-- **Support**: `support@memento.ai`
-
----
-
-*This API design provides comprehensive access to all Memento knowledge graph capabilities, enabling seamless integration with AI agents, IDEs, CI/CD pipelines, and development workflows.*
+`POST /api/v1/auth/refresh` accepts `{ refreshToken }`

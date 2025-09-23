@@ -1,19 +1,23 @@
 /**
  * Documentation Parser Service
- * Handles parsing, indexing, and synchronization of documentation files
+ * Facade that orchestrates parsing, indexing, and synchronization of documentation files
+ * Refactored into modular components for better maintainability
  */
-import { marked } from "marked";
-import { readFileSync } from "fs";
-import { join, extname, basename } from "path";
-import { RelationshipType, } from "../../models/relationships.js";
 import { HeuristicDocumentationIntelligenceProvider, } from "./DocumentationIntelligenceProvider.js";
+import { DocTokenizer, IntentExtractor, SyncOrchestrator, ParsedDocument, DomainExtraction, SyncResult, SearchResult, } from "./docs-parser/index.js";
+import { RelationshipType, } from "../../models/relationships.js";
+import { join, extname, basename } from "path";
+import { marked } from "marked";
+export { ParsedDocument, DomainExtraction, SyncResult, SearchResult };
 export class DocumentationParser {
     constructor(kgService, dbService, intelligenceProvider) {
         this.supportedExtensions = [".md", ".txt", ".rst", ".adoc"];
-        this.kgService = kgService;
-        this.dbService = dbService;
         this.intelligenceProvider =
             intelligenceProvider !== null && intelligenceProvider !== void 0 ? intelligenceProvider : new HeuristicDocumentationIntelligenceProvider();
+        this.kgService = kgService;
+        this.intentExtractor = new IntentExtractor(this.intelligenceProvider);
+        this.syncOrchestrator = new SyncOrchestrator(kgService, dbService, this.intentExtractor);
+        this.tokenizer = new DocTokenizer();
     }
     inferDocIntent(filePath, docType) {
         const normalizedPath = filePath.toLowerCase();
@@ -36,7 +40,8 @@ export class DocumentationParser {
         if (localeMatch) {
             return localeMatch[1];
         }
-        if (typeof (metadata === null || metadata === void 0 ? void 0 : metadata.language) === "string" && metadata.language.length > 0) {
+        if (typeof (metadata === null || metadata === void 0 ? void 0 : metadata.language) === "string" &&
+            metadata.language.length > 0) {
             return metadata.language;
         }
         return "en";
@@ -57,53 +62,12 @@ export class DocumentationParser {
      * Parse a documentation file and extract structured information
      */
     async parseFile(filePath) {
-        try {
-            const content = readFileSync(filePath, "utf-8");
-            const extension = extname(filePath).toLowerCase();
-            let parsedContent;
-            switch (extension) {
-                case ".md":
-                    parsedContent = await this.parseMarkdown(content, filePath);
-                    break;
-                case ".txt":
-                    parsedContent = await this.parsePlaintext(content, filePath);
-                    break;
-                case ".rst":
-                    parsedContent = await this.parseRestructuredText(content, filePath);
-                    break;
-                case ".adoc":
-                    parsedContent = await this.parseAsciiDoc(content, filePath);
-                    break;
-                default:
-                    parsedContent = await this.parsePlaintext(content, filePath);
-            }
-            const checksum = this.calculateChecksum(content);
-            const providerIntent = parsedContent.docIntent;
-            const inferredIntent = providerIntent !== null && providerIntent !== void 0 ? providerIntent : this.inferDocIntent(filePath, parsedContent.docType);
-            const locale = this.inferDocLocale(filePath, parsedContent.metadata);
-            const now = new Date();
-            parsedContent.docIntent = inferredIntent;
-            parsedContent.docVersion = checksum;
-            parsedContent.docHash = checksum;
-            parsedContent.docSource = parsedContent.docSource || "parser";
-            parsedContent.docLocale = locale;
-            parsedContent.lastIndexed = now;
-            // Extract additional metadata
-            parsedContent.metadata = {
-                ...parsedContent.metadata,
-                filePath,
-                fileSize: content.length,
-                lastModified: now,
-                checksum,
-                docIntent: inferredIntent,
-                docVersion: checksum,
-                docLocale: locale,
-            };
-            return parsedContent;
-        }
-        catch (error) {
-            throw new Error(`Failed to parse file ${filePath}: ${error instanceof Error ? error.message : "Unknown error"}`);
-        }
+        // Parse with tokenizer
+        const parsedDoc = await this.tokenizer.parseFile(filePath);
+        // Read content for intent extraction
+        const content = parsedDoc.content;
+        // Enhance with intent extraction
+        return this.intentExtractor.enhanceDocument(parsedDoc, content);
     }
     /**
      * Parse markdown content using marked library
@@ -461,54 +425,7 @@ export class DocumentationParser {
      * Sync documentation files with the knowledge graph
      */
     async syncDocumentation(docsPath) {
-        const result = {
-            processedFiles: 0,
-            newDomains: 0,
-            updatedClusters: 0,
-            errors: [],
-            sectionsLinked: 0,
-        };
-        const processedDocs = [];
-        let linkedSectionsTotal = 0;
-        try {
-            // Find all documentation files
-            const docFiles = await this.findDocumentationFiles(docsPath);
-            for (const filePath of docFiles) {
-                try {
-                    // Parse the file
-                    const parsedDoc = await this.parseFile(filePath);
-                    // Create or update documentation node
-                    const docId = await this.createOrUpdateDocumentationNode(filePath, parsedDoc);
-                    // Extract and create business domains
-                    const newDomains = await this.extractAndCreateDomains(parsedDoc, docId);
-                    result.newDomains += newDomains;
-                    // Update semantic clusters
-                    await this.updateSemanticClusters(parsedDoc, docId);
-                    linkedSectionsTotal += await this.linkDocumentSections(docId, parsedDoc);
-                    processedDocs.push({ id: docId, lastIndexed: parsedDoc.lastIndexed });
-                    result.processedFiles++;
-                }
-                catch (error) {
-                    result.errors.push(`${filePath}: ${error instanceof Error ? error.message : "Unknown error"}`);
-                }
-            }
-            try {
-                const freshness = await this.applyFreshnessUpdates(processedDocs);
-                result.refreshedRelationships = freshness.refreshed;
-                result.staleRelationships = freshness.stale;
-            }
-            catch (freshnessError) {
-                result.errors.push(`Freshness update failed: ${freshnessError instanceof Error
-                    ? freshnessError.message
-                    : "Unknown error"}`);
-            }
-            result.updatedClusters = await this.refreshClusters();
-            result.sectionsLinked = linkedSectionsTotal;
-        }
-        catch (error) {
-            result.errors.push(`Sync failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-        }
-        return result;
+        return this.syncOrchestrator.syncDocumentation(docsPath);
     }
     /**
      * Find all documentation files in a directory
@@ -766,253 +683,8 @@ export class DocumentationParser {
     /**
      * Search documentation content
      */
-    async searchDocumentation(query, options = {}) {
-        const results = [];
-        // This is a simplified search implementation
-        // In a real scenario, this would use vector search or full-text search
-        // Get all documentation nodes
-        const docs = await this.kgService.findEntitiesByType("documentation");
-        for (const doc of docs) {
-            const documentationNode = doc;
-            // Filter by options
-            if (options.domain &&
-                (!documentationNode.businessDomains ||
-                    !documentationNode.businessDomains.some((d) => d.toLowerCase().includes(options.domain.toLowerCase())))) {
-                continue;
-            }
-            if (options.docType && documentationNode.docType !== options.docType) {
-                continue;
-            }
-            // Simple text matching (could be enhanced with NLP)
-            const relevanceScore = this.calculateRelevanceScore(query, documentationNode);
-            if (relevanceScore > 0) {
-                results.push({
-                    document: documentationNode,
-                    relevanceScore,
-                    matchedSections: this.findMatchedSections(query, documentationNode.content),
-                });
-            }
-        }
-        // Sort by relevance and limit results
-        results.sort((a, b) => b.relevanceScore - a.relevanceScore);
-        return results.slice(0, options.limit || 20);
-    }
-    /**
-     * Calculate relevance score for search query
-     */
-    calculateRelevanceScore(query, doc) {
-        const lowerQuery = query.toLowerCase();
-        const lowerContent = doc.content.toLowerCase();
-        const lowerTitle = doc.title.toLowerCase();
-        let score = 0;
-        // Title matches are most important
-        if (lowerTitle.includes(lowerQuery)) {
-            score += 10;
-        }
-        // Content matches
-        const contentMatches = (lowerContent.match(new RegExp(lowerQuery, "g")) || []).length;
-        score += contentMatches * 2;
-        // Business domain matches
-        if (doc.businessDomains && doc.businessDomains.length > 0) {
-            const domainMatches = doc.businessDomains.filter((d) => d.toLowerCase().includes(lowerQuery)).length;
-            score += domainMatches * 5;
-        }
-        // Technology matches
-        if (doc.technologies && doc.technologies.length > 0) {
-            const techMatches = doc.technologies.filter((t) => t.toLowerCase().includes(lowerQuery)).length;
-            score += techMatches * 3;
-        }
-        return score;
-    }
-    /**
-     * Find matched sections in content
-     */
-    findMatchedSections(query, content) {
-        const sections = [];
-        const lines = content.split("\n");
-        const lowerQuery = query.toLowerCase();
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.toLowerCase().includes(lowerQuery)) {
-                // Include context around the match
-                const start = Math.max(0, i - 2);
-                const end = Math.min(lines.length, i + 3);
-                const context = lines.slice(start, end).join("\n");
-                sections.push(context);
-            }
-        }
-        return sections.slice(0, 5); // Limit to top 5 matches
-    }
-    getFreshnessWindowDays() {
-        const raw = process.env.DOC_FRESHNESS_MAX_AGE_DAYS;
-        const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-        if (Number.isFinite(parsed) && parsed > 0) {
-            return parsed;
-        }
-        return 14;
-    }
-    async linkDocumentSections(docId, parsedDoc) {
-        const sections = this.extractSectionDescriptors(parsedDoc);
-        if (sections.length === 0)
-            return 0;
-        let linked = 0;
-        for (const section of sections.slice(0, 30)) {
-            try {
-                await this.kgService.createRelationship({
-                    id: `rel_${docId}_${section.anchor}_DOCUMENTS_SECTION`,
-                    fromEntityId: docId,
-                    toEntityId: docId,
-                    type: RelationshipType.DOCUMENTS_SECTION,
-                    created: new Date(),
-                    lastModified: new Date(),
-                    version: 1,
-                    source: "parser",
-                    docIntent: parsedDoc.docIntent,
-                    docVersion: parsedDoc.docVersion,
-                    docHash: parsedDoc.docHash,
-                    docLocale: parsedDoc.docLocale,
-                    lastValidated: parsedDoc.lastIndexed,
-                    sectionAnchor: section.anchor,
-                    sectionTitle: section.title,
-                    summary: section.summary,
-                    metadata: {
-                        level: section.level,
-                        inferred: true,
-                        source: "doc-section-extract",
-                        sectionAnchor: section.anchor,
-                        sectionTitle: section.title,
-                        summary: section.summary,
-                        levelOrdinal: section.level,
-                    },
-                });
-                linked++;
-            }
-            catch (error) {
-                console.warn(`Failed to link documentation section ${section.anchor} for ${docId}:`, error instanceof Error ? error.message : error);
-            }
-        }
-        return linked;
-    }
-    extractSectionDescriptors(parsedDoc) {
-        const sections = [];
-        const metadata = parsedDoc.metadata || {};
-        const mdHeadings = Array.isArray(metadata.headings)
-            ? metadata.headings
-            : [];
-        if (mdHeadings.length > 0) {
-            for (const heading of mdHeadings) {
-                const text = typeof heading.text === "string" ? heading.text.trim() : "";
-                const level = Number.isFinite(heading.level) ? heading.level : 2;
-                if (text.length === 0)
-                    continue;
-                if (text === parsedDoc.title)
-                    continue;
-                sections.push({ title: text, level });
-            }
-        }
-        const rstSections = Array.isArray(metadata.sections)
-            ? metadata.sections
-            : [];
-        if (rstSections.length > 0 && sections.length === 0) {
-            for (const section of rstSections) {
-                const text = typeof section.title === "string" ? section.title.trim() : "";
-                if (text.length === 0)
-                    continue;
-                sections.push({ title: text, level: section.level || 2 });
-            }
-        }
-        const descriptors = [];
-        if (sections.length === 0) {
-            return descriptors;
-        }
-        const content = parsedDoc.content || "";
-        const lines = content.split(/\r?\n/);
-        for (let i = 0; i < sections.length; i++) {
-            const section = sections[i];
-            const anchor = this.slugifySectionTitle(section.title) || `_section_${i + 1}`;
-            const summary = this.extractSectionSummary(section.title, section.level, lines);
-            descriptors.push({
-                title: section.title,
-                anchor,
-                level: section.level || 2,
-                summary,
-            });
-        }
-        return descriptors;
-    }
-    slugifySectionTitle(title) {
-        return title
-            .toLowerCase()
-            .trim()
-            .replace(/[^a-z0-9\-_/\s]+/g, "-")
-            .replace(/\s+/g, "-")
-            .replace(/-+/g, "-")
-            .replace(/^-/g, "")
-            .replace(/-$/g, "")
-            .slice(0, 128);
-    }
-    extractSectionSummary(title, level, lines) {
-        const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const headingPatterns = [
-            new RegExp(`^#{1,${Math.max(level, 1)}}\\s*${escapeRegExp(title)}\\s*$`, "i"),
-            new RegExp(`^${escapeRegExp(title)}\s*$`, "i"),
-        ];
-        let startIndex = -1;
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (headingPatterns.some((pattern) => pattern.test(line.trim()))) {
-                startIndex = i + 1;
-                break;
-            }
-        }
-        if (startIndex === -1 || startIndex >= lines.length) {
-            return undefined;
-        }
-        const snippet = [];
-        for (let i = startIndex; i < lines.length; i++) {
-            const line = lines[i];
-            if (/^#{1,6}\s+/.test(line))
-                break; // next markdown heading
-            if (/^\s*$/.test(line)) {
-                if (snippet.length > 0)
-                    break;
-                continue;
-            }
-            snippet.push(line.trim());
-            if (snippet.join(" ").length > 220)
-                break;
-        }
-        const summary = snippet.join(" ");
-        if (!summary)
-            return undefined;
-        return summary.length > 240 ? `${summary.slice(0, 237)}...` : summary;
-    }
-    async applyFreshnessUpdates(processedDocs) {
-        let refreshed = 0;
-        const docIds = [];
-        for (const doc of processedDocs) {
-            docIds.push(doc.id);
-            try {
-                refreshed += await this.kgService.updateDocumentationFreshness(doc.id, {
-                    lastValidated: doc.lastIndexed,
-                    documentationQuality: "complete",
-                    updatedFromDocAt: doc.lastIndexed,
-                });
-            }
-            catch (error) {
-                console.warn(`Failed to refresh documentation freshness for ${doc.id}:`, error instanceof Error ? error.message : error);
-            }
-        }
-        const cutoffMs = this.getFreshnessWindowDays() * 24 * 60 * 60 * 1000;
-        const cutoffDate = new Date(Date.now() - cutoffMs);
-        let stale = 0;
-        try {
-            stale = await this.kgService.markDocumentationAsStale(cutoffDate, docIds);
-        }
-        catch (error) {
-            console.warn("Failed to mark stale documentation relationships:", error instanceof Error ? error.message : error);
-        }
-        return { refreshed, stale };
+    async searchDocumentation(query, options) {
+        return this.syncOrchestrator.searchDocumentation(query, options);
     }
 }
 //# sourceMappingURL=DocumentationParser.js.map

@@ -1,80 +1,46 @@
 /**
  * Neo4j Base Service
- * Handles raw Neo4j interactions, APOC procedures, and GDS algorithms
+ * Facade that orchestrates Neo4j operations through modular components
+ * Refactored into CypherExecutor, VectorService, and GdsService for better maintainability
  */
-import neo4j from 'neo4j-driver';
-import { EventEmitter } from 'events';
+import { EventEmitter } from "events";
+import * as neo4j from "neo4j-driver";
+import { CypherExecutor, VectorService, GdsService, Neo4jConfig, CypherQueryOptions, VectorSearchOptions, GdsAlgorithmConfig, VectorIndexConfig, PathExpandConfig, BenchmarkOptions, } from "./neo4j/index.js";
+export { Neo4jConfig, CypherQueryOptions, VectorSearchOptions, GdsAlgorithmConfig, VectorIndexConfig, PathExpandConfig, BenchmarkOptions, };
 export class Neo4jService extends EventEmitter {
     constructor(config) {
         super();
-        this.defaultTimeout = 30000;
-        this.driver = neo4j.driver(config.uri, neo4j.auth.basic(config.username, config.password), {
-            maxConnectionPoolSize: config.maxConnectionPoolSize || 50,
-            connectionTimeout: 30000,
-            maxTransactionRetryTime: 30000,
-        });
-        this.database = config.database || 'neo4j';
+        // Initialize modular services
+        this.executor = new CypherExecutor(config);
+        this.vectorService = new VectorService(this.executor);
+        this.gdsService = new GdsService(this.executor);
+        // Forward events from sub-services
+        this.executor.on("error", (data) => this.emit("error", data));
+        this.executor.on("transaction:error", (data) => this.emit("transaction:error", data));
+        this.executor.on("closed", () => this.emit("closed"));
+        this.vectorService.on("vectorIndex:created", (data) => this.emit("vectorIndex:created", data));
+        this.vectorService.on("vectors:upserted", (data) => this.emit("vectors:upserted", data));
+        this.vectorService.on("embedding:deleted", (data) => this.emit("embedding:deleted", data));
+        this.gdsService.on("algorithm:completed", (data) => this.emit("algorithm:completed", data));
+        this.gdsService.on("algorithm:error", (data) => this.emit("algorithm:error", data));
+        this.gdsService.on("pathExpansion:completed", (data) => this.emit("pathExpansion:completed", data));
+        this.gdsService.on("pathExpansion:error", (data) => this.emit("pathExpansion:error", data));
+        this.gdsService.on("shortestPath:found", (data) => this.emit("shortestPath:found", data));
+        this.gdsService.on("shortestPath:error", (data) => this.emit("shortestPath:error", data));
+        this.gdsService.on("namedGraph:created", (data) => this.emit("namedGraph:created", data));
+        this.gdsService.on("namedGraph:dropped", (data) => this.emit("namedGraph:dropped", data));
     }
     /**
      * Execute a Cypher query with parameters
      */
     async executeCypher(query, params = {}, options = {}) {
-        const session = this.driver.session({
-            database: options.database || this.database,
-            defaultAccessMode: neo4j.session.WRITE,
-        });
-        try {
-            const result = await session.run(query, params, {
-                timeout: options.timeout || this.defaultTimeout,
-            });
-            return result.records.map(record => {
-                const obj = {};
-                record.keys.forEach(key => {
-                    const value = record.get(key);
-                    obj[key] = this.convertNeo4jValue(value);
-                });
-                return obj;
-            });
-        }
-        catch (error) {
-            this.emit('error', { query, params, error });
-            throw error;
-        }
-        finally {
-            await session.close();
-        }
+        return this.executor.executeCypher(query, params, options);
     }
     /**
      * Execute multiple queries in a transaction
      */
     async executeTransaction(queries, options = {}) {
-        const session = this.driver.session({
-            database: options.database || this.database,
-            defaultAccessMode: neo4j.session.WRITE,
-        });
-        const results = [];
-        try {
-            await session.writeTransaction(async (tx) => {
-                for (const { query, params = {} } of queries) {
-                    const result = await tx.run(query, params);
-                    results.push(result.records.map(record => {
-                        const obj = {};
-                        record.keys.forEach(key => {
-                            obj[key] = this.convertNeo4jValue(record.get(key));
-                        });
-                        return obj;
-                    }));
-                }
-            });
-            return results;
-        }
-        catch (error) {
-            this.emit('error', { queries, error });
-            throw error;
-        }
-        finally {
-            await session.close();
-        }
+        return this.executor.executeTransaction(queries, options);
     }
     /**
      * Call an APOC procedure
@@ -93,7 +59,7 @@ export class Neo4jService extends EventEmitter {
     /**
      * Create or update a vector index
      */
-    async createVectorIndex(indexName, label, propertyKey, dimensions, similarity = 'cosine') {
+    async createVectorIndex(indexName, label, propertyKey, dimensions, similarity = "cosine") {
         const query = `
       CREATE VECTOR INDEX ${indexName} IF NOT EXISTS
       FOR (n:${label})
@@ -118,7 +84,7 @@ export class Neo4jService extends EventEmitter {
       SET n += item.properties
     `;
         const params = {
-            vectors: vectors.map(v => ({
+            vectors: vectors.map((v) => ({
                 id: v.id,
                 vector: v.vector,
                 properties: v.properties || {},
@@ -140,7 +106,7 @@ export class Neo4jService extends EventEmitter {
         if (options.filter) {
             const filterClauses = Object.entries(options.filter)
                 .map(([key, value]) => `node.${key} = $filter_${key}`)
-                .join(' AND ');
+                .join(" AND ");
             query += ` AND ${filterClauses}`;
         }
         query += `
@@ -214,7 +180,7 @@ export class Neo4jService extends EventEmitter {
             relFilter: relationshipFilter,
             labelFilter: options.labelFilter || null,
             maxDepth,
-            uniqueness: options.uniqueness || 'RELATIONSHIP_GLOBAL',
+            uniqueness: options.uniqueness || "RELATIONSHIP_GLOBAL",
         });
     }
     /**
@@ -223,20 +189,33 @@ export class Neo4jService extends EventEmitter {
     async getStats() {
         var _a;
         const queries = [
-            { name: 'nodes', query: 'MATCH (n) RETURN count(n) as count' },
-            { name: 'relationships', query: 'MATCH ()-[r]->() RETURN count(r) as count' },
-            { name: 'labels', query: 'CALL db.labels() YIELD label RETURN collect(label) as labels' },
-            { name: 'types', query: 'CALL db.relationshipTypes() YIELD relationshipType RETURN collect(relationshipType) as types' },
-            { name: 'indexes', query: 'SHOW INDEXES YIELD name, type, labelsOrTypes, properties RETURN collect({name: name, type: type, labels: labelsOrTypes, properties: properties}) as indexes' },
+            { name: "nodes", query: "MATCH (n) RETURN count(n) as count" },
+            {
+                name: "relationships",
+                query: "MATCH ()-[r]->() RETURN count(r) as count",
+            },
+            {
+                name: "labels",
+                query: "CALL db.labels() YIELD label RETURN collect(label) as labels",
+            },
+            {
+                name: "types",
+                query: "CALL db.relationshipTypes() YIELD relationshipType RETURN collect(relationshipType) as types",
+            },
+            {
+                name: "indexes",
+                query: "SHOW INDEXES YIELD name, type, labelsOrTypes, properties RETURN collect({name: name, type: type, labels: labelsOrTypes, properties: properties}) as indexes",
+            },
         ];
         const stats = {};
         for (const { name, query } of queries) {
             try {
                 const result = await this.executeCypher(query);
-                stats[name] = ((_a = result[0]) === null || _a === void 0 ? void 0 : _a[name === 'nodes' || name === 'relationships' ? 'count' : name]) || 0;
+                stats[name] =
+                    ((_a = result[0]) === null || _a === void 0 ? void 0 : _a[name === "nodes" || name === "relationships" ? "count" : name]) || 0;
             }
             catch (error) {
-                stats[name] = 'unavailable';
+                stats[name] = "unavailable";
             }
         }
         return stats;
@@ -246,15 +225,15 @@ export class Neo4jService extends EventEmitter {
      */
     async createCommonIndexes() {
         const indexes = [
-            'CREATE INDEX entity_id IF NOT EXISTS FOR (n:Entity) ON (n.id)',
-            'CREATE INDEX entity_type IF NOT EXISTS FOR (n:Entity) ON (n.type)',
-            'CREATE INDEX entity_path IF NOT EXISTS FOR (n:Entity) ON (n.path)',
-            'CREATE INDEX entity_name IF NOT EXISTS FOR (n:Entity) ON (n.name)',
-            'CREATE INDEX file_path IF NOT EXISTS FOR (n:File) ON (n.path)',
-            'CREATE INDEX symbol_name IF NOT EXISTS FOR (n:Symbol) ON (n.name)',
-            'CREATE INDEX symbol_path IF NOT EXISTS FOR (n:Symbol) ON (n.path)',
-            'CREATE INDEX version_entity IF NOT EXISTS FOR (n:Version) ON (n.entityId)',
-            'CREATE INDEX checkpoint_id IF NOT EXISTS FOR (n:Checkpoint) ON (n.id)',
+            "CREATE INDEX entity_id IF NOT EXISTS FOR (n:Entity) ON (n.id)",
+            "CREATE INDEX entity_type IF NOT EXISTS FOR (n:Entity) ON (n.type)",
+            "CREATE INDEX entity_path IF NOT EXISTS FOR (n:Entity) ON (n.path)",
+            "CREATE INDEX entity_name IF NOT EXISTS FOR (n:Entity) ON (n.name)",
+            "CREATE INDEX file_path IF NOT EXISTS FOR (n:File) ON (n.path)",
+            "CREATE INDEX symbol_name IF NOT EXISTS FOR (n:Symbol) ON (n.name)",
+            "CREATE INDEX symbol_path IF NOT EXISTS FOR (n:Symbol) ON (n.path)",
+            "CREATE INDEX version_entity IF NOT EXISTS FOR (n:Version) ON (n.entityId)",
+            "CREATE INDEX checkpoint_id IF NOT EXISTS FOR (n:Checkpoint) ON (n.id)",
         ];
         for (const index of indexes) {
             try {
@@ -285,8 +264,8 @@ export class Neo4jService extends EventEmitter {
         if (neo4j.isPath(value))
             return this.convertPath(value);
         if (Array.isArray(value))
-            return value.map(v => this.convertNeo4jValue(v));
-        if (typeof value === 'object') {
+            return value.map((v) => this.convertNeo4jValue(v));
+        if (typeof value === "object") {
             const converted = {};
             for (const [k, v] of Object.entries(value)) {
                 converted[k] = this.convertNeo4jValue(v);
@@ -327,7 +306,7 @@ export class Neo4jService extends EventEmitter {
         const parts = [];
         for (const [key, value] of Object.entries(config)) {
             if (value !== undefined) {
-                if (typeof value === 'string') {
+                if (typeof value === "string") {
                     parts.push(`${key}: '${value}'`);
                 }
                 else {
@@ -335,7 +314,7 @@ export class Neo4jService extends EventEmitter {
                 }
             }
         }
-        return `{${parts.join(', ')}}`;
+        return `{${parts.join(", ")}}`;
     }
     /**
      * Get index health status
@@ -348,24 +327,28 @@ export class Neo4jService extends EventEmitter {
     `;
         try {
             const result = await this.executeCypher(query);
-            const indexes = result.map(row => ({
+            const indexes = result.map((row) => ({
                 name: row.name,
-                status: row.state || 'unknown',
+                status: row.state || "unknown",
                 type: row.type,
-                labels: Array.isArray(row.labels) ? row.labels : [row.labels].filter(Boolean),
-                properties: Array.isArray(row.properties) ? row.properties : [row.properties].filter(Boolean),
+                labels: Array.isArray(row.labels)
+                    ? row.labels
+                    : [row.labels].filter(Boolean),
+                properties: Array.isArray(row.properties)
+                    ? row.properties
+                    : [row.properties].filter(Boolean),
                 populationPercent: row.populationPercent,
             }));
             const summary = {
                 total: indexes.length,
-                online: indexes.filter(i => i.status === 'ONLINE').length,
-                failed: indexes.filter(i => i.status === 'FAILED').length,
-                populating: indexes.filter(i => i.status === 'POPULATING').length,
+                online: indexes.filter((i) => i.status === "ONLINE").length,
+                failed: indexes.filter((i) => i.status === "FAILED").length,
+                populating: indexes.filter((i) => i.status === "POPULATING").length,
             };
             return { indexes, summary };
         }
         catch (error) {
-            console.warn('Failed to get index health:', error);
+            console.warn("Failed to get index health:", error);
             return {
                 indexes: [],
                 summary: { total: 0, online: 0, failed: 0, populating: 0 },
@@ -378,25 +361,25 @@ export class Neo4jService extends EventEmitter {
     async ensureGraphIndexes() {
         const advancedIndexes = [
             // Composite indexes for better query performance
-            'CREATE INDEX entity_type_path IF NOT EXISTS FOR (n:Entity) ON (n.type, n.path)',
-            'CREATE INDEX entity_name_type IF NOT EXISTS FOR (n:Entity) ON (n.name, n.type)',
-            'CREATE INDEX file_path_modified IF NOT EXISTS FOR (n:File) ON (n.path, n.lastModified)',
-            'CREATE INDEX symbol_name_file IF NOT EXISTS FOR (n:Symbol) ON (n.name, n.filePath)',
+            "CREATE INDEX entity_type_path IF NOT EXISTS FOR (n:Entity) ON (n.type, n.path)",
+            "CREATE INDEX entity_name_type IF NOT EXISTS FOR (n:Entity) ON (n.name, n.type)",
+            "CREATE INDEX file_path_modified IF NOT EXISTS FOR (n:File) ON (n.path, n.lastModified)",
+            "CREATE INDEX symbol_name_file IF NOT EXISTS FOR (n:Symbol) ON (n.name, n.filePath)",
             // Full-text search indexes
-            'CREATE FULLTEXT INDEX entity_content_search IF NOT EXISTS FOR (n:Entity) ON EACH [n.content, n.description, n.name]',
-            'CREATE FULLTEXT INDEX symbol_search IF NOT EXISTS FOR (n:Symbol) ON EACH [n.name, n.signature, n.documentation]',
+            "CREATE FULLTEXT INDEX entity_content_search IF NOT EXISTS FOR (n:Entity) ON EACH [n.content, n.description, n.name]",
+            "CREATE FULLTEXT INDEX symbol_search IF NOT EXISTS FOR (n:Symbol) ON EACH [n.name, n.signature, n.documentation]",
             // Temporal indexes for history
-            'CREATE INDEX version_timestamp IF NOT EXISTS FOR (n:Version) ON (n.timestamp)',
-            'CREATE INDEX checkpoint_timestamp IF NOT EXISTS FOR (n:Checkpoint) ON (n.timestamp)',
-            'CREATE INDEX relationship_validity IF NOT EXISTS FOR ()-[r]-() ON (r.validFrom, r.validTo)',
+            "CREATE INDEX version_timestamp IF NOT EXISTS FOR (n:Version) ON (n.timestamp)",
+            "CREATE INDEX checkpoint_timestamp IF NOT EXISTS FOR (n:Checkpoint) ON (n.timestamp)",
+            "CREATE INDEX relationship_validity IF NOT EXISTS FOR ()-[r]-() ON (r.validFrom, r.validTo)",
             // Performance indexes for relationships
-            'CREATE INDEX relationship_changeset IF NOT EXISTS FOR ()-[r]-() ON (r.changeSetId)',
-            'CREATE INDEX relationship_active IF NOT EXISTS FOR ()-[r]-() ON (r.active)',
+            "CREATE INDEX relationship_changeset IF NOT EXISTS FOR ()-[r]-() ON (r.changeSetId)",
+            "CREATE INDEX relationship_active IF NOT EXISTS FOR ()-[r]-() ON (r.active)",
         ];
         for (const index of advancedIndexes) {
             try {
                 await this.executeCypher(index);
-                console.log(`✓ Created index: ${index.split(' ')[2]}`);
+                console.log(`✓ Created index: ${index.split(" ")[2]}`);
             }
             catch (error) {
                 console.warn(`Failed to create index: ${index}`, error);
@@ -404,20 +387,20 @@ export class Neo4jService extends EventEmitter {
         }
         // Create constraints for data integrity
         const constraints = [
-            'CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (n:Entity) REQUIRE n.id IS UNIQUE',
-            'CREATE CONSTRAINT version_id_unique IF NOT EXISTS FOR (n:Version) REQUIRE n.id IS UNIQUE',
-            'CREATE CONSTRAINT checkpoint_id_unique IF NOT EXISTS FOR (n:Checkpoint) REQUIRE n.id IS UNIQUE',
+            "CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (n:Entity) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT version_id_unique IF NOT EXISTS FOR (n:Version) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT checkpoint_id_unique IF NOT EXISTS FOR (n:Checkpoint) REQUIRE n.id IS UNIQUE",
         ];
         for (const constraint of constraints) {
             try {
                 await this.executeCypher(constraint);
-                console.log(`✓ Created constraint: ${constraint.split(' ')[2]}`);
+                console.log(`✓ Created constraint: ${constraint.split(" ")[2]}`);
             }
             catch (error) {
                 console.warn(`Failed to create constraint: ${constraint}`, error);
             }
         }
-        console.log('[Neo4jService] Graph indexes and constraints ensured');
+        console.log("[Neo4jService] Graph indexes and constraints ensured");
     }
     /**
      * Run performance benchmarks
@@ -427,7 +410,7 @@ export class Neo4jService extends EventEmitter {
         const sampleSize = (options === null || options === void 0 ? void 0 : options.sampleSize) || 10;
         const includeWrites = (options === null || options === void 0 ? void 0 : options.includeWrites) || false;
         const timeout = (options === null || options === void 0 ? void 0 : options.timeout) || 5000;
-        console.log('[Neo4jService] Running performance benchmarks...');
+        console.log("[Neo4jService] Running performance benchmarks...");
         // Helper function to time operations
         const timeOperation = async (operation, iterations) => {
             const start = Date.now();
@@ -443,16 +426,16 @@ export class Neo4jService extends EventEmitter {
         // Read performance tests
         const readPerformance = {
             simpleNodeQuery: await timeOperation(async () => {
-                await this.executeCypher('MATCH (n:Entity) RETURN n LIMIT 1', {}, { timeout });
+                await this.executeCypher("MATCH (n:Entity) RETURN n LIMIT 1", {}, { timeout });
             }, sampleSize),
             relationshipTraversal: await timeOperation(async () => {
-                await this.executeCypher('MATCH (n:Entity)-[r]->() RETURN n, r LIMIT 5', {}, { timeout });
+                await this.executeCypher("MATCH (n:Entity)-[r]->() RETURN n, r LIMIT 5", {}, { timeout });
             }, sampleSize),
             indexLookup: await timeOperation(async () => {
-                await this.executeCypher('MATCH (n:Entity) WHERE n.type = $type RETURN n LIMIT 1', { type: 'File' }, { timeout });
+                await this.executeCypher("MATCH (n:Entity) WHERE n.type = $type RETURN n LIMIT 1", { type: "File" }, { timeout });
             }, sampleSize),
             aggregationQuery: await timeOperation(async () => {
-                await this.executeCypher('MATCH (n:Entity) RETURN n.type, count(n) as count', {}, { timeout });
+                await this.executeCypher("MATCH (n:Entity) RETURN n.type, count(n) as count", {}, { timeout });
             }, sampleSize),
         };
         // Write performance tests (if enabled)
@@ -461,7 +444,10 @@ export class Neo4jService extends EventEmitter {
             const testNodeId = `benchmark_test_${Date.now()}`;
             writePerformance = {
                 nodeCreation: await timeOperation(async () => {
-                    await this.executeCypher('CREATE (n:BenchmarkTest {id: $id, timestamp: $timestamp})', { id: `${testNodeId}_${Math.random()}`, timestamp: new Date().toISOString() }, { timeout });
+                    await this.executeCypher("CREATE (n:BenchmarkTest {id: $id, timestamp: $timestamp})", {
+                        id: `${testNodeId}_${Math.random()}`,
+                        timestamp: new Date().toISOString(),
+                    }, { timeout });
                 }, Math.min(sampleSize, 5)), // Limit writes
                 relationshipCreation: await timeOperation(async () => {
                     await this.executeCypher(`
@@ -476,29 +462,29 @@ export class Neo4jService extends EventEmitter {
                         id: `bulk_${testNodeId}_${i}_${Math.random()}`,
                         timestamp: new Date().toISOString(),
                     }));
-                    await this.executeCypher('UNWIND $nodes AS node CREATE (n:BenchmarkTest) SET n = node', { nodes }, { timeout });
+                    await this.executeCypher("UNWIND $nodes AS node CREATE (n:BenchmarkTest) SET n = node", { nodes }, { timeout });
                 }, Math.min(sampleSize, 3)),
             };
             // Cleanup test data
             try {
-                await this.executeCypher('MATCH (n:BenchmarkTest) DETACH DELETE n');
+                await this.executeCypher("MATCH (n:BenchmarkTest) DETACH DELETE n");
             }
             catch (error) {
-                console.warn('Failed to cleanup benchmark test data:', error);
+                console.warn("Failed to cleanup benchmark test data:", error);
             }
         }
         // Get database stats
         const [nodeStats, relStats, indexStats] = await Promise.all([
-            this.executeCypher('MATCH (n) RETURN count(n) as count'),
-            this.executeCypher('MATCH ()-[r]->() RETURN count(r) as count'),
-            this.executeCypher('SHOW INDEXES YIELD name RETURN count(name) as count'),
+            this.executeCypher("MATCH (n) RETURN count(n) as count"),
+            this.executeCypher("MATCH ()-[r]->() RETURN count(r) as count"),
+            this.executeCypher("SHOW INDEXES YIELD name RETURN count(name) as count"),
         ]);
         const databaseStats = {
             nodeCount: ((_a = nodeStats[0]) === null || _a === void 0 ? void 0 : _a.count) || 0,
             relationshipCount: ((_b = relStats[0]) === null || _b === void 0 ? void 0 : _b.count) || 0,
             indexCount: ((_c = indexStats[0]) === null || _c === void 0 ? void 0 : _c.count) || 0,
         };
-        console.log('[Neo4jService] Benchmarks completed');
+        console.log("[Neo4jService] Benchmarks completed");
         return {
             readPerformance,
             writePerformance,

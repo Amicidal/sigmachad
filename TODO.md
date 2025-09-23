@@ -16,98 +16,151 @@
 2. **Dev Commands**: `pnpm dev` (API), `pnpm test`, `pnpm test:integration` (after wiring integration suite), `pnpm smoke` for basic health.
 3. **Docs First**: Skim the blueprints and API design sections cited in each task—they define expected shapes/behaviours.
 4. **Testing Philosophy**: Update/extend Vitest suites under `tests/` alongside code changes; ensure failing legacy tests are reconciled.
-5. **Deployment Goal**: Reach the “shippable” bar defined in `MementoImplementationPlan.md` Phase 6+.
+5. **Deployment Goal**: Reach the "shippable" bar defined in `MementoImplementationPlan.md` Phase 6+.
 
 ## Task Backlog
 
-### 1. Establish Performance Relationship Ingestion & Analytics
-- **Context**: `Docs/Blueprints/performance-relationships.md` highlights missing ingestion contracts, metric-aware canonical IDs, absent history/trend storage, and failing perf suites due to undersized fixtures.
+### 1. Refresh Blueprint Documentation Against Current Implementation
+- **Context**: Comprehensive audit revealed alignment gaps between aspirational blueprints and implemented features, particularly for multi-agent orchestration, high-throughput architecture, and test/security implementation patterns.
 - **Entry Points**:
-  - `Docs/Blueprints/performance-relationships.md` (contract)
-  - `src/models/relationships.ts`, `src/utils/codeEdges.ts`, `src/services/KnowledgeGraphService.ts` (normalization + persistence)
-  - `src/services/TestEngine.ts`, `src/services/database/PostgreSQLService.ts`, `tests/integration/services/TestEngine.integration.test.ts` (emission + history)
-  - API surfaces in `src/api/routes/tests.ts`, `src/api/mcp-router.ts`
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/spec-relationships.md` (major refresh needed)
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/tests-relationships.md` (major refresh needed)
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/performance-relationships.md` (minor refresh)
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/temporal-relationships.md` (minor refresh)
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/synchronization-coordinator.md` (major refresh)
 - **Scope**:
-  - Define and enforce the performance ingestion schema (`normalizePerformanceRelationship`), including metric IDs, thresholds, severity, evidence, and derived deltas/trends.
-  - Extend canonical relationship IDs and Falkor storage to disambiguate `metricId`/`environment`, persist metrics history, and expose risk/resolution markers for regressions.
-  - Update TestEngine + bulk query fixtures to emit populated performance relationships, seed larger datasets for load tests, and document JSON/JSONB handling/opt-in raw mode.
-  - Plumb metrics history through DatabaseService + API endpoints, add filtering helpers (metric/environment/severity), and cover workflows with unit/integration tests.
-  - Capture follow-up instrumentation (batch sizing, backpressure, policy configs) and log any deferred work in TODO when scoped.
-- **Acceptance**: Performance relationships ingest metric-rich data end-to-end, APIs return persisted metrics/history, load tests exercise 50-row batches, and docs/tests match the new contract.
+  - Update spec-relationships.md to align API references with MementoAPIDesign.md sections, integrate BusinessDomain/SemanticCluster concepts from KnowledgeGraphDesign.md.
+  - Restructure tests-relationships.md to reflect graph-first approach rather than PostgreSQL-heavy design, align with test management APIs.
+  - Update performance-relationships.md database references from PostgreSQL to Neo4j/FalkorDB focus, add PERFORMS_FOR relationship examples.
+  - Update temporal-relationships.md transaction examples for current Neo4j/FalkorDB patterns, clarify ephemeral session integration.
+  - Major update to synchronization-coordinator.md addressing embedding failures, scan scope configuration, and documenting single-threaded bottlenecks.
+- **Acceptance**: Blueprints accurately reflect current implementation patterns, documented gaps have implementation tickets, and blueprint versioning tracks changes.
 
-### 2. Implement Source Control Management Orchestration
-- **Context**: Core SCM orchestration is live behind the `FEATURE_SCM` flag: `/api/v1/scm/*` routes call into `SCMService`, commits are persisted (`scm_commits`), and knowledge graph provenance is established. The only shipping provider is `LocalGitProvider`, so hosted PR creation (GitHub/GitLab) remains outstanding.
+### 2. Implement Multi-Agent Orchestrator Foundation
+- **Context**: Multi-agent orchestration is documented in blueprints but completely unimplemented. This blocks parallel agent execution and limits system velocity to single-agent sequential processing.
 - **Entry Points**:
-  - `Docs/Blueprints/source-control-management.md` (target behaviour)
-  - `src/api/routes/scm.ts`, `src/api/APIGateway.ts` (HTTP wiring)
-  - `src/services/GitService.ts`, `src/services` (git helpers + future orchestrators)
-  - Persistence layers in `src/services/database/PostgreSQLService.ts`, knowledge graph adapters, and `tests/integration/api` (end-to-end coverage)
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/multi-agent-orchestration.md` (design spec)
+  - `/Users/Coding/Desktop/sigmachad/application/multi-agent/Orchestrator.ts` (to create)
+  - `/Users/Coding/Desktop/sigmachad/scripts/agent-parse.ts` (to create)
+  - `/Users/Coding/Desktop/sigmachad/scripts/agent-test.ts` (to create)
+  - `/Users/Coding/Desktop/sigmachad/scripts/agent-scm.ts` (to create)
 - **Scope**:
-  - Design and implement an orchestration layer that stages changes, commits, and prepares push/PR payloads using `GitService` plus provider adapters (GitHub/GitLab abstraction) for branch pushes and PR creation.
-  - Model commit metadata in Postgres (branch, author, summary, linked entities) and surface updates into the knowledge graph so downstream analytics understand code provenance.
-  - Add request/response validation schemas for `/scm/commit-pr` and related endpoints, handling payload coercion and early error messaging before orchestration runs.
-  - Replace the 501 stubs with feature-flagged handlers, update integration/unit tests to cover happy paths and failure cases, then remove the legacy stub assertions.
-  - Document the new workflow in API docs and ensure Fastify route contracts align with the blueprint's structured responses.
-- **Follow-up (pending)**: Remote provider adapters lack token/permission policy coverage. Problem: we do not yet audit provider capabilities or manage per-branch scopes, risking inconsistent push/PR behaviour. Proposed fix: build a provider capability matrix with token policy enforcement, then add integration smoke tests that exercise limited-scope tokens. Follow-up steps: (1) define capability schema + validation in provider adapters, (2) implement token policy enforcement hooks, (3) extend integration tests with mocked provider responses covering scope failures.
-- **Follow-up (new)**: Implement hosted SCM providers (GitHub/GitLab). Problem: we cannot create real PRs or honour remote policies because only the local provider exists. Proposed fix: design provider interface extensions for OAuth/token management, implement GitHub + GitLab adapters that push feature branches, open PRs/merge requests, and surface provider IDs/status back into `SCMService`. Follow-up steps: (1) capture credential/config requirements and secrets handling, (2) build provider-specific API clients with retry + rate-limit handling, (3) extend integration tests with mocked provider APIs to validate PR creation and error escalation, (4) persist PR metadata (id, url, status) in Postgres for later sync jobs.
-- **Acceptance**: `/api/v1/scm/*` endpoints execute end-to-end git + provider flows, persist commit metadata, expose validated responses, and the test suite asserts the real workflow under the feature flag.
+  - Create MultiAgentOrchestrator class in application/multi-agent/ with worker spawning via child_process, task queue management, and KG event coordination.
+  - Implement specialized agent scripts (parse, test, SCM, verification) that accept task payloads and update KG with progress events.
+  - Add Redis pub-sub integration for multi-agent session handoffs with ephemeral TTL (15-60 min to checkpoint).
+  - Create EventOrchestrator extensions for agent:start, agent:progress, agent:complete events with session correlation.
+  - Implement basic task distribution algorithm with priority queuing and resource constraints.
+  - Add integration tests for parallel agent execution with mocked KG updates and timing benchmarks.
+- **Follow-up (pending)**: WebSocket integration for human-in-the-loop monitoring. Problem: No UI visibility into agent tasks. Proposed fix: Extend WebSocketRouter with /ui/agent-status endpoint, implement task board visualization.
+- **Acceptance**: Orchestrator spawns multiple agents in parallel, KG events coordinate handoffs, integration tests verify parallel execution is faster than sequential.
 
-### 3. Establish Session Relationship Ingestion & Persistence
-- **Context**: `Docs/Blueprints/session-relationships.md` outlines that `SynchronizationCoordinator` emits rich session edges, but persistence drops session metadata, canonical IDs collide, and duplicate events overwrite each other.
+### 3. Implement High-Throughput Ingestion Pipeline
+- **Context**: HighThroughputKnowledgeGraph.md describes 10k LOC/minute target but current implementation has serial bottlenecks: 500ms + 1s debounce walls, single-threaded coordination, per-entity database writes.
 - **Entry Points**:
-  - `Docs/Blueprints/session-relationships.md` (contract)
-  - `src/services/SynchronizationCoordinator.ts`, `src/services/relationships/RelationshipNormalizer.ts`, `src/services/relationships/structuralPersistence.ts`
-  - `src/models/relationships.ts`, `src/services/KnowledgeGraphService.ts`, Falkor schema/migration utilities under `src/services/database`
+  - `/Users/Coding/Desktop/sigmachad/Docs/HighThroughputKnowledgeGraph.md` (target architecture)
+  - `/Users/Coding/Desktop/sigmachad/packages/sync/src/synchronization/SynchronizationCoordinator.ts` (current bottleneck)
+  - `/Users/Coding/Desktop/sigmachad/packages/knowledge/src/core/FileWatcher.ts` (needs event bus)
+  - `/Users/Coding/Desktop/sigmachad/packages/knowledge/src/embeddings/EmbeddingService.ts` (needs async plane)
 - **Scope**:
-  - Extend the session relationship normalizer to require `sessionId`/`sequenceNumber`, validate nested metadata (`changeInfo`, `stateTransition`, `impact`), and emit canonical IDs using `sha1(sessionId|sequenceNumber|type)` plus a computed `siteHash`.
-  - Update persistence layers to store dedicated columns for session metadata, ensure merge paths compare `eventId`/`timestamp` before overwriting, and add indexes for `(sessionId, sequenceNumber)` and `(sessionId, type)`.
-  - Wire sequence-order instrumentation so ingestion logs duplicates/out-of-order events, with metrics surfaced via `SynchronizationMonitoring`.
-  - Create guarded migrations or feature-flagged schema updates so canonical changes roll out without breaking existing data, including scripts to backfill placeholder edges with derived sequence numbers when needed.
-- **Follow-up (pending)**: Need a dry-run validator for legacy session logs before backfill imports. Proposed fix: build a CLI in `src/services/relationships` that replays stored JSON, reports normalization failures, and is safe to run in staging ahead of migration toggles.
-- **Acceptance**: Session relationships persist all metadata fields without overwrites, canonical IDs remain unique per event, monitoring highlights sequence violations, and migrations can roll forward/back safely.
+  - Replace FileWatcher direct callbacks with Redis Streams or NATS event bus, partitioned by namespace/module.
+  - Implement distributed parse workers consuming bus partitions with structural diff parsing (tree-sitter incremental).
+  - Create ingestion orchestrator building dependency DAG, dispatching micro-batches to entity/relationship workers.
+  - Implement streaming graph writes with Neo4j UNWIND statements and idempotent batch IDs.
+  - Move embeddings to GPU-backed job queue with dynamic batching (100s-1000s entities per request).
+  - Add comprehensive telemetry: queue depth, lag metrics, parse latency distributions, DB throughput.
+- **Follow-up (pending)**: Autoscaling policies based on queue depth. Problem: No automatic scaling triggers. Proposed fix: Implement control loops monitoring lag metrics, triggering worker scaling.
+- **Acceptance**: System sustains 10k LOC/minute ingestion rate, P95 latency <500ms for core updates, telemetry dashboard shows queue health.
 
-### 4. Expose Session Timeline & Impact APIs
-- **Context**: Current query helpers cannot filter or reconstruct session timelines, leaving UIs and integration tests unable to consume ordered session data.
+### 4. Complete API Implementation Gaps
+- **Context**: API implementation is ~65% complete compared to MementoAPIDesign.md. Missing: vector search, business domains, complete design management, security metadata endpoints.
 - **Entry Points**:
-  - `src/services/KnowledgeGraphService.ts`, `src/services/database/FalkorDBService.ts`
-  - `src/api/routes/history.ts`, `src/api/routes/impact.ts`, `src/api/APIGateway.ts`
-  - `tests/integration/api/history.integration.test.ts`, `tests/integration/api/impact.integration.test.ts`
+  - `/Users/Coding/Desktop/sigmachad/Docs/MementoAPIDesign.md` (complete spec)
+  - `/Users/Coding/Desktop/sigmachad/packages/api/src/routes/` (partial implementations)
+  - `/Users/Coding/Desktop/sigmachad/packages/api/src/mcp-router.ts` (missing MCP tools)
 - **Scope**:
-  - Extend graph/query services with filters for `sessionId`, `sequenceNumberRange`, `timestampRange`, `actor`, `impact.severity`, and `stateTransition.to` as defined in the blueprint.
-  - Implement helper endpoints `getSessionTimeline`, `getSessionImpacts`, and `getSessionsAffectingEntity`, including pagination, summary aggregations, and standard Fastify schemas.
-  - Update history/admin UI routes to consume the new helpers and return enriched timeline payloads that embed checkpoint references when present.
-  - Add unit/integration coverage that seeds ordered events, verifies pagination/order guarantees, and guards regression scenarios for missing metadata.
-- **Follow-up (pending)**: Align the History/Timeline UI spec with the new payloads. Proposed fix: author a doc update plus front-end contract tests once the session API shapes stabilize.
-- **Acceptance**: APIs deliver ordered session data with the new filters, UIs/tests consume the timeline helpers without custom query hacks, and pagination/aggregation behaviours match blueprint expectations.
+  - Implement missing Design & Specification Management endpoints (GET/PUT/LIST for specs).
+  - Create Documentation & Domain Analysis routes (/api/docs/sync, /api/domains, /api/clusters).
+  - Implement Vector Database Operations routes (/api/graph/semantic-search using Neo4j native vectors).
+  - Complete Security Operations metadata endpoints (/api/security/metadata/{entityId}).
+  - Add missing MCP tools (scm.commit_pr, docs.sync, domains.*, clusters.*, business.*, security.*).
+  - Implement consistent error handling with buildErrorResponse across all routes.
+  - Add comprehensive Zod validation schemas for complex request types.
+- **Acceptance**: All documented API endpoints return valid responses, MCP tools match documentation, consistent error handling and validation.
 
-### 5. Integrate Session Checkpoint Workflow
-- **Context**: `SESSION_CHECKPOINT` handling is synchronous and brittle—no async job exists, metadata enrichment is missing, and failures leave dangling edges.
+### 5. Add Comprehensive E2E and Integration Test Coverage
+- **Context**: No E2E tests exist for critical flows. Integration tests fail without real databases. Unit tests appropriately use mocks for isolation, but higher-level tests need real implementations.
 - **Entry Points**:
-  - `src/services/SynchronizationCoordinator.ts`, `src/jobs`, `src/services/KnowledgeGraphService.ts`
-  - Checkpoint utilities in `src/services/RollbackCapabilities.ts`, `src/services/BackupService.ts`
-  - `tests/integration/services` covering rollback/checkpoint flows
+  - `/Users/Coding/Desktop/sigmachad/tests/unit/` (appropriately mocked for unit isolation)
+  - `/Users/Coding/Desktop/sigmachad/tests/integration/` (needs real implementations)
+  - `/Users/Coding/Desktop/sigmachad/tests/e2e/` (to create)
 - **Scope**:
-  - Introduce an asynchronous checkpoint job triggered by `SynchronizationCoordinator`, ensuring checkpoint creation, metadata enrichment (reason, hop count), and linkage via `CHECKPOINT_INCLUDES` edges.
-  - Implement retry/DLQ handling for checkpoint failures and mark affected session edges for manual intervention when retries exhaust.
-  - Persist checkpoint IDs in session relationships so timelines can navigate to snapshots, and update rollback services to consume the linkage.
-  - Provide observability hooks (metrics/logging) around checkpoint success/failure counts and document the operational playbook.
-- **Follow-up (pending)**: Decide on retention policy for checkpoint artifacts. Proposed fix: draft policy options in `Docs/Blueprints/session-relationships.md` appendix and prototype archival in `BackupService` once timelines are live.
-- **Follow-up (pending)**: Document checkpoint operational playbook. Problem: runbooks remain undefined, leaving on-call responders without guidance when jobs hit retries or DLQ. Proposed fix: author a `Docs/Operations/session-checkpoints.md` guide covering metrics interpretation, manual remediation steps, and escalation paths.
-- **Acceptance**: Checkpoints process asynchronously with retries, session timelines surface checkpoint metadata, and rollback tooling can resolve snapshot IDs without dangling edges.
+  - Create E2E test suite for critical user flows using real services: spec creation → test generation → implementation → validation → commit.
+  - Ensure integration tests use real implementations (databases, services) via Docker containers for consistent state.
+  - Implement test fixtures and data seeders for reproducible integration/E2E test environments.
+  - Add XML parser for JUnit test results (replacing regex parsing).
+  - Wire flaky test analysis into knowledge graph relationships.
+  - Implement suite/run ID persistence to prevent relationship overwrites.
+  - Document testing pyramid strategy: unit tests (with mocks) → integration tests (real services) → E2E tests (full stack).
+- **Acceptance**: E2E tests cover 5+ critical flows, integration tests run reliably with real services, testing pyramid properly implemented.
 
-### 6. Wire Session WebSocket Notifications
-- **Context**: WebSocket session notifications never fire; keep-alives, file change broadcasts, and teardown events are absent, causing integration suites to fall back to zero-assert guards.
+### 6. Implement Security Scanning Integration
+- **Context**: SecurityScanner exists but isn't integrated into sync workflows. Blueprint describes metadata-only approach but implementation creates dedicated nodes/edges.
 - **Entry Points**:
-  - `src/api/websocket-router.ts`, `src/api/APIGateway.ts`, WebSocket middleware under `src/api/middleware`
-  - `src/services/SynchronizationCoordinator.ts`, `src/services/logging/SessionEventLogger.ts` (or create adapter)
-  - `tests/integration/api` WebSocket specs and any client simulators under `tests/utils`
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/security-metadata-integration.md` (design)
+  - `/Users/Coding/Desktop/sigmachad/packages/testing/src/SecurityScanner.ts` (current implementation)
+  - `/Users/Coding/Desktop/sigmachad/packages/sync/src/synchronization/SynchronizationCoordinator.ts` (integration point)
 - **Scope**:
-  - Build a WebSocket adapter that subscribes to `SynchronizationCoordinator` events, streams session edges (including checkpoints) to connected clients, and enforces keep-alive/heartbeat semantics.
-  - Implement subscription lifecycle management to clean up on disconnects and propagate teardown events, ensuring multiple sessions per client are handled.
-  - Add broadcast throttling/backpressure controls plus logging to detect stalled clients, and surface metrics for active subscriptions.
-  - Update integration tests to assert that session notifications, keep-alives, and teardown hooks fire as expected, replacing the zero-assert guards.
-- **Follow-up (pending)**: Coordinate with client SDKs to adopt the new notification protocol. Proposed fix: version the WebSocket message schema, publish sample payloads, and update SDK contract tests once adapters land.
-- **Acceptance**: WebSocket clients receive live session updates with reliable keep-alives, integration tests cover the event stream, and telemetry shows active subscription health.
+  - Implement SecurityEnhancer class as per blueprint, integrating with SynchronizationCoordinator.
+  - Refactor SecurityScanner to append metadata to entities rather than creating dedicated nodes.
+  - Add FileWatcher integration for automatic security scanning on file changes.
+  - Implement MCP tool integration for critical vulnerability remediation.
+  - Add OSV.dev and external tool integration (Snyk, ESLint-security).
+  - Create security suppression configuration and documentation.
+- **Follow-up (pending)**: Multi-agent coordination for security fixes. Problem: No automated fix generation. Proposed fix: Security agent that generates patches for critical vulnerabilities.
+- **Acceptance**: Security scans run automatically during sync, vulnerabilities stored as metadata, critical issues trigger automated fixes.
+
+### 7. Implement Redis Session Coordination
+- **Context**: Sessions stored in graph DB instead of ephemeral Redis cache. No pub-sub for multi-agent handoffs. Missing real-time coordination capabilities.
+- **Entry Points**:
+  - `/Users/Coding/Desktop/sigmachad/Docs/Brainstorm.md` (ephemeral session design)
+  - `/Users/Coding/Desktop/sigmachad/packages/sync/src/synchronization/SynchronizationCoordinator.ts` (current session management)
+  - Redis integration points (to create)
+- **Scope**:
+  - Implement Redis session cache with TTL (15-60 min to checkpoint) for ephemeral events.
+  - Add pub-sub channels for multi-agent handoffs (agent:session:*, agent:handoff:*).
+  - Create SessionBridge service joining Redis cache with KG anchors for hybrid queries.
+  - Implement session event batching and compression for high-volume agents.
+  - Add checkpoint emission to KG as metadata anchors (no persistent session nodes).
+  - Create monitoring for session cache health, handoff success rates.
+- **Acceptance**: Sessions managed in Redis with TTL, multi-agent handoffs via pub-sub, KG anchors provide durable references.
+
+### 8. Implement Durable Rollback Persistence
+- **Context**: RollbackCapabilities uses in-memory storage (50-item cap), lost on restart. No distributed coordination or true datastore snapshots.
+- **Entry Points**:
+  - `/Users/Coding/Desktop/sigmachad/packages/sync/src/scm/RollbackCapabilities.ts` (current implementation)
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/rollback-capabilities.md` (design)
+- **Scope**:
+  - Migrate rollback points from memory to PostgreSQL with indexed lookups.
+  - Implement true datastore snapshots (graph subgraph exports, database checkpoints).
+  - Add distributed coordination for multi-process rollback operations.
+  - Implement structured telemetry for rollback operations.
+  - Create rollback point retention policies with automatic cleanup.
+  - Add rollback verification tests with simulated failures.
+- **Acceptance**: Rollback points persist across restarts, distributed rollback coordination works, telemetry tracks rollback operations.
+
+### 9. Complete Test Relationship Temporal Tracking
+- **Context**: Test relationships lack temporal history (validFrom/validTo), suite IDs don't persist causing overwrites, canonical IDs collide.
+- **Entry Points**:
+  - `/Users/Coding/Desktop/sigmachad/packages/testing/src/TestEngine.ts` (current implementation)
+  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/tests-relationships.md` (temporal design)
+- **Scope**:
+  - Add temporal validity intervals to test relationships (validFrom, validTo timestamps).
+  - Implement suite/run ID persistence to prevent relationship overwrites.
+  - Update canonical IDs to include suite context (sha1(suite|run|from|to|type)).
+  - Create temporal query helpers for test history analysis.
+  - Implement test coverage trend analysis using temporal data.
+  - Add framework-specific error semantics for retries and hook failures.
+- **Acceptance**: Test relationships track temporal history, multiple suites don't overwrite each other, coverage trends visible over time.
 
 ## General Notes
 - Keep changes ASCII unless files already contain Unicode.

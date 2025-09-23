@@ -1,0 +1,21 @@
+{
+  "name": "@memento/backup",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@memento/core": "workspace:*",
+    "@memento/database": "workspace:*",
+    "@aws-sdk/client-s3": "^3.454.0",
+    "tar": "^6.2.0",
+    "zlib": "^1.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/tar": "^6.1.10",
+    "typescript": "^5.2.2"
+  }
+}

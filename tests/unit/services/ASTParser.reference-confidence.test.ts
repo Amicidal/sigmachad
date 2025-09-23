@@ -7,7 +7,7 @@ import { noiseConfig } from '@/config/noise';
 
 describe('ASTParser reference confidence metadata', () => {
   let parser: ASTParser;
-  const tmp = path.join(__dirname, 'ast-parser', 'ref-confidence.temp.ts');
+  const tmp = path.join(path.join(__dirname, '..', 'ast-parser'), 'ref-confidence.temp.ts');
 
   beforeAll(async () => {
     parser = new ASTParser();

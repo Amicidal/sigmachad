@@ -1,0 +1,39 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "testing",
+  "sourceRoot": "packages/testing/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "packages/testing/dist",
+        "main": "packages/testing/src/index.ts",
+        "tsConfig": "packages/testing/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["packages/testing/**/*.ts"]
+      }
+    },
+    "test": {
+      "executor": "@nx/vite:test",
+      "options": {
+        "config": "vitest.config.ts",
+        "reportsDirectory": "../../coverage/packages/testing"
+      }
+    },
+    "dev": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "outputPath": "packages/testing/dist",
+        "main": "packages/testing/src/index.ts",
+        "tsConfig": "packages/testing/tsconfig.json",
+        "watch": true
+      }
+    }
+  }
+}

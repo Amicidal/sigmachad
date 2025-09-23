@@ -231,7 +231,13 @@ export class EmbeddingService extends EventEmitter {
                 throw new Error(`No embedding found for entity: ${entityId}`);
             }
             vector = result[0].embedding;
+            if (!vector) {
+                throw new Error(`Invalid embedding for entity: ${entityId}`);
+            }
             this.cache.set(entityId, vector);
+        }
+        if (!vector) {
+            throw new Error(`No valid embedding found for entity: ${entityId}`);
         }
         // Exclude the source entity from results
         const filter = { ...options.filter, 'id': { $ne: entityId } };
@@ -246,8 +252,8 @@ export class EmbeddingService extends EventEmitter {
             return new Array(this.defaultDimensions).fill(0);
         }
         try {
-            const vector = await embeddingService.generateEmbedding(content);
-            return vector;
+            const result = await embeddingService.generateEmbedding(content);
+            return result.embedding;
         }
         catch (error) {
             console.error('Failed to generate embedding:', error);
@@ -282,7 +288,7 @@ export class EmbeddingService extends EventEmitter {
     extractEntityContent(entity) {
         const parts = [];
         // Add name and type
-        if (entity.name)
+        if ('name' in entity && entity.name)
             parts.push(`Name: ${entity.name}`);
         if (entity.type)
             parts.push(`Type: ${entity.type}`);
@@ -307,7 +313,7 @@ export class EmbeddingService extends EventEmitter {
             parts.push(`Path: ${entity.path}`);
         }
         // Add metadata if available
-        if (entity.metadata) {
+        if ('metadata' in entity && entity.metadata) {
             parts.push(`Metadata: ${JSON.stringify(entity.metadata)}`);
         }
         return parts.join('\n');

@@ -1,0 +1,195 @@
+/**
+ * ImportExportBuilder - Handles module import/export relationships
+ *
+ * Extracted from RelationshipBuilder.ts as part of the modular refactoring.
+ * Handles IMPORTS relationships for various import types (default, named, namespace, side-effect).
+ */
+import * as path from "path";
+import { RelationshipType, } from "../../models/relationships.js";
+/**
+ * ImportExportBuilder handles the extraction of import/export relationships
+ * between modules including default, named, namespace, and side-effect imports.
+ */
+export class ImportExportBuilder {
+    constructor(options) {
+        this.getModuleExportMap = options.getModuleExportMap;
+    }
+    /**
+     * Extracts import relationships from a source file, analyzing various import types
+     * including default, named, namespace, and side-effect imports.
+     *
+     * @param sourceFile - The source file to analyze
+     * @param fileEntity - The file entity
+     * @param importMap - Map of import aliases to file paths
+     * @param importSymbolMap - Map of import aliases to symbol names
+     * @returns Array of import relationships
+     */
+    extractImportRelationships(sourceFile, fileEntity, importMap, importSymbolMap) {
+        const relationships = [];
+        const imports = sourceFile.getImportDeclarations();
+        for (const importDecl of imports) {
+            const moduleSpecifier = importDecl.getModuleSpecifierValue();
+            if (!moduleSpecifier)
+                continue;
+            // Side-effect import: import './x'
+            if (importDecl.getNamedImports().length === 0 &&
+                !importDecl.getDefaultImport() &&
+                !importDecl.getNamespaceImport()) {
+                const modSf = importDecl.getModuleSpecifierSourceFile();
+                if (modSf) {
+                    const abs = modSf.getFilePath();
+                    const rel = path.relative(process.cwd(), abs);
+                    relationships.push(this.createRelationship(fileEntity.id, `file:${rel}:${path.basename(rel)}`, RelationshipType.IMPORTS, {
+                        importKind: "side-effect",
+                        module: moduleSpecifier,
+                        language: fileEntity.language,
+                    }));
+                }
+                else {
+                    relationships.push(this.createRelationship(fileEntity.id, `import:${moduleSpecifier}:*`, RelationshipType.IMPORTS, {
+                        importKind: "side-effect",
+                        module: moduleSpecifier,
+                        language: fileEntity.language,
+                    }));
+                }
+            }
+            // Default import
+            const def = importDecl.getDefaultImport();
+            if (def) {
+                const alias = def.getText();
+                if (alias) {
+                    const target = importMap === null || importMap === void 0 ? void 0 : importMap.get(alias);
+                    if (target) {
+                        // Link to module default export placeholder in target file
+                        relationships.push(this.createRelationship(fileEntity.id, `file:${target}:default`, RelationshipType.IMPORTS, {
+                            importKind: "default",
+                            alias,
+                            module: moduleSpecifier,
+                            language: fileEntity.language,
+                        }));
+                    }
+                    else {
+                        relationships.push(this.createRelationship(fileEntity.id, `import:${moduleSpecifier}:default`, RelationshipType.IMPORTS, {
+                            importKind: "default",
+                            alias,
+                            module: moduleSpecifier,
+                            language: fileEntity.language,
+                        }));
+                    }
+                }
+            }
+            // Namespace import: import * as NS from '...'
+            const ns = importDecl.getNamespaceImport();
+            if (ns) {
+                const alias = ns.getText();
+                const target = alias ? importMap === null || importMap === void 0 ? void 0 : importMap.get(alias) : undefined;
+                if (target) {
+                    relationships.push(this.createRelationship(fileEntity.id, `file:${target}:*`, RelationshipType.IMPORTS, {
+                        importKind: "namespace",
+                        alias,
+                        module: moduleSpecifier,
+                        language: fileEntity.language,
+                    }));
+                }
+                else {
+                    relationships.push(this.createRelationship(fileEntity.id, `import:${moduleSpecifier}:*`, RelationshipType.IMPORTS, {
+                        importKind: "namespace",
+                        alias,
+                        module: moduleSpecifier,
+                        language: fileEntity.language,
+                    }));
+                }
+            }
+            // Named imports
+            for (const ni of importDecl.getNamedImports()) {
+                const name = ni.getNameNode().getText();
+                const aliasNode = ni.getAliasNode();
+                const alias = aliasNode ? aliasNode.getText() : undefined;
+                let resolved = null;
+                try {
+                    const modSf = importDecl.getModuleSpecifierSourceFile();
+                    const resolvedMap = this.getModuleExportMap(modSf || undefined);
+                    const hit = resolvedMap.get(name) ||
+                        (alias ? resolvedMap.get(alias) : undefined);
+                    if (hit)
+                        resolved = hit;
+                }
+                catch (_a) { }
+                if (!resolved && importMap) {
+                    const root = alias || name;
+                    const t = importMap.get(root);
+                    if (t)
+                        resolved = { fileRel: t, name, depth: 1 };
+                }
+                if (resolved) {
+                    relationships.push(this.createRelationship(fileEntity.id, `file:${resolved.fileRel}:${resolved.name}`, RelationshipType.IMPORTS, {
+                        importKind: "named",
+                        alias,
+                        module: moduleSpecifier,
+                        importDepth: resolved.depth,
+                        language: fileEntity.language,
+                    }));
+                }
+                else {
+                    relationships.push(this.createRelationship(fileEntity.id, `import:${moduleSpecifier}:${alias || name}`, RelationshipType.IMPORTS, {
+                        importKind: "named",
+                        alias,
+                        module: moduleSpecifier,
+                        language: fileEntity.language,
+                    }));
+                }
+            }
+        }
+        return relationships;
+    }
+    /**
+     * Creates a relationship with proper normalization and metadata handling.
+     */
+    createRelationship(fromId, toId, type, metadata) {
+        // For import relationships, we need to create a basic relationship
+        // The full normalization will be handled by the main RelationshipBuilder
+        const rel = {
+            id: `${fromId}|${type}|${toId}`, // Simple ID for now
+            fromEntityId: fromId,
+            toEntityId: toId,
+            type,
+            created: new Date(),
+            lastModified: new Date(),
+            version: 1,
+            ...(metadata ? { metadata } : {}),
+        };
+        // Attach a basic toRef for placeholders to aid later resolution
+        try {
+            if (!rel.toRef) {
+                const t = String(toId || "");
+                // file:<relPath>:<name> -> fileSymbol
+                const mFile = t.match(/^file:(.+?):(.+)$/);
+                if (mFile) {
+                    rel.toRef = {
+                        kind: "fileSymbol",
+                        file: mFile[1],
+                        symbol: mFile[2],
+                        name: mFile[2],
+                    };
+                }
+                else if (t.startsWith("import:")) {
+                    // import:<module>:<name> -> external
+                    rel.toRef = {
+                        kind: "external",
+                        name: t.slice("import:".length),
+                    };
+                }
+            }
+        }
+        catch (_a) { }
+        // Attach a basic fromRef
+        try {
+            if (!rel.fromRef) {
+                rel.fromRef = { kind: "entity", id: fromId };
+            }
+        }
+        catch (_b) { }
+        return rel;
+    }
+}
+//# sourceMappingURL=ImportExportBuilder.js.map

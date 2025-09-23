@@ -29,27 +29,27 @@ export declare const searchQuerySchema: z.ZodObject<{
             since: z.ZodOptional<z.ZodString>;
             until: z.ZodOptional<z.ZodString>;
         }, "strip", z.ZodTypeAny, {
-            since?: string | undefined;
             until?: string | undefined;
+            since?: string | undefined;
         }, {
-            since?: string | undefined;
             until?: string | undefined;
+            since?: string | undefined;
         }>>;
     }, "strip", z.ZodTypeAny, {
         tags?: string[] | undefined;
         path?: string | undefined;
         language?: string | undefined;
         lastModified?: {
-            since?: string | undefined;
             until?: string | undefined;
+            since?: string | undefined;
         } | undefined;
     }, {
         tags?: string[] | undefined;
         path?: string | undefined;
         language?: string | undefined;
         lastModified?: {
-            since?: string | undefined;
             until?: string | undefined;
+            since?: string | undefined;
         } | undefined;
     }>>;
     includeRelated: z.ZodOptional<z.ZodBoolean>;
@@ -64,8 +64,8 @@ export declare const searchQuerySchema: z.ZodObject<{
         path?: string | undefined;
         language?: string | undefined;
         lastModified?: {
-            since?: string | undefined;
             until?: string | undefined;
+            since?: string | undefined;
         } | undefined;
     } | undefined;
     includeRelated?: boolean | undefined;
@@ -79,8 +79,8 @@ export declare const searchQuerySchema: z.ZodObject<{
         path?: string | undefined;
         language?: string | undefined;
         lastModified?: {
-            since?: string | undefined;
             until?: string | undefined;
+            since?: string | undefined;
         } | undefined;
     } | undefined;
     includeRelated?: boolean | undefined;

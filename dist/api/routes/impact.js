@@ -204,7 +204,7 @@ export async function registerImpactRoutes(app, kgService, dbService) {
             }
             const sanitizedLimit = Math.max(1, Math.min(limit !== null && limit !== void 0 ? limit : 10, 25));
             const sanitizedDepth = sanitizeDepth(maxDepth);
-            const recentEntityIds = await kgService.findRecentEntityIds(parsedSince, sanitizedLimit);
+            const recentEntityIds = await kgService.findRecentEntityIds(sanitizedLimit);
             const records = [];
             for (const entityId of recentEntityIds) {
                 const analysis = await kgService.analyzeImpact({

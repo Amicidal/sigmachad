@@ -13,7 +13,7 @@ import fs from 'fs/promises';
 
 describe('ASTParser', () => {
   let parser: ASTParser;
-  const testFilesDir = path.join(__dirname, 'ast-parser');
+  const testFilesDir = path.join(path.join(__dirname, '..', 'ast-parser'));
 
   const expectSuccessfulParse = (result: ParseResult) => {
     expect(result.errors).toEqual([]);

@@ -1,0 +1,1196 @@
+/**
+ * Unit tests for Test Routes
+ * Tests test planning, execution recording, coverage analysis, and performance monitoring endpoints
+ */
+
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import {
+  registerTestRoutes,
+  aggregatePerformanceMetrics,
+} from "../../../src/api/routes/tests.js";
+import {
+  createMockRequest,
+  createMockReply,
+  type MockFastifyRequest,
+  type MockFastifyReply,
+} from "../../test-utils.js";
+import type { TestPlanResponse } from "../../../src/models/types.js";
+import type { TestPerformanceMetrics } from "../../../src/models/entities.js";
+
+const createPerformanceMetric = (
+  overrides: Partial<TestPerformanceMetrics> = {}
+): TestPerformanceMetrics => ({
+  averageExecutionTime: 100,
+  p95ExecutionTime: 120,
+  successRate: 0.9,
+  trend: "stable",
+  benchmarkComparisons: [],
+  historicalData: [],
+  ...overrides,
+});
+
+// Mock services
+vi.mock("../../../src/services/knowledge/KnowledgeGraphService.js", () => ({
+  KnowledgeGraphService: vi.fn(),
+}));
+vi.mock("../../../src/services/core/DatabaseService.js", () => ({
+  DatabaseService: vi.fn(),
+}));
+vi.mock("../../../src/services/testing/TestEngine.js", () => ({
+  TestEngine: vi.fn(),
+}));
+
+const planTestsMock = vi.fn();
+
+describe("aggregatePerformanceMetrics", () => {
+  it("selects the most common trend across metrics", () => {
+    const metrics: TestPerformanceMetrics[] = [
+      createPerformanceMetric({ averageExecutionTime: 90, trend: "stable" }),
+      createPerformanceMetric({ averageExecutionTime: 110, trend: "stable" }),
+      createPerformanceMetric({
+        averageExecutionTime: 140,
+        trend: "degrading",
+      }),
+    ];
+
+    const aggregated = aggregatePerformanceMetrics(metrics);
+
+    expect(aggregated.trend).toBe("stable");
+    expect(aggregated.averageExecutionTime).toBeCloseTo(
+      (90 + 110 + 140) / 3,
+      5
+    );
+  });
+
+  it("prefers degrading trend when counts tie", () => {
+    const metrics: TestPerformanceMetrics[] = [
+      createPerformanceMetric({ trend: "degrading" }),
+      createPerformanceMetric({ trend: "degrading" }),
+      createPerformanceMetric({ trend: "improving" }),
+      createPerformanceMetric({ trend: "improving" }),
+    ];
+
+    const aggregated = aggregatePerformanceMetrics(metrics);
+
+    expect(aggregated.trend).toBe("degrading");
+  });
+});
+
+vi.mock("../../../src/services/testing/TestPlanningService.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../src/services/testing/TestPlanningService.js")
+  >("../../../src/services/testing/TestPlanningService.js");
+
+  return {
+    ...actual,
+    TestPlanningService: vi.fn(() => ({
+      planTests: planTestsMock,
+    })),
+  };
+});
+
+import {
+  TestPlanningService,
+  SpecNotFoundError,
+  TestPlanningValidationError,
+} from "../../../src/services/testing/TestPlanningService.js";
+
+describe("Test Routes", () => {
+  let mockApp: any;
+  let mockKgService: any;
+  let mockDbService: any;
+  let mockTestEngine: any;
+  let mockRequest: MockFastifyRequest;
+  let mockReply: MockFastifyReply;
+  const TestPlanningServiceMock = vi.mocked(TestPlanningService);
+  const samplePlan: TestPlanResponse = {
+    testPlan: {
+      unitTests: [
+        {
+          name: "[AC-1] Unit criterion",
+          description: "Covers acceptance criterion",
+          type: "unit",
+          targetFunction: "calculateImpact",
+          assertions: ["ensures behaviour"],
+          dataRequirements: ["input coverage"],
+        },
+      ],
+      integrationTests: [],
+      e2eTests: [],
+      performanceTests: [],
+    },
+    estimatedCoverage: {
+      lines: 72,
+      branches: 64,
+      functions: 70,
+      statements: 71,
+    },
+    changedFiles: ["src/services/impact.ts"],
+  };
+
+  // Create a properly mocked Fastify app that tracks registered routes
+  const createMockApp = () => {
+    const routes = new Map<string, Function>();
+
+    const registerRoute = (
+      method: string,
+      path: string,
+      handler: Function,
+      _options?: any
+    ) => {
+      const key = `${method}:${path}`;
+      routes.set(key, handler);
+    };
+
+    return {
+      get: vi.fn((path: string, optionsOrHandler?: any, handler?: Function) => {
+        if (typeof optionsOrHandler === "function") {
+          registerRoute("get", path, optionsOrHandler);
+        } else if (handler) {
+          registerRoute("get", path, handler);
+        }
+      }),
+      post: vi.fn(
+        (path: string, optionsOrHandler?: any, handler?: Function) => {
+          if (typeof optionsOrHandler === "function") {
+            registerRoute("post", path, optionsOrHandler);
+          } else if (handler) {
+            registerRoute("post", path, handler);
+          }
+        }
+      ),
+      getRegisteredRoutes: () => routes,
+    };
+  };
+
+  // Helper function to extract route handlers
+  const getHandler = (
+    method: "get" | "post",
+    path: string,
+    app = mockApp
+  ): Function => {
+    const routes = app.getRegisteredRoutes();
+    const key = `${method}:${path}`;
+    const handler = routes.get(key);
+
+    if (!handler) {
+      const availableRoutes = Array.from(routes.keys()).join(", ");
+      throw new Error(
+        `Route ${key} not found. Available routes: ${availableRoutes}`
+      );
+    }
+
+    return handler;
+  };
+
+  beforeEach(() => {
+    // Clear all mocks
+    vi.clearAllMocks();
+    planTestsMock.mockReset();
+    planTestsMock.mockResolvedValue(samplePlan);
+    TestPlanningServiceMock.mockClear();
+
+    // Create mock services
+    mockKgService = vi.fn() as any;
+    mockDbService = {
+      getPerformanceMetricsHistory: vi.fn().mockResolvedValue([]),
+      postgresQuery: vi.fn().mockResolvedValue({ rows: [] }),
+    } as any;
+    mockTestEngine = {
+      recordTestResults: vi.fn(),
+      parseAndRecordTestResults: vi.fn(),
+      getCoverageAnalysis: vi.fn(),
+      getPerformanceMetrics: vi.fn(),
+      getFlakyTestAnalysis: vi.fn(),
+      analyzeFlakyTests: vi.fn(),
+    } as any;
+
+    // Mock Fastify app - recreate it fresh for each test
+    mockApp = createMockApp();
+
+    // Create fresh mocks for each test
+    mockRequest = createMockRequest();
+    mockReply = createMockReply();
+  });
+
+  describe("registerTestRoutes", () => {
+    it("should register all test routes with required services", async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      // Verify all routes are registered
+      expect(mockApp.post).toHaveBeenCalledWith(
+        "/tests/plan-and-generate",
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockApp.post).toHaveBeenCalledWith(
+        "/tests/record-execution",
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockApp.post).toHaveBeenCalledWith(
+        "/tests/parse-results",
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockApp.get).toHaveBeenCalledWith(
+        "/tests/performance/:entityId",
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockApp.get).toHaveBeenCalledWith(
+        "/tests/coverage/:entityId",
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockApp.get).toHaveBeenCalledWith(
+        "/tests/flaky-analysis/:entityId",
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(TestPlanningServiceMock).toHaveBeenCalledTimes(1);
+      expect(TestPlanningServiceMock).toHaveBeenCalledWith(mockKgService);
+    });
+
+    it("should register routes with minimal services", async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      // All routes should be registered
+      expect(mockApp.post).toHaveBeenCalledTimes(3);
+      expect(mockApp.get).toHaveBeenCalledTimes(3);
+      expect(TestPlanningServiceMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("POST /tests/plan-and-generate", () => {
+    let planHandler: Function;
+
+    beforeEach(async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      planHandler = getHandler("post", "/tests/plan-and-generate");
+    });
+
+    it("should call planning service and return response payload", async () => {
+      const requestBody = {
+        specId: "spec-123",
+        testTypes: ["unit", "integration"],
+      };
+      mockRequest.body = requestBody;
+
+      await planHandler(mockRequest, mockReply);
+
+      expect(planTestsMock).toHaveBeenCalledWith(requestBody);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: samplePlan,
+      });
+    });
+
+    it("should return 400 when planning service signals validation error", async () => {
+      mockRequest.body = { specId: "" };
+      planTestsMock.mockRejectedValueOnce(
+        new TestPlanningValidationError(
+          "Specification ID is required for test planning"
+        )
+      );
+
+      await planHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(400);
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: {
+            code: "INVALID_TEST_PLAN_REQUEST",
+            message: "Specification ID is required for test planning",
+          },
+        })
+      );
+    });
+
+    it("should return 404 when specification is missing", async () => {
+      mockRequest.body = { specId: "spec-missing" };
+      planTestsMock.mockRejectedValueOnce(
+        new SpecNotFoundError("spec-missing")
+      );
+
+      await planHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(404);
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: {
+            code: "SPEC_NOT_FOUND",
+            message: "Specification not found",
+          },
+        })
+      );
+    });
+
+    it("should return 500 when planning service throws unexpected error", async () => {
+      mockRequest.body = { specId: "spec-failure" };
+      planTestsMock.mockRejectedValueOnce(new Error("planner failure"));
+
+      await planHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(500);
+      expect(mockReply.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: {
+            code: "TEST_PLANNING_FAILED",
+            message: "Failed to plan and generate tests",
+            details: "planner failure",
+          },
+        })
+      );
+    });
+  });
+
+  describe("POST /tests/record-execution", () => {
+    let recordHandler: Function;
+
+    beforeEach(async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      recordHandler = getHandler("post", "/tests/record-execution");
+    });
+
+    it("should record single test execution result", async () => {
+      const testResult = {
+        testId: "test-123",
+        testSuite: "AuthService",
+        testName: "should authenticate user",
+        status: "passed" as const,
+        duration: 150,
+      };
+
+      mockRequest.body = testResult;
+
+      mockTestEngine.recordTestResults = vi.fn().mockResolvedValue(undefined);
+
+      await recordHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.recordTestResults).toHaveBeenCalledWith({
+        suiteName: "API Recorded Tests",
+        timestamp: expect.any(Date),
+        framework: "api",
+        totalTests: 1,
+        passedTests: 1,
+        failedTests: 0,
+        skippedTests: 0,
+        duration: 150,
+        results: [
+          expect.objectContaining({
+            testId: "test-123",
+            testSuite: "AuthService",
+            testName: "should authenticate user",
+            status: "passed",
+            duration: 150,
+          }),
+        ],
+      });
+
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: { recorded: 1 },
+      });
+    });
+
+    it("should record multiple test execution results", async () => {
+      const testResults = [
+        {
+          testId: "test-1",
+          testSuite: "AuthService",
+          testName: "should authenticate user",
+          status: "passed" as const,
+          duration: 150,
+        },
+        {
+          testId: "test-2",
+          testSuite: "AuthService",
+          testName: "should reject invalid credentials",
+          status: "failed" as const,
+          duration: 200,
+          errorMessage: "Expected to throw but did not",
+        },
+        {
+          testId: "test-3",
+          testSuite: "AuthService",
+          testName: "should handle network timeout",
+          status: "skipped" as const,
+          duration: 0,
+        },
+      ];
+
+      mockRequest.body = testResults;
+
+      mockTestEngine.recordTestResults = vi.fn().mockResolvedValue(undefined);
+
+      await recordHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.recordTestResults).toHaveBeenCalledWith({
+        suiteName: "API Recorded Tests",
+        timestamp: expect.any(Date),
+        framework: "api",
+        totalTests: 3,
+        passedTests: 1,
+        failedTests: 1,
+        skippedTests: 1,
+        duration: 350,
+        results: expect.any(Array),
+      });
+
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: { recorded: 3 },
+      });
+    });
+
+    it("should handle test results with coverage and performance data", async () => {
+      const testResult = {
+        testId: "test-coverage",
+        testSuite: "ServiceTest",
+        testName: "should handle complex scenario",
+        status: "passed" as const,
+        duration: 500,
+        coverage: {
+          lines: 85,
+          branches: 78,
+          functions: 90,
+          statements: 84,
+        },
+        performance: {
+          memoryUsage: 25.5,
+          cpuUsage: 15.2,
+          networkRequests: 3,
+        },
+      };
+
+      mockRequest.body = testResult;
+
+      mockTestEngine.recordTestResults = vi.fn().mockResolvedValue(undefined);
+
+      await recordHandler(mockRequest, mockReply);
+
+      const recordedSuite = (mockTestEngine.recordTestResults as any).mock
+        .calls[0][0];
+      expect(recordedSuite.results[0].coverage).toEqual(testResult.coverage);
+      expect(recordedSuite.results[0].performance).toEqual(
+        testResult.performance
+      );
+    });
+
+    it("should handle test engine errors", async () => {
+      mockRequest.body = {
+        testId: "test-error",
+        testSuite: "ErrorSuite",
+        testName: "should handle errors",
+        status: "error" as const,
+        duration: 100,
+      };
+
+      mockTestEngine.recordTestResults = vi
+        .fn()
+        .mockRejectedValue(new Error("Database connection failed"));
+
+      await recordHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(500);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          code: "TEST_RECORDING_FAILED",
+          message: "Failed to record test execution results",
+        },
+      });
+    });
+  });
+
+  describe("POST /tests/parse-results", () => {
+    let parseHandler: Function;
+
+    beforeEach(async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      parseHandler = getHandler("post", "/tests/parse-results");
+    });
+
+    it("should parse and record Jest test results", async () => {
+      mockRequest.body = {
+        filePath: "/tmp/jest-results.json",
+        format: "jest",
+      };
+
+      mockTestEngine.parseAndRecordTestResults = vi
+        .fn()
+        .mockResolvedValue(undefined);
+
+      await parseHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.parseAndRecordTestResults).toHaveBeenCalledWith(
+        "/tmp/jest-results.json",
+        "jest"
+      );
+
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          message:
+            "Test results from /tmp/jest-results.json parsed and recorded successfully",
+        },
+      });
+    });
+
+    it("should parse and record JUnit test results", async () => {
+      mockRequest.body = {
+        filePath: "/tmp/junit-results.xml",
+        format: "junit",
+      };
+
+      mockTestEngine.parseAndRecordTestResults = vi
+        .fn()
+        .mockResolvedValue(undefined);
+
+      await parseHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.parseAndRecordTestResults).toHaveBeenCalledWith(
+        "/tmp/junit-results.xml",
+        "junit"
+      );
+    });
+
+    it("should parse and record Vitest test results", async () => {
+      mockRequest.body = {
+        filePath: "/tmp/vitest-results.json",
+        format: "vitest",
+      };
+
+      mockTestEngine.parseAndRecordTestResults = vi
+        .fn()
+        .mockResolvedValue(undefined);
+
+      await parseHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.parseAndRecordTestResults).toHaveBeenCalledWith(
+        "/tmp/vitest-results.json",
+        "vitest"
+      );
+    });
+
+    it("should handle parsing errors", async () => {
+      mockRequest.body = {
+        filePath: "/tmp/invalid-results.json",
+        format: "jest",
+      };
+
+      mockTestEngine.parseAndRecordTestResults = vi
+        .fn()
+        .mockRejectedValue(new Error("Invalid JSON format"));
+
+      await parseHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(500);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          code: "TEST_PARSING_FAILED",
+          message: "Failed to parse test results",
+        },
+      });
+    });
+  });
+
+  describe("GET /tests/performance/:entityId", () => {
+    let performanceHandler: Function;
+
+    beforeEach(async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      performanceHandler = getHandler("get", "/tests/performance/:entityId");
+    });
+
+    it("should return performance metrics for valid entity", async () => {
+      const entityId = "test-entity-123";
+      const mockMetrics = {
+        averageExecutionTime: 245.5,
+        p95ExecutionTime: 320.0,
+        successRate: 0.92,
+        trend: "improving" as const,
+        benchmarkComparisons: [
+          { benchmark: "industry_avg", value: 280.0, status: "above" as const },
+        ],
+        historicalData: [
+          {
+            timestamp: new Date("2023-01-01"),
+            executionTime: 250.0,
+            averageExecutionTime: 250.0,
+            p95ExecutionTime: 300.0,
+            successRate: 0.9,
+            coveragePercentage: 0,
+            runId: "run-a",
+          },
+          {
+            timestamp: new Date("2023-01-02"),
+            executionTime: 245.0,
+            averageExecutionTime: 245.0,
+            p95ExecutionTime: 295.0,
+            successRate: 0.92,
+            coveragePercentage: 0,
+            runId: "run-b",
+          },
+        ],
+      };
+
+      mockRequest.params = { entityId };
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: "test",
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi
+        .fn()
+        .mockResolvedValue(mockMetrics);
+      const mockHistory = [
+        {
+          metricId: "fixtures/latency/p95",
+          currentValue: 320,
+          detectedAt: new Date("2023-01-02T00:00:00Z"),
+          source: "snapshot" as const,
+        },
+      ];
+      mockDbService.getPerformanceMetricsHistory = vi
+        .fn()
+        .mockResolvedValue(mockHistory);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.getPerformanceMetrics).toHaveBeenCalledWith(
+        entityId
+      );
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({})
+      );
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          metrics: mockMetrics,
+          history: mockHistory,
+        },
+      });
+    });
+
+    it("should normalize environment filter before querying history", async () => {
+      const entityId = "test-entity-env";
+      const mockMetrics = {
+        averageExecutionTime: 200,
+        p95ExecutionTime: 250,
+        successRate: 0.95,
+        trend: "stable" as const,
+        benchmarkComparisons: [],
+        historicalData: [],
+      };
+
+      mockRequest.params = { entityId };
+      mockRequest.query = { environment: "Production" } as any;
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: "test",
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi
+        .fn()
+        .mockResolvedValue(mockMetrics);
+      mockDbService.getPerformanceMetricsHistory = vi
+        .fn()
+        .mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({ environment: "prod" })
+      );
+    });
+
+    it("should normalize metricId filter before querying history", async () => {
+      const entityId = "test-entity-metric";
+      const mockMetrics = {
+        averageExecutionTime: 210,
+        p95ExecutionTime: 260,
+        successRate: 0.9,
+        trend: "stable" as const,
+        benchmarkComparisons: [],
+        historicalData: [],
+      };
+
+      mockRequest.params = { entityId };
+      mockRequest.query = { metricId: "Benchmark/API/Login-Latency " } as any;
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: "test",
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi
+        .fn()
+        .mockResolvedValue(mockMetrics);
+      mockDbService.getPerformanceMetricsHistory = vi
+        .fn()
+        .mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({ metricId: "benchmark/api/login-latency" })
+      );
+    });
+
+    it("should ignore invalid limit values when building history options", async () => {
+      const entityId = "test-entity-invalid-limit";
+      const mockMetrics = {
+        averageExecutionTime: 205,
+        p95ExecutionTime: 255,
+        successRate: 0.91,
+        trend: "stable" as const,
+        benchmarkComparisons: [],
+        historicalData: [],
+      };
+
+      mockRequest.params = { entityId };
+      mockRequest.query = { limit: "not-a-number" } as any;
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: "test",
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi
+        .fn()
+        .mockResolvedValue(mockMetrics);
+      mockDbService.getPerformanceMetricsHistory = vi
+        .fn()
+        .mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({ limit: undefined })
+      );
+    });
+
+    it("should clamp limit filter to maximum allowed value", async () => {
+      const entityId = "test-entity-limit";
+      const mockMetrics = {
+        averageExecutionTime: 215,
+        p95ExecutionTime: 270,
+        successRate: 0.89,
+        trend: "stable" as const,
+        benchmarkComparisons: [],
+        historicalData: [],
+      };
+
+      mockRequest.params = { entityId };
+      mockRequest.query = { limit: "9999" } as any;
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: "test",
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi
+        .fn()
+        .mockResolvedValue(mockMetrics);
+      mockDbService.getPerformanceMetricsHistory = vi
+        .fn()
+        .mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockDbService.getPerformanceMetricsHistory).toHaveBeenCalledWith(
+        entityId,
+        expect.objectContaining({ limit: 500 })
+      );
+    });
+
+    it("should handle performance metrics retrieval errors", async () => {
+      mockRequest.params = { entityId: "non-existent-entity" };
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: "non-existent-entity",
+        type: "test",
+        performanceMetrics: undefined,
+      });
+
+      mockTestEngine.getPerformanceMetrics = vi
+        .fn()
+        .mockRejectedValue(new Error("Entity not found"));
+
+      mockDbService.getPerformanceMetricsHistory.mockResolvedValue([]);
+
+      await performanceHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.getPerformanceMetrics).toHaveBeenCalledWith(
+        "non-existent-entity"
+      );
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          metrics: {
+            averageExecutionTime: 0,
+            p95ExecutionTime: 0,
+            successRate: 0,
+            trend: "stable",
+            benchmarkComparisons: [],
+            historicalData: [],
+          },
+          history: [],
+        },
+      });
+    });
+  });
+
+  describe("GET /tests/coverage/:entityId", () => {
+    let coverageHandler: Function;
+
+    beforeEach(async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      coverageHandler = getHandler("get", "/tests/coverage/:entityId");
+    });
+
+    it("should return coverage analysis for valid entity", async () => {
+      const entityId = "service-coverage-123";
+      const mockCoverage = {
+        entityId,
+        overallCoverage: {
+          lines: 85.5,
+          branches: 78.2,
+          functions: 92.1,
+          statements: 84.8,
+        },
+        testBreakdown: {
+          unitTests: {
+            lines: 88.0,
+            branches: 82.0,
+            functions: 95.0,
+            statements: 87.5,
+          },
+          integrationTests: {
+            lines: 75.0,
+            branches: 68.0,
+            functions: 80.0,
+            statements: 74.0,
+          },
+          e2eTests: {
+            lines: 60.0,
+            branches: 55.0,
+            functions: 65.0,
+            statements: 58.0,
+          },
+        },
+        uncoveredLines: [15, 23, 67],
+        uncoveredBranches: [12, 45],
+        testCases: [
+          {
+            testId: "unit-test-1",
+            testName: "should handle valid input",
+            covers: ["service-coverage-123"],
+          },
+        ],
+      };
+
+      mockRequest.params = { entityId };
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: entityId,
+        type: "function",
+      });
+
+      mockTestEngine.getCoverageAnalysis = vi
+        .fn()
+        .mockResolvedValue(mockCoverage);
+
+      await coverageHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.getCoverageAnalysis).toHaveBeenCalledWith(entityId);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: mockCoverage,
+      });
+    });
+
+    it("should handle coverage analysis errors", async () => {
+      mockRequest.params = { entityId: "invalid-entity" };
+
+      mockKgService.getEntity = vi.fn().mockResolvedValue({
+        id: "invalid-entity",
+        type: "function",
+      });
+
+      mockTestEngine.getCoverageAnalysis = vi
+        .fn()
+        .mockRejectedValue(new Error("Coverage data not available"));
+
+      await coverageHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(500);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          code: "COVERAGE_RETRIEVAL_FAILED",
+          message: "Failed to retrieve test coverage data",
+        },
+      });
+    });
+  });
+
+  describe("GET /tests/flaky-analysis/:entityId", () => {
+    let flakyHandler: Function;
+
+    beforeEach(async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      flakyHandler = getHandler("get", "/tests/flaky-analysis/:entityId");
+    });
+
+    it("should return flaky test analysis for valid entity", async () => {
+      const entityId = "flaky-test-123";
+      const mockAnalysis = {
+        testId: entityId,
+        testName: "should handle network timeouts",
+        flakyScore: 0.75,
+        totalRuns: 100,
+        failureRate: 0.15,
+        successRate: 0.85,
+        recentFailures: 5,
+        patterns: {
+          timeOfDay: "evening",
+          environment: "staging",
+          duration: "long-running",
+        },
+        recommendations: [
+          "Consider rewriting this test to be more deterministic",
+          "Check for race conditions or timing dependencies",
+          "Add retry logic if the failure is intermittent",
+        ],
+      };
+
+      mockRequest.params = { entityId };
+
+      mockTestEngine.getFlakyTestAnalysis = vi
+        .fn()
+        .mockResolvedValue([mockAnalysis]);
+
+      await flakyHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.getFlakyTestAnalysis).toHaveBeenCalledWith(
+        entityId
+      );
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: mockAnalysis,
+      });
+    });
+
+    it("should return 404 when no analysis found for entity", async () => {
+      const entityId = "non-flaky-test";
+      mockRequest.params = { entityId };
+
+      mockTestEngine.getFlakyTestAnalysis = vi.fn().mockResolvedValue([]);
+
+      await flakyHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(404);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          code: "ANALYSIS_NOT_FOUND",
+          message: "No flaky test analysis found for this entity",
+        },
+      });
+    });
+
+    it("should handle flaky analysis errors", async () => {
+      mockRequest.params = { entityId: "error-test" };
+
+      mockTestEngine.getFlakyTestAnalysis = vi
+        .fn()
+        .mockRejectedValue(new Error("Analysis service unavailable"));
+
+      await flakyHandler(mockRequest, mockReply);
+
+      expect(mockReply.status).toHaveBeenCalledWith(500);
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          code: "FLAKY_ANALYSIS_FAILED",
+          message: "Failed to retrieve flaky test analysis",
+        },
+      });
+    });
+
+    it("should return analysis for specific test when found among multiple", async () => {
+      const entityId = "specific-flaky-test";
+      const mockAnalyses = [
+        {
+          testId: "other-test-1",
+          testName: "should validate input",
+          flakyScore: 0.2,
+        },
+        {
+          testId: entityId,
+          testName: "should handle specific scenario",
+          flakyScore: 0.8,
+        },
+        {
+          testId: "other-test-2",
+          testName: "should process data",
+          flakyScore: 0.3,
+        },
+      ];
+
+      mockRequest.params = { entityId };
+
+      mockTestEngine.getFlakyTestAnalysis = vi
+        .fn()
+        .mockResolvedValue(mockAnalyses);
+
+      await flakyHandler(mockRequest, mockReply);
+
+      expect(mockTestEngine.getFlakyTestAnalysis).toHaveBeenCalledWith(
+        entityId
+      );
+      expect(mockReply.send).toHaveBeenCalledWith({
+        success: true,
+        data: mockAnalyses[1], // Should return the matching analysis
+      });
+    });
+  });
+
+  describe("Error handling and edge cases", () => {
+    it("should handle missing parameters gracefully", async () => {
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      // Test handlers with missing parameters
+      const performanceHandler = getHandler(
+        "get",
+        "/tests/performance/:entityId"
+      );
+      const coverageHandler = getHandler("get", "/tests/coverage/:entityId");
+      const flakyHandler = getHandler("get", "/tests/flaky-analysis/:entityId");
+
+      // These should still work but may return errors due to missing services
+      // In a real scenario, Fastify would validate the parameters first
+      expect(typeof performanceHandler).toBe("function");
+      expect(typeof coverageHandler).toBe("function");
+      expect(typeof flakyHandler).toBe("function");
+    });
+
+    it("should handle service unavailability", async () => {
+      // Register routes without test engine
+      const mockAppNoEngine = createMockApp();
+
+      await registerTestRoutes(
+        mockAppNoEngine as any,
+        mockKgService,
+        mockDbService
+        // No test engine
+      );
+
+      // Routes should still be registered but handlers should handle missing services
+      expect(mockAppNoEngine.post).toHaveBeenCalledTimes(3);
+      expect(mockAppNoEngine.get).toHaveBeenCalledTimes(3);
+    });
+
+    it("should validate request body schemas", async () => {
+      // This test verifies that the routes are registered with proper schemas
+      // In a real Fastify app, these would be validated before reaching the handlers
+
+      await registerTestRoutes(
+        mockApp as any,
+        mockKgService,
+        mockDbService,
+        mockTestEngine
+      );
+
+      // Check that POST routes have schema objects
+      expect(mockApp.post).toHaveBeenCalledWith(
+        "/tests/plan-and-generate",
+        expect.objectContaining({
+          schema: expect.objectContaining({
+            body: expect.any(Object),
+          }),
+        }),
+        expect.any(Function)
+      );
+
+      expect(mockApp.post).toHaveBeenCalledWith(
+        "/tests/record-execution",
+        expect.objectContaining({
+          schema: expect.objectContaining({
+            body: expect.any(Object),
+          }),
+        }),
+        expect.any(Function)
+      );
+    });
+  });
+});

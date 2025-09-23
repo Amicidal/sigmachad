@@ -10,7 +10,7 @@ This document outlines the comprehensive knowledge graph schema for the Memento 
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Codebase      │    │  Knowledge      │    │   Vector        │
 │   Files         │────│   Graph         │────│   Index         │
-│                 │    │  (FalkorDB)     │    │  (Qdrant)       │
+│                 │    │  (Neo4j)        │    │  (Neo4j Native) │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                               │
                               ▼
@@ -19,6 +19,7 @@ This document outlines the comprehensive knowledge graph schema for the Memento 
                        │   Engine        │
                        └─────────────────┘
 ```
+- Qdrant on standby for advanced vector needs; Neo4j native vectors suffice for core embeddings (e.g., kNN on clusters/symbols).
 
 ## Node Types (Entities)
 
@@ -175,89 +176,42 @@ This document outlines the comprehensive knowledge graph schema for the Memento 
 ```
 
 ### 12. Change
-**Tracks changes to codebase entities**
+**Tracks durable SCM changes (commits/PRs); ephemeral sessions ref via metadata anchors.**
 ```
 {
-  id: string (UUID)
+  id: string (UUID or commitHash)
   type: "change"
   changeType: string (create, update, delete, rename, move)
-  entityType: string (file, symbol, spec, etc.)
-  entityId: string (ID of entity that changed)
+  entityType: string (file, symbol, cluster)
+  entityId: string (affected KG entity)
   timestamp: timestamp
-  author: string
-  commitHash: string (optional)
-  diff: string (change details)
-  previousState: object (entity state before change)
-  newState: object (entity state after change)
-  sessionId: string (links to AI agent session)
-  specId: string (optional, links to related spec)
+  author: string (SCM or agent summary)
+  commitHash: string (optional Git ref)
+  diff: object (lines added/removed, summary)
+  previousState: object (pre-change entity snapshot)
+  newState: object (post-change entity snapshot)
+  sessionRefs: object[] (from KG anchors, e.g., [{ sessionId, checkpointId, agentImpacts: 'broken test' }])  // Ephemeral ref, no persistent ties
+  metadata: object (session summary, perfDelta, validation results)
 }
 ```
 
-### 13. Session
-**Tracks AI agent interaction sessions and development activity**
-```
-{
-  id: string (UUID)
-  type: "session"
-  startTime: timestamp
-  endTime: timestamp
-  agentType: string (claude, gpt, etc.)
-  userId: string
-  changes: string[] (change IDs from this session)
-  specs: string[] (spec IDs created in this session)
-  status: string (active, completed, failed)
-  metadata: object (session context and parameters)
-  
-  // Event tracking for fine-grained changes
-  events: Array<{
-    timestamp: Date
-    entityId: string
-    changeType: 'modified' | 'added' | 'deleted' | 'tested' | 'built'
-    elementType?: 'function' | 'class' | 'import' | 'test'
-    elementName?: string
-    operation?: 'added' | 'modified' | 'deleted' | 'renamed'
-    testResult?: 'passed' | 'failed' | 'skipped'
-    buildResult?: 'success' | 'failure'
-  }>
-  
-  // Semantic snapshots at key moments
-  snapshots: Map<string, {
-    trigger: 'test_fail' | 'test_pass' | 'build_fail' | 'build_pass' | 'manual' | 'periodic'
-    timestamp: Date
-    workingState: boolean
-    affectedEntities: Array<{
-      entityId: string
-      fullImplementation?: string  // Complete function/class at this moment
-      context?: {
-        imports: string[]
-        callers: string[]
-        callees: string[]
-      }
-    }>
-  }>
-  
-  // Session-level state tracking
-  lastKnownGoodState?: {
-    timestamp: Date
-    verifiedBy: 'test' | 'build' | 'manual'
-  }
-  currentState: 'working' | 'broken' | 'unknown'
-}
-```
+### 13. Session (Ephemeral Anchors Only)
+**Live agent sessions managed in Redis cache (TTL to checkpoint); KG holds sparse refs for awareness.**
+- No persistent node; use metadata anchors on affected entities (e.g., cluster.metadata.sessions = [{ sessionId, outcome, checkpointId, keyImpacts: [entityIds] }]).
+- Events/transitions (changeInfo, stateTransition, impact) in Redis JSON/sorted sets; discard after checkpoint.
 
 ### 14. Version
-**Compact snapshot of an entity when its content changes (append-only)**
+**Snapshots of entity states; refs ephemeral sessions via checkpoint anchors.**
 ```
 {
   id: string (UUID)
   type: "version"
-  entityId: string           // id of the current/live entity node
-  path?: string              // helpful for files/symbols
-  hash: string               // content hash at this moment
-  language?: string
-  timestamp: timestamp       // when this snapshot was recorded
-  metadata?: object          // minimal additional info (size, lines, metrics)
+  entityId: string (linked KG entity)
+  hash: string (content hash)
+  timestamp: timestamp
+  changeId: string (links to Change node)
+  sessionAnchor?: object (from KG metadata, e.g., { sessionId, outcome: 'working', checkpointId })  // Ref-only, no direct session edge
+  metadata: object (diffStats, validation)
 }
 ```
 
@@ -273,6 +227,42 @@ This document outlines the comprehensive knowledge graph schema for the Memento 
   hops: number               // K-hop neighborhood captured
   seedEntities: string[]     // entities around which snapshot was built
   metadata?: object
+}
+```
+
+### 16. SemanticCluster
+**Groups related code entities by business functionality, attached to specs/docs for refactor-resilient implementation linking**
+```
+{
+  id: string (UUID)
+  type: "semanticCluster"
+  name: string
+  description: string
+  specId?: string (links to attached Spec)
+  businessDomainId: string
+  clusterType: string ("feature", "module", "capability")
+  cohesionScore: number (0-1)
+  lastAnalyzed: timestamp
+  memberEntities: string[] (array of entity IDs; auto-updates on refactors)
+  performanceMetrics?: object (aggregated benchmarks)
+}
+```
+
+### 17. Benchmark
+**Tracks performance runs and regressions, attachable to clusters/specs**
+```
+{
+  id: string (UUID)
+  type: "benchmark"
+  metricId: string (e.g., "api/login-latency")
+  baselineValue: number
+  currentValue: number
+  unit: string (ms, ops/s)
+  trend: string ("improving", "regressing", "stable")
+  sampleSize: number
+  attachedToCluster?: string (cluster ID for group-level tracking)
+  attachedToSpec?: string (spec ID for progress alignment)
+  history: array (timestamped snapshots)
 }
 ```
 
@@ -362,11 +352,13 @@ All relationships include:
 - `IMPACTS`: Spec → File/Directory (files impacted by spec)
 
 ### Temporal Relationships
-- `PREVIOUS_VERSION`: Entity → Entity (links to previous version of same entity)
-- `CHANGED_AT`: Entity → Timestamp (tracks when entity changed)
-- `MODIFIED_BY`: Entity → Change (links entity to change that modified it)
-- `CREATED_IN`: Entity → Commit/Session (links entity to creation context)
-- `OF`: Version → Entity (version belongs to current/live entity)
+- `PREVIOUS_VERSION`: Version → Version (chains snapshots; no session ties—ephemeral).
+- `MODIFIED_BY`: Change → Entity (SCM changes only; session refs in metadata).
+- `CREATED_IN`: Change → Entity (initial creation).
+- `MODIFIED_IN`: Change → Entity (updates).
+- `REMOVED_IN`: Change → Entity (deletions).
+- `OF`: Version → Entity (current version).
+- (No session provenance—ephemeral in Redis; refs via anchors in Change metadata.)
 
 ### Change Tracking Relationships
 - `INTRODUCED_IN`: Entity → Change (when entity was first introduced)
@@ -383,6 +375,14 @@ All relationships include:
 
 ### Checkpoint Relationships
 - `CHECKPOINT_INCLUDES`: Checkpoint → Entity/Version (members of the checkpoint subgraph)
+
+### Cluster and Spec Relationships
+- `IMPLEMENTS_CLUSTER`: Spec → SemanticCluster (spec implemented by this cluster of entities; avoids per-symbol links for multi-file specs)
+- `MEMBER_OF_CLUSTER`: CodebaseEntity → SemanticCluster (entity belongs to cluster; updates automatically on refactors)
+
+### Benchmark Relationships
+- `PERFORMS_FOR`: Benchmark → SemanticCluster/Spec (benchmark tracks performance for this cluster/spec)
+- `REGRESSION_IMPACTS`: Benchmark → Change (regression caused by this change, linked to affected cluster)
 
 ## Graph Constraints and Indexes
 
@@ -415,9 +415,9 @@ All relationships include:
 ## Vector Database Integration
 
 ### Embedding Strategy
-- **Code Embeddings**: Functions, classes, interfaces
-- **Documentation Embeddings**: Specs, comments, docstrings
-- **Test Embeddings**: Test cases and assertions
+- **Code Embeddings**: Functions, classes, interfaces (native Neo4j vectors via APOC/GDS).
+- **Documentation Embeddings**: Specs, comments, docstrings.
+- **Test Embeddings**: Test cases and assertions.
 
 ### Metadata Mapping
 ```typescript
@@ -445,10 +445,10 @@ interface VectorMetadata {
 - **Session Context Search**: Find code modified in similar sessions
 
 ### Search Patterns
-- **Semantic Code Search**: Find similar functions/classes
-- **API Usage Examples**: Find usage patterns for symbols
-- **Test Case Retrieval**: Find relevant tests for symbols
-- **Spec Matching**: Find related specifications
+- **Semantic Code Search**: Find similar functions/classes (Neo4j vector similarity queries).
+- **API Usage Examples**: Find usage patterns for symbols.
+- **Test Case Retrieval**: Find relevant tests for symbols.
+- **Spec Matching**: Find related specifications.
 
 ## Query Patterns
 
@@ -484,6 +484,25 @@ OPTIONAL MATCH (spec)<-[:VALIDATES]-(t:Test)
 OPTIONAL MATCH (t)-[:TESTS]->(s:Symbol)
 OPTIONAL MATCH (s)-[:DEFINES]->(f:File)
 RETURN spec, collect(t) as tests, collect(DISTINCT s) as symbols, collect(DISTINCT f) as files
+```
+
+### 11. Implementation Cluster for Spec
+**Find all entities implementing a spec via attached cluster (refactor-resilient, no path maintenance)**
+```
+MATCH (spec:Spec {id: $specId})-[:IMPLEMENTS_CLUSTER]->(cluster:SemanticCluster)
+MATCH (cluster)<-[:MEMBER_OF_CLUSTER]-(entity:CodebaseEntity)
+OPTIONAL MATCH (entity)-[:DEFINES|TESTS]-(related:Symbol|Test)
+RETURN spec.title, cluster.name, cluster.cohesionScore, collect(entity) as implementationCluster, collect(related) as testsAndSymbols
+```
+
+### 12. Benchmark Tracking for Spec/Cluster
+**Track performance progress/regressions for a spec's implementation cluster**
+```
+MATCH (spec:Spec {id: $specId})-[:IMPLEMENTS_CLUSTER]->(cluster:SemanticCluster)
+MATCH (cluster)-[:PERFORMS_FOR]-(bench:Benchmark)
+WHERE bench.trend = 'regressing' AND bench.timestamp >= $since
+RETURN spec.title, cluster.name, bench.metricId, bench.currentValue, bench.delta, bench.history[-5..] as recentSnapshots
+ORDER BY bench.timestamp DESC
 ```
 
 ## Temporal Query Patterns
@@ -1099,7 +1118,7 @@ memento sync --validate
          ▼                        ▼                        ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │  Change Parser  │────│ Graph Database │────│Vector Database │
-│ (ts-morph/tree- │    │  (FalkorDB)    │    │   (Qdrant)     │
+│ (ts-morph/tree- │    │  (Neo4j)       │    │   (Neo4j Native)│
 │    sitter)      │    │                 │    │                │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                        │                        │
@@ -1132,7 +1151,7 @@ memento sync --validate
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Code Parser   │────│   Doc Parser    │────│ Knowledge Graph │
-│  (ts-morph)     │    │ (Markdown, etc) │    │   (FalkorDB)    │
+│  (ts-morph)     │    │ (Markdown, etc) │    │   (Neo4j)       │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                        │                        │
          ▼                        ▼                        ▼
@@ -1425,7 +1444,7 @@ interface DocumentationCentricAPI {
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Test Runner   │────│  Test Parser    │────│ Knowledge Graph │
-│ (Jest/Vitest)   │    │                 │    │   (FalkorDB)    │
+│ (Jest/Vitest)   │    │                 │    │   (Neo4j)       │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                        │                        │
          ▼                        ▼                        ▼
@@ -1511,203 +1530,35 @@ WHERE t.performanceTrend = "degrading"
 RETURN c.changeType, f.name, t.performanceTrend, c.timestamp
 ```
 
-### Security Tooling Integration
+### Security Tooling Integration (Simplified)
+Security issues are handled via metadata on existing entities (e.g., File/Symbol) rather than dedicated nodes, for efficiency. Append results from external scans (ESLint-security, Snyk) during sync; critical vulns trigger immediate refactors via gates.
 
-#### Security Integration Architecture
+// Schema: No new nodes; use metadata on CodebaseEntity
+// Example: n.metadata.vulnerabilities = [{ id: 'CVE-123', severity: 'high', tool: 'snyk', fixed: false, remediation: 'Update dep' }]
+
+// Ingestion: During file sync, run lightweight scans and merge into metadata; offload full reports to external storage.
+// Queries: Filter via props for impact analysis, e.g.,
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Security Tools │────│ Security Parser │────│ Knowledge Graph │
-│ (SAST, SCA, etc)│    │                 │    │   (FalkorDB)    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                        │                        │
-         ▼                        ▼                        ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ Vulnerability   │────│ Security Issues │────│ Risk Assessment │
-│   Scanner       │    │                 │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+MATCH (entity:CodebaseEntity)
+WHERE entity.metadata.vulnerabilities.severity = 'critical' AND entity.metadata.vulnerabilities.fixed = false
+MATCH (entity)-[:IMPACTS]-(spec:Spec)
+RETURN entity.path, entity.metadata.vulnerabilities, spec.title
 ```
+Benefits: Lean KG (no extra traversals), fast queries, aligns with quick-fix velocity. For deep audits, query external stores by vuln ID.
 
-#### Security Node Types
+### Ephemeral Session Management (New Subsection)
+Sessions are ephemeral in Redis for velocity—store live events (sequences, modified/impacted/checkpoint) with TTL (15-60 min or to next checkpoint). KG anchors summaries (metadata refs on entities/clusters for outcomes/impacts). Bridge (SessionQueryService) joins for queries.
 
-##### SecurityIssue
-**Security vulnerabilities and findings**
-```
-{
-  id: string (UUID)
-  type: "securityIssue"
-  tool: string ("eslint-security", "semgrep", "snyk", "owasp-zap")
-  ruleId: string
-  severity: string ("critical", "high", "medium", "low", "info")
-  title: string
-  description: string
-  cwe: string (Common Weakness Enumeration)
-  owasp: string (OWASP category)
-  affectedEntityId: string
-  lineNumber: number
-  codeSnippet: string
-  remediation: string
-  status: string ("open", "fixed", "accepted", "false-positive")
-  discoveredAt: timestamp
-  lastScanned: timestamp
-  confidence: number (0-1)
-}
-```
+- **Redis Structure**: `session:{id}` (JSON: {events: [] (batched), state}); expire on checkpoint.
+- **Checkpoints**: Ref-only in KG metadata (e.g., {id, timestamp, refEntities: [ids]}); opt-in Postgres snapshot for failures (<5%).
+- **Scalability**: 100+ agents (5k sessions/day) via Redis Cluster; zero long-term growth. Multi-agent: Shared keys/pub-sub for handoffs.
+- **Queries (Bridge Examples)**:
+  - Transitions: Redis: ZRANGE events:{id} | filter 'pass' to 'broke'; Bridge: JOIN KG anchors (e.g., "Broke cluster's benchmark").
+  - Isolation: Redis: Filter by agentId; Bridge: Traverse refs (e.g., "Agent 20's session impacts on spec").
 
-##### Vulnerability
-**Dependency vulnerabilities**
-```
-{
-  id: string (UUID)
-  type: "vulnerability"
-  packageName: string
-  version: string
-  vulnerabilityId: string (CVE, GHSA, etc)
-  severity: string
-  description: string
-  cvssScore: number
-  affectedVersions: string
-  fixedInVersion: string
-  publishedAt: timestamp
-  lastUpdated: timestamp
-  exploitability: string ("high", "medium", "low")
-}
-```
-
-#### Security Relationship Types
-
-##### HAS_SECURITY_ISSUE
-- **Source**: Entity → SecurityIssue
-- **Properties**: severity, status, discovered date
-
-##### DEPENDS_ON_VULNERABLE
-- **Source**: Module → Vulnerability
-- **Properties**: severity, exposure level, remediation status
-
-##### SECURITY_IMPACTS
-- **Source**: SecurityIssue → Function/File
-- **Properties**: attack vector, potential impact, exploitability
-
-#### Integrated Security Tools
-
-**1. ESLint Security Rules:**
-```javascript
-// .eslintrc.js
-{
-  "plugins": ["security"],
-  "extends": ["plugin:security/recommended"],
-  "rules": {
-    "security/detect-object-injection": "error",
-    "security/detect-eval-with-expression": "error",
-    "security/detect-no-csrf-before-method-override": "error"
-  }
-}
-```
-
-**2. SAST Tools (Semgrep, CodeQL):**
-- Pattern-based vulnerability detection
-- Custom rules for business-specific security issues
-- Integration with CI/CD pipelines
-
-**3. SCA Tools (Snyk, OWASP Dependency Check):**
-- Dependency vulnerability scanning
-- License compliance checking
-- Outdated package detection
-
-**4. Secret Detection:**
-- API key detection
-- Credential exposure prevention
-- Integration with git hooks
-
-#### Security Analysis Queries
-
-**Critical security issues:**
-```cypher
-MATCH (si:SecurityIssue)
-WHERE si.severity = "critical" AND si.status = "open"
-MATCH (si)-[:HAS_SECURITY_ISSUE]->(entity)
-RETURN si.title, entity.path, si.lineNumber, si.remediation
-ORDER BY si.discoveredAt DESC
-```
-
-**Vulnerable dependencies:**
-```cypher
-MATCH (m:Module)-[:DEPENDS_ON_VULNERABLE]->(v:Vulnerability)
-WHERE v.severity IN ["critical", "high"]
-RETURN m.name, v.vulnerabilityId, v.cvssScore, v.fixedInVersion
-ORDER BY v.cvssScore DESC
-```
-
-**Security debt by file:**
-```cypher
-MATCH (f:File)-[:HAS_SECURITY_ISSUE]->(si:SecurityIssue)
-WHERE si.status = "open"
-RETURN f.path,
-       count(si) as issueCount,
-       collect(si.severity) as severities,
-       collect(si.title) as issues
-ORDER BY issueCount DESC
-```
+Benefits: Max velocity (sub-ms access), no bloat; checkpoints ensure recovery. Aligns with agent swarms—discard noise, keep signal.
 
 ### Integration Workflow
 
 #### Combined Enhancement Pipeline
 ```
-Code Change → Parse → LLM Analysis → Test Execution → Security Scan
-      ↓            ↓            ↓            ↓            ↓
-  Graph Update → Intent Store → Performance Record → Issue Creation → Risk Assessment
-      ↓            ↓            ↓            ↓            ↓
-  Impact Analysis → Business Context → Performance Alerts → Security Reports → Recommendations
-```
-
-#### API Integration Points
-```typescript
-interface EnhancedKnowledgeGraphAPI {
-  // Documentation Integration
-  syncDocumentation(): Promise<void>;
-  getDocumentationForEntity(entityId: string): Promise<DocumentationNode[]>;
-
-  // Domain Analysis
-  getBusinessDomains(): Promise<BusinessDomain[]>;
-  getEntitiesByDomain(domainName: string): Promise<CodebaseEntity[]>;
-
-  // Test Integration
-  recordTestExecution(testId: string, results: TestResults): Promise<void>;
-  getPerformanceMetrics(functionId: string): Promise<PerformanceMetrics>;
-
-  // Security Integration
-  scanForSecurityIssues(entityId: string): Promise<SecurityIssue[]>;
-  getVulnerabilityReport(): Promise<VulnerabilityReport>;
-
-  // Clustering
-  getSemanticClusters(): Promise<SemanticCluster[]>;
-  getClusterMembers(clusterId: string): Promise<CodebaseEntity[]>;
-
-  // Combined Analysis
-  getEntityInsights(entityId: string): Promise<EntityInsights>;
-}
-```
-
-#### Performance & Reliability Enhancements
-
-**1. LLM Caching:**
-- Cache LLM responses for similar code patterns
-- Invalidate cache on code changes
-- Fallback to rule-based analysis when LLM unavailable
-
-**2. Test Performance Monitoring:**
-- Track test execution times over time
-- Alert on performance regressions
-- Correlate test performance with code complexity
-
-**3. Security Scan Scheduling:**
-- Daily automated security scans
-- On-demand scans for critical changes
-- Incremental scans for modified files only
-
-This enhanced knowledge graph would provide comprehensive insights into:
-- **Business Context**: Why code exists and its business value
-- **Performance Characteristics**: How code performs and scales
-- **Security Posture**: Vulnerabilities and security issues
-- **Quality Metrics**: Beyond structure to include semantic and performance quality
-
-The system would transform from a structural code analyzer into a business-aware, performance-conscious, security-focused development intelligence platform.

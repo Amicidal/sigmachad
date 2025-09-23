@@ -7,7 +7,7 @@ import { noiseConfig } from "@/config/noise";
 
 describe("ASTParser confidence respects config overrides", () => {
   let parser: ASTParser;
-  const dir = path.join(__dirname, "ast-parser", "conf-override");
+  const dir = path.join(path.join(__dirname, "..", "ast-parser"), "conf-override");
   const defs = path.join(dir, "defs.ts");
   const importer = path.join(dir, "importer.ts");
 

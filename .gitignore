@@ -8,3 +8,12 @@ node_modules
 # Log files
 logs/
 *.log
+
+# Nx
+.nx/cache
+.nx/workspace-data
+nx-cloud.env
+nx-graph.json
+
+vite.config.*.timestamp*
+vitest.config.*.timestamp*

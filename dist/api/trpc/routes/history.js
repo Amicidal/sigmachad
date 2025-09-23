@@ -56,7 +56,11 @@ export const historyRouter = router({
     getCheckpointMembers: adminProcedure
         .input(z.object({ id: z.string(), limit: z.number().int().min(1).max(1000).optional(), offset: z.number().int().min(0).optional() }))
         .query(async ({ input, ctx }) => {
-        const { items, total } = await ctx.kgService.getCheckpointMembers(input.id, { limit: input.limit, offset: input.offset });
+        const allItems = await ctx.kgService.getCheckpointMembers(input.id);
+        const offset = input.offset || 0;
+        const limit = input.limit || allItems.length;
+        const items = allItems.slice(offset, offset + limit);
+        const total = allItems.length;
         return { items, total };
     }),
     // Summary
@@ -69,7 +73,7 @@ export const historyRouter = router({
     exportCheckpoint: adminProcedure
         .input(z.object({ id: z.string(), includeRelationships: z.boolean().optional() }))
         .query(async ({ input, ctx }) => {
-        return ctx.kgService.exportCheckpoint(input.id, { includeRelationships: input.includeRelationships });
+        return ctx.kgService.exportCheckpoint(input.id);
     }),
     // Import checkpoint
     importCheckpoint: adminProcedure
@@ -80,7 +84,7 @@ export const historyRouter = router({
         useOriginalId: z.boolean().optional(),
     }))
         .mutation(async ({ input, ctx }) => {
-        return ctx.kgService.importCheckpoint({ checkpoint: input.checkpoint, members: input.members, relationships: input.relationships }, { useOriginalId: input.useOriginalId });
+        return ctx.kgService.importCheckpoint({ checkpoint: input.checkpoint, entities: input.members, relationships: input.relationships || [] });
     }),
     // Delete checkpoint
     deleteCheckpoint: adminProcedure

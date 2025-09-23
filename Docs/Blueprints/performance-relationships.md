@@ -15,7 +15,8 @@ Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) captu
 2. Persist metrics and context (baseline, current value, delta, unit, sample size, environment) without flattening to generic metadata.
 3. Support multiple metrics per entity and scenario, enabling comparisons across benchmarks.
 4. Provide query filters for metric IDs, threshold breaches, trend directions, and environment.
-5. Integrate with history to track when regressions occurred/resolved and support reporting.
+5. Integrate with specs/clusters: Attach benchmarks to SemanticCluster or Spec for holistic progress/regression tracking across implementations.
+6. Integrate with history to track when regressions occurred/resolved and support reporting.
 
 ## 4. Inputs & Consumers
 - **Ingestion Sources**: Benchmark harnesses, profiling tools, performance CI jobs, production telemetry summarizers.
@@ -59,12 +60,19 @@ Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) captu
    - Maintain rolling statistics (e.g., exponential moving average) for trending analysis.
    - When regression resolves (values return within threshold), update `status` to `resolved`, set `resolvedAt`, but keep history for reporting.
 4. **Auxiliary Entities**: Optionally create `benchmark_run` nodes to store detailed runs and link edges; re-use for dashboards.
-5. **Indexes**: `(metricId)`, `(type, severity)`, `(environment)`, `(trend)`, optionally `(type, metricId, environment)` composite.
+5. **Spec/Cluster Links**: Use `PERFORMS_FOR` edges to attach benchmarks to clusters/specs; update metadata with `attachedToCluster`/`attachedToSpec` for queries.
+6. **Indexes**: `(metricId)`, `(type, severity)`, `(environment)`, `(trend)`, optionally `(type, metricId, environment)` composite.
 
 ## 8. Query & API Surface
 1. `getRelationships` now accepts `metricId`, `environment`, `severity`, `trend`, `detectedAfter`, `detectedBefore`, and resolution filters. Document combined usage patterns (e.g., “critical regressions in staging last 7 days”).
 2. REST + MCP `tests.performance` endpoints return aggregate metrics **and** a `history` array of `performance_metric_snapshots` (see §8). Extend blueprints with concrete payloads so dashboard builders can align on shapes.
 3. Follow-up helpers remain desirable: `getPerformanceRegressions`, `getMetricHistory`, and `getEntityPerformanceSummary` should reuse the snapshot storage once prioritised.
+**Performance for Spec Implementation:**
+```
+MATCH (spec:Spec {id: $specId})-[:IMPLEMENTS_CLUSTER]->(cluster:SemanticCluster)
+MATCH (cluster)-[:PERFORMS_FOR]-(bench:Benchmark)
+RETURN spec.title, bench.metricId, bench.trend, bench.delta
+```
 
 ## 9. Temporal & Auditing
 1. Integrate with history pipeline: open edges when regression detected, close when resolved; maintain `validFrom/validTo` reflecting active regression periods.
@@ -103,3 +111,6 @@ Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) captu
 - Default thresholds: `warnOnLargeBatchSize = 50`, `slowBatchThresholdMs = 750`, `queueDepthWarningThreshold = 3`, `historyLimit = 10`. Override them by supplying `bulkConfig` when constructing `PostgreSQLService` (and therefore `DatabaseService`).
 - `slowBatches` captures any batch that exceeds thresholds or fails; use it for alert routing and throttling decisions. `history` is capped to `historyLimit` entries to avoid unbounded growth.
 - The high-volume integration scenario (`tests/integration/services/TestEngine.integration.test.ts`) inserts 60 performance snapshots via `postgresBulkQuery`, ensuring telemetry and throttling safeguards stay regression-tested.
+
+## Spec/Cluster Integration (New Section)
+Benchmarks attach to clusters/specs via `PERFORMS_FOR` for automatic tracking—no path maintenance needed, as cluster members update on refactors. This resolves attachment uncertainty: Use for spec-level dashboards (e.g., "Is this feature's perf regressing?"). Ingest from CI; query trends tied to changes via `REGRESSION_IMPACTS`.

@@ -10,7 +10,7 @@ import { DefaultBackupStorageRegistry, } from "./BackupStorageProvider.js";
 import { LocalFilesystemStorageProvider } from "./LocalFilesystemStorageProvider.js";
 import { S3StorageProvider } from "./S3StorageProvider.js";
 // import { GCSStorageProvider } from "./GCSStorageProvider.js"; // TODO: Implement GCS provider
-import { MaintenanceMetrics } from "../testing/metrics/MaintenanceMetrics.js";
+import { MaintenanceMetrics } from "../testing-metrics/MaintenanceMetrics.js";
 export class MaintenanceOperationError extends Error {
     constructor(message, options) {
         var _a;

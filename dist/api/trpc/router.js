@@ -31,11 +31,11 @@ export const createTRPCContext = async (opts) => {
     };
 };
 // Import route procedures
-import { codeRouter } from './routes/code.js';
-import { designRouter } from './routes/design.js';
-import { graphRouter } from './routes/graph.js';
-import { adminRouter } from './routes/admin.js';
-import { historyRouter } from './routes/history.js';
+import { codeRouter } from '../routes/trpc-code.js';
+import { designRouter } from '../routes/trpc-design.js';
+import { graphRouter } from '../routes/trpc-graph.js';
+import { adminRouter } from '../routes/trpc-admin.js';
+import { historyRouter } from '../routes/trpc-history.js';
 // Root router
 export const appRouter = router({
     code: codeRouter,

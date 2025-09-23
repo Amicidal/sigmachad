@@ -1,164 +1,54 @@
 /**
  * History Service
- * Handles temporal versioning, checkpoints, and history pruning
+ * Facade that orchestrates temporal versioning, checkpoints, and history operations
+ * Refactored into modular components for better maintainability
  */
-import { EventEmitter } from 'events';
+import { EventEmitter } from "events";
+import { VersionManager, CheckpointService, TemporalQueryService, CheckpointOptions, VersionInfo, CheckpointInfo, HistoryMetrics, CheckpointSummary, SessionImpact, } from "./history/index.js";
+export { CheckpointOptions, VersionInfo, CheckpointInfo, HistoryMetrics, CheckpointSummary, SessionImpact, };
 export class HistoryService extends EventEmitter {
     constructor(neo4j) {
         super();
         this.neo4j = neo4j;
-        this.historyEnabled = process.env.HISTORY_ENABLED !== 'false';
+        // Initialize modular services
+        this.versionManager = new VersionManager(neo4j);
+        this.checkpointService = new CheckpointService(neo4j);
+        this.temporalQueryService = new TemporalQueryService(neo4j);
+        // Forward events from sub-services
+        this.versionManager.on("version:created", (data) => this.emit("version:created", data));
+        this.versionManager.on("history:pruned", (data) => this.emit("history:pruned", data));
+        this.checkpointService.on("checkpoint:created", (data) => this.emit("checkpoint:created", data));
+        this.checkpointService.on("checkpoint:deleted", (data) => this.emit("checkpoint:deleted", data));
+        this.temporalQueryService.on("edge:opened", (data) => this.emit("edge:opened", data));
+        this.temporalQueryService.on("edge:closed", (data) => this.emit("edge:closed", data));
+    }
+    // Getter for history enabled status (delegated from services)
+    get historyEnabled() {
+        return this.versionManager ? true : false; // Simplified - services handle their own enabled state
     }
     /**
      * Append a version for an entity
      */
     async appendVersion(entity, options) {
-        if (!this.historyEnabled) {
-            return `ver_disabled_${Date.now().toString(36)}`;
-        }
-        const entityId = entity.id;
-        const timestamp = (options === null || options === void 0 ? void 0 : options.timestamp) || new Date();
-        const hash = entity.hash || Date.now().toString(36);
-        const versionId = `ver_${entityId}_${hash}`;
-        const query = `
-      MATCH (e:Entity {id: $entityId})
-      MERGE (v:Version {id: $versionId})
-      SET v.entityId = $entityId
-      SET v.hash = $hash
-      SET v.timestamp = $timestamp
-      SET v.type = 'version'
-      SET v.path = $path
-      SET v.language = $language
-      SET v.changeSetId = $changeSetId
-      MERGE (v)-[:VERSION_OF]->(e)
-      WITH v
-      OPTIONAL MATCH (e)<-[:VERSION_OF]-(prev:Version)
-      WHERE prev.id <> v.id AND prev.timestamp < v.timestamp
-      WITH v, prev
-      ORDER BY prev.timestamp DESC
-      LIMIT 1
-      FOREACH (p IN CASE WHEN prev IS NOT NULL THEN [prev] ELSE [] END |
-        MERGE (v)-[:PREVIOUS_VERSION]->(p)
-      )
-      RETURN v
-    `;
-        await this.neo4j.executeCypher(query, {
-            entityId,
-            versionId,
-            hash,
-            timestamp: timestamp.toISOString(),
-            path: entity.path || null,
-            language: entity.language || null,
-            changeSetId: (options === null || options === void 0 ? void 0 : options.changeSetId) || null,
-        });
-        this.emit('version:created', { entityId, versionId, timestamp });
-        return versionId;
+        return this.versionManager.appendVersion(entity, options);
     }
     /**
      * Create a checkpoint capturing a subgraph state
      */
     async createCheckpoint(seedEntities, options) {
-        if (!this.historyEnabled) {
-            return {
-                checkpointId: `chk_disabled_${Date.now().toString(36)}`,
-                memberCount: 0,
-            };
-        }
-        const checkpointId = `chk_${Date.now().toString(36)}`;
-        const timestamp = new Date();
-        const hops = Math.min(Math.max(1, options.hops || 2), 5);
-        // Create checkpoint node
-        await this.neo4j.executeCypher(`
-      MERGE (c:Checkpoint {id: $id})
-      SET c.timestamp = $timestamp
-      SET c.reason = $reason
-      SET c.seedEntities = $seeds
-      SET c.description = $description
-      SET c.metadata = $metadata
-      `, {
-            id: checkpointId,
-            timestamp: timestamp.toISOString(),
-            reason: options.reason,
-            seeds: JSON.stringify(seedEntities),
-            description: options.description || null,
-            metadata: JSON.stringify(options.window || {}),
-        });
-        // Collect neighborhood members
-        const memberQuery = `
-      UNWIND $seedIds AS seedId
-      MATCH (seed:Entity {id: seedId})
-      CALL apoc.path.expand(seed, null, null, 0, $hops, 'RELATIONSHIP_GLOBAL')
-      YIELD path
-      WITH last(nodes(path)) AS member
-      RETURN DISTINCT member.id AS id
-    `;
-        const memberResult = await this.neo4j.executeCypher(memberQuery, {
-            seedIds: seedEntities,
-            hops,
-        });
-        const memberIds = memberResult.map(r => r.id).filter(Boolean);
-        // Link members to checkpoint
-        if (memberIds.length > 0) {
-            await this.neo4j.executeCypher(`
-        MATCH (c:Checkpoint {id: $checkpointId})
-        UNWIND $memberIds AS memberId
-        MATCH (m:Entity {id: memberId})
-        MERGE (c)-[:INCLUDES]->(m)
-        `, { checkpointId, memberIds });
-        }
-        this.emit('checkpoint:created', {
-            checkpointId,
-            seedCount: seedEntities.length,
-            memberCount: memberIds.length,
-            reason: options.reason,
-        });
-        return { checkpointId, memberCount: memberIds.length };
+        return this.checkpointService.createCheckpoint(seedEntities, options);
     }
     /**
      * Open a temporal edge with validity period
      */
     async openEdge(fromId, toId, type, timestamp, changeSetId) {
-        if (!this.historyEnabled)
-            return;
-        const at = timestamp || new Date();
-        const query = `
-      MATCH (from:Entity {id: $fromId})
-      MATCH (to:Entity {id: $toId})
-      MERGE (from)-[r:${type} {id: $relId}]->(to)
-      SET r.validFrom = $at
-      SET r.validTo = null
-      SET r.active = true
-      SET r.changeSetId = $changeSetId
-      SET r.lastModified = $at
-    `;
-        await this.neo4j.executeCypher(query, {
-            fromId,
-            toId,
-            relId: `rel_${fromId}_${toId}_${type}`,
-            at: at.toISOString(),
-            changeSetId: changeSetId || null,
-        });
-        this.emit('edge:opened', { fromId, toId, type, timestamp: at });
+        return this.temporalQueryService.openEdge(fromId, toId, type, timestamp, changeSetId);
     }
     /**
      * Close a temporal edge
      */
     async closeEdge(fromId, toId, type, timestamp) {
-        if (!this.historyEnabled)
-            return;
-        const at = timestamp || new Date();
-        const query = `
-      MATCH (from:Entity {id: $fromId})-[r:${type}]->(to:Entity {id: $toId})
-      SET r.validTo = coalesce(r.validTo, $at)
-      SET r.active = false
-      SET r.lastModified = $at
-    `;
-        await this.neo4j.executeCypher(query, {
-            fromId,
-            toId,
-            at: at.toISOString(),
-        });
-        this.emit('edge:closed', { fromId, toId, type, timestamp: at });
+        return this.temporalQueryService.closeEdge(fromId, toId, type, timestamp);
     }
     /**
      * Prune old history data
@@ -174,7 +64,9 @@ export class HistoryService extends EventEmitter {
         const checkpointQuery = dryRun
             ? `MATCH (c:Checkpoint) WHERE c.timestamp < $cutoff RETURN count(c) as count`
             : `MATCH (c:Checkpoint) WHERE c.timestamp < $cutoff DETACH DELETE c RETURN count(*) as count`;
-        const checkpointResult = await this.neo4j.executeCypher(checkpointQuery, { cutoff });
+        const checkpointResult = await this.neo4j.executeCypher(checkpointQuery, {
+            cutoff,
+        });
         const checkpointsDeleted = ((_a = checkpointResult[0]) === null || _a === void 0 ? void 0 : _a.count) || 0;
         // Close old edges
         const edgeQuery = dryRun
@@ -186,9 +78,11 @@ export class HistoryService extends EventEmitter {
         const versionQuery = dryRun
             ? `MATCH (v:Version) WHERE v.timestamp < $cutoff AND NOT ((:Checkpoint)-[:INCLUDES]->(v)) RETURN count(v) as count`
             : `MATCH (v:Version) WHERE v.timestamp < $cutoff AND NOT ((:Checkpoint)-[:INCLUDES]->(v)) DETACH DELETE v RETURN count(*) as count`;
-        const versionResult = await this.neo4j.executeCypher(versionQuery, { cutoff });
+        const versionResult = await this.neo4j.executeCypher(versionQuery, {
+            cutoff,
+        });
         const versionsDeleted = ((_c = versionResult[0]) === null || _c === void 0 ? void 0 : _c.count) || 0;
-        this.emit('history:pruned', {
+        this.emit("history:pruned", {
             dryRun,
             retentionDays,
             cutoff,
@@ -224,14 +118,14 @@ export class HistoryService extends EventEmitter {
     `;
         const result = await this.neo4j.executeCypher(cypherQuery, {
             startId: query.startId,
-            relationshipFilter: ((_a = query.relationshipTypes) === null || _a === void 0 ? void 0 : _a.join('|')) || null,
-            labelFilter: ((_b = query.nodeLabels) === null || _b === void 0 ? void 0 : _b.join('|')) || null,
+            relationshipFilter: ((_a = query.relationshipTypes) === null || _a === void 0 ? void 0 : _a.join("|")) || null,
+            labelFilter: ((_b = query.nodeLabels) === null || _b === void 0 ? void 0 : _b.join("|")) || null,
             maxDepth,
             until: until.toISOString(),
         });
         const allNodes = new Map();
         const allEdges = [];
-        result.forEach(row => {
+        result.forEach((row) => {
             var _a, _b;
             (_a = row.nodes) === null || _a === void 0 ? void 0 : _a.forEach((node) => {
                 var _a;
@@ -256,18 +150,18 @@ export class HistoryService extends EventEmitter {
         const where = [];
         const params = {};
         if (options === null || options === void 0 ? void 0 : options.reason) {
-            where.push('c.reason = $reason');
+            where.push("c.reason = $reason");
             params.reason = options.reason;
         }
         if (options === null || options === void 0 ? void 0 : options.since) {
-            where.push('c.timestamp >= $since');
+            where.push("c.timestamp >= $since");
             params.since = options.since.toISOString();
         }
         if (options === null || options === void 0 ? void 0 : options.until) {
-            where.push('c.timestamp <= $until');
+            where.push("c.timestamp <= $until");
             params.until = options.until.toISOString();
         }
-        const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+        const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
         // Count total
         const countQuery = `
       MATCH (c:Checkpoint)
@@ -290,11 +184,11 @@ export class HistoryService extends EventEmitter {
         params.offset = (options === null || options === void 0 ? void 0 : options.offset) || 0;
         params.limit = (options === null || options === void 0 ? void 0 : options.limit) || 50;
         const result = await this.neo4j.executeCypher(query, params);
-        const items = result.map(row => ({
+        const items = result.map((row) => ({
             id: row.c.properties.id,
             timestamp: new Date(row.c.properties.timestamp),
             reason: row.c.properties.reason,
-            seedEntities: JSON.parse(row.c.properties.seedEntities || '[]'),
+            seedEntities: JSON.parse(row.c.properties.seedEntities || "[]"),
             memberCount: row.memberCount,
             metadata: row.c.properties.metadata
                 ? JSON.parse(row.c.properties.metadata)
@@ -308,18 +202,21 @@ export class HistoryService extends EventEmitter {
     async getHistoryMetrics() {
         var _a, _b, _c, _d;
         const queries = [
-            { name: 'versions', query: 'MATCH (v:Version) RETURN count(v) as c' },
-            { name: 'checkpoints', query: 'MATCH (c:Checkpoint) RETURN count(c) as c' },
+            { name: "versions", query: "MATCH (v:Version) RETURN count(v) as c" },
             {
-                name: 'openEdges',
-                query: 'MATCH ()-[r]->() WHERE r.validTo IS NULL RETURN count(r) as c',
+                name: "checkpoints",
+                query: "MATCH (c:Checkpoint) RETURN count(c) as c",
             },
             {
-                name: 'closedEdges',
-                query: 'MATCH ()-[r]->() WHERE r.validTo IS NOT NULL RETURN count(r) as c',
+                name: "openEdges",
+                query: "MATCH ()-[r]->() WHERE r.validTo IS NULL RETURN count(r) as c",
             },
             {
-                name: 'checkpointMembers',
+                name: "closedEdges",
+                query: "MATCH ()-[r]->() WHERE r.validTo IS NOT NULL RETURN count(r) as c",
+            },
+            {
+                name: "checkpointMembers",
                 query: `
           MATCH (c:Checkpoint)
           OPTIONAL MATCH (c)-[:INCLUDES]->(m)
@@ -327,8 +224,8 @@ export class HistoryService extends EventEmitter {
         `,
             },
         ];
-        const results = await Promise.all(queries.map(q => this.neo4j.executeCypher(q.query)));
-        const memberCounts = results[4].map(r => r.memberCount || 0);
+        const results = await Promise.all(queries.map((q) => this.neo4j.executeCypher(q.query)));
+        const memberCounts = results[4].map((r) => r.memberCount || 0);
         const avgMembers = memberCounts.length
             ? memberCounts.reduce((a, b) => a + b, 0) / memberCounts.length
             : 0;
@@ -352,11 +249,11 @@ export class HistoryService extends EventEmitter {
         for (const [key, value] of Object.entries(properties)) {
             if (value === null || value === undefined)
                 continue;
-            if (key === 'created' || key === 'lastModified' || key.endsWith('At')) {
+            if (key === "created" || key === "lastModified" || key.endsWith("At")) {
                 entity[key] = new Date(value);
             }
-            else if (typeof value === 'string' &&
-                (value.startsWith('[') || value.startsWith('{'))) {
+            else if (typeof value === "string" &&
+                (value.startsWith("[") || value.startsWith("{"))) {
                 try {
                     entity[key] = JSON.parse(value);
                 }
@@ -396,7 +293,7 @@ export class HistoryService extends EventEmitter {
             id: row.c.properties.id,
             timestamp: new Date(row.c.properties.timestamp),
             reason: row.c.properties.reason,
-            seedEntities: JSON.parse(row.c.properties.seedEntities || '[]'),
+            seedEntities: JSON.parse(row.c.properties.seedEntities || "[]"),
             memberCount: row.memberCount,
             metadata: row.c.properties.metadata
                 ? JSON.parse(row.c.properties.metadata)
@@ -412,7 +309,7 @@ export class HistoryService extends EventEmitter {
       RETURN m
     `;
         const result = await this.neo4j.executeCypher(query, { checkpointId });
-        return result.map(row => this.parseEntity(row.m));
+        return result.map((row) => this.parseEntity(row.m));
     }
     /**
      * Get checkpoint summary
@@ -431,16 +328,19 @@ export class HistoryService extends EventEmitter {
         type(r) as relType,
         count(r) as relCount
     `;
-        const statsResult = await this.neo4j.executeCypher(statsQuery, { checkpointId });
+        const statsResult = await this.neo4j.executeCypher(statsQuery, {
+            checkpointId,
+        });
         const entityTypes = {};
         const relationshipTypes = {};
         let totalRelationships = 0;
-        statsResult.forEach(row => {
+        statsResult.forEach((row) => {
             if (row.entityType) {
                 entityTypes[row.entityType] = (entityTypes[row.entityType] || 0) + 1;
             }
             if (row.relType && row.relCount > 0) {
-                relationshipTypes[row.relType] = (relationshipTypes[row.relType] || 0) + row.relCount;
+                relationshipTypes[row.relType] =
+                    (relationshipTypes[row.relType] || 0) + row.relCount;
                 totalRelationships += row.relCount;
             }
         });
@@ -463,7 +363,7 @@ export class HistoryService extends EventEmitter {
       DETACH DELETE c
     `;
         await this.neo4j.executeCypher(query, { checkpointId });
-        this.emit('checkpoint:deleted', { checkpointId });
+        this.emit("checkpoint:deleted", { checkpointId });
     }
     /**
      * Export checkpoint data
@@ -480,8 +380,10 @@ export class HistoryService extends EventEmitter {
       MATCH (from)-[r]->(to)
       RETURN r, from.id as fromId, to.id as toId
     `;
-        const relResult = await this.neo4j.executeCypher(relQuery, { checkpointId });
-        const relationships = relResult.map(row => ({
+        const relResult = await this.neo4j.executeCypher(relQuery, {
+            checkpointId,
+        });
+        const relationships = relResult.map((row) => ({
             ...this.parseRelationship(row.r),
             fromId: row.fromId,
             toId: row.toId,
@@ -541,7 +443,7 @@ export class HistoryService extends EventEmitter {
             metadata: JSON.stringify(checkpoint.metadata || {}),
         });
         // Link entities to checkpoint
-        const entityIds = entities.map(e => e.id);
+        const entityIds = entities.map((e) => e.id);
         if (entityIds.length > 0) {
             await this.neo4j.executeCypher(`
         MATCH (c:Checkpoint {id: $checkpointId})
@@ -550,7 +452,10 @@ export class HistoryService extends EventEmitter {
         MERGE (c)-[:INCLUDES]->(e)
         `, { checkpointId, entityIds });
         }
-        this.emit('checkpoint:imported', { checkpointId, entityCount: entities.length });
+        this.emit("checkpoint:imported", {
+            checkpointId,
+            entityCount: entities.length,
+        });
         return checkpointId;
     }
     /**
@@ -559,29 +464,31 @@ export class HistoryService extends EventEmitter {
     async getEntityTimeline(entityId, options) {
         // Get entity
         const entityQuery = `MATCH (e:Entity {id: $entityId}) RETURN e`;
-        const entityResult = await this.neo4j.executeCypher(entityQuery, { entityId });
+        const entityResult = await this.neo4j.executeCypher(entityQuery, {
+            entityId,
+        });
         const entity = entityResult.length > 0 ? this.parseEntity(entityResult[0].e) : null;
         // Get versions
-        const where = ['v.entityId = $entityId'];
+        const where = ["v.entityId = $entityId"];
         const params = { entityId };
         if (options === null || options === void 0 ? void 0 : options.since) {
-            where.push('v.timestamp >= $since');
+            where.push("v.timestamp >= $since");
             params.since = options.since.toISOString();
         }
         if (options === null || options === void 0 ? void 0 : options.until) {
-            where.push('v.timestamp <= $until');
+            where.push("v.timestamp <= $until");
             params.until = options.until.toISOString();
         }
         const versionQuery = `
       MATCH (v:Version)
-      WHERE ${where.join(' AND ')}
+      WHERE ${where.join(" AND ")}
       RETURN v
       ORDER BY v.timestamp DESC
       LIMIT $limit
     `;
         params.limit = (options === null || options === void 0 ? void 0 : options.limit) || 100;
         const versionResult = await this.neo4j.executeCypher(versionQuery, params);
-        const versions = versionResult.map(row => ({
+        const versions = versionResult.map((row) => ({
             id: row.v.properties.id,
             entityId: row.v.properties.entityId,
             hash: row.v.properties.hash,
@@ -598,8 +505,11 @@ export class HistoryService extends EventEmitter {
       ORDER BY r.validFrom DESC
       LIMIT $limit
     `;
-        const relResult = await this.neo4j.executeCypher(relQuery, { entityId, limit: params.limit });
-        const relationships = relResult.map(row => ({
+        const relResult = await this.neo4j.executeCypher(relQuery, {
+            entityId,
+            limit: params.limit,
+        });
+        const relationships = relResult.map((row) => ({
             ...this.parseRelationship(row.r),
             fromId: row.fromId,
             toId: row.toId,
@@ -610,26 +520,26 @@ export class HistoryService extends EventEmitter {
      * Get relationship timeline
      */
     async getRelationshipTimeline(relationshipId, options) {
-        const where = ['r.id = $relationshipId'];
+        const where = ["r.id = $relationshipId"];
         const params = { relationshipId };
         if (options === null || options === void 0 ? void 0 : options.since) {
-            where.push('r.validFrom >= $since');
+            where.push("r.validFrom >= $since");
             params.since = options.since.toISOString();
         }
         if (options === null || options === void 0 ? void 0 : options.until) {
-            where.push('r.validTo <= $until');
+            where.push("r.validTo <= $until");
             params.until = options.until.toISOString();
         }
         const query = `
       MATCH ()-[r]->()
-      WHERE ${where.join(' AND ')}
+      WHERE ${where.join(" AND ")}
       RETURN r, startNode(r).id as fromId, endNode(r).id as toId
       ORDER BY r.validFrom DESC
       LIMIT $limit
     `;
         params.limit = (options === null || options === void 0 ? void 0 : options.limit) || 100;
         const result = await this.neo4j.executeCypher(query, params);
-        return result.map(row => ({
+        return result.map((row) => ({
             ...this.parseRelationship(row.r),
             fromId: row.fromId,
             toId: row.toId,
@@ -642,14 +552,14 @@ export class HistoryService extends EventEmitter {
         const where = [];
         const params = { sessionId };
         if (options === null || options === void 0 ? void 0 : options.since) {
-            where.push('timestamp >= $since');
+            where.push("timestamp >= $since");
             params.since = options.since.toISOString();
         }
         if (options === null || options === void 0 ? void 0 : options.until) {
-            where.push('timestamp <= $until');
+            where.push("timestamp <= $until");
             params.until = options.until.toISOString();
         }
-        const whereClause = where.length > 0 ? `AND ${where.join(' AND ')}` : '';
+        const whereClause = where.length > 0 ? `AND ${where.join(" AND ")}` : "";
         // Get versions for session
         const versionQuery = `
       MATCH (v:Version)
@@ -660,7 +570,7 @@ export class HistoryService extends EventEmitter {
     `;
         params.limit = (options === null || options === void 0 ? void 0 : options.limit) || 100;
         const versionResult = await this.neo4j.executeCypher(versionQuery, params);
-        const versions = versionResult.map(row => ({
+        const versions = versionResult.map((row) => ({
             id: row.v.properties.id,
             entityId: row.v.properties.entityId,
             hash: row.v.properties.hash,
@@ -678,7 +588,7 @@ export class HistoryService extends EventEmitter {
       LIMIT $limit
     `;
         const relResult = await this.neo4j.executeCypher(relQuery, params);
-        const relationships = relResult.map(row => ({
+        const relationships = relResult.map((row) => ({
             ...this.parseRelationship(row.r),
             fromId: row.fromId,
             toId: row.toId,
@@ -694,11 +604,11 @@ export class HistoryService extends EventEmitter {
       LIMIT $limit
     `;
         const checkpointResult = await this.neo4j.executeCypher(checkpointQuery, params);
-        const checkpoints = checkpointResult.map(row => ({
+        const checkpoints = checkpointResult.map((row) => ({
             id: row.c.properties.id,
             timestamp: new Date(row.c.properties.timestamp),
             reason: row.c.properties.reason,
-            seedEntities: JSON.parse(row.c.properties.seedEntities || '[]'),
+            seedEntities: JSON.parse(row.c.properties.seedEntities || "[]"),
             memberCount: row.memberCount,
             metadata: row.c.properties.metadata
                 ? JSON.parse(row.c.properties.metadata)
@@ -715,16 +625,20 @@ export class HistoryService extends EventEmitter {
       MATCH (v:Version {changeSetId: $sessionId})-[:VERSION_OF]->(e:Entity)
       RETURN DISTINCT e
     `;
-        const entityResult = await this.neo4j.executeCypher(entityQuery, { sessionId });
-        const entitiesModified = entityResult.map(row => this.parseEntity(row.e));
+        const entityResult = await this.neo4j.executeCypher(entityQuery, {
+            sessionId,
+        });
+        const entitiesModified = entityResult.map((row) => this.parseEntity(row.e));
         // Get relationships created in session
         const createdQuery = `
       MATCH ()-[r]->()
       WHERE r.changeSetId = $sessionId AND r.validFrom IS NOT NULL
       RETURN r, startNode(r).id as fromId, endNode(r).id as toId
     `;
-        const createdResult = await this.neo4j.executeCypher(createdQuery, { sessionId });
-        const relationshipsCreated = createdResult.map(row => ({
+        const createdResult = await this.neo4j.executeCypher(createdQuery, {
+            sessionId,
+        });
+        const relationshipsCreated = createdResult.map((row) => ({
             ...this.parseRelationship(row.r),
             fromId: row.fromId,
             toId: row.toId,
@@ -735,21 +649,27 @@ export class HistoryService extends EventEmitter {
       WHERE r.changeSetId = $sessionId AND r.validTo IS NOT NULL
       RETURN r, startNode(r).id as fromId, endNode(r).id as toId
     `;
-        const closedResult = await this.neo4j.executeCypher(closedQuery, { sessionId });
-        const relationshipsClosed = closedResult.map(row => ({
+        const closedResult = await this.neo4j.executeCypher(closedQuery, {
+            sessionId,
+        });
+        const relationshipsClosed = closedResult.map((row) => ({
             ...this.parseRelationship(row.r),
             fromId: row.fromId,
             toId: row.toId,
         }));
         // Calculate metrics
         const timestamps = [
-            ...relationshipsCreated.map(r => { var _a; return (_a = r.properties) === null || _a === void 0 ? void 0 : _a.validFrom; }).filter(Boolean),
-            ...relationshipsClosed.map(r => { var _a; return (_a = r.properties) === null || _a === void 0 ? void 0 : _a.validTo; }).filter(Boolean),
-        ].map(t => new Date(t));
-        const timespan = timestamps.length > 0 ? {
-            start: new Date(Math.min(...timestamps.map(t => t.getTime()))),
-            end: new Date(Math.max(...timestamps.map(t => t.getTime()))),
-        } : undefined;
+            ...relationshipsCreated
+                .map((r) => { var _a; return (_a = r.properties) === null || _a === void 0 ? void 0 : _a.validFrom; })
+                .filter(Boolean),
+            ...relationshipsClosed.map((r) => { var _a; return (_a = r.properties) === null || _a === void 0 ? void 0 : _a.validTo; }).filter(Boolean),
+        ].map((t) => new Date(t));
+        const timespan = timestamps.length > 0
+            ? {
+                start: new Date(Math.min(...timestamps.map((t) => t.getTime()))),
+                end: new Date(Math.max(...timestamps.map((t) => t.getTime()))),
+            }
+            : undefined;
         return {
             entitiesModified,
             relationshipsCreated,
@@ -765,19 +685,19 @@ export class HistoryService extends EventEmitter {
      * Get sessions affecting an entity
      */
     async getSessionsAffectingEntity(entityId, options) {
-        const where = ['v.entityId = $entityId'];
+        const where = ["v.entityId = $entityId"];
         const params = { entityId };
         if (options === null || options === void 0 ? void 0 : options.since) {
-            where.push('v.timestamp >= $since');
+            where.push("v.timestamp >= $since");
             params.since = options.since.toISOString();
         }
         if (options === null || options === void 0 ? void 0 : options.until) {
-            where.push('v.timestamp <= $until');
+            where.push("v.timestamp <= $until");
             params.until = options.until.toISOString();
         }
         const query = `
       MATCH (v:Version)
-      WHERE ${where.join(' AND ')} AND v.changeSetId IS NOT NULL
+      WHERE ${where.join(" AND ")} AND v.changeSetId IS NOT NULL
       OPTIONAL MATCH (e:Entity {id: $entityId})-[r]->()
       WHERE r.changeSetId = v.changeSetId
       WITH v.changeSetId as sessionId,
@@ -791,7 +711,7 @@ export class HistoryService extends EventEmitter {
     `;
         params.limit = (options === null || options === void 0 ? void 0 : options.limit) || 50;
         const result = await this.neo4j.executeCypher(query, params);
-        const details = result.map(row => ({
+        const details = result.map((row) => ({
             sessionId: row.sessionId,
             versionCount: row.versionCount,
             relationshipCount: row.relationshipCount,
@@ -800,7 +720,7 @@ export class HistoryService extends EventEmitter {
                 end: new Date(row.endTime),
             },
         }));
-        const sessions = [...new Set(details.map(d => d.sessionId))];
+        const sessions = [...new Set(details.map((d) => d.sessionId))];
         return { sessions, details };
     }
     /**
@@ -811,7 +731,7 @@ export class HistoryService extends EventEmitter {
         const versionQuery = `
       MATCH (v:Version {changeSetId: $sessionId})
       MATCH (v)-[:VERSION_OF]->(e:Entity)
-      ${(options === null || options === void 0 ? void 0 : options.entityTypes) ? 'WHERE e.type IN $entityTypes' : ''}
+      ${(options === null || options === void 0 ? void 0 : options.entityTypes) ? "WHERE e.type IN $entityTypes" : ""}
       RETURN v, e.type as entityType
       ORDER BY v.timestamp DESC
       LIMIT $limit
@@ -821,7 +741,7 @@ export class HistoryService extends EventEmitter {
             versionParams.entityTypes = options.entityTypes;
         }
         const versionResult = await this.neo4j.executeCypher(versionQuery, versionParams);
-        const versions = versionResult.map(row => ({
+        const versions = versionResult.map((row) => ({
             id: row.v.properties.id,
             entityId: row.v.properties.entityId,
             hash: row.v.properties.hash,
@@ -834,7 +754,7 @@ export class HistoryService extends EventEmitter {
         const relQuery = `
       MATCH ()-[r]->()
       WHERE r.changeSetId = $sessionId
-      ${(options === null || options === void 0 ? void 0 : options.relationshipTypes) ? 'AND type(r) IN $relationshipTypes' : ''}
+      ${(options === null || options === void 0 ? void 0 : options.relationshipTypes) ? "AND type(r) IN $relationshipTypes" : ""}
       RETURN r, type(r) as relType, startNode(r).id as fromId, endNode(r).id as toId
       ORDER BY r.validFrom DESC
       LIMIT $limit
@@ -844,7 +764,7 @@ export class HistoryService extends EventEmitter {
             relParams.relationshipTypes = options.relationshipTypes;
         }
         const relResult = await this.neo4j.executeCypher(relQuery, relParams);
-        const relationships = relResult.map(row => ({
+        const relationships = relResult.map((row) => ({
             ...this.parseRelationship(row.r),
             fromId: row.fromId,
             toId: row.toId,
@@ -852,21 +772,22 @@ export class HistoryService extends EventEmitter {
         // Build summary
         const entityTypes = {};
         const relationshipTypes = {};
-        versionResult.forEach(row => {
+        versionResult.forEach((row) => {
             if (row.entityType) {
                 entityTypes[row.entityType] = (entityTypes[row.entityType] || 0) + 1;
             }
         });
-        relResult.forEach(row => {
+        relResult.forEach((row) => {
             if (row.relType) {
-                relationshipTypes[row.relType] = (relationshipTypes[row.relType] || 0) + 1;
+                relationshipTypes[row.relType] =
+                    (relationshipTypes[row.relType] || 0) + 1;
             }
         });
         return {
             versions,
             relationships,
             summary: {
-                entitiesAffected: new Set(versions.map(v => v.entityId)).size,
+                entitiesAffected: new Set(versions.map((v) => v.entityId)).size,
                 relationshipsAffected: relationships.length,
                 entityTypes,
                 relationshipTypes,

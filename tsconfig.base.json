@@ -1,0 +1,33 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "sourceMap": true,
+    "declaration": true,
+    "moduleResolution": "node16",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "target": "ES2018",
+    "module": "Node16",
+    "lib": ["ES2018"],
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/api/*": ["src/api/*"],
+      "@/models/*": ["src/models/*"],
+      "@/services/*": ["src/services/*"],
+      "@/utils/*": ["src/utils/*"],
+      "@memento/api": ["packages/api/src"],
+      "@memento/api/*": ["packages/api/src/*"],
+      "@memento/core": ["packages/core/src"],
+      "@memento/core/*": ["packages/core/src/*"],
+      "@memento/database": ["packages/database/src"],
+      "@memento/database/*": ["packages/database/src/*"],
+      "@memento/knowledge": ["packages/knowledge/src"],
+      "@memento/knowledge/*": ["packages/knowledge/src/*"],
+      "@memento/testing": ["packages/testing/src"],
+      "@memento/testing/*": ["packages/testing/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", "coverage"]
+}

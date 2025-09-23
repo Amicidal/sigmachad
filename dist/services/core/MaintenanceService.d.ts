@@ -36,7 +36,7 @@ export declare class MaintenanceService {
     private runReindexing;
     private runValidation;
     private findOrphanedEntities;
-    private findDanglingRelationships;
+    private removeDanglingRelationships;
     private cleanupOldSyncRecords;
     private cleanupOrphanedEmbeddings;
     private validateDatabaseConnections;

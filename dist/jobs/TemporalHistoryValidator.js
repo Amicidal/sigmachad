@@ -148,10 +148,8 @@ export class TemporalHistoryValidator {
             if (current.previousVersionId) {
                 continue;
             }
-            const repaired = await this.kgService.repairPreviousVersionLink(timeline.entityId, current.versionId, prev.versionId, { timestamp: current.timestamp });
-            if (repaired) {
-                repairedVersionIds.push(current.versionId);
-            }
+            await this.kgService.repairPreviousVersionLink(current.versionId);
+            repairedVersionIds.push(current.versionId);
         }
         return repairedVersionIds;
     }

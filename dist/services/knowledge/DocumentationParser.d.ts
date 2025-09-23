@@ -1,53 +1,20 @@
 /**
  * Documentation Parser Service
- * Handles parsing, indexing, and synchronization of documentation files
+ * Facade that orchestrates parsing, indexing, and synchronization of documentation files
+ * Refactored into modular components for better maintainability
  */
-import { KnowledgeGraphService } from "./knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "./core/DatabaseService.js";
-import { DocumentationNode, BusinessDomain } from "../../models/entities.js";
+import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
+import { DatabaseService } from "../core/DatabaseService.js";
 import { DocumentationIntelligenceProvider } from "./DocumentationIntelligenceProvider.js";
-export interface ParsedDocument {
-    title: string;
-    content: string;
-    businessDomains: string[];
-    stakeholders: string[];
-    technologies: string[];
-    docType: DocumentationNode["docType"];
-    docIntent: DocumentationNode["docIntent"];
-    docVersion: string;
-    docHash: string;
-    docSource: DocumentationNode["docSource"];
-    docLocale?: string;
-    lastIndexed: Date;
-    metadata: Record<string, any>;
-}
-export interface DomainExtraction {
-    name: string;
-    description: string;
-    criticality: BusinessDomain["criticality"];
-    stakeholders: string[];
-    keyProcesses: string[];
-    confidence: number;
-}
-export interface SyncResult {
-    processedFiles: number;
-    newDomains: number;
-    updatedClusters: number;
-    errors: string[];
-    refreshedRelationships?: number;
-    staleRelationships?: number;
-    sectionsLinked?: number;
-}
-export interface SearchResult {
-    document: DocumentationNode;
-    relevanceScore: number;
-    matchedSections: string[];
-}
+import { ParsedDocument, DomainExtraction, SyncResult, SearchResult } from "./docs-parser/index.js";
+export { ParsedDocument, DomainExtraction, SyncResult, SearchResult };
 export declare class DocumentationParser {
-    private kgService;
-    private dbService;
-    private supportedExtensions;
+    private tokenizer;
+    private intentExtractor;
+    private syncOrchestrator;
     private intelligenceProvider;
+    private kgService;
+    private supportedExtensions;
     constructor(kgService: KnowledgeGraphService, dbService: DatabaseService, intelligenceProvider?: DocumentationIntelligenceProvider);
     private inferDocIntent;
     private inferDocLocale;
@@ -141,23 +108,9 @@ export declare class DocumentationParser {
      * Search documentation content
      */
     searchDocumentation(query: string, options?: {
-        domain?: string;
-        docType?: DocumentationNode["docType"];
         limit?: number;
+        minScore?: number;
+        domain?: string;
     }): Promise<SearchResult[]>;
-    /**
-     * Calculate relevance score for search query
-     */
-    private calculateRelevanceScore;
-    /**
-     * Find matched sections in content
-     */
-    private findMatchedSections;
-    private getFreshnessWindowDays;
-    private linkDocumentSections;
-    private extractSectionDescriptors;
-    private slugifySectionTitle;
-    private extractSectionSummary;
-    private applyFreshnessUpdates;
 }
 //# sourceMappingURL=DocumentationParser.d.ts.map
