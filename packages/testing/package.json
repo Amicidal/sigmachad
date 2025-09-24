@@ -8,11 +8,25 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "eslint src/**/*.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "security:scan": "node dist/security/cli.js scan",
+    "security:scan:full": "node dist/security/cli.js scan --scope=full",
+    "security:scan:critical": "node dist/security/cli.js scan --scope=critical-only",
+    "security:audit": "node dist/security/cli.js audit",
+    "security:report": "node dist/security/cli.js report",
+    "security:compliance": "node dist/security/cli.js compliance",
+    "security:sarif": "node dist/security/cli.js sarif",
+    "security:secrets:check": "node dist/security/cli.js secrets-check",
+    "security:secrets:check:file": "node dist/security/cli.js secrets-check-file",
+    "security:deps:check": "node dist/security/cli.js deps-check",
+    "security:policy:check": "node dist/security/cli.js policy-check",
+    "security:fix": "node dist/security/cli.js fix"
   },
   "dependencies": {
     "@memento/core": "workspace:*",
-    "@memento/knowledge": "workspace:*"
+    "@memento/database": "workspace:*",
+    "@memento/knowledge": "workspace:*",
+    "commander": "^12.0.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^3.2.4",

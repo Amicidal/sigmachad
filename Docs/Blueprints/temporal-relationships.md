@@ -10,12 +10,12 @@ Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFI
 
 ## 2.1 Status Snapshot (2025-09-19)
 - ✅ `appendVersion`, `openEdge`, and `closeEdge` persist temporal metadata, create change nodes, and link provenance edges when `changeSetId` is provided.
-- ✅ Timeline helpers (`getEntityTimeline`, `getRelationshipTimeline`, `getChangesForSession`) are implemented and wired into `src/api/routes/history.ts`; unit coverage exercises the new flows.
+- ✅ Timeline helpers (`getEntityTimeline`, `getRelationshipTimeline`, `getChangesForSession`) are implemented and wired into history routes (in `@memento/api`); unit coverage exercises the new flows.
 - ✅ Temporal writes flow through `runTemporalTransaction`, which now serializes `MULTI/EXEC` usage on the shared Falkor connection to prevent interleaving; the validator job auto-repairs missing `PREVIOUS_VERSION` links.
 - ⏳ SynchronizationCoordinator + rollback paths require failure-mode hardening and tests to surface database errors and clear pending states.
 - ✅ Blueprint/API documentation now includes transactional guidance, `scripts/backfill-temporal-history.ts` provides a backfill/repair entry point, and integration suites cover the history timelines surface.
 
-> See TODO item “### 10. Operationalize Temporal Relationship Lifecycle & Timelines” for the authoritative task checklist.
+> See project TODO for related temporal relationship implementation tasks.
 
 ## 3. Desired Capabilities
 1. Implement transactional versioning and temporal edge lifecycle to accurately reflect when entities/relationships change.
@@ -25,7 +25,7 @@ Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFI
 
 ## 4. Inputs & Consumers
 - **Inputs**: SynchronizationCoordinator parsing cycles, SCM commit metadata, manual change annotations, rollback operations. (Ephemeral sessions excluded—no provenance.)
-- **Consumers**: History APIs (`src/api/routes/history.ts`), admin dashboards, rollback service, impact analysis, compliance auditors.
+- **Consumers**: History APIs (in `@memento/api`), admin dashboards, rollback service, impact analysis, compliance auditors.
 
 ## 5. Schema & Metadata Requirements
 | Field | Type | Notes |

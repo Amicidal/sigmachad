@@ -90,33 +90,41 @@ module.exports = {
           relativePath.startsWith(domain)
         );
 
-        if (currentDepth > maxDepth) {
+        // Check if this is in the packages directory (monorepo structure)
+        const isInPackages = relativePath.startsWith('packages' + path.sep);
+
+        // Adjust depth limits for packages directory
+        const effectiveTargetDepth = isInPackages ? targetDepth + 1 : targetDepth;
+        const effectiveWarnDepth = isInPackages ? warnDepth + 1 : warnDepth;
+        const effectiveMaxDepth = isInPackages ? maxDepth + 1 : maxDepth;
+
+        if (currentDepth > effectiveMaxDepth) {
           // Always error if exceeding absolute maximum
           context.report({
             node,
             messageId: 'tooDeep',
             data: {
-              maxDepth,
+              maxDepth: effectiveMaxDepth,
               currentDepth
             }
           });
-        } else if (currentDepth > warnDepth && !isComplexDomain) {
+        } else if (currentDepth > effectiveWarnDepth && !isComplexDomain) {
           // Error for non-complex domains exceeding warning threshold
           context.report({
             node,
             messageId: 'exceedsWarn',
             data: {
-              warnDepth,
+              warnDepth: effectiveWarnDepth,
               currentDepth
             }
           });
-        } else if (currentDepth > targetDepth && !isComplexDomain) {
+        } else if (currentDepth > effectiveTargetDepth && !isComplexDomain) {
           // Warn for files exceeding target in non-complex domains
           context.report({
             node,
             messageId: 'exceedsTarget',
             data: {
-              targetDepth,
+              targetDepth: effectiveTargetDepth,
               currentDepth
             }
           });

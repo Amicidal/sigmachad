@@ -4,8 +4,8 @@
  * Implements Phase 5.2 requirements for test integration
  */
 
-import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../core/DatabaseService.js";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
 import { TestResultParser } from "./TestResultParser.js";
 import {
   Test,
@@ -13,16 +13,16 @@ import {
   TestPerformanceMetrics,
   CoverageMetrics,
   TestHistoricalData,
-} from "../../models/entities.js";
+} from "@memento/core";
 import {
   PerformanceRelationship,
   PerformanceMetricSample,
   PerformanceTrend,
   RelationshipType,
-} from "../../models/relationships.js";
-import { noiseConfig } from "../../config/noise.js";
-import { sanitizeEnvironment } from "../../utils/environment.js";
-import { normalizeMetricIdForId } from "../../utils/codeEdges.js";
+} from "@memento/core";
+import { noiseConfig } from "@memento/core";
+import { sanitizeEnvironment } from "@memento/core";
+import { normalizeMetricIdForId } from "@memento/core";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -101,7 +101,7 @@ interface PerformanceRelationshipOptions {
 
 export class TestEngine {
   private parser: TestResultParser;
-  private perfRelBuffer: import("../../models/relationships.js").GraphRelationship[] = [];
+  private perfRelBuffer: import("@memento/core").GraphRelationship[] = [];
   private perfIncidentSeeds: Set<string> = new Set();
   private testSessionSequences: Map<string, number> = new Map();
 

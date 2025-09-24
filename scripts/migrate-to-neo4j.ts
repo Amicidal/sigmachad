@@ -7,10 +7,10 @@
  * to a unified Neo4j database with native vector support.
  */
 
-import { createClient as createRedisClient } from "redis";
-import { QdrantClient } from "@qdrant/js-client-rest";
-import neo4j from "neo4j-driver";
-import { Neo4jService } from "../src/services/database/Neo4jService.js";
+import { createClient as createRedisClient } from 'redis';
+import { QdrantClient } from '@qdrant/js-client-rest';
+import neo4j from 'neo4j-driver';
+import { Neo4jService } from '../src/services/database/Neo4jService.js';
 
 interface MigrationConfig {
   source: {
@@ -49,7 +49,7 @@ class DataMigrator {
   }
 
   async initialize(): Promise<void> {
-    console.log("🔧 Initializing migration services...");
+    console.log('🔧 Initializing migration services...');
 
     // Connect to FalkorDB (Redis)
     this.falkorClient = createRedisClient({
@@ -57,32 +57,32 @@ class DataMigrator {
       database: this.config.source.falkordb.database || 0,
     });
     await this.falkorClient.connect();
-    console.log("✅ Connected to FalkorDB");
+    console.log('✅ Connected to FalkorDB');
 
     // Test Qdrant connection
     await this.qdrantClient.getCollections();
-    console.log("✅ Connected to Qdrant");
+    console.log('✅ Connected to Qdrant');
 
     // Initialize Neo4j
     await this.neo4jService.initialize();
     await this.neo4jService.setupGraph();
     await this.neo4jService.setupVectorIndexes();
-    console.log("✅ Connected to Neo4j");
+    console.log('✅ Connected to Neo4j');
   }
 
   async migrateGraphData(): Promise<void> {
-    console.log("\n📊 Migrating graph data from FalkorDB to Neo4j...");
+    console.log('\n📊 Migrating graph data from FalkorDB to Neo4j...');
 
     try {
       // Export all nodes from FalkorDB
       const nodesResult = await this.falkorClient.sendCommand([
-        "GRAPH.QUERY",
-        "memento",
-        "MATCH (n) RETURN n, labels(n) as labels LIMIT 10000",
+        'GRAPH.QUERY',
+        'memento',
+        'MATCH (n) RETURN n, labels(n) as labels LIMIT 10000',
       ]);
 
       if (!nodesResult || !Array.isArray(nodesResult)) {
-        console.log("⚠️ No nodes found in FalkorDB");
+        console.log('⚠️ No nodes found in FalkorDB');
         return;
       }
 
@@ -97,13 +97,13 @@ class DataMigrator {
         if (!row || !Array.isArray(row)) continue;
 
         const [node, labels] = row;
-        if (!node || typeof node !== "object") continue;
+        if (!node || typeof node !== 'object') continue;
 
         // Extract properties and labels
         const props = { ...node };
         delete props.id; // Remove FalkorDB internal ID
 
-        const nodeLabels = Array.isArray(labels) ? labels.join(":") : "Entity";
+        const nodeLabels = Array.isArray(labels) ? labels.join(':') : 'Entity';
 
         try {
           await session.run(
@@ -127,23 +127,23 @@ class DataMigrator {
       // Now migrate relationships
       await this.migrateRelationships();
     } catch (error) {
-      console.error("❌ Graph migration failed:", error);
+      console.error('❌ Graph migration failed:', error);
       throw error;
     }
   }
 
   async migrateRelationships(): Promise<void> {
-    console.log("\n🔗 Migrating relationships from FalkorDB to Neo4j...");
+    console.log('\n🔗 Migrating relationships from FalkorDB to Neo4j...');
 
     try {
       const relsResult = await this.falkorClient.sendCommand([
-        "GRAPH.QUERY",
-        "memento",
-        "MATCH (a)-[r]->(b) RETURN id(a) as fromId, id(b) as toId, type(r) as type, properties(r) as props LIMIT 10000",
+        'GRAPH.QUERY',
+        'memento',
+        'MATCH (a)-[r]->(b) RETURN id(a) as fromId, id(b) as toId, type(r) as type, properties(r) as props LIMIT 10000',
       ]);
 
       if (!relsResult || !Array.isArray(relsResult)) {
-        console.log("⚠️ No relationships found in FalkorDB");
+        console.log('⚠️ No relationships found in FalkorDB');
         return;
       }
 
@@ -178,15 +178,19 @@ class DataMigrator {
       await session.close();
       console.log(`✅ Migrated ${migratedCount} relationships`);
     } catch (error) {
-      console.error("❌ Relationship migration failed:", error);
+      console.error('❌ Relationship migration failed:', error);
       throw error;
     }
   }
 
   async migrateVectorData(): Promise<void> {
-    console.log("\n🧮 Migrating vector embeddings from Qdrant to Neo4j...");
+    console.log('\n🧮 Migrating vector embeddings from Qdrant to Neo4j...');
 
-    const collections = ["code_embeddings", "documentation_embeddings", "integration_test"];
+    const collections = [
+      'code_embeddings',
+      'documentation_embeddings',
+      'integration_test',
+    ];
 
     for (const collection of collections) {
       try {
@@ -233,9 +237,11 @@ class DataMigrator {
           offset += limit;
         }
 
-        console.log(`  ✅ Migrated ${totalMigrated} vectors from ${collection}`);
+        console.log(
+          `  ✅ Migrated ${totalMigrated} vectors from ${collection}`
+        );
       } catch (error: any) {
-        if (error.status === 404 || error.message?.includes("Not found")) {
+        if (error.status === 404 || error.message?.includes('Not found')) {
           console.log(`  ⚠️ Collection ${collection} not found in Qdrant`);
         } else {
           console.error(`  ❌ Failed to migrate ${collection}:`, error);
@@ -245,28 +251,32 @@ class DataMigrator {
   }
 
   async verifyMigration(): Promise<void> {
-    console.log("\n🔍 Verifying migration...");
+    console.log('\n🔍 Verifying migration...');
 
     const session = this.neo4jService.getDriver().session();
 
     try {
       // Count nodes
-      const nodeCountResult = await session.run("MATCH (n) RETURN count(n) as count");
-      const nodeCount = nodeCountResult.records[0].get("count").toNumber();
+      const nodeCountResult = await session.run(
+        'MATCH (n) RETURN count(n) as count'
+      );
+      const nodeCount = nodeCountResult.records[0].get('count').toNumber();
       console.log(`  Nodes in Neo4j: ${nodeCount}`);
 
       // Count relationships
-      const relCountResult = await session.run("MATCH ()-[r]->() RETURN count(r) as count");
-      const relCount = relCountResult.records[0].get("count").toNumber();
+      const relCountResult = await session.run(
+        'MATCH ()-[r]->() RETURN count(r) as count'
+      );
+      const relCount = relCountResult.records[0].get('count').toNumber();
       console.log(`  Relationships in Neo4j: ${relCount}`);
 
       // Count vectors by type
-      const vectorTypes = ["CodeEmbedding", "DocEmbedding", "TestEmbedding"];
+      const vectorTypes = ['CodeEmbedding', 'DocEmbedding', 'TestEmbedding'];
       for (const type of vectorTypes) {
         const vectorResult = await session.run(
           `MATCH (n:${type}) RETURN count(n) as count`
         );
-        const count = vectorResult.records[0].get("count").toNumber();
+        const count = vectorResult.records[0].get('count').toNumber();
         console.log(`  ${type} vectors: ${count}`);
       }
     } finally {
@@ -275,7 +285,7 @@ class DataMigrator {
   }
 
   async cleanup(): Promise<void> {
-    console.log("\n🧹 Cleaning up connections...");
+    console.log('\n🧹 Cleaning up connections...');
 
     if (this.falkorClient) {
       await this.falkorClient.disconnect();
@@ -283,7 +293,7 @@ class DataMigrator {
 
     await this.neo4jService.close();
 
-    console.log("✅ Cleanup complete");
+    console.log('✅ Cleanup complete');
   }
 
   async run(): Promise<void> {
@@ -303,37 +313,37 @@ async function main() {
   const config: MigrationConfig = {
     source: {
       falkordb: {
-        url: process.env.OLD_FALKORDB_URL || "redis://localhost:6379",
+        url: process.env.OLD_FALKORDB_URL || 'redis://localhost:6379',
         database: 0,
       },
       qdrant: {
-        url: process.env.OLD_QDRANT_URL || "http://localhost:6333",
+        url: process.env.OLD_QDRANT_URL || 'http://localhost:6333',
         apiKey: process.env.OLD_QDRANT_API_KEY,
       },
     },
     target: {
       neo4j: {
-        uri: process.env.NEO4J_URI || "bolt://localhost:7687",
-        username: process.env.NEO4J_USER || "neo4j",
-        password: process.env.NEO4J_PASSWORD || "memento123",
-        database: process.env.NEO4J_DATABASE || "neo4j",
+        uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
+        username: process.env.NEO4J_USER || 'neo4j',
+        password: process.env.NEO4J_PASSWORD || 'memento123',
+        database: process.env.NEO4J_DATABASE || 'neo4j',
       },
     },
   };
 
-  console.log("🚀 Starting FalkorDB + Qdrant → Neo4j Migration");
-  console.log("================================================");
+  console.log('🚀 Starting FalkorDB + Qdrant → Neo4j Migration');
+  console.log('================================================');
 
   const migrator = new DataMigrator(config);
   await migrator.run();
 
-  console.log("\n✨ Migration complete!");
+  console.log('\n✨ Migration complete!');
 }
 
 // Run if executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
-    console.error("\n❌ Migration failed:", error);
+    console.error('\n❌ Migration failed:', error);
     process.exit(1);
   });
 }

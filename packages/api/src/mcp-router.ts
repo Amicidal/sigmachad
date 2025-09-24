@@ -14,11 +14,9 @@ import {
   McpError,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { KnowledgeGraphService } from "../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../services/core/DatabaseService.js";
-import { ASTParser } from "../services/knowledge/ASTParser.js";
-import { TestEngine } from "../services/testing/TestEngine.js";
-import { SecurityScanner } from "../services/testing/SecurityScanner.js";
+import { KnowledgeGraphService, ASTParser } from "../../../dist/services/knowledge/index.js";
+import { DatabaseService } from "../../../dist/services/database/index.js";
+import { TestEngine, SecurityScanner } from "../../../dist/services/testing/index.js";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import path from "path";
@@ -28,15 +26,15 @@ import {
   SpecNotFoundError,
   TestPlanningService,
   TestPlanningValidationError,
-} from "../services/testing/TestPlanningService.js";
+} from "../../../dist/services/testing/index.js";
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestSpec,
-} from "../models/types.js";
-import type { CoverageMetrics, Spec } from "../models/entities.js";
-import { SpecService } from "../services/testing/SpecService.js";
-import { resolvePerformanceHistoryOptions } from "../utils/performanceFilters.js";
+} from "../../../dist/services/core/index.js";
+import type { CoverageMetrics, Spec } from "../../../dist/services/core/index.js";
+import { SpecService } from "../../../dist/services/testing/index.js";
+import { resolvePerformanceHistoryOptions } from "../../../dist/services/core/index.js";
 
 // MCP Tool definitions
 interface MCPToolDefinition {
@@ -1191,7 +1189,8 @@ export class MCPRouter {
 
   // Tool handlers (connected to actual implementations)
   private async handleCreateSpec(params: any): Promise<any> {
-    console.log("MCP Tool called: design.create_spec", params);
+    // Log for debug only - remove in production
+    // console.log("MCP Tool called: design.create_spec", params);
 
     try {
       const payload = {
@@ -1230,7 +1229,8 @@ export class MCPRouter {
   }
 
   private async handleGraphSearch(params: any): Promise<any> {
-    console.log("MCP Tool called: graph.search", params);
+    // Debug logging - remove in production
+    // console.log("MCP Tool called: graph.search", params);
 
     try {
       if (
@@ -1293,7 +1293,8 @@ export class MCPRouter {
   }
 
   private async handleListModuleChildren(params: any): Promise<any> {
-    console.log("MCP Tool called: graph.list_module_children", params);
+    // Debug logging - remove in production
+    // console.log("MCP Tool called: graph.list_module_children", params);
 
     try {
       const modulePath =
@@ -1362,7 +1363,8 @@ export class MCPRouter {
   }
 
   private async handleListImports(params: any): Promise<any> {
-    console.log("MCP Tool called: graph.list_imports", params);
+    // Debug logging - remove in production
+    // console.log("MCP Tool called: graph.list_imports", params);
 
     try {
       const entityId =
@@ -1451,7 +1453,8 @@ export class MCPRouter {
   }
 
   private async handleFindDefinition(params: any): Promise<any> {
-    console.log("MCP Tool called: graph.find_definition", params);
+    // Debug logging - remove in production
+    // console.log("MCP Tool called: graph.find_definition", params);
 
     try {
       const symbolId =
@@ -1521,7 +1524,8 @@ export class MCPRouter {
   }
 
   private async handleGetExamples(params: any): Promise<any> {
-    console.log("MCP Tool called: graph.examples", params);
+    // Debug logging - remove in production
+    // console.log("MCP Tool called: graph.examples", params);
 
     try {
       // Use the KnowledgeGraphService to get entity examples
@@ -1592,7 +1596,8 @@ export class MCPRouter {
   }
 
   private async handleProposeDiff(params: any): Promise<any> {
-    console.log("MCP Tool called: code.propose_diff", params);
+    // Debug logging - remove in production
+    // console.log("MCP Tool called: code.propose_diff", params);
 
     try {
       const affectedEntities: any[] = [];
@@ -1748,7 +1753,8 @@ export class MCPRouter {
   }
 
   private async handleValidateCode(params: any): Promise<any> {
-    console.log("MCP Tool called: validate.run", params);
+    // Debug logging - remove in production
+    // console.log("MCP Tool called: validate.run", params);
 
     try {
       // Create a comprehensive validation result structure
@@ -1902,7 +1908,8 @@ export class MCPRouter {
   }
 
   private async handlePlanTests(params: any): Promise<any> {
-    console.log("MCP Tool called: tests.plan_and_generate", params);
+    // Debug logging - remove in production
+    // console.log("MCP Tool called: tests.plan_and_generate", params);
 
     const request: TestPlanRequest = {
       specId: params.specId,

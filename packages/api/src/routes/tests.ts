@@ -4,19 +4,19 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/core/DatabaseService.js";
-import { TestEngine } from "../../services/testing/TestEngine.js";
-import { TestPlanningService, SpecNotFoundError, TestPlanningValidationError } from "../../services/testing/TestPlanningService.js";
-import { RelationshipType } from "../../models/relationships.js";
-import type { TestPerformanceMetrics } from "../../models/entities.js";
+import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
+import { DatabaseService } from "../../../dist/services/core/index.js";
+import { TestEngine } from "../../../dist/services/testing/index.js";
+import { TestPlanningService, SpecNotFoundError, TestPlanningValidationError } from "../../../dist/services/testing/index.js";
+import { RelationshipType } from "../../../dist/services/core/index.js";
+import type { TestPerformanceMetrics } from "../../../dist/services/core/index.js";
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestExecutionResult,
   PerformanceHistoryOptions,
-} from "../../models/types.js";
-import { resolvePerformanceHistoryOptions } from "../../utils/performanceFilters.js";
+} from "../../../dist/services/core/index.js";
+import { resolvePerformanceHistoryOptions } from "../../../dist/services/core/index.js";
 
 const createEmptyPerformanceMetrics = (): TestPerformanceMetrics => ({
   averageExecutionTime: 0,

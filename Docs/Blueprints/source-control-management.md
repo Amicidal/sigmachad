@@ -7,7 +7,7 @@ The SCM surface automates commit creation, pull-request scaffolding, branch mana
 - `/api/v1/scm/commit-pr` stages requested paths, creates a commit, persists metadata to Postgres (`scm_commits`), materialises change entities/relationships in the knowledge graph, and optionally asks the configured SCM provider to push and create a PR payload. Responses include commit status, provider details, retry metadata, and linked artifacts (spec/tests/validation).
 - Companion endpoints (`/scm/commit`, `/scm/push`, `/scm/branch`, `/scm/status`, `/scm/changes`, `/scm/diff`, `/scm/log`) delegate to `SCMService` and enforce Fastify schemas for request/response validation.
 - A feature flag (`FEATURE_SCM` / `SCM_FEATURE_FLAG`) can disable the surface. When disabled the handlers return a structured `NOT_IMPLEMENTED` payload so existing callers can detect availability.
-- The default provider is `LocalGitProvider`, which pushes to a configured remote and synthesises a PR URL (`<remote>#<branch>:<hash>`). GitHub/GitLab adapters are not yet implemented; see follow-up plan in `TODO.md`.
+- The default provider is `LocalGitProvider`, which pushes to a configured remote and synthesises a PR URL (`<remote>#<branch>:<hash>`). GitHub/GitLab adapters are not yet implemented; see follow-up plan in project TODO.
 
 ## 3. Implementation Notes
 - `SCMService.createCommitAndMaybePR` serialises git access with a mutex to avoid concurrent branch switches, captures author info from environment (`GIT_AUTHOR_*`, `GITHUB_ACTOR`), and records provider attempts/errors for downstream automation.

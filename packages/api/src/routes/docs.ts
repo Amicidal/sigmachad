@@ -4,11 +4,8 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/core/DatabaseService.js';
-import { DocumentationParser } from '../../services/knowledge/DocumentationParser.js';
-import { RelationshipType } from '../../models/relationships.js';
-import { noiseConfig } from '../../config/noise.js';
+import { KnowledgeGraphService, DocumentationParser } from '@memento/knowledge';
+import { DatabaseService, RelationshipType, noiseConfig } from '@memento/core';
 
 interface SyncDocumentationResponse {
   processedFiles: number;

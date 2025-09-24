@@ -53,7 +53,7 @@ CodebaseEntity.metadata: {
   4. Update KG: Cypher SET on entity; emit MCP event for criticals (agent refactor task).
   5. Multi-Agent: Parallel scans; idempotent (e.g., if Agent 20 fixed, skip re-emit).
 
-- **TS Stub** (`packages/core/src/services/SecurityEnhancer.ts`, called from `SynchronizationCoordinator.updateEntity`):
+- **TS Stub** (`@memento/core/SecurityEnhancer.ts`, called from `SynchronizationCoordinator.updateEntity`):
 ```typescript
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -165,4 +165,6 @@ class SecurityEnhancer {
 - **Benefits**: Lean (no schema bloat); fast queries (prop filters); velocity (gates trigger agents, <1% blocks). Aligns with no-prod: Fix criticals ASAP, ignore low via prune. Multi-agent: Collaborative fixes (e.g., swarm on debt in spec).
 
 (No dedicated blueprint needed beyond this—integrates via services.)
+
+
 

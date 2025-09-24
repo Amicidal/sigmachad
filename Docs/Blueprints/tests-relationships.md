@@ -27,7 +27,7 @@ Testing edges (`TESTS`, `VALIDATES`) connect automated tests to code and specs s
 
 ## 4. Inputs & Consumers
 - **Ingestion Sources**: Test engine execution results, CI integrations, manual annotations for spec validation. Additional future sources include flaky-test detectors and telemetry from external services.
-- **Downstream Consumers**: Impact API (`src/api/routes/impact.ts`), tests API (`src/api/routes/tests.ts`), admin dashboards, IDE integrations surfacing coverage, and automation (rerun impacted tests).
+- **Downstream Consumers**: Impact API, tests API (both in `@memento/api`), admin dashboards, IDE integrations surfacing coverage, and automation (rerun impacted tests).
 
 ## 5. Schema & Metadata Requirements
 | Field | Type | Notes |
@@ -43,7 +43,7 @@ Testing edges (`TESTS`, `VALIDATES`) connect automated tests to code and specs s
 | `metadata.additional` | object | Room for language/framework specifics (e.g., jest test path).
 
 ## 6. Normalization Strategy
-1. **Dedicated Helper**: Implement `normalizeTestRelationship` and invoke it from `KnowledgeGraphService.normalizeRelationship` (`src/services/KnowledgeGraphService.ts`). Responsibilities:
+1. **Dedicated Helper**: Implement `normalizeTestRelationship` and invoke it from `KnowledgeGraphService.normalizeRelationship` (in `@memento/knowledge`). Responsibilities:
    - Map incoming `testType` strings to enum; log/collect metrics for unknown values.
    - Sanitize `suiteId`, `runId` to max lengths (e.g., 256 chars), remove whitespace.
    - Clamp `coverage` to `[0,1]`, round to 3 decimals; if missing but `passed=true`, allow null.

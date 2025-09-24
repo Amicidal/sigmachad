@@ -1,7 +1,7 @@
 # MCP Tooling Blueprint
 
 ## 1. Overview
-Model Context Protocol (MCP) tools expose key graph, design, and testing workflows over JSON-RPC. They back the `/mcp` endpoint, the MCP router in `src/api/mcp-router.ts`, and the integration suite in `tests/integration/api/MCPToolIntegration.integration.test.ts`. Recent fixes ensured the graph examples payload matches client expectations, preserved tool-specific error codes during validation failures, and introduced a heuristic fallback for `tests.plan_and_generate`—now short-circuiting Postgres lookups when spec identifiers are non-UUID strings to avoid spurious 500s.
+Model Context Protocol (MCP) tools expose key graph, design, and testing workflows over JSON-RPC. They back the `/mcp` endpoint, the MCP router (in `@memento/api`), and the integration suite. Recent fixes ensured the graph examples payload matches client expectations, preserved tool-specific error codes during validation failures, and introduced a heuristic fallback for `tests.plan_and_generate`—now short-circuiting Postgres lookups when spec identifiers are non-UUID strings to avoid spurious 500s.
 
 ## 2. Current Gaps
 - **Heuristic planning only:** The new fallback returns structured unit/integration/E2E/performance plans, but they are generated from acceptance-criteria strings or title heuristics. They ignore existing KG relationships, historical tests, or dependency signals. This keeps the integration test green yet yields low-fidelity guidance for real users.

@@ -1,0 +1,1 @@
+{"version":3,"file":"admin-ui.d.ts","sourceRoot":"","sources":["../../src/routes/admin-ui.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AAEH,OAAO,EAAE,eAAe,EAAE,MAAM,SAAS,CAAC;AAC1C,OAAO,EAAE,qBAAqB,EAAE,MAAM,2CAA2C,CAAC;AAClF,OAAO,EAAE,eAAe,EAAE,MAAM,sCAAsC,CAAC;AAEvE,wBAAsB,qBAAqB,CACzC,GAAG,EAAE,eAAe,EACpB,UAAU,EAAE,qBAAqB,EACjC,UAAU,EAAE,eAAe,GAC1B,OAAO,CAAC,IAAI,CAAC,CAyQf"}

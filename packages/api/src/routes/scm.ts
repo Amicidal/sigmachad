@@ -5,13 +5,13 @@
 
 import { FastifyInstance } from "fastify";
 import path from "path";
-import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/core/DatabaseService.js";
-import { GitService } from "../../services/scm/GitService.js";
-import { SCMService, ValidationError } from "../../services/scm/SCMService.js";
-import { LocalGitProvider } from "../../services/scm/LocalGitProvider.js";
-import { SCMProviderNotConfiguredError } from "../../services/scm/SCMProvider.js";
-import type { CommitPRRequest } from "../../models/types.js";
+import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
+import { DatabaseService } from "../../../dist/services/core/index.js";
+import { GitService } from "../../../dist/services/synchronization/index.js";
+import { SCMService, ValidationError } from "../../../dist/services/synchronization/index.js";
+import { LocalGitProvider } from "../../../dist/services/synchronization/index.js";
+import { SCMProviderNotConfiguredError } from "../../../dist/services/synchronization/index.js";
+import type { CommitPRRequest } from "../../../dist/services/core/index.js";
 
 const SCM_FEATURE_FLAG = String(process.env.FEATURE_SCM ?? "true").toLowerCase();
 const SCM_FEATURE_ENABLED = !["0", "false", "off"].includes(SCM_FEATURE_FLAG);

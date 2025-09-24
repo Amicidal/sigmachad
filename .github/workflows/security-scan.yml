@@ -1,0 +1,356 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'Scan scope'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - critical-only
+          - recent
+      upload_reports:
+        description: 'Upload reports as artifacts'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  SECURITY_OSV_ENABLED: true
+  SECURITY_OSV_BATCH: true
+  SECURITY_MIN_SEVERITY: medium
+  SECURITY_MIN_CONFIDENCE: 0.7
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm build
+
+      - name: Run security scan
+        id: security-scan
+        run: |
+          echo "Running security scan with scope: ${{ github.event.inputs.scope || 'full' }}"
+          pnpm run security:scan --scope="${{ github.event.inputs.scope || 'full' }}" --format=json --output=security-report.json
+
+          # Set outputs for later steps
+          if [ -f security-report.json ]; then
+            echo "scan_completed=true" >> $GITHUB_OUTPUT
+            echo "report_path=security-report.json" >> $GITHUB_OUTPUT
+          else
+            echo "scan_completed=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      - name: Parse scan results
+        id: parse-results
+        if: steps.security-scan.outputs.scan_completed == 'true'
+        run: |
+          # Parse JSON report and extract key metrics
+          if [ -f security-report.json ]; then
+            critical_issues=$(jq '.summary.bySeverity.critical // 0' security-report.json)
+            high_issues=$(jq '.summary.bySeverity.high // 0' security-report.json)
+            total_issues=$(jq '.summary.totalIssues // 0' security-report.json)
+            total_vulns=$(jq '.summary.totalVulnerabilities // 0' security-report.json)
+
+            echo "critical_issues=$critical_issues" >> $GITHUB_OUTPUT
+            echo "high_issues=$high_issues" >> $GITHUB_OUTPUT
+            echo "total_issues=$total_issues" >> $GITHUB_OUTPUT
+            echo "total_vulnerabilities=$total_vulns" >> $GITHUB_OUTPUT
+
+            # Determine if scan should fail the build
+            if [ "$critical_issues" -gt 0 ]; then
+              echo "scan_status=critical" >> $GITHUB_OUTPUT
+            elif [ "$high_issues" -gt 5 ]; then
+              echo "scan_status=high" >> $GITHUB_OUTPUT
+            else
+              echo "scan_status=success" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Generate reports
+        if: steps.security-scan.outputs.scan_completed == 'true'
+        run: |
+          # Generate multiple report formats
+          pnpm run security:report --format=html --output=security-report.html
+          pnpm run security:report --format=markdown --output=security-report.md
+          pnpm run security:report --format=csv --output=security-report.csv
+
+          # Generate SARIF for GitHub Security tab
+          pnpm run security:sarif --output=security-results.sarif
+
+      - name: Upload SARIF results
+        if: steps.security-scan.outputs.scan_completed == 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: security-results.sarif
+          category: security-scan
+        continue-on-error: true
+
+      - name: Upload security reports
+        if: steps.security-scan.outputs.scan_completed == 'true' && (github.event.inputs.upload_reports == 'true' || github.event.inputs.upload_reports == '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports-${{ github.sha }}
+          path: |
+            security-report.json
+            security-report.html
+            security-report.md
+            security-report.csv
+            security-results.sarif
+          retention-days: 30
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && steps.security-scan.outputs.scan_completed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('security-report.md')) {
+              console.log('No markdown report found');
+              return;
+            }
+
+            const report = fs.readFileSync('security-report.md', 'utf8');
+            const critical = '${{ steps.parse-results.outputs.critical_issues }}';
+            const high = '${{ steps.parse-results.outputs.high_issues }}';
+            const total = '${{ steps.parse-results.outputs.total_issues }}';
+            const vulns = '${{ steps.parse-results.outputs.total_vulnerabilities }}';
+
+            const summary = `## 🔒 Security Scan Results
+
+            - **Critical Issues:** ${critical}
+            - **High Severity Issues:** ${high}
+            - **Total Issues:** ${total}
+            - **Vulnerabilities:** ${vulns}
+
+            ${critical > 0 ? '⚠️ **Critical security issues found! Please address before merging.**' : ''}
+            ${high > 5 ? '⚠️ **High number of high-severity issues detected.**' : ''}
+
+            <details>
+            <summary>📄 Full Security Report</summary>
+
+            ${report}
+
+            </details>`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+
+      - name: Fail on critical issues
+        if: steps.parse-results.outputs.scan_status == 'critical'
+        run: |
+          echo "❌ Critical security issues found! Failing the build."
+          echo "Critical issues: ${{ steps.parse-results.outputs.critical_issues }}"
+          exit 1
+
+      - name: Warn on high issues
+        if: steps.parse-results.outputs.scan_status == 'high'
+        run: |
+          echo "⚠️ High number of security issues found!"
+          echo "High severity issues: ${{ steps.parse-results.outputs.high_issues }}"
+          echo "Consider addressing these issues before deployment."
+
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run npm audit
+        run: |
+          pnpm audit --audit-level moderate --json > npm-audit.json || true
+          pnpm audit --audit-level moderate || echo "Vulnerabilities found"
+
+      - name: Run OSV Scanner
+        uses: google/osv-scanner-action@v1
+        with:
+          scan-args: |-
+            -r
+            --skip-git
+            .
+        continue-on-error: true
+
+      - name: Upload dependency scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-scan-${{ github.sha }}
+          path: |
+            npm-audit.json
+            results.json
+          retention-days: 30
+
+  secrets-scan:
+    name: Secrets Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+        continue-on-error: true
+
+      - name: Run GitLeaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        continue-on-error: true
+
+  compliance-check:
+    name: Security Compliance Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm build
+
+      - name: Run compliance check
+        run: |
+          pnpm run security:compliance --framework=owasp --output=compliance-report.json
+          pnpm run security:compliance --framework=nist --output=nist-compliance.json
+        continue-on-error: true
+
+      - name: Upload compliance reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-reports-${{ github.sha }}
+          path: |
+            compliance-report.json
+            nist-compliance.json
+          retention-days: 30
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [security-scan, dependency-scan, secrets-scan, compliance-check]
+    if: always()
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-${{ github.sha }}"
+          merge-multiple: true
+
+      - name: Generate security summary
+        run: |
+          echo "# 🔒 Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Scan:** ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependency Scan:** ${{ needs.dependency-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Secrets Scan:** ${{ needs.secrets-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Compliance Check:** ${{ needs.compliance-check.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f security-report.json ]; then
+            echo "## Security Metrics" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total Issues:** $(jq '.summary.totalIssues // 0' security-report.json)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Critical:** $(jq '.summary.bySeverity.critical // 0' security-report.json)" >> $GITHUB_STEP_SUMMARY
+            echo "- **High:** $(jq '.summary.bySeverity.high // 0' security-report.json)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Medium:** $(jq '.summary.bySeverity.medium // 0' security-report.json)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Low:** $(jq '.summary.bySeverity.low // 0' security-report.json)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total Vulnerabilities:** $(jq '.summary.totalVulnerabilities // 0' security-report.json)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Recommendations" >> $GITHUB_STEP_SUMMARY
+          echo "- Review security reports in the artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Address critical and high severity issues first" >> $GITHUB_STEP_SUMMARY
+          echo "- Update vulnerable dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "- Remove any exposed secrets" >> $GITHUB_STEP_SUMMARY

@@ -23,4 +23,4 @@ Rollback orchestration coordinates capture and restoration of entities, relation
 
 ## 4. Inputs & Consumers
 - **Inputs**: SynchronizationCoordinator parsing cycles, SCM commit metadata, manual change annotations, rollback operations, session manager (ephemeral Redis refs only).
-- **Consumers**: History APIs (`src/api/routes/history.ts`), admin dashboards, rollback service, impact analysis, compliance auditors.
+- **Consumers**: History APIs (in `@memento/api`), admin dashboards, rollback service, impact analysis, compliance auditors.

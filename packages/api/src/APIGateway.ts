@@ -8,21 +8,11 @@ import fastifyCors from "@fastify/cors";
 import fastifyWebsocket from "@fastify/websocket";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { createTRPCContext, appRouter } from "./trpc/router.js";
-import { KnowledgeGraphService } from "../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../services/core/DatabaseService.js";
-import { FileWatcher } from "../services/core/FileWatcher.js";
-import { ASTParser } from "../services/knowledge/ASTParser.js";
-import { DocumentationParser } from "../services/knowledge/DocumentationParser.js";
-import { SynchronizationCoordinator } from "../services/synchronization/SynchronizationCoordinator.js";
-import { ConflictResolution } from "../services/scm/ConflictResolution.js";
-import { SynchronizationMonitoring } from "../services/synchronization/SynchronizationMonitoring.js";
-import { RollbackCapabilities } from "../services/scm/RollbackCapabilities.js";
-import { TestEngine } from "../services/testing/TestEngine.js";
-import { SecurityScanner } from "../services/testing/SecurityScanner.js";
-import { BackupService } from "../services/backup/BackupService.js";
-import { LoggingService } from "../services/core/LoggingService.js";
-import { MaintenanceService } from "../services/core/MaintenanceService.js";
-import { ConfigurationService } from "../services/core/ConfigurationService.js";
+import { KnowledgeGraphService, ASTParser, DocumentationParser } from "../../../dist/services/knowledge/index.js";
+import { DatabaseService, FileWatcher, LoggingService, MaintenanceService, ConfigurationService } from "../../../dist/services/core/index.js";
+import { SynchronizationCoordinator, SynchronizationMonitoring, ConflictResolution, RollbackCapabilities } from "../../../dist/services/synchronization/index.js";
+import { TestEngine, SecurityScanner } from "../../../dist/services/testing/index.js";
+import { BackupService } from "../../../dist/services/backup/index.js";
 import { AuthContext } from "./middleware/authentication.js";
 
 // Import route handlers
@@ -31,7 +21,7 @@ import { registerTestRoutes } from "./routes/tests.js";
 import { registerGraphRoutes } from "./routes/graph.js";
 import { registerCodeRoutes } from "./routes/code.js";
 import { registerImpactRoutes } from "./routes/impact.js";
-// import { registerVDBRoutes } from './routes/vdb.js';
+import { registerVDBRoutes } from './routes/vdb.js';
 import { registerSCMRoutes } from "./routes/scm.js";
 import { registerDocsRoutes } from "./routes/docs.js";
 import { registerSecurityRoutes } from "./routes/security.js";
@@ -1012,7 +1002,7 @@ export class APIGateway {
             this.astParser
           );
           await registerImpactRoutes(app, this.kgService, this.dbService);
-          // registerVDBRoutes(app, this.kgService, this.dbService); // Commented out - file removed
+          await registerVDBRoutes(app, this.kgService, this.dbService);
           registerSCMRoutes(app, this.kgService, this.dbService);
           registerDocsRoutes(
             app,
@@ -1277,6 +1267,10 @@ export class APIGateway {
     console.log("✅ MCP server validation passed");
   }
 
+  /**
+   * Starts the API Gateway server and all associated services
+   * @throws {Error} If server fails to start or validation fails
+   */
   async start(): Promise<void> {
     try {
       // Start rate limiting cleanup interval
@@ -1326,10 +1320,17 @@ export class APIGateway {
     }
   }
 
+  /**
+   * Returns the underlying Fastify instance
+   * @returns {FastifyInstance} The Fastify server instance
+   */
   getServer(): FastifyInstance {
     return this.app;
   }
 
+  /**
+   * Gracefully stops the API Gateway server and all associated services
+   */
   async stop(): Promise<void> {
     // Stop WebSocket router first
     await this.wsRouter.shutdown();

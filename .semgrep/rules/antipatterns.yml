@@ -1,0 +1,148 @@
+rules:
+  # Untyped any usage
+  - id: untyped-any-usage
+    pattern-either:
+      - pattern: "$VAR: any"
+      - pattern: "setCoordinator($PARAM: any)"
+    message: Using 'any' type defeats TypeScript's type safety - define proper interface
+    languages: [typescript]
+    severity: ERROR
+    metadata:
+      category: type-safety
+      antipattern: untyped-parameter
+
+  # Magic numbers without constants
+  - id: hardcoded-magic-numbers
+    pattern-either:
+      - patterns:
+          - pattern: $OBJ.setMaxListeners($NUM)
+          - metavariable-regex:
+              metavariable: $NUM
+              regex: '^[0-9]+$'
+      - patterns:
+          - pattern: setMaxListeners($NUM)
+          - metavariable-regex:
+              metavariable: $NUM
+              regex: '^[0-9]+$'
+      - pattern: substr($X, $NUM, $NUM2)
+      - pattern: substring($X, $NUM)
+    message: Magic number should be extracted to a named constant
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: maintainability
+      antipattern: magic-number
+
+  # Console.log in production code
+  - id: console-log-in-class
+    pattern: console.log(...)
+    message: Direct console.log in class - use proper logging abstraction
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: abstraction
+      antipattern: direct-console
+
+  # Non-atomic status checks
+  - id: race-condition-status
+    patterns:
+      - pattern: |
+          if (this.$STATUS === $VALUE) {
+            throw ...
+          }
+    message: Status check and modification aren't atomic - potential race condition
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: concurrency
+      antipattern: race-condition
+
+  # Empty catch blocks (already in quality-indicators but more specific here)
+  - id: catch-without-recovery
+    pattern: |
+      catch ($ERR) {
+        this.$VAR = $ERR;
+      }
+    message: Error caught but no recovery mechanism or rethrow
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: error-handling
+      antipattern: no-error-recovery
+
+  # Complex inline ID generation
+  - id: complex-id-generation
+    pattern: "Math.random()"
+    message: Complex ID generation should be extracted to utility function
+    languages: [typescript, javascript]
+    severity: INFO
+    metadata:
+      category: maintainability
+      antipattern: inline-id-generation
+
+  # Event emission with string types
+  - id: string-based-events
+    pattern-either:
+      - pattern: emit($STRING, ...)
+      - pattern: this.emit($STRING, ...)
+      - pattern: super.emit($STRING, ...)
+    message: Event type using raw string - consider using enum or const
+    languages: [typescript, javascript]
+    severity: INFO
+    metadata:
+      category: type-safety
+      antipattern: weak-event-types
+
+  # Async functions without await
+  - id: unnecessary-async
+    patterns:
+      - pattern: |
+          async $FUNC(...): Promise<...> {
+            ...
+          }
+      - pattern-not: |
+          async $FUNC(...): Promise<...> {
+            ...
+            await ...
+            ...
+          }
+    message: Async function without await - should be synchronous
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: design
+      antipattern: unnecessary-async
+
+  # External setter dependency
+  - id: temporal-coupling
+    patterns:
+      - pattern: |
+          setCoordinator($PARAM): void {
+            this.$FIELD = $PARAM;
+          }
+    message: External setter creates temporal coupling - consider constructor injection
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: design
+      antipattern: temporal-coupling
+
+  # God object indicator - too many methods
+  - id: too-many-responsibilities
+    patterns:
+      - pattern: |
+          class $CLASS extends $BASE {
+            ...
+            protected abstract $M1(...): ...;
+            protected abstract $M2(...): ...;
+            protected abstract $M3(...): ...;
+            protected abstract $M4(...): ...;
+            protected abstract $M5(...): ...;
+            ...
+          }
+    message: Class has too many abstract methods - consider splitting responsibilities
+    languages: [typescript]
+    severity: WARNING
+    metadata:
+      category: design
+      antipattern: god-object

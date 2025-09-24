@@ -1,0 +1,336 @@
+rules:
+  # Stub implementations
+  - id: not-implemented-stub
+    pattern-either:
+      - pattern: throw new Error("Not implemented")
+      - pattern: throw new Error("TODO")
+      - pattern: throw new Error("FIXME")
+      - pattern: return Promise.reject("Not implemented")
+      - pattern: console.log("TODO:...")
+    message: Stub implementation detected - function not actually implemented
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: stub
+      deception-risk: high
+
+  # TODO/FIXME comments - more specific patterns to avoid false positives
+  - id: todo-comments
+    patterns:
+      - pattern-either:
+          - pattern: |
+              // TODO: $MSG
+          - pattern: |
+              // FIXME: $MSG
+          - pattern: |
+              /* TODO: $MSG */
+          - pattern: |
+              // HACK: $MSG
+          - pattern: |
+              // @todo $MSG
+          - pattern: |
+              // @fixme $MSG
+      - pattern-not: |
+          // For $X
+    message: Incomplete implementation marker found
+    languages: [typescript, javascript]
+    severity: INFO
+    metadata:
+      category: incomplete
+      deception-risk: medium
+
+  # Hardcoded credentials
+  - id: hardcoded-credentials
+    pattern-either:
+      - pattern: |
+          $VAR = "admin123"
+      - pattern: |
+          password = "$STRING"
+      - pattern: |
+          apiKey = "$STRING"
+      - pattern: |
+          secret = "$STRING"
+      - patterns:
+          - pattern: $VAR = "$STRING"
+          - metavariable-regex:
+              metavariable: $VAR
+              regex: (password|passwd|pwd|apiKey|api_key|secret|token|auth)
+          - metavariable-regex:
+              metavariable: $STRING
+              regex: .{6,}
+    message: Potential hardcoded credential detected
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: security
+      deception-risk: high
+
+  # Test environment bypasses - code that behaves differently in tests
+  - id: test-environment-bypass
+    patterns:
+      - pattern-either:
+          # Direct NODE_ENV checks that change behavior
+          - patterns:
+              - pattern: |
+                  if (process.env.NODE_ENV === "test") {
+                    ...
+                  }
+              - pattern-not: |
+                  if (process.env.NODE_ENV === "test") {
+                    throw ...
+                  }
+              - pattern-not: |
+                  if (process.env.NODE_ENV === "test") {
+                    console.log(...)
+                  }
+          - patterns:
+              - pattern: |
+                  if (process.env.NODE_ENV !== "production") {
+                    ...
+                  }
+              - pattern-not: |
+                  if (process.env.NODE_ENV !== "production") {
+                    console.log(...)
+                  }
+          # Skipping logic in tests with OR conditions
+          - pattern: |
+              if (process.env.NODE_ENV === "test" || ...) {
+                ...
+              }
+          - pattern: |
+              if (process.env.RUN_INTEGRATION === "1" || ...) {
+                ...
+              }
+          - pattern: |
+              if (... || process.env.NODE_ENV === "test") {
+                ...
+              }
+          - pattern: |
+              if (... || process.env.RUN_INTEGRATION === "1") {
+                ...
+              }
+          # Early returns for test environment
+          - patterns:
+              - pattern: |
+                  if ($TEST_CHECK) {
+                    $CACHE_CHECK
+                  }
+              - metavariable-regex:
+                  metavariable: $TEST_CHECK
+                  regex: .*(process\.env\.NODE_ENV|process\.env\.TEST|process\.env\.RUN_INTEGRATION).*
+              - metavariable-pattern:
+                  metavariable: $CACHE_CHECK
+                  pattern-either:
+                    - pattern: return $X
+                    - pattern: reply.send($X)
+                    - pattern: res.send($X)
+    message: Code behaves differently in tests - tests aren't testing real implementation
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: deception
+      deception-risk: critical
+
+  # Deceptive validation
+  - id: always-true-validation
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  function $FUNC(...) {
+                    ...
+                    return true;
+                  }
+              - metavariable-regex:
+                  metavariable: $FUNC
+                  regex: (validate|verify|check|isValid|is[A-Z].*Valid)
+          - patterns:
+              - pattern: |
+                  const $FUNC = (...) => true
+              - metavariable-regex:
+                  metavariable: $FUNC
+                  regex: (validate|verify|check|isValid)
+    message: Validation function always returns true - no actual validation
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: deception
+      deception-risk: critical
+
+  # Silent error swallowing
+  - id: silent-error-handler
+    pattern-either:
+      - pattern: |
+          try {
+            ...
+          } catch ($ERR) {
+          }
+      - pattern: |
+          try {
+            ...
+          } catch {
+          }
+      - pattern: |
+          .catch(() => {})
+      - pattern: |
+          .catch(err => {})
+    message: Error silently swallowed - no error handling or logging
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: brittleness
+      deception-risk: high
+
+  # Missing error handling in async
+  - id: unhandled-async-rejection
+    patterns:
+      - pattern: |
+          async function $FUNC(...) {
+            ...
+          }
+      - pattern-not-inside: |
+          try {
+            ...
+          } catch {
+            ...
+          }
+      - pattern-inside: |
+          await $PROMISE
+    message: Async function with await but no try-catch error handling
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: brittleness
+      deception-risk: medium
+
+  # SQL injection risk
+  - id: sql-string-concatenation
+    pattern-either:
+      - pattern: |
+          $QUERY = "SELECT * FROM " + $VAR
+      - pattern: |
+          $QUERY = `SELECT * FROM ${$VAR}`
+      - patterns:
+          - pattern: |
+              $DB.query("..." + $VAR)
+          - metavariable-regex:
+              metavariable: $DB
+              regex: (db|database|sql|conn|connection)
+    message: SQL query built with string concatenation - injection risk
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: security
+      deception-risk: high
+
+  # Missing null checks
+  - id: unsafe-property-access
+    patterns:
+      - pattern: $OBJ.$PROP1.$PROP2
+      - pattern-not-inside: |
+          if ($OBJ && $OBJ.$PROP1) {
+            ...
+          }
+      - pattern-not-inside: |
+          if ($OBJ?.$PROP1) {
+            ...
+          }
+    message: Nested property access without null check - potential crash
+    languages: [typescript, javascript]
+    severity: INFO
+    metadata:
+      category: brittleness
+      deception-risk: low
+
+  # Fake security function
+  - id: deceptive-security-function
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  function $FUNC(...) {
+                    ...
+                    return $INPUT;
+                  }
+              - metavariable-regex:
+                  metavariable: $FUNC
+                  regex: (sanitize|escape|encrypt|hash|secure)
+              - pattern-not: |
+                  function $FUNC(...) {
+                    ...
+                    $TRANSFORM($INPUT)
+                    ...
+                  }
+          - patterns:
+              - pattern: |
+                  const $FUNC = ($INPUT) => $INPUT
+              - metavariable-regex:
+                  metavariable: $FUNC
+                  regex: (sanitize|escape|encrypt|hash|secure)
+    message: Security function returns input unchanged - no actual security
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: deception
+      deception-risk: critical
+
+  # Console.log in production code
+  - id: console-log-in-production
+    pattern: console.log(...)
+    message: Console.log found - should use proper logging
+    languages: [typescript, javascript]
+    severity: INFO
+    metadata:
+      category: quality
+      deception-risk: low
+
+  # Empty function implementation (excluding constructors and intentional no-ops)
+  - id: empty-function
+    patterns:
+      - pattern-either:
+          - pattern: |
+              function $FUNC(...) {
+              }
+          - pattern: |
+              const $FUNC = (...) => {}
+          - pattern: |
+              async function $FUNC(...) {
+              }
+          - pattern: |
+              $METHOD(...): $TYPE {
+              }
+      - pattern-not: |
+          constructor(...) {}
+      - pattern-not-inside: |
+          interface $INTERFACE {
+            ...
+          }
+      - pattern-not-inside: |
+          abstract class $CLASS {
+            ...
+          }
+    message: Empty function implementation
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      category: stub
+      deception-risk: medium
+
+  # Magic numbers without context
+  - id: magic-numbers
+    patterns:
+      - pattern: $VAR = $NUM
+      - metavariable-regex:
+          metavariable: $NUM
+          regex: ^[0-9]{3,}$
+      - pattern-not-inside: |
+          const $CONST = $NUM
+      - pattern-not-inside: |
+          // $COMMENT
+          $VAR = $NUM
+    message: Magic number without explanation
+    languages: [typescript, javascript]
+    severity: INFO
+    metadata:
+      category: quality
+      deception-risk: low

@@ -1,16 +1,9 @@
 import { FastifyInstance } from 'fastify';
-import type { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
-import type { DatabaseService } from '../../services/core/DatabaseService.js';
-import type { FileWatcher } from '../../services/core/FileWatcher.js';
-import type { SynchronizationCoordinator } from '../../services/synchronization/SynchronizationCoordinator.js';
-import type { SynchronizationMonitoring } from '../../services/synchronization/SynchronizationMonitoring.js';
-import type { ConflictResolution } from '../../services/scm/ConflictResolution.js';
-import type { RollbackCapabilities } from '../../services/scm/RollbackCapabilities.js';
-import { BackupService, MaintenanceOperationError } from '../../services/backup/BackupService.js';
-import type { LoggingService } from '../../services/core/LoggingService.js';
-import type { MaintenanceService } from '../../services/core/MaintenanceService.js';
-import type { ConfigurationService } from '../../services/core/ConfigurationService.js';
-import { MaintenanceMetrics } from '../../services/testing/MaintenanceMetrics.js';
+import type { KnowledgeGraphService } from '@memento/knowledge';
+import type { DatabaseService, FileWatcher, LoggingService, MaintenanceService, ConfigurationService } from '@memento/core';
+import type { SynchronizationCoordinator, SynchronizationMonitoring, ConflictResolution, RollbackCapabilities } from '@memento/sync';
+import { BackupService, MaintenanceOperationError } from '@memento/backup';
+import { MaintenanceMetrics } from '@memento/testing';
 
 type HealthLevel = 'healthy' | 'degraded' | 'unhealthy';
 

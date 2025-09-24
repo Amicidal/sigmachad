@@ -4,11 +4,8 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/core/DatabaseService.js";
-import { ASTParser, ParseResult } from "../../services/knowledge/ASTParser.js";
-import { RelationshipType } from "../../models/relationships.js";
-import { ValidationResult, ValidationIssue } from "../../models/types.js";
+import { KnowledgeGraphService, ASTParser, ParseResult } from "../../../dist/services/knowledge/index.js";
+import { DatabaseService, RelationshipType, ValidationResult, ValidationIssue } from "../../../dist/services/core/index.js";
 import {
   SecurityIssue,
   Entity,
@@ -16,7 +13,7 @@ import {
   ClassSymbol,
   Symbol as SymbolEntity,
   Test,
-} from "../../models/entities.js";
+} from "../../../dist/services/core/index.js";
 import fs from "fs/promises";
 import path from "path";
 import console from "console";

@@ -7,9 +7,17 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "lint": "eslint src/**/*.ts"
+    "lint": "eslint src/**/*.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "redis": "^4.7.0",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.4"
   }
 }

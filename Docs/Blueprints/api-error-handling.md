@@ -19,4 +19,4 @@ The API Gateway exposes REST endpoints layered over Fastify. Consistent error en
 - Consider centralising error logging (attach structured context before sending responses) so repetition in per-route catch blocks disappears.
 
 ## 5. Recent Fixes
-- **2025-09-19:** Introduced `buildErrorResponse` in `src/api/routes/graph.ts` and updated graph endpoints plus gateway integration tests to guarantee `requestId`/`timestamp` accompany server-side failures.
+- **2025-09-19:** Introduced `buildErrorResponse` in graph routes (now in `@memento/api`) and updated graph endpoints plus gateway integration tests to guarantee `requestId`/`timestamp` accompany server-side failures.

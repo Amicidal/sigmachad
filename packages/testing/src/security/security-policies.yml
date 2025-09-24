@@ -1,0 +1,531 @@
+# Security Scanner Policy Configuration
+# This file defines the security scanning policies and rules
+
+version: "1.0"
+
+# Global security settings
+security:
+  # Severity threshold - issues below this level will be ignored
+  severity_threshold: "medium"
+
+  # Confidence threshold - issues below this confidence will be ignored
+  confidence_threshold: 0.7
+
+  # Maximum scan time per file (in milliseconds)
+  max_scan_time: 30000
+
+  # Maximum file size to scan (in bytes)
+  max_file_size: 10485760  # 10MB
+
+  # Enable parallel scanning
+  parallel_scanning: true
+
+  # Maximum concurrent scans
+  max_concurrent_scans: 8
+
+# Scanner-specific configurations
+scanners:
+  sast:
+    enabled: true
+    timeout: 20000
+
+    # Rule configuration
+    rules:
+      enabled:
+        - SQL_INJECTION
+        - XSS_VULNERABILITY
+        - COMMAND_INJECTION
+        - PATH_TRAVERSAL
+        - HARDCODED_SECRET
+        - WEAK_CRYPTO
+        - INSECURE_RANDOM
+        - BROKEN_ACCESS_CONTROL
+        - MISSING_AUTHENTICATION
+        - CORS_MISCONFIGURATION
+        - DEBUG_MODE_ENABLED
+        - INSUFFICIENT_LOGGING
+        - SENSITIVE_DATA_LOGGED
+        - SSRF_VULNERABILITY
+        - NOSQL_INJECTION
+        - XXE_INJECTION
+        - CSRF_VULNERABILITY
+        - UNRESTRICTED_FILE_UPLOAD
+        - CODE_INJECTION_DYNAMIC
+        - PRIVILEGE_ESCALATION
+        - RACE_CONDITION
+        - INTEGER_OVERFLOW
+        - BUFFER_OVERFLOW_READ
+        - BUFFER_OVERFLOW_WRITE
+        - USE_AFTER_FREE_JS
+        - INCORRECT_AUTHORIZATION
+        - INCORRECT_PERMISSIONS
+        - NULL_REFERENCE
+        - HARDCODED_DATABASE_CREDENTIALS
+
+      disabled:
+        - NULL_REFERENCE  # Too many false positives
+        - MISSING_VALIDATION  # Low confidence in test files
+
+      # Custom severity overrides
+      custom_severity:
+        HARDCODED_SECRET: "critical"
+        SQL_INJECTION: "critical"
+        COMMAND_INJECTION: "critical"
+        HARDCODED_DATABASE_CREDENTIALS: "critical"
+        XSS_VULNERABILITY: "high"
+        PATH_TRAVERSAL: "high"
+        SSRF_VULNERABILITY: "high"
+        BROKEN_ACCESS_CONTROL: "high"
+        MISSING_AUTHENTICATION: "high"
+
+      # Custom confidence overrides
+      custom_confidence:
+        HARDCODED_SECRET: 0.9
+        SQL_INJECTION: 0.9
+        COMMAND_INJECTION: 0.9
+        XSS_VULNERABILITY: 0.8
+        WEAK_CRYPTO: 0.9
+
+  secrets:
+    enabled: true
+    timeout: 15000
+
+    # Entropy analysis settings
+    entropy:
+      enabled: true
+      min_entropy: 4.0
+
+    # File type scanning
+    file_types:
+      include:
+        - "*.js"
+        - "*.ts"
+        - "*.jsx"
+        - "*.tsx"
+        - "*.py"
+        - "*.java"
+        - "*.go"
+        - "*.php"
+        - "*.rb"
+        - "*.cs"
+        - "*.cpp"
+        - "*.c"
+        - "*.sh"
+        - "*.bash"
+        - "*.zsh"
+        - "*.json"
+        - "*.yml"
+        - "*.yaml"
+        - "*.xml"
+        - "*.config"
+        - "*.env"
+        - "*.env.local"
+        - "*.env.production"
+        - "*.properties"
+
+      exclude:
+        - "*.min.js"
+        - "*.map"
+        - "node_modules/**"
+        - "dist/**"
+        - "build/**"
+        - ".git/**"
+        - "coverage/**"
+        - "*.log"
+        - "*.backup"
+        - "*.tmp"
+
+  dependencies:
+    enabled: true
+    timeout: 45000
+
+    # Vulnerability databases
+    databases:
+      - "OSV"
+      - "NVD"
+      - "GitHub Advisory"
+
+    # Package file patterns
+    package_files:
+      - "package.json"
+      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "yarn.lock"
+      - "requirements.txt"
+      - "Pipfile"
+      - "Pipfile.lock"
+      - "Gemfile"
+      - "Gemfile.lock"
+      - "pom.xml"
+      - "build.gradle"
+      - "go.mod"
+      - "go.sum"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "composer.json"
+      - "composer.lock"
+
+    # Ignore certain vulnerabilities
+    ignore_vulnerabilities:
+      - "GHSA-example-ignore"  # Example ignored vulnerability
+
+    # Only report vulnerabilities with fixes available
+    require_fix_available: false
+
+# Path and file exclusions
+exclusions:
+  paths:
+    - "node_modules/**"
+    - ".git/**"
+    - "dist/**"
+    - "build/**"
+    - "coverage/**"
+    - "*.min.js"
+    - "*.bundle.js"
+    - "vendor/**"
+    - ".nyc_output/**"
+    - "logs/**"
+    - "tmp/**"
+    - "temp/**"
+    - ".cache/**"
+    - ".vscode/**"
+    - ".idea/**"
+    - "*.log"
+    - "*.backup"
+
+  # File patterns to exclude
+  files:
+    - "*.test.js"
+    - "*.spec.js"
+    - "*.test.ts"
+    - "*.spec.ts"
+    - "*__mocks__/**"
+    - "*__tests__/**"
+    - "test/**"
+    - "tests/**"
+    - "spec/**"
+    - "mock/**"
+    - "mocks/**"
+    - "fixtures/**"
+    - "*.md"
+    - "*.txt"
+    - "*.pdf"
+    - "*.doc"
+    - "*.docx"
+    - "*.xls"
+    - "*.xlsx"
+    - "*.ppt"
+    - "*.pptx"
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.png"
+    - "*.gif"
+    - "*.bmp"
+    - "*.ico"
+    - "*.svg"
+    - "*.mp3"
+    - "*.mp4"
+    - "*.avi"
+    - "*.mov"
+    - "*.wmv"
+    - "*.zip"
+    - "*.tar"
+    - "*.gz"
+    - "*.rar"
+    - "*.7z"
+
+# Issue suppression rules
+suppressions:
+  - rule_id: "MISSING_VALIDATION"
+    path: "tests/**"
+    reason: "Test files don't require full input validation"
+    until: "2024-12-31"
+    created_by: "security-team"
+
+  - rule_id: "HARDCODED_SECRET"
+    path: "examples/**"
+    reason: "Example code contains sample credentials"
+    until: "2024-06-30"
+    created_by: "docs-team"
+
+  - rule_id: "DEBUG_MODE_ENABLED"
+    path: "development.config.js"
+    reason: "Debug mode allowed in development configuration"
+    until: "permanent"
+    created_by: "dev-team"
+
+# Compliance framework mappings
+compliance:
+  owasp_top_10_2021:
+    enabled: true
+    rules:
+      A01_BROKEN_ACCESS_CONTROL:
+        - BROKEN_ACCESS_CONTROL
+        - MISSING_AUTHENTICATION
+        - PATH_TRAVERSAL
+        - INCORRECT_AUTHORIZATION
+        - PRIVILEGE_ESCALATION
+        - INCORRECT_PERMISSIONS
+        - CSRF_VULNERABILITY
+
+      A02_CRYPTOGRAPHIC_FAILURES:
+        - WEAK_CRYPTO
+        - HARDCODED_CRYPTO_KEY
+        - INSECURE_RANDOM
+        - WEAK_ENCRYPTION
+        - HARDCODED_SECRET
+        - HARDCODED_DATABASE_CREDENTIALS
+
+      A03_INJECTION:
+        - SQL_INJECTION
+        - XSS_VULNERABILITY
+        - COMMAND_INJECTION
+        - NOSQL_INJECTION
+        - OS_COMMAND_INJECTION
+        - DOM_XSS
+        - IMPROPER_INPUT_VALIDATION
+        - LDAP_INJECTION
+        - XXE_INJECTION
+        - CODE_INJECTION_DYNAMIC
+
+      A04_INSECURE_DESIGN:
+        - MISSING_RATE_LIMITING
+        - RACE_CONDITION
+        - INTEGER_OVERFLOW
+
+      A05_SECURITY_MISCONFIGURATION:
+        - DEBUG_MODE_ENABLED
+        - CORS_MISCONFIGURATION
+        - XXE_LIBXML_VULNERABILITY
+
+      A06_VULNERABLE_COMPONENTS:
+        - DEPRECATED_FUNCTION
+        - BUFFER_OVERFLOW_READ
+        - BUFFER_OVERFLOW_WRITE
+        - USE_AFTER_FREE_JS
+        - NULL_REFERENCE
+
+      A07_IDENTIFICATION_AUTHENTICATION_FAILURES:
+        - WEAK_SESSION_CONFIG
+        - MISSING_PASSWORD_POLICY
+
+      A08_SOFTWARE_DATA_INTEGRITY_FAILURES:
+        - INSECURE_DESERIALIZATION
+        - UNSIGNED_CODE_EXECUTION
+
+      A09_SECURITY_LOGGING_MONITORING_FAILURES:
+        - INSUFFICIENT_LOGGING
+        - SENSITIVE_DATA_LOGGED
+
+      A10_SERVER_SIDE_REQUEST_FORGERY:
+        - SSRF_VULNERABILITY
+
+  cwe_top_25_2023:
+    enabled: true
+    rules:
+      CWE_79:  # Cross-site Scripting
+        - XSS_VULNERABILITY
+        - DOM_XSS
+
+      CWE_89:  # SQL Injection
+        - SQL_INJECTION
+
+      CWE_20:  # Improper Input Validation
+        - IMPROPER_INPUT_VALIDATION
+        - MISSING_VALIDATION
+
+      CWE_125: # Out-of-bounds Read
+        - BUFFER_OVERFLOW_READ
+
+      CWE_78:  # OS Command Injection
+        - COMMAND_INJECTION
+        - OS_COMMAND_INJECTION
+
+      CWE_787: # Out-of-bounds Write
+        - BUFFER_OVERFLOW_WRITE
+
+      CWE_22:  # Path Traversal
+        - PATH_TRAVERSAL
+        - PATH_INJECTION
+
+      CWE_352: # CSRF
+        - CSRF_VULNERABILITY
+
+      CWE_434: # Unrestricted File Upload
+        - UNRESTRICTED_FILE_UPLOAD
+
+      CWE_94:  # Code Injection
+        - CODE_INJECTION_DYNAMIC
+
+      CWE_269: # Improper Privilege Management
+        - PRIVILEGE_ESCALATION
+
+      CWE_502: # Insecure Deserialization
+        - INSECURE_DESERIALIZATION
+
+      CWE_287: # Improper Authentication
+        - MISSING_AUTHENTICATION
+
+      CWE_862: # Missing Authorization
+        - INCORRECT_AUTHORIZATION
+
+      CWE_276: # Incorrect Default Permissions
+        - INCORRECT_PERMISSIONS
+
+      CWE_200: # Information Exposure
+        - SENSITIVE_DATA_LOGGED
+
+      CWE_522: # Insufficiently Protected Credentials
+        - HARDCODED_SECRET
+        - HARDCODED_DATABASE_CREDENTIALS
+
+      CWE_611: # XXE
+        - XXE_INJECTION
+        - XXE_LIBXML_VULNERABILITY
+
+      CWE_918: # SSRF
+        - SSRF_VULNERABILITY
+
+      CWE_362: # Race Condition
+        - RACE_CONDITION
+
+      CWE_190: # Integer Overflow
+        - INTEGER_OVERFLOW
+
+      CWE_327: # Weak Crypto
+        - WEAK_CRYPTO
+        - WEAK_ENCRYPTION
+
+      CWE_416: # Use After Free
+        - USE_AFTER_FREE_JS
+
+      CWE_863: # Incorrect Authorization
+        - INCORRECT_AUTHORIZATION
+
+      CWE_306: # Missing Authentication
+        - MISSING_AUTHENTICATION
+
+# Reporting configuration
+reporting:
+  formats:
+    json:
+      enabled: true
+      include_code_snippets: true
+      include_remediation: true
+      include_metadata: true
+
+    html:
+      enabled: true
+      template: "default"
+      include_charts: true
+      include_remediation: true
+
+    markdown:
+      enabled: true
+      include_remediation: true
+      include_examples: true
+
+    csv:
+      enabled: true
+      include_file_paths: true
+
+    sarif:
+      enabled: true
+      include_fingerprints: true
+      include_fixes: true
+      include_related_locations: true
+
+  # Default output directory
+  output_directory: "./security-reports"
+
+  # Include suppressed issues in reports
+  include_suppressed: false
+
+  # Include file content in reports
+  include_file_content: false
+
+  # Maximum code snippet length
+  max_snippet_length: 200
+
+# Integration settings
+integrations:
+  github:
+    enabled: true
+    upload_sarif: true
+    create_issues: false
+    comment_on_pr: true
+
+  slack:
+    enabled: false
+    webhook_url: ""
+    notify_on_critical: true
+    notify_on_scan_complete: false
+
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    from_address: ""
+    to_addresses: []
+    notify_on_critical: true
+
+# Performance tuning
+performance:
+  # Cache settings
+  cache:
+    enabled: true
+    ttl: 3600  # Cache TTL in seconds (1 hour)
+    max_size: 1000  # Maximum cache entries
+
+  # Batch processing
+  batch_size: 50
+
+  # Memory limits
+  max_memory_usage: 1073741824  # 1GB in bytes
+
+  # CPU limits
+  max_cpu_usage: 80  # Percentage
+
+# Logging configuration
+logging:
+  level: "info"  # debug, info, warn, error
+
+  # Log to file
+  file:
+    enabled: true
+    path: "./logs/security-scanner.log"
+    max_size: 104857600  # 100MB
+    max_files: 5
+
+  # Log to console
+  console:
+    enabled: true
+    colorize: true
+
+  # Include scan metrics in logs
+  include_metrics: true
+
+  # Include performance data
+  include_performance: true
+
+# Notification rules
+notifications:
+  critical_issues:
+    enabled: true
+    threshold: 1  # Notify if any critical issues found
+    channels: ["console", "file"]
+
+  high_issues:
+    enabled: true
+    threshold: 5  # Notify if 5+ high issues found
+    channels: ["console"]
+
+  scan_failures:
+    enabled: true
+    channels: ["console", "file"]
+
+  performance_issues:
+    enabled: true
+    memory_threshold: 500  # MB
+    time_threshold: 300000  # 5 minutes in ms
+    channels: ["console", "file"]

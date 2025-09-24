@@ -4,10 +4,8 @@
  */
 
 import { z } from 'zod';
-import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/core/DatabaseService.js';
-import { ASTParser } from '../../services/knowledge/ASTParser.js';
-import { FileWatcher } from '../../services/core/FileWatcher.js';
+import { KnowledgeGraphService, ASTParser } from '@memento/knowledge';
+import { DatabaseService, FileWatcher } from '@memento/core';
 import { router, publicProcedure, TRPCContext } from './base.js';
 import type { FastifyRequest } from 'fastify';
 import {

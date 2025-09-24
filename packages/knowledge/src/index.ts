@@ -52,3 +52,6 @@ export * from './orchestration/ServiceRegistry.js';
 export * from './orchestration/CacheManager.js';
 export * from './orchestration/PerformanceOptimizer.js';
 export * from './orchestration/StatsCollector.js';
+
+// High-Throughput Ingestion Pipeline exports
+export * from './ingestion/index.js';

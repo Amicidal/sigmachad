@@ -1,9 +1,9 @@
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { KnowledgeGraphService } from "../knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../core/DatabaseService.js";
-import { noiseConfig } from "../../config/noise.js";
-import { RelationshipType } from "../../models/relationships.js";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
+import { noiseConfig } from "@memento/core";
+import { RelationshipType } from "@memento/core";
 import type {
   CreateSpecRequest,
   CreateSpecResponse,
@@ -11,8 +11,8 @@ import type {
   ListSpecsParams,
   UpdateSpecRequest,
   ValidationIssue,
-} from "../../models/types.js";
-import type { Spec } from "../../models/entities.js";
+} from "@memento/core";
+import type { Spec } from "@memento/core";
 
 export interface SpecListResult {
   specs: Spec[];

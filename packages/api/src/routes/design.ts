@@ -5,14 +5,14 @@
 
 import { FastifyInstance } from "fastify";
 import { v4 as uuidv4 } from "uuid";
-import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/core/DatabaseService.js";
-import { SpecService } from "../../services/testing/SpecService.js";
+import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
+import { DatabaseService } from "../../../dist/services/core/index.js";
+import { SpecService } from "../../../dist/services/testing/index.js";
 import {
   CreateSpecRequest,
   UpdateSpecRequest,
   ListSpecsParams,
-} from "../../models/types.js";
+} from "../../../dist/services/core/index.js";
 
 export function registerDesignRoutes(
   app: FastifyInstance,

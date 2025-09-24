@@ -1,22 +1,68 @@
 #!/bin/sh
 
-# Run depth validation using node with typescript support
+# Run depth validation
 echo "🔍 Checking directory depth constraints..."
-node --experimental-strip-types scripts/validate-depth.ts 2>/dev/null || node scripts/validate-depth.js 2>/dev/null || echo "⚠️  Depth validation skipped (TypeScript runner not available)"
+pnpm tsx scripts/validate-depth.ts
 
-# Since nx and eslint aren't available, skip linting for now
-# but let's at least check if staged files have basic issues
-echo "📝 Checking staged files..."
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ Pre-commit check failed: Directory depth exceeds maximum allowed (3 levels)"
+  echo ""
+  echo "Please refactor deep nested directories before committing."
+  echo "Run 'pnpm tsx scripts/validate-depth.ts --fix' for suggestions."
+  exit 1
+fi
 
-# Get staged TypeScript/JavaScript files
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ts|tsx|js|jsx)$' || true)
+# Run linter on all packages
+echo "📝 Running linter..."
+pnpm lint
 
-if [ -n "$STAGED_FILES" ]; then
-  echo "Files to be committed:"
-  echo "$STAGED_FILES" | head -10
-  if [ $(echo "$STAGED_FILES" | wc -l) -gt 10 ]; then
-    echo "... and $(expr $(echo "$STAGED_FILES" | wc -l) - 10) more files"
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ Pre-commit check failed: Linting errors found"
+  echo ""
+  echo "Run 'pnpm lint:fix' to automatically fix some issues."
+  exit 1
+fi
+
+# Run security checks
+echo "🔒 Running security checks..."
+
+# Quick secrets scan on staged files
+echo "🔍 Scanning for secrets..."
+git diff --cached --name-only | xargs -I {} pnpm run security:secrets:check:file {}
+
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ Pre-commit check failed: Secrets detected in staged files"
+  echo ""
+  echo "Please remove secrets from your code before committing."
+  exit 1
+fi
+
+# Quick dependency vulnerability check (only if package files changed)
+if git diff --cached --name-only | grep -E "(package\.json|pnpm-lock\.yaml|requirements\.txt|Pipfile|Gemfile|pom\.xml|build\.gradle|go\.mod|Cargo\.toml|composer\.json)"; then
+  echo "📦 Checking dependencies..."
+  pnpm run security:deps:check --quick
+
+  if [ $? -ne 0 ]; then
+    echo ""
+    echo "⚠️ Warning: Dependency vulnerabilities detected"
+    echo ""
+    echo "Consider updating vulnerable dependencies."
+    # Don't fail the commit for dependency issues, just warn
   fi
 fi
 
-echo "✅ Pre-commit checks passed!"
+# Generate code summaries (non-blocking)
+echo "📚 Generating code summaries..."
+bash scripts/generate-code-summaries.sh 2>/dev/null || {
+  echo "⚠️  Warning: Could not generate code summaries (non-blocking)"
+}
+
+# Add summaries to commit if they exist and changed
+if [ -d "docs/summaries" ]; then
+  git add docs/summaries/*.md 2>/dev/null || true
+fi
+
+echo "✅ All pre-commit checks passed!"

@@ -21,3 +21,6 @@ export * from './logging/index.js';
 
 // Model exports (types are also models in this structure)
 export * from './models/relationships.js';
+
+// Rollback exports
+export * from './rollback/index.js';

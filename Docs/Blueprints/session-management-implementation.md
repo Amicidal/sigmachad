@@ -1,9 +1,9 @@
-# Ephemeral Session Management: Architecture and Implementation
+# Session Management Implementation Blueprint
 
-## Overview
+## 1. Overview
 This document details the ephemeral Redis-based session management for multi-agent coordination in Memento. Sessions capture live events (changes, state transitions like pass→break, impacts) in Redis cache with TTL (15-60 min or tied to checkpoint discard), ensuring zero long-term growth. The KG holds sparse anchors (metadata refs on entities/clusters for summaries/outcomes/checkpoints) for structural awareness. A bridge service (`SessionQueryService`) unifies queries (Redis depth + KG traversals), enabling fast isolation (e.g., "session impacts on spec") and handoffs. Opt-in Postgres snapshots for rare failures (<5%). Focus: Velocity for 100+ agents (5k sessions/day), real-time pub-sub, no bloat—aligns with agent swarms and KG core (relationships/clusters/benchmarks).
 
-## Architectural Diagram
+## 2. Architecture
 ```
 Multi-Agent Emit (MCP Tool/Event) → Redis Cache (Live Events: Sorted Sets/JSON, TTL 15-60 min)
       │                                       │
@@ -24,7 +24,7 @@ Checkpoints (Ref-Only Metadata on Entities) ─────── Discard Redis 
 - **Bridge**: Joins for intelligent queries (e.g., detect transitions in Redis, enrich with KG impacts).
 - **Postgres**: Durable but optional (only for broken sessions; ~1-5% volume).
 
-## Schema and Data Model
+## 3. Schema and Data Model
 ### Redis (Ephemeral Cache)
 - **Key Structure**: Namespaced for isolation (e.g., by agentId/module).
   - `session:{sessionId}`: Redis Hash with JSON fields (batched events for efficiency, ~1-5KB/session):
@@ -111,7 +111,7 @@ Checkpoints (Ref-Only Metadata on Entities) ─────── Discard Redis 
   ```
   - Prune: >30 days (partition drop). Volume: <5% sessions (failures only), ~1-10GB/year.
 
-## Implementation Flow
+## 4. Implementation Flow
 1. **Session Creation** (Agent Start, e.g., MCP Tool Call):
    - Generate `sessionId` (UUID), init `session:{id}` in Redis (HSET agentIds/state).
    - Pub/sub announce (e.g., "New session for spec impl—join?").
@@ -137,9 +137,9 @@ Checkpoints (Ref-Only Metadata on Entities) ─────── Discard Redis 
 
 - **Error Handling**: Retry Redis writes (exponential backoff); on failure, emit to fallback queue (Postgres). Multi-agent: Use Redis locks (SETNX) for concurrent writes.
 
-## Code Stubs
+## 5. Code Stubs
 ### SessionManager (Ingestion/Redis Writes)
-In `packages/core/src/services/SessionManager.ts` (called from `SynchronizationCoordinator`):
+In `@memento/core/SessionManager.ts` (called from `SynchronizationCoordinator`):
 ```typescript
 import Redis from 'ioredis';
 import { KnowledgeGraphService } from './KnowledgeGraphService';  // Existing KG
@@ -323,7 +323,7 @@ export { SessionManager, SessionEvent, SessionAnchor };
 ```
 
 ### SessionBridge (Queries: Redis + KG Join)
-In `packages/core/src/services/SessionBridge.ts`:
+In `@memento/core/SessionBridge.ts`:
 ```typescript
 import { SessionManager } from './SessionManager';
 import { KnowledgeGraphService } from './KnowledgeGraphService';
@@ -445,7 +445,7 @@ export { SessionBridge };
 
 - **Usage in MCP Tools**: Expose via endpoints (e.g., `tools.getSessionTransitions(sessionId)` calls bridge.getTransitions).
 
-## KG Integration
+## 6. KG Integration
 - **Anchors Enable Traversals**: Metadata refs tie sessions to core without bloat—e.g., query impacts on clusters/specs/benchmarks.
   - **Example: Session Outcomes on Cluster** (Cypher, <100ms):
     ```
@@ -468,17 +468,19 @@ export { SessionBridge };
 
 - **No Bloat Guarantee**: Anchors ~1k/day (1k sessions × 1-2 refs); events live-only in Redis (discard post-checkpoint). Integrates with sync (`FileWatcher` emits events if session active).
 
-## Scalability
+## 7. Scalability
 - **100+ Agents (5k Sessions/Day, 250k Events/Day)**: Redis Cluster (3-6 nodes, sharded by sessionId/agentId, $100-500/mo)—handles 1M+ ops/day sub-ms. Pub/sub scales handoffs (no central bottleneck).
 - **Growth**: Zero persistent from events (TTL discards); KG anchors <5% (~1MB/day, prune to 1-2%). Postgres opt-in <1GB/year (failures only).
 - **Performance**: Writes <5ms (Redis bulk); queries <100ms (bridge: ZRANGE + 1-hop Cypher). At 1M LOC: Core KG traversals unaffected.
 - **Ops**: Auto-TTL; monitor `active_sessions` via Redis INFO. Multi-agent: Sharding isolates (e.g., Agent 50's sessions in shard 5); locks (SETNX) for concurrent writes.
 
-## Multi-Agent Handoffs
+## 8. Multi-Agent Handoffs
 - **Shared Sessions**: One ID for workflow (e.g., 5 agents on cluster refactor = 1 cache entry, `agentIds` array). Pub-sub: Agent A publishes 'modified', B/C subscribe real-time ("Join and sync impacts").
 - **Example Flow**: Agent 20 starts session for spec impl → Emits events (Redis) → Agent 21 joins (subscribe, getHandoffContext) → On checkpoint (test pass), anchor to KG, discard cache → Agent 22 recovers from anchor refs.
 - **Coordination**: Bridge.getHandoffContext(sessionId) for "recent changes + KG context" (e.g., "Catch up: Modified cluster-ABC, broke benchmark Y by -5ms").
 - **Velocity Boost**: Real-time (no polling), shared = 2-5x faster swarms (20 agents on 1k tasks/day without duplication).
 
 This blueprint is ready for implementation—stubs adapt to existing `SynchronizationCoordinator` and `KnowledgeGraphService`. For failures, the opt-in Postgres ensures debuggability without routine bloat. Aligns with velocity: Live coord, discard noise, KG for structure.
+
+
 

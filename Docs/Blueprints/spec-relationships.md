@@ -15,7 +15,7 @@ Specification edges (`REQUIRES`, `IMPACTS`, `IMPLEMENTS_SPEC`, `IMPLEMENTS_CLUST
 4. Integrate with versioning to capture requirement evolution and compliance timeline.
 
 ## 4. Inputs & Consumers
-- **Ingestion Sources**: Design authoring APIs (`src/api/routes/design.ts`), documentation parser (domain docs), manual annotations, potential integrations with project management tools (e.g., Linear, Jira).
+- **Ingestion Sources**: Design authoring APIs (in `@memento/api`), documentation parser (domain docs), manual annotations, potential integrations with project management tools (e.g., Linear, Jira).
 - **Consumers**: Impact endpoints, planning dashboards, spec coverage reports, testing automation (identify unimplemented requirements), and compliance audits.
 
 ## 5. Schema & Metadata Requirements

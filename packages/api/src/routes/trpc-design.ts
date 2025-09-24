@@ -4,10 +4,9 @@
  */
 
 import { z } from 'zod';
-import { router, publicProcedure, type TRPCContext } from '../base.js';
-import { SpecService } from '../../../services/testing/SpecService.js';
-import type { Spec } from '../../../models/entities.js';
-import type { ListSpecsParams } from '../../../models/types.js';
+import { router, publicProcedure, type TRPCContext } from '../trpc/base.js';
+import { SpecService } from '@memento/testing';
+import type { Spec, ListSpecsParams } from '@memento/core';
 
 const ValidationIssueSchema = z.object({
   message: z.string(),

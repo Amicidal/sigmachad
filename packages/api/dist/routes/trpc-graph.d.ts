@@ -1,0 +1,233 @@
+/**
+ * Knowledge Graph tRPC Routes
+ * Type-safe procedures for graph operations
+ */
+export declare const graphRouter: import("@trpc/server").CreateRouterInner<import("@trpc/server").RootConfig<{
+    ctx: import("../trpc/base.js").TRPCContext;
+    meta: object;
+    errorShape: any;
+    transformer: typeof import("superjson").default;
+}>, {
+    getEntities: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../trpc/base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../trpc/base.js").TRPCContext;
+        _input_in: {
+            type?: string | undefined;
+            limit?: number | undefined;
+            offset?: number | undefined;
+        };
+        _input_out: {
+            limit: number;
+            offset: number;
+            type?: string | undefined;
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, {
+        items: Entity[] | undefined;
+        total: number;
+        limit: number;
+        offset: number;
+    }>;
+    getEntity: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../trpc/base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../trpc/base.js").TRPCContext;
+        _input_in: {
+            id: string;
+        };
+        _input_out: {
+            id: string;
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, any>;
+    getRelationships: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../trpc/base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../trpc/base.js").TRPCContext;
+        _input_in: {
+            entityId: string;
+            type?: string | undefined;
+            limit?: number | undefined;
+            direction?: "incoming" | "outgoing" | "both" | undefined;
+        };
+        _input_out: {
+            entityId: string;
+            limit: number;
+            direction: "incoming" | "outgoing" | "both";
+            type?: string | undefined;
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, any[]>;
+    searchEntities: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../trpc/base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../trpc/base.js").TRPCContext;
+        _input_in: {
+            query: string;
+            limit?: number | undefined;
+            entityTypes?: ("function" | "spec" | "file" | "class" | "interface" | "module" | "test" | "change" | "session" | "directory")[] | undefined;
+            searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
+            filters?: {
+                path?: string | undefined;
+                tags?: string[] | undefined;
+                language?: string | undefined;
+                lastModified?: {
+                    since?: Date | undefined;
+                    until?: Date | undefined;
+                } | undefined;
+                checkpointId?: string | undefined;
+            } | undefined;
+            includeRelated?: boolean | undefined;
+        };
+        _input_out: {
+            query: string;
+            limit: number;
+            entityTypes?: ("function" | "spec" | "file" | "class" | "interface" | "module" | "test" | "change" | "session" | "directory")[] | undefined;
+            searchType?: "semantic" | "structural" | "usage" | "dependency" | undefined;
+            filters?: {
+                path?: string | undefined;
+                tags?: string[] | undefined;
+                language?: string | undefined;
+                lastModified?: {
+                    since?: Date | undefined;
+                    until?: Date | undefined;
+                } | undefined;
+                checkpointId?: string | undefined;
+            } | undefined;
+            includeRelated?: boolean | undefined;
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, {
+        items: Entity[];
+        total: number;
+    }>;
+    getDependencies: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../trpc/base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../trpc/base.js").TRPCContext;
+        _input_in: {
+            entityId: string;
+            depth?: number | undefined;
+        };
+        _input_out: {
+            entityId: string;
+            depth: number;
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, any>;
+    getClusters: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../trpc/base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../trpc/base.js").TRPCContext;
+        _input_in: {
+            limit?: number | undefined;
+            domain?: string | undefined;
+            minSize?: number | undefined;
+        };
+        _input_out: {
+            limit: number;
+            minSize: number;
+            domain?: string | undefined;
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, Entity[]>;
+    analyzeImpact: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../trpc/base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../trpc/base.js").TRPCContext;
+        _input_in: {
+            entityId: string;
+            changeType: "refactor" | "modify" | "delete";
+        };
+        _input_out: {
+            entityId: string;
+            changeType: "refactor" | "modify" | "delete";
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, {
+        entityId: string;
+        entityType: any;
+        changeType: "refactor" | "modify" | "delete";
+        impactScore: number;
+        riskLevel: string;
+        directlyImpacted: number;
+        totalRelationships: number;
+        impactedEntities: string[];
+        highRiskChanges: never[];
+        warnings: never[];
+        recommendations: string[];
+        timestamp: string;
+    }>;
+    timeTravel: import("@trpc/server").BuildProcedure<"query", {
+        _config: import("@trpc/server").RootConfig<{
+            ctx: import("../trpc/base.js").TRPCContext;
+            meta: object;
+            errorShape: any;
+            transformer: typeof import("superjson").default;
+        }>;
+        _meta: object;
+        _ctx_out: import("../trpc/base.js").TRPCContext;
+        _input_in: {
+            startId: string;
+            types?: string[] | undefined;
+            since?: Date | undefined;
+            until?: Date | undefined;
+            atTime?: Date | undefined;
+            maxDepth?: number | undefined;
+        };
+        _input_out: {
+            startId: string;
+            types?: string[] | undefined;
+            since?: Date | undefined;
+            until?: Date | undefined;
+            atTime?: Date | undefined;
+            maxDepth?: number | undefined;
+        };
+        _output_in: typeof import("@trpc/server").unsetMarker;
+        _output_out: typeof import("@trpc/server").unsetMarker;
+    }, any>;
+}>;
+//# sourceMappingURL=trpc-graph.d.ts.map

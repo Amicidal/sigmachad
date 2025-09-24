@@ -17,7 +17,7 @@ Following this convention keeps Claude responsive and preserves earlier conversa
 
 ## Monorepo Structure Rules
 
-- **Depth Limit**: No file paths deeper than 3 levels from workspace root (e.g., `packages/graph/src/utils.ts` = 3 levels: `packages/`, `graph/`, `src/utils.ts`). Exceptions: `node_modules/`, `dist/`.
+- **Depth Limit**: No file paths deeper than 3 (4 for packages) levels from workspace root (e.g., `packages/graph/src/utils.ts` = 4 levels: `packages/`, `graph/`, `src/`, `utils.ts`). Exceptions: `node_modules/`, `dist/`.
 
 - **Import Restrictions**: No relative imports >3 `../` (e.g., `../../../` forbidden). Use path aliases for cross-package imports.
 

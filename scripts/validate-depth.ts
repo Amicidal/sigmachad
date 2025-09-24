@@ -42,17 +42,19 @@ class DepthValidator {
         'services/knowledge',
         'services/testing',
         'api/trpc',
-        'services/synchronization'
+        'services/synchronization',
       ],
       verbose: false,
       fix: false,
-      ...options
+      ...options,
     };
     this.projectRoot = process.cwd();
   }
 
   public async validate(): Promise<boolean> {
-    console.log(`🔍 Validating directory depth (target: ${this.options.targetDepth}, warn: ${this.options.warnDepth}, max: ${this.options.maxDepth})...`);
+    console.log(
+      `🔍 Validating directory depth (target: ${this.options.targetDepth}, warn: ${this.options.warnDepth}, max: ${this.options.maxDepth})...`
+    );
 
     const files = this.getAllSourceFiles();
 
@@ -76,20 +78,15 @@ class DepthValidator {
   }
 
   private getAllSourceFiles(): string[] {
-    const patterns = [
-      '**/*.ts',
-      '**/*.tsx',
-      '**/*.js',
-      '**/*.jsx'
-    ];
+    const patterns = ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'];
 
-    const ignorePatterns = this.options.ignorePaths.map(p => `${p}/**`);
+    const ignorePatterns = this.options.ignorePaths.map((p) => `${p}/**`);
 
     const files: string[] = [];
     for (const pattern of patterns) {
       const matches = globSync(pattern, {
         ignore: ignorePatterns,
-        absolute: false
+        absolute: false,
       });
       files.push(...matches);
     }
@@ -102,7 +99,7 @@ class DepthValidator {
     const depth = segments.length - 1; // Subtract 1 for filename
 
     // Check if this is in a complex domain that allows deeper nesting
-    const isComplexDomain = this.options.complexDomains.some(domain =>
+    const isComplexDomain = this.options.complexDomains.some((domain) =>
       filePath.startsWith(domain)
     );
 
@@ -113,7 +110,7 @@ class DepthValidator {
         path: filePath,
         depth,
         severity: 'error',
-        suggestion
+        suggestion,
       });
     } else if (depth > this.options.warnDepth && !isComplexDomain) {
       // Non-complex domain exceeding warning threshold
@@ -122,7 +119,7 @@ class DepthValidator {
         path: filePath,
         depth,
         severity: 'error',
-        suggestion
+        suggestion,
       });
     } else if (depth > this.options.targetDepth) {
       // Exceeds target but within acceptable range for complex domains
@@ -132,7 +129,7 @@ class DepthValidator {
           path: filePath,
           depth,
           severity: 'warning',
-          suggestion
+          suggestion,
         });
       } else if (!isComplexDomain) {
         const suggestion = this.generateSuggestion(filePath);
@@ -140,7 +137,7 @@ class DepthValidator {
           path: filePath,
           depth,
           severity: 'error',
-          suggestion
+          suggestion,
         });
       }
     }
@@ -151,7 +148,10 @@ class DepthValidator {
 
     // Common refactoring patterns
     if (filePath.includes('services/knowledge/parser/builders/')) {
-      return filePath.replace('services/knowledge/parser/builders/', 'builders/parser/');
+      return filePath.replace(
+        'services/knowledge/parser/builders/',
+        'builders/parser/'
+      );
     }
 
     if (filePath.includes('services/knowledge/ogm/models/')) {
@@ -159,15 +159,15 @@ class DepthValidator {
     }
 
     if (filePath.includes('services/knowledge/knowledge-graph/facades/')) {
-      return filePath.replace('services/knowledge/knowledge-graph/facades/', 'facades/graph/');
+      return filePath.replace(
+        'services/knowledge/knowledge-graph/facades/',
+        'facades/graph/'
+      );
     }
 
     // Generic suggestion: flatten middle directories
     if (segments.length > this.options.maxDepth + 1) {
-      const newSegments = [
-        ...segments.slice(0, 2),
-        ...segments.slice(-2)
-      ];
+      const newSegments = [...segments.slice(0, 2), ...segments.slice(-2)];
       return newSegments.join(path.sep);
     }
 
@@ -176,18 +176,21 @@ class DepthValidator {
 
   private reportViolations(): void {
     if (this.warnings.length > 0) {
-      console.log(`\n⚠️  Found ${this.warnings.length} files exceeding target depth (allowed for complex domains):`);
+      console.log(
+        `\n⚠️  Found ${this.warnings.length} files exceeding target depth (allowed for complex domains):`
+      );
       this.reportItems(this.warnings, true);
     }
 
     if (this.violations.length > 0) {
-      console.log(`\n❌ Found ${this.violations.length} files exceeding maximum depth:`);
+      console.log(
+        `\n❌ Found ${this.violations.length} files exceeding maximum depth:`
+      );
       this.reportItems(this.violations, false);
     }
   }
 
   private reportItems(items: DepthViolation[], isWarning: boolean): void {
-
     // Group by depth
     const byDepth = items.reduce((acc, v) => {
       if (!acc[v.depth]) acc[v.depth] = [];
@@ -195,7 +198,9 @@ class DepthValidator {
       return acc;
     }, {} as Record<number, DepthViolation[]>);
 
-    for (const [depth, violations] of Object.entries(byDepth).sort((a, b) => Number(b[0]) - Number(a[0]))) {
+    for (const [depth, violations] of Object.entries(byDepth).sort(
+      (a, b) => Number(b[0]) - Number(a[0])
+    )) {
       console.log(`\n  Depth ${depth} (${violations.length} files):`);
 
       if (this.options.verbose) {
@@ -219,12 +224,16 @@ class DepthValidator {
     if (!isWarning) {
       console.log('\n📊 Summary:');
       console.log(`  - Target depth: ${this.options.targetDepth}`);
-      console.log(`  - Warning depth: ${this.options.warnDepth} (complex domains only)`);
+      console.log(
+        `  - Warning depth: ${this.options.warnDepth} (complex domains only)`
+      );
       console.log(`  - Maximum depth: ${this.options.maxDepth}`);
       console.log(`  - Files with errors: ${this.violations.length}`);
       console.log(`  - Files with warnings: ${this.warnings.length}`);
       if (items.length > 0) {
-        console.log(`  - Deepest nesting: ${Math.max(...items.map(v => v.depth))}`);
+        console.log(
+          `  - Deepest nesting: ${Math.max(...items.map((v) => v.depth))}`
+        );
       }
     }
   }
@@ -261,13 +270,19 @@ class DepthValidator {
       stepNumber++;
     }
 
-    console.log(`\n${stepNumber}. Update all import statements across the codebase`);
+    console.log(
+      `\n${stepNumber}. Update all import statements across the codebase`
+    );
     console.log(`${stepNumber + 1}. Update barrel exports if any`);
     console.log(`${stepNumber + 2}. Run tests to ensure nothing is broken`);
 
     if (this.warnings.length > 0) {
-      console.log(`\n⚠️  Note: ${this.warnings.length} files are in complex domains and exceed target depth but are within acceptable limits.`);
-      console.log('Consider refactoring these when making major changes to those modules.');
+      console.log(
+        `\n⚠️  Note: ${this.warnings.length} files are in complex domains and exceed target depth but are within acceptable limits.`
+      );
+      console.log(
+        'Consider refactoring these when making major changes to those modules.'
+      );
     }
   }
 }
@@ -278,23 +293,29 @@ async function main() {
 
   const options: Partial<ValidationOptions> = {
     verbose: args.includes('--verbose') || args.includes('-v'),
-    fix: args.includes('--fix') || args.includes('-f')
+    fix: args.includes('--fix') || args.includes('-f'),
   };
 
   // Parse target depth if provided
-  const targetIndex = args.findIndex(arg => arg === '--target-depth' || arg === '-t');
+  const targetIndex = args.findIndex(
+    (arg) => arg === '--target-depth' || arg === '-t'
+  );
   if (targetIndex !== -1 && args[targetIndex + 1]) {
     options.targetDepth = parseInt(args[targetIndex + 1], 10);
   }
 
   // Parse warning depth if provided
-  const warnIndex = args.findIndex(arg => arg === '--warn-depth' || arg === '-w');
+  const warnIndex = args.findIndex(
+    (arg) => arg === '--warn-depth' || arg === '-w'
+  );
   if (warnIndex !== -1 && args[warnIndex + 1]) {
     options.warnDepth = parseInt(args[warnIndex + 1], 10);
   }
 
   // Parse max depth if provided
-  const depthIndex = args.findIndex(arg => arg === '--max-depth' || arg === '-d');
+  const depthIndex = args.findIndex(
+    (arg) => arg === '--max-depth' || arg === '-d'
+  );
   if (depthIndex !== -1 && args[depthIndex + 1]) {
     options.maxDepth = parseInt(args[depthIndex + 1], 10);
   }
@@ -310,7 +331,7 @@ async function main() {
 }
 
 // Run if executed directly
-main().catch(err => {
+main().catch((err) => {
   console.error('Error validating depth:', err);
   process.exit(1);
 });

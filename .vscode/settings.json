@@ -1,0 +1,107 @@
+{
+  // SonarLint Configuration
+  "sonarlint.connectedMode.connections.sonarqube": [],
+  "sonarlint.connectedMode.connections.sonarcloud": [],
+  "sonarlint.rules": {
+    // TypeScript specific rules
+    "typescript:S6606": {
+      "level": "on",
+      "parameters": {}
+    },
+    // Avoid 'any' type
+    "typescript:S4023": {
+      "level": "on"
+    },
+    // Cognitive complexity
+    "typescript:S3776": {
+      "level": "on",
+      "parameters": {
+        "threshold": "15"
+      }
+    },
+    // Function complexity
+    "typescript:S1541": {
+      "level": "on",
+      "parameters": {
+        "threshold": "10"
+      }
+    },
+    // Magic numbers
+    "typescript:S109": {
+      "level": "on"
+    },
+    // Console logging
+    "typescript:S106": {
+      "level": "on"
+    },
+    // Empty catch blocks
+    "typescript:S2486": {
+      "level": "on"
+    },
+    // Commented out code
+    "typescript:S125": {
+      "level": "on"
+    },
+    // TODO/FIXME comments
+    "typescript:S1135": {
+      "level": "on"
+    },
+    // Promise constructor antipattern
+    "typescript:S4822": {
+      "level": "on"
+    },
+    // Generic exceptions
+    "typescript:S112": {
+      "level": "on"
+    },
+    // Circular dependencies
+    "typescript:S1854": {
+      "level": "on"
+    },
+    // Dead stores
+    "typescript:S1763": {
+      "level": "on"
+    },
+    // Null pointer dereference
+    "typescript:S2259": {
+      "level": "on"
+    }
+  },
+
+  // Additional rules for JavaScript files
+  "sonarlint.rules.javascript": {
+    // Same rules apply to JavaScript
+    "javascript:S4023": { "level": "on" },
+    "javascript:S3776": { "level": "on", "parameters": { "threshold": "15" } },
+    "javascript:S109": { "level": "on" },
+    "javascript:S106": { "level": "on" },
+    "javascript:S2486": { "level": "on" },
+    "javascript:S125": { "level": "on" },
+    "javascript:S1135": { "level": "on" }
+  },
+
+  // Path to Node.js executable (adjust if needed)
+  "sonarlint.ls.javaHome": "",
+
+  // Output verbosity
+  "sonarlint.output.verboseLevel": "info",
+
+  // Show verbose logs
+  "sonarlint.output.showAnalyzerLogs": false,
+
+  // Show verbose rule descriptions
+  "sonarlint.output.showRuleDescriptions": true,
+
+  // File exclusions (if needed)
+  "sonarlint.pathToCompileCommands": "",
+
+  // Exclude test files from analysis
+  "sonarlint.testFilePattern": "**/*.test.ts,**/*.spec.ts,**/*.test.js,**/*.spec.js",
+
+  // Focus on source files
+  "sonarlint.focusOnNewCode": false,
+  "sonarlint.connectedMode.project": {
+    "connectionId": "http://localhost:9000",
+    "projectKey": "sigmachad"
+  }
+}

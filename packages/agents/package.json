@@ -1,0 +1,57 @@
+{
+  "name": "@memento/agents",
+  "version": "0.1.0",
+  "description": "Multi-agent orchestration system for Memento knowledge graph",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "multi-agent",
+    "orchestration",
+    "coordination",
+    "distributed-systems",
+    "knowledge-graph",
+    "memento"
+  ],
+  "author": "Memento Team",
+  "license": "MIT",
+  "dependencies": {
+    "events": "^3.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.4",
+    "@types/node": "^22.8.4"
+  },
+  "peerDependencies": {
+    "@memento/core": "workspace:*"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "package.json"
+  ],
+  "publishConfig": {
+    "access": "restricted"
+  }
+}

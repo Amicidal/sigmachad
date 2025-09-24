@@ -1,7 +1,7 @@
 # WebSocket Integration Blueprint
 
 ## 1. Overview
-The WebSocket router (`src/api/websocket-router.ts`) delivers real-time graph and file system events to connected clients, integrating with Redis pub-sub for ephemeral session handoffs (e.g., multi-agent notifications). Integration coverage now exercises connection concurrency, subscription state introspection, and broadcast fan-out across multiple clients. To keep the channel useful for IDEs and background agents we need to tighten the protocol contract and address replay semantics surfaced while hardening the tests.
+The WebSocket router (in `@memento/api`) delivers real-time graph and file system events to connected clients, integrating with Redis pub-sub for ephemeral session handoffs (e.g., multi-agent notifications). Integration coverage now exercises connection concurrency, subscription state introspection, and broadcast fan-out across multiple clients. To keep the channel useful for IDEs and background agents we need to tighten the protocol contract and address replay semantics surfaced while hardening the tests.
 
 ## 2. Current Gaps
 - **Replay ambiguity**: `handleSubscription` immediately replays the last cached event per type. The replay uses the exact same envelope as live updates (no `isReplay`, sequence, or timestamp delta), so consumers cannot distinguish historical payloads from fresh broadcasts. In the new broadcast test this surfaced as stale `entity_created` events being treated as the target notification.

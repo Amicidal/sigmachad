@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { router, adminProcedure } from '../base.js';
+import { router, adminProcedure } from '../trpc/base.js';
 
 export const historyRouter = router({
   // Create a checkpoint

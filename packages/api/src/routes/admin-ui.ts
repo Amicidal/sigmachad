@@ -5,8 +5,8 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/core/DatabaseService.js";
+import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
+import { DatabaseService } from "../../../dist/services/core/index.js";
 
 export async function registerAdminUIRoutes(
   app: FastifyInstance,

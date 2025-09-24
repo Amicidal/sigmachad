@@ -1,10 +1,8 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { z } from 'zod';
-import { KnowledgeGraphService } from '../../services/knowledge/KnowledgeGraphService.js';
-import { DatabaseService } from '../../services/core/DatabaseService.js';
-import { ASTParser } from '../../services/knowledge/ASTParser.js';
-import { FileWatcher } from '../../services/core/FileWatcher.js';
+import { KnowledgeGraphService, ASTParser } from '@memento/knowledge';
+import { DatabaseService, FileWatcher } from '@memento/core';
 import type { AuthContext } from '../middleware/authentication.js';
 import { scopesSatisfyRequirement } from '../middleware/authentication.js';
 

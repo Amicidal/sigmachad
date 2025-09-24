@@ -5,9 +5,9 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../services/core/DatabaseService.js";
-import { RelationshipType } from "../../models/relationships.js";
+import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
+import { DatabaseService } from "../../../dist/services/core/index.js";
+import { RelationshipType } from "../../../dist/services/core/index.js";
 
 const coerceStringArray = (value: unknown): string[] | undefined => {
   if (Array.isArray(value)) {

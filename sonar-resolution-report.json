@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-09-24T01:55:06.572Z",
+  "summary": {
+    "totalIssues": 0,
+    "successfulResolutions": 0,
+    "failedResolutions": 0,
+    "manualReviews": 0,
+    "averageResolutionTime": null,
+    "issuesByType": {},
+    "commonFailurePatterns": []
+  },
+  "detailedResults": []
+}

@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { router, publicProcedure } from '../base.js';
+import { router, publicProcedure } from '../trpc/base.js';
 import { TRPCError } from '@trpc/server';
 
 // Entity and Relationship schemas
@@ -186,7 +186,90 @@ export const graphRouter = router({
       changeType: z.enum(['modify', 'delete', 'refactor']),
     }))
     .query(async ({ input, ctx }) => {
-      throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'Impact analysis is not yet available.' });
+      try {
+        // Get the entity
+        const entity = await ctx.kgService.getEntity(input.entityId);
+        if (!entity) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: `Entity ${input.entityId} not found` });
+        }
+
+        // Get relationships for impact analysis
+        const outgoingRels = await ctx.kgService.getRelationships({
+          fromEntityId: input.entityId,
+          limit: 1000,
+        });
+
+        const incomingRels = await ctx.kgService.getRelationships({
+          toEntityId: input.entityId,
+          limit: 1000,
+        });
+
+        // Calculate impact based on change type and relationships
+        const impactedEntities = new Set<string>();
+        const highRiskChanges = [];
+        const warnings = [];
+
+        // Add directly connected entities
+        for (const rel of [...outgoingRels, ...incomingRels]) {
+          const relatedId = rel.fromEntityId === input.entityId ? rel.toEntityId : rel.fromEntityId;
+          impactedEntities.add(relatedId);
+
+          // Check for high-risk relationships
+          if (['depends', 'extends', 'implements', 'calls'].includes(rel.type)) {
+            if (input.changeType === 'delete') {
+              highRiskChanges.push({
+                type: 'breaking_change',
+                message: `Deleting ${entity.type} will break ${rel.type} relationship`,
+                relatedEntity: relatedId,
+                severity: 'high'
+              });
+            } else if (input.changeType === 'refactor') {
+              warnings.push({
+                type: 'refactor_warning',
+                message: `Refactoring may affect ${rel.type} relationship`,
+                relatedEntity: relatedId,
+                severity: 'medium'
+              });
+            }
+          }
+        }
+
+        // Calculate impact score
+        const directImpacts = impactedEntities.size;
+        const riskLevel = highRiskChanges.length > 0 ? 'high' :
+                         warnings.length > 3 ? 'medium' : 'low';
+
+        const analysis = {
+          entityId: input.entityId,
+          entityType: entity.type,
+          changeType: input.changeType,
+          impactScore: Math.min(directImpacts * 10, 100),
+          riskLevel,
+          directlyImpacted: directImpacts,
+          totalRelationships: outgoingRels.length + incomingRels.length,
+          impactedEntities: Array.from(impactedEntities).slice(0, 50), // Limit response size
+          highRiskChanges,
+          warnings,
+          recommendations: [
+            ...(input.changeType === 'delete' && directImpacts > 0 ?
+               ['Consider deprecation before deletion', 'Review all dependent code'] : []),
+            ...(riskLevel === 'high' ?
+               ['Run comprehensive tests', 'Consider gradual rollout'] : []),
+            'Update documentation after changes'
+          ],
+          timestamp: new Date().toISOString()
+        };
+
+        return analysis;
+      } catch (error) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Failed to analyze impact: ${error instanceof Error ? error.message : 'Unknown error'}`
+        });
+      }
     }),
   // Time travel traversal
   timeTravel: publicProcedure

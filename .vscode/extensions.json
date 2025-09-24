@@ -1,0 +1,22 @@
+{
+  "recommendations": [
+    // Code quality and analysis
+    "sonarsource.sonarlint-vscode",
+
+    // TypeScript and JavaScript
+    "dbaeumer.vscode-eslint",
+    "ms-vscode.vscode-typescript-next",
+
+    // Debugging and testing
+    "vitest.explorer",
+
+    // Git and version control
+    "eamodio.gitlens",
+
+    // Formatting
+    "esbenp.prettier-vscode",
+
+    // Documentation
+    "yzhang.markdown-all-in-one"
+  ]
+}

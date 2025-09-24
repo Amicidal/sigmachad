@@ -5,16 +5,16 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
 
 ## 2. Status Summary
 ### Completed Improvements
-- Structural metadata is now promoted to first-class Falkor properties (alias, import type, namespace flags, module path, temporal fields) during ingestion via `extractStructuralPersistenceFields` and the write pipeline, instead of living solely in `r.metadata` (`src/services/relationships/structuralPersistence.ts:8`, `src/services/KnowledgeGraphService.ts:5380`).
-- `normalizeStructuralRelationship` canonicalizes import/export metadata, resolution state, confidence defaults, and `time-rel_*` IDs while language adapters populate cross-language fields (`src/services/relationships/RelationshipNormalizer.ts:208`, `src/services/relationships/RelationshipNormalizer.ts:348`).
-- Graph APIs expose structural filters and navigation helpers—`getRelationships` accepts alias/module filters, `finalizeScan` retires stale edges, `listModuleChildren`/`listImports` power module navigation, and `getModuleHistory` surfaces temporal context (`src/services/KnowledgeGraphService.ts:6740`, `src/services/KnowledgeGraphService.ts:7132`, `src/services/KnowledgeGraphService.ts:11637`, `src/services/KnowledgeGraphService.ts:11803`).
-- Falkor command serialization now handles nested objects and arrays without hitting the "primitive types only" error, allowing structured metadata to flow through `SET n += $props` operations (`src/services/database/FalkorDBService.ts:384`).
+- Structural metadata is now promoted to first-class Falkor properties (alias, import type, namespace flags, module path, temporal fields) during ingestion via `extractStructuralPersistenceFields` and the write pipeline, instead of living solely in `r.metadata` (now in `@memento/core` and `@memento/knowledge`).
+- `normalizeStructuralRelationship` canonicalizes import/export metadata, resolution state, confidence defaults, and `time-rel_*` IDs while language adapters populate cross-language fields (now in `@memento/core`).
+- Graph APIs expose structural filters and navigation helpers—`getRelationships` accepts alias/module filters, `finalizeScan` retires stale edges, `listModuleChildren`/`listImports` power module navigation, and `getModuleHistory` surfaces temporal context (implemented in `@memento/knowledge`).
+- Falkor command serialization now handles nested objects and arrays without hitting the "primitive types only" error, allowing structured metadata to flow through `SET n += $props` operations (handled in `@memento/database`).
 
 ### Outstanding Gaps
-- Guarantee Falkor index bootstrap on first graph creation: `setupGraph` still defers when the graph key is missing, so an initial write can occur without indexes. Add a first-write hook or bootstrap task to create indexes immediately (`src/services/database/FalkorDBService.ts:279`).
-- Restore vector search endpoints by wiring the Fastify router to the vector-store implementation; `registerVDBRoutes` remains commented out so `/api/v1/vdb/search` responds 404 (`src/api/APIGateway.ts:27`).
-- Codify a canonical symbol-kind taxonomy shared by REST schemas and graph queries—the current lookup tables keep behaviour working but remain ad-hoc (`src/api/routes/graph.ts:20`).
-- Ensure dependency ingestion surfaces meaningful results for `graph.dependencies.analyze`; the MCP tool currently replays whatever `CALLS`/`REFERENCES`/`DEPENDS_ON` edges exist, so we still need fixtures and parser coverage to guarantee non-empty responses (`src/services/KnowledgeGraphService.ts:9480`).
+- Guarantee Falkor index bootstrap on first graph creation: `setupGraph` still defers when the graph key is missing, so an initial write can occur without indexes. Add a first-write hook or bootstrap task to create indexes immediately (in `@memento/database`).
+- Restore vector search endpoints by wiring the Fastify router to the vector-store implementation; `registerVDBRoutes` remains commented out so `/api/v1/vdb/search` responds 404 (in `@memento/api`).
+- Codify a canonical symbol-kind taxonomy shared by REST schemas and graph queries—the current lookup tables keep behaviour working but remain ad-hoc (in `@memento/api`).
+- Ensure dependency ingestion surfaces meaningful results for `graph.dependencies.analyze`; the MCP tool currently replays whatever `CALLS`/`REFERENCES`/`DEPENDS_ON` edges exist, so we still need fixtures and parser coverage to guarantee non-empty responses (in `@memento/knowledge`).
 
 ## 3. Desired Capabilities
 1. Persist structural metadata that supports multi-language ingestion—import alias, import type (default/named/wildcard), namespace flags, re-export targets, symbol kind, and module path.
@@ -23,7 +23,7 @@ Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionall
 4. Maintain compatibility with different languages by using generic fields plus language-specific metadata namespaces.
 
 ## 4. Inputs & Consumers
-- **Inputs**: AST parser (`src/services/ASTParser.ts`), language-specific parsers (future), manual overrides for legacy languages.
+- **Inputs**: AST parser (`@memento/knowledge`), language-specific parsers (future), manual overrides for legacy languages.
 - **Consumers**: IDE integrations, dependency graph API, impact analysis, docs linking, code navigation features, build tooling analyzing module graphs.
 
 ## 5. Schema & Metadata Requirements

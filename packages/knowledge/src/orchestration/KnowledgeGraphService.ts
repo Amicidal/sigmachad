@@ -624,4 +624,216 @@ export class KnowledgeGraphService extends EventEmitter {
   async finalizeScan(scanStart: Date): Promise<void> {
     return this.relationshipManager.finalizeScan(scanStart);
   }
+
+  // ========== High-Throughput Ingestion Pipeline Integration ==========
+
+  /**
+   * Process a directory using the high-throughput ingestion pipeline
+   * This method bridges the existing KnowledgeGraphService with the new pipeline
+   */
+  async processDirectory(
+    directoryPath: string,
+    options: {
+      batchSize?: number;
+      maxConcurrency?: number;
+      skipEmbeddings?: boolean;
+      progressCallback?: (progress: { processed: number; total: number; errors: number }) => void;
+      fileFilters?: string[];
+    } = {}
+  ): Promise<{
+    success: boolean;
+    processedFiles: number;
+    processedEntities: number;
+    processedRelationships: number;
+    errors: Array<{ file: string; error: string }>;
+    metrics: {
+      totalTimeMs: number;
+      entitiesPerSecond: number;
+      filesPerSecond: number;
+    };
+  }> {
+    const startTime = Date.now();
+    const errors: Array<{ file: string; error: string }> = [];
+    let processedFiles = 0;
+    let processedEntities = 0;
+    let processedRelationships = 0;
+
+    try {
+      // Import the pipeline components only when needed
+      const { HighThroughputIngestionPipeline } = await import('../ingestion/pipeline.js');
+      const { createKnowledgeGraphAdapter } = await import('../ingestion/knowledge-graph-adapter.js');
+
+      // Create an adapter that bridges this service to the pipeline
+      const adapter = createKnowledgeGraphAdapter(this);
+
+      // Configure the pipeline
+      const pipelineConfig = {
+        batchSize: options.batchSize || 100,
+        maxConcurrency: options.maxConcurrency || 4,
+        queueConfig: {
+          maxSize: 10000,
+          partitions: 4,
+          persistenceConfig: {
+            enabled: false // In-memory for now
+          }
+        },
+        workerConfig: {
+          poolSize: options.maxConcurrency || 4,
+          taskTimeout: 30000
+        },
+        batchConfig: {
+          maxBatchSize: options.batchSize || 100,
+          flushInterval: 1000,
+          enableCompression: false
+        },
+        enrichmentConfig: {
+          enableEmbeddings: !options.skipEmbeddings,
+          batchSize: 25
+        }
+      };
+
+      // Create and start the pipeline
+      const pipeline = new HighThroughputIngestionPipeline(pipelineConfig, adapter, {
+        embeddingService: this.embeddings
+      });
+
+      // Set up progress tracking
+      pipeline.on('batch:completed', (data: any) => {
+        processedEntities += data.entitiesProcessed || 0;
+        processedRelationships += data.relationshipsProcessed || 0;
+
+        if (options.progressCallback) {
+          options.progressCallback({
+            processed: processedFiles,
+            total: 0, // Will be updated as we discover files
+            errors: errors.length
+          });
+        }
+      });
+
+      pipeline.on('error', (error: any) => {
+        errors.push({
+          file: error.context?.filePath || 'unknown',
+          error: error.message || 'Unknown error'
+        });
+      });
+
+      await pipeline.start();
+
+      try {
+        // Process the directory
+        await this.processDirectoryRecursively(
+          directoryPath,
+          pipeline,
+          options.fileFilters,
+          (filePath: string) => {
+            processedFiles++;
+            if (options.progressCallback) {
+              options.progressCallback({
+                processed: processedFiles,
+                total: 0, // We don't know total until we scan all files
+                errors: errors.length
+              });
+            }
+          }
+        );
+
+        // Wait for pipeline to complete processing
+        await pipeline.waitForCompletion();
+
+      } finally {
+        await pipeline.stop();
+      }
+
+      const totalTimeMs = Date.now() - startTime;
+      const entitiesPerSecond = processedEntities / (totalTimeMs / 1000);
+      const filesPerSecond = processedFiles / (totalTimeMs / 1000);
+
+      return {
+        success: errors.length === 0,
+        processedFiles,
+        processedEntities,
+        processedRelationships,
+        errors,
+        metrics: {
+          totalTimeMs,
+          entitiesPerSecond,
+          filesPerSecond
+        }
+      };
+
+    } catch (error) {
+      console.error('[KnowledgeGraphService] Directory processing failed:', error);
+      errors.push({
+        file: directoryPath,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+
+      const totalTimeMs = Date.now() - startTime;
+      return {
+        success: false,
+        processedFiles,
+        processedEntities,
+        processedRelationships,
+        errors,
+        metrics: {
+          totalTimeMs,
+          entitiesPerSecond: 0,
+          filesPerSecond: 0
+        }
+      };
+    }
+  }
+
+  /**
+   * Helper method to recursively process directories
+   */
+  private async processDirectoryRecursively(
+    dirPath: string,
+    pipeline: any,
+    fileFilters?: string[],
+    onFileProcessed?: (filePath: string) => void
+  ): Promise<void> {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+
+        if (entry.isDirectory()) {
+          // Skip node_modules and other common directories
+          if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') {
+            continue;
+          }
+          await this.processDirectoryRecursively(fullPath, pipeline, fileFilters, onFileProcessed);
+        } else if (entry.isFile()) {
+          // Apply file filters if provided
+          if (fileFilters && fileFilters.length > 0) {
+            const shouldProcess = fileFilters.some(filter => {
+              if (filter.startsWith('*.')) {
+                return fullPath.endsWith(filter.slice(1));
+              }
+              return fullPath.includes(filter);
+            });
+            if (!shouldProcess) continue;
+          }
+
+          // Default to common source code files
+          const supportedExtensions = ['.ts', '.js', '.tsx', '.jsx', '.py', '.java', '.cpp', '.c', '.h'];
+          const hasValidExtension = supportedExtensions.some(ext => fullPath.endsWith(ext));
+
+          if (hasValidExtension) {
+            await pipeline.processFile(fullPath);
+            onFileProcessed?.(fullPath);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[KnowledgeGraphService] Error processing directory ${dirPath}:`, error);
+      throw error;
+    }
+  }
 }

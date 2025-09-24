@@ -1,9 +1,9 @@
-# Session Relationships (Ephemeral Redis Blueprint)
+# Session Relationships Blueprint
 
 ## 1. Overview
 Session management is ephemeral in Redis cache for live multi-agent coordination—store events (modified, impacted, checkpoint) with TTL to next checkpoint (15-60 min) or fixed discard. No persistent KG nodes/edges for depth; use anchors (metadata refs on entities/clusters) for awareness. Bridge service enables graph-aware queries (e.g., transitions/isolation). Focus: Velocity for 100+ agents, zero bloat.
 
-## 2. Current Gaps (Pre-Refresh)
+## 2. Current Gaps
 - Legacy designs assumed persistent edges; now shift to cache for scale.
 
 ## 3. Desired Capabilities
@@ -47,4 +47,5 @@ Session management is ephemeral in Redis cache for live multi-agent coordination
 - From persistent: Migrate summaries to metadata; drop old edges.
 - Velocity: Ephemeral maximizes swarms—focus live coord, discard noise.
 
-(No temporal auditing—use Git/checkpoints for history.)
+## 10. Notes
+No temporal auditing—use Git/checkpoints for history.

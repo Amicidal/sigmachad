@@ -6,9 +6,8 @@
 import { FastifyInstance } from "fastify";
 import { EventEmitter } from "events";
 import type { Server as HttpServer } from "http";
-import { FileWatcher, FileChange } from "../services/core/FileWatcher.js";
-import { KnowledgeGraphService } from "../services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../services/core/DatabaseService.js";
+import { FileWatcher, FileChange, DatabaseService } from "../../../dist/services/core/index.js";
+import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
 import { WebSocketServer, WebSocket } from "ws";
 import {
   authenticateHeaders,
@@ -19,7 +18,7 @@ import type { AuthContext } from "./middleware/authentication.js";
 import {
   SessionStreamEvent,
   SynchronizationCoordinator,
-} from "../services/synchronization/SynchronizationCoordinator.js";
+} from "../../../dist/services/synchronization/index.js";
 import {
   WebSocketConnection,
   WebSocketMessage,
@@ -101,7 +100,8 @@ export class WebSocketRouter extends EventEmitter {
     if (this.fileWatcher) {
       this.fileWatcher.on("change", (change: FileChange) => {
         try {
-          console.log("🧭 FileWatcher change event");
+          // Debug log - remove in production
+          // console.log("🧭 FileWatcher change event");
         } catch {}
         this.broadcastEvent({
           type: "file_change",

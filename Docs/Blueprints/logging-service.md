@@ -16,12 +16,12 @@ The logging service captures runtime events across Memento, piping console outpu
 6. ✅ Expose health metrics (dropped writes, suppressed file exports, listener counts) so observability tooling can surface regressions quickly.
 
 ## 4. Backlog
-- [x] **Instrumentation dispatcher**: create `src/services/logging/InstrumentationDispatcher.ts` to wrap console/process hooks once, store original methods, cap listener counts, and broadcast structured events to registered consumers via weak references. Includes metrics for registered instance count and listener saturation.
-- [x] **Lifecycle & registration API**: update `src/services/LoggingService.ts` to register with the dispatcher, expose `dispose()` for tests/runtime cleanup, and ensure disposing the final consumer restores original console/process handlers.
+- [x] **Instrumentation dispatcher**: create `InstrumentationDispatcher` (in `@memento/core`) to wrap console/process hooks once, store original methods, cap listener counts, and broadcast structured events to registered consumers via weak references. Includes metrics for registered instance count and listener saturation.
+- [x] **Lifecycle & registration API**: update `LoggingService` (in `@memento/core`) to register with the dispatcher, expose `dispose()` for tests/runtime cleanup, and ensure disposing the final consumer restores original console/process handlers.
 - [x] **Persistence hardening**: replace raw `appendFile` calls with a guarded writer that honors retry backoff, stops after configurable failure thresholds, emits diagnostics via preserved console functions, and increments `droppedFileWrites` metrics.
-- [x] **Serialization guardrail**: introduce a safe JSON serializer (e.g., reviver/replacer in `src/services/logging/serialization.ts`) that handles circular references, trims oversized payloads, and annotates redactions so analytics can reason about omissions.
+- [x] **Serialization guardrail**: introduce a safe JSON serializer (in `@memento/core`) that handles circular references, trims oversized payloads, and annotates redactions so analytics can reason about omissions.
 - [x] **Log rotation**: add size- and age-based rotation settings to `LoggingService` options (`maxFileSize`, `maxFileAgeMs`, `maxHistory`), implement atomic rollover with deterministic filenames (e.g., `.1`, `.2` suffixes), and document defaults.
-- [x] **Health metrics surface**: expose `getHealthMetrics()` reporting dropped writes, suppressed exports, dispatcher listener count, and rotation events; thread through to `src/api/routes/admin.ts` for operational introspection.
+- [x] **Health metrics surface**: expose `getHealthMetrics()` reporting dropped writes, suppressed exports, dispatcher listener count, and rotation events; thread through to admin routes (in `@memento/api`) for operational introspection.
 - [ ] **Documentation alignment**: refresh `README.md` and admin docs with configuration instructions, metric semantics, and lifecycle guidance once implementation stabilises.
 - [ ] **Automatic dispatcher cleanup**: explore adopting `WeakRef`/`FinalizationRegistry` support (or expiring registrations) so long-lived processes stay healthy even when consumers forget to call `dispose()`.
 

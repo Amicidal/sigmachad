@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  neo4j-test:
+    image: neo4j:5.15-community
+    container_name: neo4j-test
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+    ports:
+      - "7688:7687"
+      - "7475:7474"
+    volumes:
+      - neo4j_test_data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant-test:
+    image: qdrant/qdrant:v1.7.4
+    container_name: qdrant-test
+    ports:
+      - "6334:6333"
+    volumes:
+      - qdrant_test_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: postgres-test
+    environment:
+      - POSTGRES_DB=memento_test
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d memento_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: redis-test
+    ports:
+      - "6382:6379"
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  neo4j_test_data:
+  qdrant_test_data:
+  postgres_test_data:
+  redis_test_data:
+
+networks:
+  default:
+    name: memento-test-network
