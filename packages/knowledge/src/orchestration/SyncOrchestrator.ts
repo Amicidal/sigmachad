@@ -14,11 +14,11 @@ import {
   BusinessDomain,
   SemanticCluster,
   Entity,
-} from "../../../models/entities.js";
+} from '@memento/core';
 import {
   RelationshipType,
   DocumentationRelationship,
-} from "../../../models/relationships.js";
+} from '@memento/core';
 
 export interface SyncResult {
   processedFiles: number;

@@ -4,8 +4,8 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { KnowledgeGraphService } from '../../../dist/services/knowledge/index.js';
-import { DatabaseService } from '../../../dist/services/core/index.js';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database';
 
 interface VectorSearchRequest {
   query: string;

@@ -4,9 +4,9 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
-import { DatabaseService } from "../../../dist/services/core/index.js";
-import { RelationshipType } from "../../../dist/services/core/index.js";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
+import { RelationshipType } from "@memento/core";
 
 const GRAPH_ENTITY_TYPE_LOOKUP: Record<string, string> = {
   change: "change",

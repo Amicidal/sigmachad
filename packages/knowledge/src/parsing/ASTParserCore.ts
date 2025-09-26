@@ -22,12 +22,12 @@ import {
   InterfaceSymbol,
   TypeAliasSymbol,
   Symbol as SymbolEntity,
-} from "../../models/entities.js";
+} from '@memento/core';
 import {
   GraphRelationship,
   RelationshipType,
   StructuralRelationship,
-} from "../../models/relationships.js";
+} from '@memento/core';
 import {
   normalizeCodeEdge,
   canonicalRelationshipId,

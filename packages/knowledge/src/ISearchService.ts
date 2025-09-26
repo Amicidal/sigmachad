@@ -4,7 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { Entity } from '../../models/entities.js';
+import { Entity } from '@memento/core';
 import {
   GraphSearchRequest,
   GraphExamples,

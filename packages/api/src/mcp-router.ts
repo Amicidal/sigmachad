@@ -14,9 +14,9 @@ import {
   McpError,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { KnowledgeGraphService, ASTParser } from "../../../dist/services/knowledge/index.js";
-import { DatabaseService } from "../../../dist/services/database/index.js";
-import { TestEngine, SecurityScanner } from "../../../dist/services/testing/index.js";
+import { KnowledgeGraphService, ASTParser } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
+import { TestEngine, SecurityScanner } from "@memento/testing";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import path from "path";
@@ -26,15 +26,15 @@ import {
   SpecNotFoundError,
   TestPlanningService,
   TestPlanningValidationError,
-} from "../../../dist/services/testing/index.js";
+} from "@memento/testing";
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestSpec,
-} from "../../../dist/services/core/index.js";
-import type { CoverageMetrics, Spec } from "../../../dist/services/core/index.js";
-import { SpecService } from "../../../dist/services/testing/index.js";
-import { resolvePerformanceHistoryOptions } from "../../../dist/services/core/index.js";
+} from "@memento/core";
+import type { CoverageMetrics, Spec } from "@memento/core";
+import { SpecService } from "@memento/testing";
+import { resolvePerformanceHistoryOptions } from "@memento/core";
 
 // MCP Tool definitions
 interface MCPToolDefinition {

@@ -5,7 +5,7 @@
 
 import { EventEmitter } from "events";
 import { Neo4jService } from "../Neo4jService.js";
-import { RelationshipType } from "../../../models/relationships.js";
+import { RelationshipType } from '@memento/core';
 import { TimeRangeParams, TraversalQuery } from "../../../models/types.js";
 
 export interface HistoryMetrics {

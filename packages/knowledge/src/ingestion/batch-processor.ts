@@ -5,8 +5,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { Entity } from '@memento/core/models/entities.js';
-import { GraphRelationship } from '@memento/core/models/relationships.js';
+import { Entity } from '@memento/core';
+import { GraphRelationship } from '@memento/core';
 import {
   BatchConfig,
   BatchMetadata,

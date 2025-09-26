@@ -3,8 +3,8 @@
  * Consolidates common types to avoid duplication
  */
 
-import { Entity, Symbol as SymbolEntity } from "../../../models/entities.js";
-import { GraphRelationship } from "../../../models/relationships.js";
+import { Entity, Symbol as SymbolEntity } from '@memento/core';
+import { GraphRelationship } from '@memento/core';
 
 /**
  * Result of parsing a file or set of files

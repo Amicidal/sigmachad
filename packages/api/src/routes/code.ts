@@ -4,8 +4,9 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService, ASTParser, ParseResult } from "../../../dist/services/knowledge/index.js";
-import { DatabaseService, RelationshipType, ValidationResult, ValidationIssue } from "../../../dist/services/core/index.js";
+import { KnowledgeGraphService, ASTParser, ParseResult } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
+import { RelationshipType, ValidationResult, ValidationIssue } from "@memento/core";
 import {
   SecurityIssue,
   Entity,
@@ -13,7 +14,7 @@ import {
   ClassSymbol,
   Symbol as SymbolEntity,
   Test,
-} from "../../../dist/services/core/index.js";
+} from "@memento/core";
 import fs from "fs/promises";
 import path from "path";
 import console from "console";

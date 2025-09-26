@@ -3,8 +3,8 @@
  * Bridges the high-throughput ingestion pipeline with the existing KnowledgeGraphService
  */
 
-import { Entity } from '@memento/core/models/entities.js';
-import { GraphRelationship } from '@memento/core/models/relationships.js';
+import { Entity } from '@memento/core';
+import { GraphRelationship } from '@memento/core';
 import { KnowledgeGraphServiceIntegration } from './pipeline.js';
 
 export interface KnowledgeGraphServiceLike {

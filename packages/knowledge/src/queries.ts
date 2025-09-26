@@ -2,7 +2,7 @@
  * Shared Cypher query utilities for analysis operations
  */
 
-import { RelationshipType } from "../../../models/relationships.js";
+import { RelationshipType } from '@memento/core';
 
 export interface TraversalOptions {
   startNodeId: string;

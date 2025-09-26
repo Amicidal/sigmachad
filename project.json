@@ -1,18 +1,22 @@
 {
   "$schema": "./node_modules/nx/schemas/project-schema.json",
   "name": "memento",
-  "sourceRoot": "src",
+  "sourceRoot": "apps/main/src",
   "projectType": "application",
   "targets": {
     "build": {
       "executor": "@nx/js:tsc",
-      "outputs": ["{options.outputPath}"],
+      "outputs": [
+        "{options.outputPath}"
+      ],
       "options": {
-        "outputPath": "dist",
-        "main": "src/index.ts",
-        "tsConfig": "tsconfig.json"
+        "outputPath": "dist/apps/main",
+        "main": "apps/main/src/index.ts",
+        "tsConfig": "apps/main/tsconfig.json"
       },
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "serve": {
       "executor": "@nx/node:node",
@@ -32,7 +36,9 @@
     "lint": {
       "executor": "@nx/eslint:lint",
       "options": {
-        "lintFilePatterns": ["src/**/*.ts"]
+        "lintFilePatterns": [
+          "apps/main/src/**/*.ts"
+        ]
       }
     },
     "test": {
@@ -86,5 +92,11 @@
       }
     }
   },
-  "implicitDependencies": ["core", "database", "knowledge", "api", "testing"]
+  "implicitDependencies": [
+    "core",
+    "database",
+    "knowledge",
+    "api",
+    "testing"
+  ]
 }

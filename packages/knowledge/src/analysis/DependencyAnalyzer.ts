@@ -5,9 +5,9 @@
 
 import { EventEmitter } from "events";
 import { Neo4jService } from "../Neo4jService.js";
-import { Entity } from "../../../models/entities.js";
+import { Entity } from '@memento/core';
 import { DependencyAnalysis } from "../../../models/types.js";
-import { RelationshipType } from "../../../models/relationships.js";
+import { RelationshipType } from '@memento/core';
 import {
   buildDirectRelationshipQuery,
   buildPathExpansionQuery,

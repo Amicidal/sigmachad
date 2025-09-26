@@ -3,8 +3,8 @@
  * Based on HighThroughputKnowledgeGraph.md architecture
  */
 
-import { Entity } from '@memento/core/models/entities.js';
-import { GraphRelationship } from '@memento/core/models/relationships.js';
+import { Entity } from '@memento/core';
+import { GraphRelationship } from '@memento/core';
 
 // ========== Event Bus Types ==========
 

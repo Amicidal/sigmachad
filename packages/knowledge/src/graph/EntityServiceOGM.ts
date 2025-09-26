@@ -12,7 +12,7 @@ import {
   File,
   FunctionSymbol,
   ClassSymbol,
-} from '../../models/entities.js';
+} from '@memento/core';
 import {
   modelToEntity,
   entityToModelProps,

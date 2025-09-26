@@ -90,42 +90,46 @@ export default {
           relativePath.startsWith(domain)
         );
 
-        // Check if this is in the packages directory (monorepo structure)
-        const isInPackages = relativePath.startsWith('packages' + path.sep);
+        // Treat package/app root (packages/<name> or apps/<name>) as baseline depth
+        const sep = path.sep;
+        const inPackageRoot = /^packages[\\/][^\\/]+[\\/]/.test(relativePath);
+        const inAppRoot = /^apps[\\/][^\\/]+[\\/]/.test(relativePath);
+        const baselineOffset = (inPackageRoot || inAppRoot) ? 2 : 0; // subtract "packages" + <name>
+        const effectiveCurrentDepth = Math.max(0, currentDepth - baselineOffset);
 
-        // Adjust depth limits for packages directory
-        const effectiveTargetDepth = isInPackages ? targetDepth + 1 : targetDepth;
-        const effectiveWarnDepth = isInPackages ? warnDepth + 1 : warnDepth;
-        const effectiveMaxDepth = isInPackages ? maxDepth + 1 : maxDepth;
+        // Keep configured thresholds as-is; we compare using effectiveCurrentDepth
+        const effectiveTargetDepth = targetDepth;
+        const effectiveWarnDepth = warnDepth;
+        const effectiveMaxDepth = maxDepth;
 
-        if (currentDepth > effectiveMaxDepth) {
+        if (effectiveCurrentDepth > effectiveMaxDepth) {
           // Always error if exceeding absolute maximum
           context.report({
             node,
             messageId: 'tooDeep',
             data: {
               maxDepth: effectiveMaxDepth,
-              currentDepth
+              currentDepth: effectiveCurrentDepth
             }
           });
-        } else if (currentDepth > effectiveWarnDepth && !isComplexDomain) {
+        } else if (effectiveCurrentDepth > effectiveWarnDepth && !isComplexDomain) {
           // Error for non-complex domains exceeding warning threshold
           context.report({
             node,
             messageId: 'exceedsWarn',
             data: {
               warnDepth: effectiveWarnDepth,
-              currentDepth
+              currentDepth: effectiveCurrentDepth
             }
           });
-        } else if (currentDepth > effectiveTargetDepth && !isComplexDomain) {
+        } else if (effectiveCurrentDepth > effectiveTargetDepth && !isComplexDomain) {
           // Warn for files exceeding target in non-complex domains
           context.report({
             node,
             messageId: 'exceedsTarget',
             data: {
               targetDepth: effectiveTargetDepth,
-              currentDepth
+              currentDepth: effectiveCurrentDepth
             }
           });
         }

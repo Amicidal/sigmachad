@@ -17,11 +17,11 @@ import {
   InterfaceSymbol,
   TypeAliasSymbol,
   Symbol as SymbolEntity,
-} from "@memento/core/models/entities.js";
+} from '@memento/core';
 import {
   GraphRelationship,
   RelationshipType,
-} from "@memento/core/models/relationships.js";
+} from "@memento/core";
 import {
   normalizeCodeEdge,
   canonicalRelationshipId,

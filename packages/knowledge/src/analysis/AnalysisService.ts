@@ -6,13 +6,13 @@
 
 import { EventEmitter } from "events";
 import { Neo4jService } from "./Neo4jService.js";
-import { Entity } from "../../models/entities.js";
+import { Entity } from '@memento/core';
 import {
   ImpactAnalysis,
   ImpactAnalysisRequest,
   DependencyAnalysis,
 } from "../../models/types.js";
-import { PathQuery } from "../../models/relationships.js";
+import { PathQuery } from '@memento/core';
 import { ImpactAnalyzer } from "./ImpactAnalyzer.js";
 import { DependencyAnalyzer } from "./DependencyAnalyzer.js";
 import { PathAnalyzer, type PathResult } from "./PathAnalyzer.js";

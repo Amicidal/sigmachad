@@ -12,7 +12,7 @@ import {
   GraphRelationship,
   RelationshipType,
   RelationshipQuery,
-} from '../../models/relationships.js';
+} from '@memento/core';
 import {
   normalizeCodeEdge,
   canonicalRelationshipId,

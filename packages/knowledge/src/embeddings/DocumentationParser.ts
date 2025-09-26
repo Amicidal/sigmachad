@@ -23,11 +23,11 @@ import {
   DocumentationNode,
   BusinessDomain,
   SemanticCluster,
-} from "../../models/entities.js";
+} from '@memento/core';
 import {
   RelationshipType,
   DocumentationRelationship,
-} from "../../models/relationships.js";
+} from '@memento/core';
 import { join, extname, basename } from "path";
 import { marked, TokensList } from "marked";
 

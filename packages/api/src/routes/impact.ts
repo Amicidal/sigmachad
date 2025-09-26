@@ -4,9 +4,9 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
-import { DatabaseService } from "../../../dist/services/core/index.js";
-import { ImpactAnalysis, ImpactAnalysisRequest } from "../../../dist/services/core/index.js";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
+import { ImpactAnalysis, ImpactAnalysisRequest } from "@memento/core";
 
 type ChangeType = ImpactAnalysisRequest["changes"][number]["changeType"];
 type ImpactChange = ImpactAnalysisRequest["changes"][number];

@@ -5,7 +5,7 @@
 
 import { EventEmitter } from 'events';
 import { Neo4jService } from './Neo4jService.js';
-import { Entity } from '../../models/entities.js';
+import { Entity } from '@memento/core';
 import { embeddingService } from '../../utils/embedding.js';
 
 export interface EmbeddingOptions {

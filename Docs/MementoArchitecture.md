@@ -358,33 +358,75 @@ spec:
 
 ```
 memento/
-├── src/
-│   ├── api/                    # API endpoints and routers
-│   │   ├── mcp-router.ts      # MCP server for Claude integration
-│   │   ├── rest-router.ts     # REST API endpoints
-│   │   ├── websocket-router.ts # Real-time WebSocket connections
-│   │   └── middleware/        # Request validation, logging
-│   ├── services/              # Core business logic services
-│   │   ├── KnowledgeGraphService.ts
-│   │   ├── TestEngine.ts
-│   │   ├── SecurityScanner.ts
-│   │   ├── DocumentationParser.ts
-│   │   └── FileWatcher.ts
-│   ├── models/                # Data models and schemas
-│   │   ├── entities.ts        # Graph node type definitions
-│   │   ├── relationships.ts   # Graph relationship definitions
-│   │   └── types.ts           # TypeScript type definitions
-│   ├── utils/                 # Utility functions and helpers
-│   │   ├── ast-parser.ts      # TypeScript AST parsing
-│   │   ├── embedding.ts       # Vector embedding generation
-│   │   ├── git-integration.ts # Git repository operations
-│   │   └── validation.ts      # Input validation helpers
-│   └── index.ts               # Application entry point
+├── apps/
+│   └── main/                  # Main application
+│       ├── src/
+│       │   └── index.ts       # Application entry point
+│       └── tsconfig.json      # App-specific TypeScript config
+├── packages/                  # Shared packages with path aliases
+│   ├── api/                   # @memento/api - API endpoints and routers
+│   │   ├── src/
+│   │   │   ├── APIGateway.ts  # Main API gateway
+│   │   │   ├── mcp-router.ts  # MCP server for Claude integration
+│   │   │   ├── routes/        # REST API endpoints
+│   │   │   ├── trpc/          # tRPC router and procedures
+│   │   │   ├── websocket-router.ts # Real-time WebSocket connections
+│   │   │   └── middleware/    # Request validation, logging
+│   │   └── README.md
+│   ├── knowledge/             # @memento/knowledge - Knowledge graph services
+│   │   ├── src/
+│   │   │   ├── analysis/      # Code analysis services
+│   │   │   ├── embeddings/    # Vector embedding services
+│   │   │   ├── graph/         # Graph database operations
+│   │   │   ├── ingestion/     # Data ingestion pipeline
+│   │   │   ├── orchestration/ # Knowledge graph orchestration
+│   │   │   ├── parsing/       # AST parsing and symbol extraction
+│   │   │   ├── queries.ts     # Graph query utilities
+│   │   │   └── types.ts       # Knowledge graph type definitions
+│   │   └── README.md
+│   ├── core/                  # @memento/core - Core services and types
+│   │   ├── src/
+│   │   │   ├── auth/          # Authentication services
+│   │   │   ├── config/        # Configuration management
+│   │   │   ├── logging/       # Logging utilities
+│   │   │   └── types/         # Shared type definitions
+│   │   └── README.md
+│   ├── database/              # @memento/database - Database services
+│   │   ├── src/
+│   │   │   ├── postgres/      # PostgreSQL operations
+│   │   │   ├── redis/         # Redis operations
+│   │   │   └── falkordb/      # FalkorDB graph operations
+│   │   └── README.md
+│   ├── sync/                  # @memento/sync - Synchronization services
+│   │   ├── src/
+│   │   │   ├── scm/           # Source control management
+│   │   │   └── index.ts       # Sync service main entry
+│   │   └── README.md
+│   ├── testing/               # @memento/testing - Test execution services
+│   │   ├── src/
+│   │   │   ├── runners/       # Test runners
+│   │   │   ├── coverage/      # Coverage analysis
+│   │   │   └── security/      # Security testing
+│   │   └── README.md
+│   ├── backup/                # @memento/backup - Backup operations
+│   │   ├── src/
+│   │   │   └── services/      # Backup services
+│   │   └── README.md
+│   └── shared-types/          # @memento/shared-types - Shared type definitions
+│       ├── src/
+│       │   ├── api.ts         # API type definitions
+│       │   ├── database.ts    # Database type definitions
+│       │   └── knowledge.ts   # Knowledge graph type definitions
+│       └── README.md
 ├── tests/                     # Test suites and fixtures
 │   ├── unit/                  # Unit tests
 │   ├── integration/           # Integration tests
+│   ├── e2e/                   # End-to-end tests
 │   └── fixtures/              # Test data and mocks
-├── docs/                      # Documentation and guides
+├── Docs/                      # Documentation and guides
+│   ├── Blueprints/            # Technical specifications
+│   ├── Guides/                # User guides
+│   └── summaries/             # Package summaries
 ├── docker/                    # Docker configuration
 │   ├── Dockerfile             # Main application container
 │   ├── docker-compose.yml     # Local development stack
@@ -397,8 +439,11 @@ memento/
 │   ├── default.json           # Default configuration
 │   └── development.json       # Development overrides
 ├── package.json
+├── tsconfig.base.json         # Base TypeScript config with path aliases
 ├── tsconfig.json
+├── project.json               # Nx project configuration
 ├── eslint.config.js
+├── CLAUDE.md                  # Development guidelines
 └── README.md
 ```
 

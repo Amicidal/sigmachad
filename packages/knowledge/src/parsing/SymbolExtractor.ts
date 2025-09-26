@@ -13,7 +13,7 @@ import {
   InterfaceSymbol,
   TypeAliasSymbol,
   Symbol as SymbolEntity,
-} from "../../../models/entities.js";
+} from '@memento/core';
 import {
   createHash,
   createShortHash,

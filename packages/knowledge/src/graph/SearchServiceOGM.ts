@@ -8,7 +8,7 @@ import { NeogmaService } from './NeogmaService.js';
 import { createEntityModels } from '../../models/ogm/EntityModels.js';
 import { modelToEntity } from '../../models/ogm/BaseModels.js';
 import { EmbeddingService } from './EmbeddingService.js';
-import { Entity } from '../../models/entities.js';
+import { Entity } from '@memento/core';
 import {
   GraphSearchRequest,
   GraphExamples,

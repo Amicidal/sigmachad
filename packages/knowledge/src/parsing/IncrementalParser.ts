@@ -5,8 +5,8 @@
 
 import * as path from "path";
 import * as fs from "fs/promises";
-import { Entity, Symbol as SymbolEntity } from "../../../models/entities.js";
-import { GraphRelationship } from "../../../models/relationships.js";
+import { Entity, Symbol as SymbolEntity } from '@memento/core';
+import { GraphRelationship } from '@memento/core';
 import { createHash } from "./utils.js";
 import {
   ParseResult,

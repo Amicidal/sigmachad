@@ -4,19 +4,19 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
-import { DatabaseService } from "../../../dist/services/core/index.js";
-import { TestEngine } from "../../../dist/services/testing/index.js";
-import { TestPlanningService, SpecNotFoundError, TestPlanningValidationError } from "../../../dist/services/testing/index.js";
-import { RelationshipType } from "../../../dist/services/core/index.js";
-import type { TestPerformanceMetrics } from "../../../dist/services/core/index.js";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
+import { TestEngine } from "@memento/testing";
+import { TestPlanningService, SpecNotFoundError, TestPlanningValidationError } from "@memento/testing";
+import { RelationshipType } from "@memento/core";
+import type { TestPerformanceMetrics } from "@memento/core";
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestExecutionResult,
   PerformanceHistoryOptions,
-} from "../../../dist/services/core/index.js";
-import { resolvePerformanceHistoryOptions } from "../../../dist/services/core/index.js";
+} from "@memento/core";
+import { resolvePerformanceHistoryOptions } from "@memento/core";
 
 const createEmptyPerformanceMetrics = (): TestPerformanceMetrics => ({
   averageExecutionTime: 0,

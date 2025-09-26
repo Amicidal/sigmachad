@@ -8,11 +8,13 @@ import fastifyCors from "@fastify/cors";
 import fastifyWebsocket from "@fastify/websocket";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { createTRPCContext, appRouter } from "./trpc/router.js";
-import { KnowledgeGraphService, ASTParser, DocumentationParser } from "../../../dist/services/knowledge/index.js";
-import { DatabaseService, FileWatcher, LoggingService, MaintenanceService, ConfigurationService } from "../../../dist/services/core/index.js";
-import { SynchronizationCoordinator, SynchronizationMonitoring, ConflictResolution, RollbackCapabilities } from "../../../dist/services/synchronization/index.js";
-import { TestEngine, SecurityScanner } from "../../../dist/services/testing/index.js";
-import { BackupService } from "../../../dist/services/backup/index.js";
+import { KnowledgeGraphService, ASTParser, DocumentationParser } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
+import { FileWatcher, LoggingService, MaintenanceService, ConfigurationService } from "@memento/core";
+import { SynchronizationCoordinator, SynchronizationMonitoring } from "@memento/sync/synchronization";
+import { ConflictResolution, RollbackCapabilities } from "@memento/sync/scm";
+import { TestEngine, SecurityScanner } from "@memento/testing";
+import { BackupService } from "@memento/backup";
 import { AuthContext } from "./middleware/authentication.js";
 
 // Import route handlers

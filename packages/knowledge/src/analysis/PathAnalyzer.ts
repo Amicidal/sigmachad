@@ -5,8 +5,8 @@
 
 import { EventEmitter } from "events";
 import { Neo4jService } from "../Neo4jService.js";
-import { Entity } from "../../../models/entities.js";
-import { PathQuery } from "../../../models/relationships.js";
+import { Entity } from '@memento/core';
+import { PathQuery } from '@memento/core';
 import { buildDijkstraQuery } from "./queries.js";
 
 export interface PathResult {

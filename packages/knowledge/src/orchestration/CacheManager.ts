@@ -3,8 +3,8 @@
  * Handles file caching, symbol indexing, and export maps for efficient parsing
  */
 
-import { Entity, Symbol as SymbolEntity } from "../../../models/entities.js";
-import { GraphRelationship } from "../../../models/relationships.js";
+import { Entity, Symbol as SymbolEntity } from '@memento/core';
+import { GraphRelationship } from '@memento/core';
 import { createHash } from "./utils.js";
 import { CachedFileInfo, ExportMapEntry } from "./types.js";
 import { PerformanceOptimizer } from "./PerformanceOptimizer.js";

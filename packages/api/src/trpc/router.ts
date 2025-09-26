@@ -5,7 +5,8 @@
 
 import { z } from 'zod';
 import { KnowledgeGraphService, ASTParser } from '@memento/knowledge';
-import { DatabaseService, FileWatcher } from '@memento/core';
+import { DatabaseService } from '@memento/database';
+import { FileWatcher } from '@memento/core';
 import { router, publicProcedure, TRPCContext } from './base.js';
 import type { FastifyRequest } from 'fastify';
 import {

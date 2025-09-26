@@ -5,13 +5,13 @@
 
 import { FastifyInstance } from "fastify";
 import path from "path";
-import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
-import { DatabaseService } from "../../../dist/services/core/index.js";
-import { GitService } from "../../../dist/services/synchronization/index.js";
-import { SCMService, ValidationError } from "../../../dist/services/synchronization/index.js";
-import { LocalGitProvider } from "../../../dist/services/synchronization/index.js";
-import { SCMProviderNotConfiguredError } from "../../../dist/services/synchronization/index.js";
-import type { CommitPRRequest } from "../../../dist/services/core/index.js";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database";
+import { GitService } from "@memento/sync/scm";
+import { SCMService, ValidationError } from "@memento/sync/scm";
+import { LocalGitProvider } from "@memento/sync/scm";
+import { SCMProviderNotConfiguredError } from "@memento/sync/scm";
+import type { CommitPRRequest } from "@memento/core";
 
 const SCM_FEATURE_FLAG = String(process.env.FEATURE_SCM ?? "true").toLowerCase();
 const SCM_FEATURE_ENABLED = !["0", "false", "off"].includes(SCM_FEATURE_FLAG);

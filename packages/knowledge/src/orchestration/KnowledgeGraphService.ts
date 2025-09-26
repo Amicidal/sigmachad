@@ -7,7 +7,7 @@
 
 import { EventEmitter } from "events";
 import { Neo4jConfig } from "./Neo4jService.js";
-import { RelationshipType } from "../../models/relationships.js";
+import { RelationshipType } from '@memento/core';
 import { ServiceRegistry } from "./knowledge-graph/ServiceRegistry.js";
 import { EventOrchestrator } from "./knowledge-graph/EventOrchestrator.js";
 import { GraphInitializer } from "./knowledge-graph/GraphInitializer.js";
@@ -31,12 +31,12 @@ interface KnowledgeGraphDependencies {
 }
 
 // Import types
-import { Entity } from "../../models/entities.js";
+import { Entity } from '@memento/core';
 import {
   GraphRelationship,
   RelationshipQuery,
   PathQuery,
-} from "../../models/relationships.js";
+} from '@memento/core';
 import {
   GraphSearchRequest,
   ImpactAnalysisRequest,

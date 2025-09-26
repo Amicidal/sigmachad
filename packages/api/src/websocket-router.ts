@@ -6,8 +6,9 @@
 import { FastifyInstance } from "fastify";
 import { EventEmitter } from "events";
 import type { Server as HttpServer } from "http";
-import { FileWatcher, FileChange, DatabaseService } from "../../../dist/services/core/index.js";
-import { KnowledgeGraphService } from "../../../dist/services/knowledge/index.js";
+import { FileWatcher, FileChange } from "@memento/core";
+import { DatabaseService } from "@memento/database";
+import { KnowledgeGraphService } from "@memento/knowledge";
 import { WebSocketServer, WebSocket } from "ws";
 import {
   authenticateHeaders,
@@ -18,7 +19,7 @@ import type { AuthContext } from "./middleware/authentication.js";
 import {
   SessionStreamEvent,
   SynchronizationCoordinator,
-} from "../../../dist/services/synchronization/index.js";
+} from "@memento/sync/synchronization";
 import {
   WebSocketConnection,
   WebSocketMessage,

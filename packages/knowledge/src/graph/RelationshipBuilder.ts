@@ -8,11 +8,11 @@
 
 import { Project, Node, SourceFile } from "ts-morph";
 import * as path from "path";
-import { Entity, File, Symbol as SymbolEntity } from "../../../models/entities.js";
+import { Entity, File, Symbol as SymbolEntity } from '@memento/core';
 import {
   GraphRelationship,
   RelationshipType,
-} from "../../../models/relationships.js";
+} from '@memento/core';
 import { normalizeCodeEdge } from "../../../utils/codeEdges.js";
 import { noiseConfig } from "../../../config/noise.js";
 

@@ -3,8 +3,8 @@
  * Handles directory hierarchy creation and path normalization
  */
 
-import { Entity } from "../../../models/entities.js";
-import { GraphRelationship, RelationshipType, StructuralRelationship } from "../../../models/relationships.js";
+import { Entity } from '@memento/core';
+import { GraphRelationship, RelationshipType, StructuralRelationship } from '@memento/core';
 import { createHash, normalizeRelPath, parseFilePath, getPathDepth, isParentPath } from "./utils.js";
 
 /**
