@@ -271,7 +271,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - run: npm test
+      - run: pnpm test
 `;
 
       const validation = await system.ciIntegration.validateWorkflow(validWorkflow, 'github-actions');

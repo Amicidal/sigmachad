@@ -3291,10 +3291,10 @@ export async function registerAssetsProxyRoutes(app: FastifyInstance): Promise<v
     try {
       const res = await fetchFromMirrors('sigma', [
         'https://unpkg.com/sigma/build/sigma.min.js',
-        'https://cdn.jsdelivr.net/npm/sigma/build/sigma.min.js',
+        'https://unpkg.com/sigma/build/sigma.min.js',
 
         'https://unpkg.com/sigma@2.4.0/build/sigma.min.js',
-        'https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js',
+        'https://unpkg.com/sigma@2.4.0/build/sigma.min.js',
       ]);
       reply.header('content-type', res.contentType).send(res.body);
     } catch (e) {
@@ -3307,7 +3307,7 @@ export async function registerAssetsProxyRoutes(app: FastifyInstance): Promise<v
     try {
       const res = await fetchFromMirrors('graphology', [
         'https://unpkg.com/graphology@0.25.3/dist/graphology.umd.min.js',
-        'https://cdn.jsdelivr.net/npm/graphology@0.25.3/dist/graphology.umd.min.js',
+        'https://unpkg.com/graphology@0.25.3/dist/graphology.umd.min.js',
       ]);
       reply.header('content-type', res.contentType).send(res.body);
     } catch (e) {
@@ -3320,9 +3320,9 @@ export async function registerAssetsProxyRoutes(app: FastifyInstance): Promise<v
     try {
       const res = await fetchFromMirrors('forceatlas2', [
         'https://unpkg.com/graphology-layout-forceatlas2/umd/graphology-layout-forceatlas2.min.js',
-        'https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2/umd/graphology-layout-forceatlas2.min.js',
+        'https://unpkg.com/graphology-layout-forceatlas2/umd/graphology-layout-forceatlas2.min.js',
         'https://unpkg.com/graphology-layout-forceatlas2/umd/graphology-layout-forceatlas2.js',
-        'https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2/umd/graphology-layout-forceatlas2.js',
+        'https://unpkg.com/graphology-layout-forceatlas2/umd/graphology-layout-forceatlas2.js',
       ]);
       reply.header('content-type', res.contentType).send(res.body);
     } catch (e) {

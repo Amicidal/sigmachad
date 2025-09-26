@@ -12,10 +12,9 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
 
 # Install dependencies
-ENV npm_config_build_from_source=true \
-    PNPM_HOME=/usr/local/share/pnpm \
+ENV PNPM_HOME=/usr/local/share/pnpm \
     PNPM_SKIP_RECURSIVE_INSTALL_WARN=true
-RUN npm install -g pnpm && pnpm install --no-frozen-lockfile
+RUN corepack prepare pnpm@latest --activate && pnpm install --no-frozen-lockfile
 
 # Development stage
 FROM base AS development

@@ -2810,7 +2810,7 @@ export class DependencyScanner {
           dependencies.push({
             name,
             version: String(version),
-            ecosystem: "npm",
+            ecosystem: NODE_PACKAGE_ECOSYSTEM,
             scope: "runtime",
             path: filePath,
             direct: true
@@ -2824,7 +2824,7 @@ export class DependencyScanner {
           dependencies.push({
             name,
             version: String(version),
-            ecosystem: "npm",
+            ecosystem: NODE_PACKAGE_ECOSYSTEM,
             scope: "development",
             path: filePath,
             direct: true
@@ -2838,7 +2838,7 @@ export class DependencyScanner {
           dependencies.push({
             name,
             version: String(version),
-            ecosystem: "npm",
+            ecosystem: NODE_PACKAGE_ECOSYSTEM,
             scope: "optional",
             path: filePath,
             direct: true
@@ -5282,7 +5282,7 @@ A comprehensive security scanning and analysis module for the Memento project th
 ### Installation
 
 ```bash
-npm install @memento/testing
+pnpm add @memento/testing
 ```
 
 ### Basic Usage
@@ -8102,7 +8102,7 @@ export class VulnerabilityDatabase {
   async checkVulnerabilities(
     packageName: string,
     version: string,
-    ecosystem: string = "npm"
+    ecosystem: string = NODE_PACKAGE_ECOSYSTEM
   ): Promise<Vulnerability[]> {
     const cacheKey = `${ecosystem}:${packageName}@${version}`;
 
@@ -8158,7 +8158,7 @@ export class VulnerabilityDatabase {
 
     for (const [ecosystem, deps] of byEcosystem) {
       try {
-        if (ecosystem === "npm" && this.isOSVEnabled()) {
+        if (ecosystem === NODE_PACKAGE_ECOSYSTEM && this.isOSVEnabled()) {
           const batchVulns = await this.fetchOSVBatch(deps);
           vulnerabilities.push(...batchVulns);
         } else {
@@ -8203,19 +8203,19 @@ export class VulnerabilityDatabase {
       {
         name: "OSV (Open Source Vulnerabilities)",
         url: "https://api.osv.dev",
-        ecosystem: ["npm", "pypi", "maven", "go", "cargo", "packagist", "rubygems"],
+        ecosystem: [NODE_PACKAGE_ECOSYSTEM, "pypi", "maven", "go", "cargo", "packagist", "rubygems"],
         enabled: this.isOSVEnabled()
       },
       {
         name: "GitHub Security Advisories",
         url: "https://api.github.com/advisories",
-        ecosystem: ["npm", "pypi", "maven", "go", "cargo", "packagist", "rubygems"],
+        ecosystem: [NODE_PACKAGE_ECOSYSTEM, "pypi", "maven", "go", "cargo", "packagist", "rubygems"],
         enabled: false
       },
       {
         name: "Local Mock Database",
         url: "internal://mock",
-        ecosystem: ["npm", "pypi", "maven", "go", "cargo", "packagist", "rubygems"],
+        ecosystem: [NODE_PACKAGE_ECOSYSTEM, "pypi", "maven", "go", "cargo", "packagist", "rubygems"],
         enabled: true
       }
     ];
@@ -10045,7 +10045,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - run: npm test
+      - run: pnpm test
 `;
 
       const validation = await system.ciIntegration.validateWorkflow(validWorkflow, 'github-actions');
@@ -15422,7 +15422,7 @@ test_temporal:
   stage: test
   image: node:18
   script:
-    - npm install -g pnpm
+    - corepack prepare pnpm@latest --activate
     - pnpm install
     - ${config.testCommand}
   artifacts:

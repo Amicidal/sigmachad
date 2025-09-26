@@ -12,6 +12,7 @@ import {
   SecuritySeverity
 } from "./types.js";
 import { VulnerabilityDatabase } from "./vulnerability-db.js";
+import { NODE_PACKAGE_ECOSYSTEM } from "./ecosystems.js";
 
 export class DependencyScanner {
   private vulnerabilityDb: VulnerabilityDatabase;
@@ -182,7 +183,7 @@ export class DependencyScanner {
           dependencies.push({
             name,
             version: String(version),
-            ecosystem: "npm",
+            ecosystem: NODE_PACKAGE_ECOSYSTEM,
             scope: "runtime",
             path: filePath,
             direct: true
@@ -196,7 +197,7 @@ export class DependencyScanner {
           dependencies.push({
             name,
             version: String(version),
-            ecosystem: "npm",
+            ecosystem: NODE_PACKAGE_ECOSYSTEM,
             scope: "development",
             path: filePath,
             direct: true
@@ -210,7 +211,7 @@ export class DependencyScanner {
           dependencies.push({
             name,
             version: String(version),
-            ecosystem: "npm",
+            ecosystem: NODE_PACKAGE_ECOSYSTEM,
             scope: "optional",
             path: filePath,
             direct: true

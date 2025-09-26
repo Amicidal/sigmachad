@@ -126,7 +126,12 @@
       "Bash(npx:*)",
       "Bash(pnpm docs:generate:*)",
       "Bash(./test-summary.sh)",
-      "Bash(semgrep:*)"
+      "Bash(semgrep:*)",
+      "Bash(do:*)",
+      "Bash([:*)",
+      "Bash(then echo \"$pkg has code:\")",
+      "Bash(else echo \"$pkg empty except possibly README\")",
+      "Bash(fi:*)"
     ],
     "deny": [],
     "ask": []

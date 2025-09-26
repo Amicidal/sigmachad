@@ -19,10 +19,10 @@ The MCP (Model Context Protocol) server provides AI agents with structured acces
 **Running the MCP server:**
 ```bash
 # Development mode
-npm run dev:mcp
+pnpm run dev:mcp
 
 # Production build
-npm run build:mcp
+pnpm run build:mcp
 node dist/apps/mcp-server/main.js
 ```
 
@@ -54,10 +54,10 @@ A React-based web interface for visualizing and interacting with your codebase k
 **Running the web app:**
 ```bash
 # Development mode
-npm run dev:web
+pnpm run dev:web
 
 # Production build
-npm run build:web
+pnpm run build:web
 npx serve dist/apps/web
 ```
 
@@ -82,10 +82,10 @@ To run both the web app and API server in development:
 
 ```bash
 # Start all services
-npm run dev:all
+pnpm run dev:all
 
 # Or run them separately in different terminals
-npm run dev:web    # Terminal 1: Web app on port 5173
+pnpm run dev:web    # Terminal 1: Web app on port 5173
 nx run mcp-server:serve:api  # Terminal 2: API server on port 3001
 ```
 
@@ -93,11 +93,11 @@ nx run mcp-server:serve:api  # Terminal 2: API server on port 3001
 
 ```bash
 # Build all applications
-npm run build
+pnpm run build
 
 # Build specific apps
-npm run build:web
-npm run build:mcp
+pnpm run build:web
+pnpm run build:mcp
 ```
 
 ## Architecture
@@ -148,17 +148,17 @@ Start required services:
 
 ```bash
 # Start databases
-npm run dev:docker-up
+pnpm run dev:docker-up
 
 # Stop databases
-npm run docker:down
+pnpm run docker:down
 ```
 
 ## Testing
 
 ```bash
 # Run all tests
-npm test
+pnpm test
 
 # Run specific app tests
 nx test web
@@ -179,5 +179,5 @@ nx test mcp-server
 
 ### Build errors
 - Clear Nx cache: `nx reset`
-- Clean and rebuild: `npm run clean && npm run build`
-- Update dependencies: `npm install`
+- Clean and rebuild: `pnpm run clean && pnpm run build`
+- Update dependencies: `pnpm install`

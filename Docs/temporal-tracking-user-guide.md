@@ -697,9 +697,9 @@ stream.on('data', (batch) => {
 
 ### Documentation
 - [API Reference](./api-reference.md)
-- [Blueprint Documents](../Blueprints/)
-- [Test Relationships Guide](../Blueprints/tests-relationships.md)
-- [Temporal Relationships Spec](../Blueprints/temporal-relationships.md)
+- [Blueprint Documents](Blueprints/)
+- [Test Relationships Guide](Blueprints/knowledge-graph/tests-relationships.md)
+- [Temporal Relationships Spec](Blueprints/knowledge-graph/temporal-relationships.md)
 
 ### Community
 - GitHub Issues: Report bugs and feature requests

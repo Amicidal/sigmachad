@@ -318,11 +318,11 @@ if (args.includes('--help') || args.includes('-h')) {
 Memento - AI Coding Assistant with Knowledge Graph
 
 Usage:
-  npm start                    Start the development server
-  npm run dev                  Start with hot reload
-  npm run build               Build for production
-  npm test                     Run tests
-  npm run health              Check system health
+  pnpm start                   Start the development server
+  pnpm run dev                 Start with hot reload
+  pnpm run build              Build for production
+  pnpm test                    Run tests
+  pnpm run health             Check system health
 
 Environment Variables:
   PORT                         Server port (default: 3000)
@@ -334,8 +334,8 @@ Environment Variables:
   LOG_LEVEL                    Logging level (info/debug/warn/error)
 
 Examples:
-  PORT=3001 npm start          Start on port 3001
-  NODE_ENV=production npm start Run in production mode
+  PORT=3001 pnpm start         Start on port 3001
+  NODE_ENV=production pnpm start Run in production mode
   `);
   process.exit(0);
 }

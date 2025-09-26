@@ -112,7 +112,7 @@ docker-compose up -d
 
 # Wait for services to be healthy
 # Then run integration tests
-npm test -- --run tests/integration/api/
+pnpm test -- --run tests/integration/api/
 ```
 
 ### Running Unit Tests
@@ -121,10 +121,10 @@ Unit tests can run without infrastructure:
 
 ```bash
 # Run all unit tests
-npm test -- --run tests/unit/api/
+pnpm test -- --run tests/unit/api/
 
 # Run specific test file
-npm test -- --run tests/unit/api/APIGateway.unit.test.ts
+pnpm test -- --run tests/unit/api/APIGateway.unit.test.ts
 ```
 
 ### Running Integration Tests
@@ -136,10 +136,10 @@ Integration tests require full infrastructure:
 docker-compose up -d
 
 # Run integration tests
-npm test -- --run tests/integration/api/
+pnpm test -- --run tests/integration/api/
 
 # Run specific integration test
-npm test -- --run tests/integration/api/APIGateway.integration.test.ts
+pnpm test -- --run tests/integration/api/APIGateway.integration.test.ts
 ```
 
 ## Test Coverage
@@ -264,7 +264,7 @@ stages:
 unit-tests:
   stage: test
   script:
-    - npm test -- --run tests/unit/
+    - pnpm test -- --run tests/unit/
 
 integration-tests:
   stage: integration
@@ -272,14 +272,14 @@ integration-tests:
     - docker:dind
   script:
     - docker-compose up -d
-    - npm test -- --run tests/integration/
+    - pnpm test -- --run tests/integration/
   dependencies:
     - unit-tests
 
 performance-tests:
   stage: performance
   script:
-    - npm test -- --run tests/integration/api/Performance.integration.test.ts
+    - pnpm test -- --run tests/integration/api/Performance.integration.test.ts
   dependencies:
     - integration-tests
 ```

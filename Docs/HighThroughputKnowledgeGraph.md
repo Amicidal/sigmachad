@@ -110,7 +110,7 @@ File Events → Event Bus → Parse Workers → Ingestion Orchestrator → Graph
 
 ## Risks & Open Questions
 - **Ordering Guarantees:** Need a partitioning strategy that balances throughput with correctness for inter-file relationships.
-- **Namespace Isolation:** Ensure new pipelines respect namespace scoping rules identified in existing blueprint gaps (`Docs/Blueprints/knowledge-graph-service.md`).
+- **Namespace Isolation:** Ensure new pipelines respect namespace scoping rules identified in existing blueprint gaps (`Docs/Blueprints/knowledge-graph/knowledge-graph-service.md`).
 - **Operational Complexity:** Introducing Kafka/Redis Streams and multiple worker pools increases deployment complexity; require observability/ops investment.
 - **Cost Footprint:** GPU embedding planes and horizontal workers raise infrastructure costs; must align with product tiering.
 

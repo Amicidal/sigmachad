@@ -711,7 +711,7 @@ await sessionManager1.checkpoint(sessionId);
 
 ## Troubleshooting
 
-Common issues and solutions are covered in the [Redis Session Troubleshooting Guide](./Redis-Session-Troubleshooting-Guide.md).
+Common issues and solutions are covered in the [Redis Session Troubleshooting Guide](../Guides/sessions/redis-session-troubleshooting-guide.md).
 
 ## Migration Guide
 
@@ -719,4 +719,4 @@ For migrating from older session systems, see the [Session Migration Guide](./Se
 
 ## Performance Tuning
 
-Detailed performance optimization guidelines are available in the [Performance Tuning Guide](./Performance-Tuning-Guide.md).
+Detailed performance optimization guidelines are available in the [Performance Tuning Guide](../Guides/observability/performance-tuning-guide.md).

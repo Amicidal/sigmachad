@@ -6,6 +6,7 @@
 - Avoid compatibility shims or legacy pathways—apply necessary refactors immediately when feasible.
 - If a refactor must wait, log a full-context entry (problem, proposed fix, follow-up steps) in the root backlog file (e.g., `TODO.md`) so it stays actionable.
 - Expect concurrent agent sessions; unexpected working tree changes can happen—diff, sync, and adapt instead of reverting unseen work.
+- Use pnpm for all package management tasks; legacy Node package manager artifacts have been removed from the repo.
 
 ## Capturing Test Output
 - Test suites produce high-volume output that WILL overflow Codex context. YOU MUST Redirect full logs to a file instead of streaming them to the assistant.

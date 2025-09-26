@@ -8,7 +8,7 @@ set -e
 echo "📚 Starting code summary generation..."
 
 # Create summaries directory if it doesn't exist
-mkdir -p docs/summaries
+mkdir -p Docs/summaries
 
 # Check if required tools are available
 if ! command -v semgrep &> /dev/null; then
@@ -94,7 +94,7 @@ for dir_path in $DIRS_TO_PROCESS; do
     fi
 
     # Start writing the summary file
-    summary_file="docs/summaries/$package_name.md"
+    summary_file="Docs/summaries/$package_name.md"
 
     # Get current timestamp in EST/EDT with 12-hour format
     if command -v gdate &> /dev/null; then
@@ -246,7 +246,7 @@ EOF
 done
 
 # Create an index file
-index_file="docs/summaries/README.md"
+index_file="Docs/summaries/README.md"
 cat > "$index_file" << EOF
 # Code Summaries
 
@@ -262,7 +262,7 @@ This directory contains automatically generated code summaries for each package.
 EOF
 
 # List all summary files
-for summary in docs/summaries/*.md; do
+for summary in Docs/summaries/*.md; do
     if [ -f "$summary" ] && [ "$summary" != "$index_file" ]; then
         filename=$(basename "$summary")
         package_name="${filename%.md}"
@@ -288,5 +288,5 @@ if [ "$PROCESSED" -eq 0 ]; then
     exit 1
 else
     echo "✅ Code summaries generation complete!"
-    echo "📁 Summaries saved to docs/summaries/"
+    echo "📁 Summaries saved to Docs/summaries/"
 fi

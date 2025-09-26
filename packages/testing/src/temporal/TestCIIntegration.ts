@@ -438,7 +438,7 @@ test_temporal:
   stage: test
   image: node:18
   script:
-    - npm install -g pnpm
+    - corepack prepare pnpm@latest --activate
     - pnpm install
     - ${config.testCommand}
   artifacts:

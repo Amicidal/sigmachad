@@ -573,7 +573,7 @@ describe('Security Routes', () => {
         fixes: [
           {
             description: 'Update vulnerable package',
-            code: 'npm update lodash@^4.17.12',
+            code: 'pnpm update lodash@^4.17.12',
             explanation: 'Update to patched version'
           }
         ],

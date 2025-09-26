@@ -190,7 +190,7 @@ const searchService = new SearchServiceAdapter(
 
 ### Running Tests
 ```bash
-npm test src/services/knowledge/ogm/SearchServiceOGM.test.ts
+pnpm test src/services/knowledge/ogm/SearchServiceOGM.test.ts
 ```
 
 ## Monitoring and Metrics

@@ -176,6 +176,11 @@ Model Context Protocol support for AI assistants:
 - Documentation and specifications
 - Dependency graphs and relationships
 
+### Blueprints & Guides
+- Docs/Blueprints/api/api-error-handling.md
+- Docs/Blueprints/api/websocket-integration.md
+- Related domains: Docs/Blueprints/knowledge-graph/ (graph service), Docs/Blueprints/sync/ (coordinator)
+
 ## Error Handling
 
 All API responses follow a consistent error format:
@@ -399,7 +404,7 @@ pnpm run fix-imports
 - Review rate limiting configuration
 
 #### Slow Response Times
-- Enable debug logging: `DEBUG=api:* npm start`
+- Enable debug logging: `DEBUG=api:* pnpm start`
 - Check database query performance
 - Review middleware execution order
 
@@ -407,7 +412,7 @@ pnpm run fix-imports
 
 Enable verbose logging:
 ```bash
-NODE_ENV=development DEBUG=api:*,kg:*,ws:* npm start
+NODE_ENV=development DEBUG=api:*,kg:*,ws:* pnpm start
 ```
 
 Monitor metrics:

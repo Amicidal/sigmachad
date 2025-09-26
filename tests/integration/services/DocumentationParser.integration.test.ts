@@ -90,7 +90,7 @@ This is a comprehensive guide for getting started with our system.
 ## Installation
 
 \`\`\`bash
-npm install our-package
+pnpm add our-package
 \`\`\`
 
 ## Usage
@@ -264,9 +264,9 @@ The system is built using:
 GETTING STARTED
 
 1. Clone the repository
-2. Install dependencies: npm install
+2. Install dependencies: pnpm install
 3. Set up the database
-4. Run the application: npm start
+4. Run the application: pnpm start
 
 For more information, contact the development team.
 `;
@@ -388,7 +388,7 @@ First, install the required dependencies:
 .. code-block:: bash
 
    pip install our-package
-   npm install
+   pnpm install
 
 Configuration
 -------------

@@ -25,13 +25,13 @@ Tests require the following test databases to be running:
 ### Using Docker Compose (Recommended)
 ```bash
 # Start test databases
-npm run docker:test-up
+pnpm run docker:test-up
 
 # Run tests
-npm run test
+pnpm run test
 
 # Stop test databases
-npm run docker:test-down
+pnpm run docker:test-down
 ```
 
 ### Manual Setup
@@ -46,27 +46,27 @@ If you prefer to run databases manually, ensure these services are available:
 
 ### All Tests
 ```bash
-npm run test
+pnpm run test
 ```
 
 ### Unit Tests Only
 ```bash
-npm run test -- tests/unit/services/DatabaseService.test.ts
+pnpm run test -- tests/unit/services/DatabaseService.test.ts
 ```
 
 ### Integration Tests Only
 ```bash
-npm run test -- tests/integration/services/DatabaseService.integration.test.ts
+pnpm run test -- tests/integration/services/DatabaseService.integration.test.ts
 ```
 
 ### With Coverage
 ```bash
-npm run test:coverage
+pnpm run test:coverage
 ```
 
 ### Watch Mode
 ```bash
-npm run test:watch
+pnpm run test:watch
 ```
 
 ## Test Coverage
@@ -161,7 +161,7 @@ NODE_ENV=test
 ## Troubleshooting
 
 ### Database Connection Issues
-1. Ensure test databases are running: `npm run docker:test-up`
+1. Ensure test databases are running: `pnpm run docker:test-up`
 2. Wait for databases to be fully ready (may take 30-60 seconds)
 3. Check database logs: `docker-compose -f docker-compose.test.yml logs`
 

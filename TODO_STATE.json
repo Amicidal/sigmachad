@@ -123,7 +123,7 @@
         "buildStatus": "failed",
         "issues": [
           "TypeScript compilation failed due to missing service imports (187 errors)",
-          "API package missing test script - tests exist but no npm script to run them",
+          "API package missing test script - tests exist but no pnpm script to run them",
           "Import paths reference moved services that need updating"
         ],
         "implementationStatus": {
@@ -173,7 +173,7 @@
           "Knowledge graph: Code parsing, indexing, traversal, analysis, maintenance",
           "API gateway: Rate limiting, error handling, CORS, security headers"
         ],
-        "testScripts": "Complete npm scripts for running individual suites, managing services, and full test execution",
+        "testScripts": "Complete ppnpm scripts for running individual suites, managing services, and full test execution",
         "issues": "None - implementation is complete and comprehensive"
       }
     },
@@ -203,12 +203,12 @@
           "specializedScanners": "✅ All present - CodeScanner (SAST), SecretsScanner, DependencyScanner (SCA) with proper initialization",
           "cicdIntegration": "✅ Complete - security-scan.yml workflow with full/critical/recent scopes, artifact uploads, scheduled runs",
           "preCommitHooks": "✅ Implemented - secrets scanning on staged files, dependency vulnerability checks",
-          "packageScripts": "✅ Complete - 12 security-related npm scripts for scanning, auditing, reporting, compliance"
+          "packageScripts": "✅ Complete - 12 security-related pnpm scripts for scanning, auditing, reporting, compliance"
         },
         "securityCoverage": {
           "owaspCompliance": "✅ Implemented - Rules include OWASP mappings (A05:2021-Security Misconfiguration, etc.)",
           "secretDetection": "✅ Comprehensive - AWS keys, API tokens, hardcoded secrets, database credentials, certificates",
-          "dependencyScanning": "✅ Multi-ecosystem - npm/yarn, pip, maven, gradle, go.mod, cargo, composer (9 ecosystems)",
+          "dependencyScanning": "✅ Multi-ecosystem - pnpm/yarn, pip, maven, gradle, go.mod, cargo, composer (9 ecosystems)",
           "codeAnalysis": "✅ SAST capabilities - Pattern-based vulnerability detection with confidence scoring"
         },
         "testQuality": {

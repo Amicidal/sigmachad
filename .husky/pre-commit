@@ -25,6 +25,10 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# Enforce docs coupling for changed packages (before auto-fix)
+echo "📎 Checking docs coupling..."
+pnpm docs:coupling
+
 # Run security checks
 echo "🔒 Running security checks..."
 
@@ -54,6 +58,11 @@ if git diff --cached --name-only | grep -E "(package\.json|pnpm-lock\.yaml|requi
   fi
 fi
 
+# Validate and normalize blueprints (auto-fix, then validate)
+echo "📘 Validating blueprint docs..."
+pnpm docs:fix >/dev/null 2>&1 || true
+pnpm docs:validate
+
 # Generate code summaries (non-blocking)
 echo "📚 Generating code summaries..."
 bash scripts/generate-code-summaries.sh 2>/dev/null || {
@@ -61,8 +70,8 @@ bash scripts/generate-code-summaries.sh 2>/dev/null || {
 }
 
 # Add summaries to commit if they exist and changed
-if [ -d "docs/summaries" ]; then
-  git add docs/summaries/*.md 2>/dev/null || true
+if [ -d "Docs/summaries" ]; then
+  git add Docs/summaries/*.md 2>/dev/null || true
 fi
 
 echo "✅ All pre-commit checks passed!"

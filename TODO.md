@@ -5,8 +5,8 @@
 - **Primary Modules**: `src/api` (REST/MCP/WebSocket layer), `src/services` (KnowledgeGraphService, TestEngine, Synchronization, SecurityScanner), `Docs/` (design + blueprints).
 - **Key Documents to Review First**:
   - `Docs/MementoAPIDesign.md`
-  - `Docs/Blueprints/tests-relationships.md`
-  - `Docs/Blueprints/spec-relationships.md`
+  - `Docs/Blueprints/knowledge-graph/tests-relationships.md`
+  - `Docs/Blueprints/knowledge-graph/spec-relationships.md`
   - `MementoImplementationPlan.md`
 - **Skill Stack**: TypeScript (ESM), Fastify, tRPC, Neo4j-like queries via FalkorDB, PostgreSQL, Vitest.
 - **Known State**: Impact API and test-planning endpoints are stubbed; flaky-analysis endpoint ignores persisted data; several tests reference legacy responses; build artefacts tracked in git.
@@ -23,11 +23,11 @@
 ### 1. Refresh Blueprint Documentation Against Current Implementation
 - **Context**: Comprehensive audit revealed alignment gaps between aspirational blueprints and implemented features, particularly for multi-agent orchestration, high-throughput architecture, and test/security implementation patterns.
 - **Entry Points**:
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/spec-relationships.md` (major refresh needed)
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/tests-relationships.md` (major refresh needed)
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/performance-relationships.md` (minor refresh)
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/temporal-relationships.md` (minor refresh)
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/synchronization-coordinator.md` (major refresh)
+  - `Docs/Blueprints/knowledge-graph/spec-relationships.md` (major refresh needed)
+  - `Docs/Blueprints/knowledge-graph/tests-relationships.md` (major refresh needed)
+  - `Docs/Blueprints/knowledge-graph/performance-relationships.md` (minor refresh)
+  - `Docs/Blueprints/knowledge-graph/temporal-relationships.md` (minor refresh)
+  - `Docs/Blueprints/sync/synchronization-coordinator.md` (major refresh)
 - **Scope**:
   - Update spec-relationships.md to align API references with MementoAPIDesign.md sections, integrate BusinessDomain/SemanticCluster concepts from KnowledgeGraphDesign.md.
   - Restructure tests-relationships.md to reflect graph-first approach rather than PostgreSQL-heavy design, align with test management APIs.
@@ -39,7 +39,7 @@
 ### 2. Implement Multi-Agent Orchestrator Foundation
 - **Context**: Multi-agent orchestration is documented in blueprints but completely unimplemented. This blocks parallel agent execution and limits system velocity to single-agent sequential processing.
 - **Entry Points**:
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/multi-agent-orchestration.md` (design spec)
+  - `Docs/Blueprints/orchestration/multi-agent-orchestration.md` (design spec)
   - `/Users/Coding/Desktop/sigmachad/application/multi-agent/Orchestrator.ts` (to create)
   - `/Users/Coding/Desktop/sigmachad/scripts/agent-parse.ts` (to create)
   - `/Users/Coding/Desktop/sigmachad/scripts/agent-test.ts` (to create)
@@ -94,7 +94,7 @@
   - `packages/knowledge/src/ingestion/error-handler.ts` - Error handling and recovery
   - `packages/knowledge/scripts/smoke-test.ts` - Comprehensive testing suite
   - `packages/knowledge/scripts/simple-smoke-test.ts` - Basic validation test
-  - `packages/knowledge/PIPELINE_GUIDE.md` - Complete usage documentation
+- `Docs/Guides/sync/pipeline-guide.md` - Complete usage documentation
 - **Follow-up (pending)**: Autoscaling policies based on queue depth. Problem: No automatic scaling triggers. Proposed fix: ✅ **IMPLEMENTED** - Auto-scaling with configurable thresholds and cooldown periods.
 - **Acceptance**: ✅ **ACHIEVED** - System architecture supports 10k+ LOC/minute ingestion rate, comprehensive telemetry implemented, backward compatibility maintained.
 
@@ -133,7 +133,7 @@
 ### 6. Implement Security Scanning Integration
 - **Context**: SecurityScanner exists but isn't integrated into sync workflows. Blueprint describes metadata-only approach but implementation creates dedicated nodes/edges.
 - **Entry Points**:
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/security-metadata-integration.md` (design)
+  - `Docs/Blueprints/security/security-metadata-integration.md` (design)
   - `/Users/Coding/Desktop/sigmachad/packages/testing/src/SecurityScanner.ts` (current implementation)
   - `/Users/Coding/Desktop/sigmachad/packages/sync/src/synchronization/SynchronizationCoordinator.ts` (integration point)
 - **Scope**:
@@ -165,7 +165,7 @@
 - **Context**: RollbackCapabilities uses in-memory storage (50-item cap), lost on restart. No distributed coordination or true datastore snapshots.
 - **Entry Points**:
   - `/Users/Coding/Desktop/sigmachad/packages/sync/src/scm/RollbackCapabilities.ts` (current implementation)
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/rollback-capabilities.md` (design)
+  - `Docs/Blueprints/rollback/rollback-capabilities.md` (design)
 - **Scope**:
   - Migrate rollback points from memory to PostgreSQL with indexed lookups.
   - Implement true datastore snapshots (graph subgraph exports, database checkpoints).
@@ -179,7 +179,7 @@
 - **Context**: Test relationships lack temporal history (validFrom/validTo), suite IDs don't persist causing overwrites, canonical IDs collide.
 - **Entry Points**:
   - `/Users/Coding/Desktop/sigmachad/packages/testing/src/TestEngine.ts` (current implementation)
-  - `/Users/Coding/Desktop/sigmachad/Docs/Blueprints/tests-relationships.md` (temporal design)
+  - `Docs/Blueprints/knowledge-graph/tests-relationships.md` (temporal design)
 - **Scope**:
   - Add temporal validity intervals to test relationships (validFrom, validTo timestamps).
   - Implement suite/run ID persistence to prevent relationship overwrites.
@@ -188,6 +188,20 @@
   - Implement test coverage trend analysis using temporal data.
   - Add framework-specific error semantics for retries and hook failures.
 - **Acceptance**: Test relationships track temporal history, multiple suites don't overwrite each other, coverage trends visible over time.
+
+### 10. Docs Reorganization and Pre-commit Enforcement
+- **Context**: Blueprints were flat and inconsistent, exceeding folder file limits and lacking a working TODO in several docs. Pre-commit didn't validate docs.
+- **Scope**:
+  - Reorganize Docs/Blueprints by package domain (knowledge-graph, sessions, security, rollback, api, integration) with README indices.
+  - Enforce required sections (Overview, Desired Capabilities, Metadata with Scope, Working TODO) via pre-commit validator.
+  - Standardize code summaries path to `Docs/summaries` for consistency.
+- **Status**: Initial structure, template, and validator added. Major KG, Sessions, and Security blueprints moved. Auto-fix inserts missing sections.
+- **Follow-up**:
+  - Update internal cross-links to reflect new paths.
+  - Migrate remaining blueprints into their domain folders (api, integration, rollback).
+  - Add acceptance criteria examples per blueprint and link to tests.
+  - Consider consolidating relationship docs under a single relationships index.
+  - Add CI job to run `pnpm docs:validate` on PRs.
 
 ## General Notes
 - Keep changes ASCII unless files already contain Unicode.

@@ -27,7 +27,7 @@ A comprehensive security scanning and analysis module for the Memento project th
 ### Installation
 
 ```bash
-npm install @memento/testing
+pnpm add @memento/testing
 ```
 
 ### Basic Usage

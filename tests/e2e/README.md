@@ -272,7 +272,7 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: '18'
-      - run: npm install -g pnpm
+      - run: corepack prepare pnpm@latest --activate
       - run: pnpm install
       - run: pnpm test:e2e:full
 ```
@@ -282,7 +282,7 @@ jobs:
 ```bash
 # Run tests in CI-like environment
 docker run --rm -v $(pwd):/workspace -w /workspace node:18 \
-  bash -c "npm install -g pnpm && pnpm install && pnpm test:e2e:full"
+  bash -c "corepack prepare pnpm@latest --activate && pnpm install && pnpm test:e2e:full"
 ```
 
 ## Maintenance

@@ -4672,7 +4672,7 @@ export class ASTParser {
   private extractDependencies(content: string): string[] {
     const dependencies: string[] = [];
 
-    // Extract npm package imports
+    // Extract Node package imports
     const importRegex = /from ['"]([^'"]+)['"]/g;
     let match;
     while ((match = importRegex.exec(content)) !== null) {

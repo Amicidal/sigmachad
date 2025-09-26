@@ -433,7 +433,7 @@ export class SecurityFixAgent extends BaseAgent {
   }
 
   private async applyDependencyUpdate(issue: any, fix: SecurityFix): Promise<boolean> {
-    // This would involve updating package.json and running npm/pnpm install
+    // This would involve updating package.json and running pnpm install
     // For safety, we'll just log the recommendation
     this.log('info', 'Dependency update recommended', {
       issueId: issue.id,

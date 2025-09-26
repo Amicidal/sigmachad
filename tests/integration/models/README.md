@@ -69,24 +69,24 @@ The tests expect the following database connections:
 
 ### Run All Model Integration Tests
 ```bash
-npm test tests/integration/models/
+pnpm test tests/integration/models/
 ```
 
 ### Run Specific Test Files
 ```bash
 # Test entities only
-npm test tests/integration/models/entities.integration.test.ts
+pnpm test tests/integration/models/entities.integration.test.ts
 
 # Test relationships only
-npm test tests/integration/models/relationships.integration.test.ts
+pnpm test tests/integration/models/relationships.integration.test.ts
 
 # Test types only
-npm test tests/integration/models/types.integration.test.ts
+pnpm test tests/integration/models/types.integration.test.ts
 ```
 
 ### Run with Coverage
 ```bash
-npm test -- --coverage tests/integration/models/
+pnpm test -- --coverage tests/integration/models/
 ```
 
 ## Test Scenarios Covered
@@ -209,7 +209,7 @@ These tests are designed to run in CI/CD pipelines:
 
 Run tests with debug output:
 ```bash
-DEBUG=* npm test tests/integration/models/
+DEBUG=* pnpm test tests/integration/models/
 ```
 
 ## Contributing

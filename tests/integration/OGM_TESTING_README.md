@@ -59,26 +59,26 @@ Enhanced database helpers with OGM support:
 ### Prerequisites
 Ensure all database services are running:
 ```bash
-npm run dev:docker-up
+pnpm run dev:docker-up
 ```
 
 ### Integration Tests
 Run all OGM integration tests:
 ```bash
-npm run test:integration -- tests/integration/services/OGMServices.integration.test.ts
-npm run test:integration -- tests/integration/OGMMigration.validation.test.ts
+pnpm run test:integration -- tests/integration/services/OGMServices.integration.test.ts
+pnpm run test:integration -- tests/integration/OGMMigration.validation.test.ts
 ```
 
 ### Performance Benchmarks
 Run performance benchmarks (takes 5+ minutes):
 ```bash
-npm run test:integration -- tests/benchmarks/OGMPerformance.benchmark.ts
+pnpm run test:integration -- tests/benchmarks/OGMPerformance.benchmark.ts
 ```
 
 ### All OGM Tests
 Run all OGM-related tests:
 ```bash
-npm run test:integration -- tests/integration/services/OGMServices.integration.test.ts tests/integration/OGMMigration.validation.test.ts tests/benchmarks/OGMPerformance.benchmark.ts
+pnpm run test:integration -- tests/integration/services/OGMServices.integration.test.ts tests/integration/OGMMigration.validation.test.ts tests/benchmarks/OGMPerformance.benchmark.ts
 ```
 
 ## Test Configuration
@@ -162,7 +162,7 @@ Tests include realistic codebase patterns:
 ```bash
 # Ensure services are running
 docker-compose ps
-npm run health
+pnpm run health
 ```
 
 **Memory Issues**
@@ -174,13 +174,13 @@ node --expose-gc ./node_modules/.bin/vitest run tests/benchmarks/
 **Test Isolation Problems**
 ```bash
 # Clean all databases
-npm run db:clear:all
+pnpm run db:clear:all
 ```
 
 ### Debug Mode
 Enable detailed logging:
 ```bash
-DEBUG=1 npm run test:integration -- tests/integration/services/OGMServices.integration.test.ts
+DEBUG=1 pnpm run test:integration -- tests/integration/services/OGMServices.integration.test.ts
 ```
 
 ## Migration Checklist
@@ -212,13 +212,13 @@ Include in CI pipeline:
 ```yaml
 - name: Run OGM Integration Tests
   run: |
-    npm run dev:docker-up
-    npm run test:integration -- tests/integration/services/OGMServices.integration.test.ts
-    npm run test:integration -- tests/integration/OGMMigration.validation.test.ts
+    pnpm run dev:docker-up
+    pnpm run test:integration -- tests/integration/services/OGMServices.integration.test.ts
+    pnpm run test:integration -- tests/integration/OGMMigration.validation.test.ts
 ```
 
 For production validation, also run benchmarks:
 ```yaml
 - name: Run OGM Performance Benchmarks
-  run: npm run test:integration -- tests/benchmarks/OGMPerformance.benchmark.ts
+  run: pnpm run test:integration -- tests/benchmarks/OGMPerformance.benchmark.ts
 ```
