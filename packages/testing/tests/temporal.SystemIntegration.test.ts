@@ -13,8 +13,8 @@ import {
   TemporalUtils,
   TemporalConstants,
   TEMPORAL_VERSION
-} from '../src/temporal.js';
-import type { TestExecutionRecord } from '../src/TestTypes.js';
+} from '../src/temporal/index.js';
+import type { TestExecutionRecord } from '../src/temporal/TestTypes.js';
 
 describe('Temporal System Integration', () => {
   describe('System Creation and Configuration', () => {

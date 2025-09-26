@@ -18,8 +18,8 @@ import {
   TemporalUtils,
   TemporalConstants,
   TEMPORAL_VERSION
-} from '../src/temporal.js';
-import type { TestExecutionRecord, TestConfiguration } from '../src/TestTypes.js';
+} from '../src/temporal/index.js';
+import type { TestExecutionRecord, TestConfiguration } from '../src/temporal/TestTypes.js';
 
 describe('Temporal Tracking Integration', () => {
   describe('System Factory Functions', () => {
