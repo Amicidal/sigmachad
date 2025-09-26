@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TestTemporalTracker } from '../src/temporal/TestTemporalTracker.js';
+import { TestTemporalTracker } from '../src/TestTemporalTracker.js';
 import {
   TestExecutionRecord,
   TestMetadata,
@@ -12,7 +12,7 @@ import {
   TestStatus,
   TestType,
   TestRelationshipType
-} from '../src/temporal/TestTypes.js';
+} from '../src/TestTypes.js';
 
 describe('TestTemporalTracker', () => {
   let tracker: TestTemporalTracker;

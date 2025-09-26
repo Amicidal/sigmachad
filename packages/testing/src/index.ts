@@ -5,4 +5,4 @@ export { TestPlanningService } from './TestPlanningService.js';
 export { TestResultParser } from './TestResultParser.js';
 export { MaintenanceMetrics } from './MaintenanceMetrics.js';
 export * from './NamespaceScope.js';
-export * from './temporal/index.js';
+export * from './temporal.js';

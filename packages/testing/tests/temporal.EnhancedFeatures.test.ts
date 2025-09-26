@@ -7,10 +7,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { TestVisualization } from '../src/temporal/TestVisualization.js';
-import { TestPredictiveAnalytics } from '../src/temporal/TestPredictiveAnalytics.js';
-import { TestDataStorage } from '../src/temporal/TestDataStorage.js';
-import { TestCIIntegration } from '../src/temporal/TestCIIntegration.js';
+import { TestVisualization } from '../src/TestVisualization.js';
+import { TestPredictiveAnalytics } from '../src/TestPredictiveAnalytics.js';
+import { TestDataStorage } from '../src/TestDataStorage.js';
+import { TestCIIntegration } from '../src/TestCIIntegration.js';
 import {
   TestExecutionRecord,
   TestEvolutionEvent,
@@ -19,7 +19,7 @@ import {
   TestStatus,
   TestType,
   TestRelationshipType
-} from '../src/temporal/TestTypes.js';
+} from '../src/TestTypes.js';
 
 describe('Enhanced Temporal Tracking Features', () => {
   let config: TestConfiguration;
