@@ -131,7 +131,9 @@
       "Bash([:*)",
       "Bash(then echo \"$pkg has code:\")",
       "Bash(else echo \"$pkg empty except possibly README\")",
-      "Bash(fi:*)"
+      "Bash(fi:*)",
+      "Bash(nx g:*)",
+      "Bash(python3 -m json.tool:*)"
     ],
     "deny": [],
     "ask": []

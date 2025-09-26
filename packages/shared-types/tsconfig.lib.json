@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "declaration": true,
+    "outDir": "../../dist/out-tsc",
+    "types": []
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "**/*.spec.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "**/*.spec.js",
+    "src/**/*.spec.js",
+    "**/*.spec.jsx",
+    "**/*.spec.tsx",
+    "**/*.test.js",
+    "src/**/*.test.js",
+    "**/*.test.jsx",
+    "**/*.test.tsx",
+    "src/tsconfig.spec.json"
+  ]
+}

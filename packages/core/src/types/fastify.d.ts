@@ -1,5 +1,5 @@
 import "fastify";
-import type { AuthContext } from "@memento/api";
+import type { AuthContext } from "@memento/shared-types";
 
 declare module "fastify" {
   interface FastifyRequest {

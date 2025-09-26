@@ -2,9 +2,9 @@
  * ESLint rule to enforce maximum directory depth of 3 levels from project root
  */
 
-const path = require('path');
+import path from 'path';
 
-module.exports = {
+export default {
   meta: {
     type: 'problem',
     docs: {

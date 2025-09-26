@@ -3,8 +3,9 @@
  * Manages system configuration, feature detection, and health monitoring
  */
 
-import { DatabaseService } from '@memento/database';
-import { SynchronizationCoordinator } from '@memento/sync';
+import type { IDatabaseService } from '@memento/shared-types';
+// Avoid a hard dependency on @memento/sync; use a minimal interface instead
+export interface ISynchronizationCoordinator {}
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -49,8 +50,8 @@ export interface SystemConfiguration {
 
 export class ConfigurationService {
   constructor(
-    private readonly dbService?: DatabaseService,
-    private readonly syncCoordinator?: SynchronizationCoordinator,
+    private readonly dbService?: IDatabaseService,
+    private readonly syncCoordinator?: ISynchronizationCoordinator,
     private readonly testWorkingDir?: string
   ) {}
 
@@ -237,10 +238,9 @@ export class ConfigurationService {
 
     try {
       // Check graph search capability
-      const testQuery = await dbService.falkordbQuery(
-        "MATCH (n) RETURN count(n) LIMIT 1"
-      );
-      features.graphSearch = Array.isArray(testQuery);
+      await dbService.falkordbQuery("MATCH (n) RETURN count(n) LIMIT 1");
+      // If query succeeds without throwing, graph search is available
+      features.graphSearch = true;
     } catch (error) {
       features.graphSearch = false;
     }
@@ -249,8 +249,9 @@ export class ConfigurationService {
       // Check vector search capability
       const qdrantClient = dbService.getQdrantClient();
       const collections = await qdrantClient.getCollections();
-      features.vectorSearch =
-        collections.collections && collections.collections.length >= 0;
+      features.vectorSearch = Array.isArray(collections?.collections)
+        ? collections.collections.length > 0
+        : false;
     } catch (error) {
       features.vectorSearch = false;
     }

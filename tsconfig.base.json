@@ -26,7 +26,11 @@
       "@memento/knowledge": ["packages/knowledge/src"],
       "@memento/knowledge/*": ["packages/knowledge/src/*"],
       "@memento/testing": ["packages/testing/src"],
-      "@memento/testing/*": ["packages/testing/src/*"]
+      "@memento/testing/*": ["packages/testing/src/*"],
+      "@memento/shared-types": ["packages/shared-types/src"],
+      "@memento/shared-types/*": ["packages/shared-types/src/*"],
+      "@shared-types": ["packages/shared-types/src"],
+      "@shared-types/*": ["packages/shared-types/src/*"]
     }
   },
   "exclude": ["node_modules", "dist", "coverage"]

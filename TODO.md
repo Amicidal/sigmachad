@@ -98,6 +98,15 @@
 - **Follow-up (pending)**: Autoscaling policies based on queue depth. Problem: No automatic scaling triggers. Proposed fix: ✅ **IMPLEMENTED** - Auto-scaling with configurable thresholds and cooldown periods.
 - **Acceptance**: ✅ **ACHIEVED** - System architecture supports 10k+ LOC/minute ingestion rate, comprehensive telemetry implemented, backward compatibility maintained.
 
+## Follow-up: Consolidate shared-types interfaces (depth-limit compliance)
+
+- Context (2025-09-26): Introduced shared interfaces and auth types under `packages/shared-types/src/` to break Nx circular deps by making `core` depend only on interfaces.
+- Issue: Existing `packages/shared-types/src/interfaces/` exceeds the repo depth limit (>3 levels). It pre-existed; we added two files to it to minimize churn.
+- Proposed fix:
+  - Move `src/interfaces/DatabaseService.ts`, `src/interfaces/KnowledgeGraphService.ts`, `src/interfaces/TemporalHistoryValidator.ts` to top-level `src/` as `database-service.ts`, `knowledge-graph-service.ts`, `temporal-history-validator.ts`.
+  - Update re-exports and imports; remove `src/interfaces/`.
+  - Verify with `pnpm lint:depth`.
+
 ### 4. Complete API Implementation Gaps
 - **Context**: API implementation is ~65% complete compared to MementoAPIDesign.md. Missing: vector search, business domains, complete design management, security metadata endpoints.
 - **Entry Points**:

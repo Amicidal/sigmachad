@@ -15,5 +15,10 @@ logs/
 nx-cloud.env
 nx-graph.json
 
+# Build artifacts
+dist/
+packages/**/dist/
+apps/**/dist/
+
 vite.config.*.timestamp*
 vitest.config.*.timestamp*

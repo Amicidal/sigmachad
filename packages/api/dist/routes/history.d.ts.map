@@ -1,1 +1,0 @@
-{"version":3,"file":"history.d.ts","sourceRoot":"","sources":["../../src/routes/history.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AAEH,OAAO,EAAE,eAAe,EAAE,MAAM,SAAS,CAAC;AAC1C,OAAO,EAAE,qBAAqB,EAAE,MAAM,2CAA2C,CAAC;AAClF,OAAO,EAAE,eAAe,EAAE,MAAM,sCAAsC,CAAC;AAyJvE,wBAAsB,qBAAqB,CACzC,GAAG,EAAE,eAAe,EACpB,SAAS,EAAE,qBAAqB,EAChC,UAAU,EAAE,eAAe,GAC1B,OAAO,CAAC,IAAI,CAAC,CAuzBf"}

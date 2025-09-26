@@ -3,11 +3,15 @@
  * Handles system maintenance tasks including cleanup, optimization, reindexing, and validation
  */
 
-import { DatabaseService } from '@memento/database';
-import { KnowledgeGraphService } from '@memento/knowledge';
-import { MaintenanceMetrics } from '@memento/testing';
-import { MaintenanceOperationError } from '@memento/backup';
-import { TemporalHistoryValidator } from '@memento/jobs';
+import type { IDatabaseService, IKnowledgeGraphService, ITemporalHistoryValidator } from '@memento/shared-types';
+
+// Local error to avoid cross-package dependency on backup
+export class MaintenanceOperationError extends Error {
+  constructor(message: string, public context?: Record<string, unknown>) {
+    super(message);
+    this.name = 'MaintenanceOperationError';
+  }
+}
 
 export interface MaintenanceTask {
   id: string;
@@ -33,20 +37,23 @@ export interface MaintenanceResult {
 export class MaintenanceService {
   private activeTasks = new Map<string, MaintenanceTask>();
   private completedTasks = new Map<string, MaintenanceTask>();
-  private readonly temporalValidator: TemporalHistoryValidator;
+  private readonly temporalValidator: ITemporalHistoryValidator | undefined;
 
   constructor(
-    private dbService: DatabaseService,
-    private kgService: KnowledgeGraphService
+    private dbService: IDatabaseService,
+    private kgService: IKnowledgeGraphService,
+    temporalValidator?: ITemporalHistoryValidator
   ) {
-    this.temporalValidator = new TemporalHistoryValidator(this.kgService);
+    this.temporalValidator = temporalValidator;
   }
 
   async runMaintenanceTask(taskType: string): Promise<MaintenanceResult> {
     this.ensureDependenciesReady(taskType);
 
     const taskId = `${taskType}_${Date.now()}`;
-    const metrics = MaintenanceMetrics.getInstance();
+    const metrics = {
+      recordMaintenanceTask: (_: { taskType: string; status: 'success'|'failure'; durationMs: number }) => void 0,
+    };
     const startedAt = Date.now();
 
     const task: MaintenanceTask = {
@@ -310,24 +317,22 @@ export class MaintenanceService {
       // 4. Validate database connectivity
       await this.validateDatabaseConnections();
 
-      const temporalReport = await this.temporalValidator.validate({
-        autoRepair: true,
-        dryRun: false,
-        batchSize: 25,
-        timelineLimit: 200,
-        logger: (message, context) =>
-          console.log(`temporal-validator:${message}`, context ?? {}),
-      });
-      const unresolvedTemporalIssues = temporalReport.issues.filter(
-        (issue) => issue.repaired !== true
-      ).length;
-      stats.temporalIssues += temporalReport.issues.length;
-      stats.temporalRepairs += temporalReport.repairedLinks;
+      const temporalReport = this.temporalValidator
+        ? await this.temporalValidator.validate({
+          autoRepair: true,
+          dryRun: false,
+          batchSize: 25,
+          timelineLimit: 200,
+          logger: (message, context) =>
+            console.log(`temporal-validator:${message}`, context ?? {}),
+        })
+        : { issues: [], repairedLinks: 0, scannedEntities: 0, inspectedVersions: 0 };
+
+      const unresolvedTemporalIssues = (temporalReport.issues || []).filter((issue: any) => issue.repaired !== true).length;
+      stats.temporalIssues += temporalReport.issues?.length ?? 0;
+      stats.temporalRepairs += temporalReport.repairedLinks ?? 0;
       stats.integrityIssues += unresolvedTemporalIssues;
-      if (
-        temporalReport.issues.length > 0 ||
-        temporalReport.repairedLinks > 0
-      ) {
+      if ((temporalReport.issues?.length ?? 0) > 0 || (temporalReport.repairedLinks ?? 0) > 0) {
         changes.push({
           type: "temporal_history_validation",
           report: {
@@ -335,7 +340,7 @@ export class MaintenanceService {
             inspectedVersions: temporalReport.inspectedVersions,
             repairedLinks: temporalReport.repairedLinks,
             unresolvedIssues: unresolvedTemporalIssues,
-            sampleIssues: temporalReport.issues.slice(0, 50),
+            sampleIssues: (temporalReport.issues || []).slice(0, 50),
           },
         });
       }

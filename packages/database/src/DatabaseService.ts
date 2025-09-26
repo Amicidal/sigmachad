@@ -10,6 +10,7 @@ import {
   IRedisService,
   IDatabaseHealthCheck,
 } from '../database/index.js';
+import type { IDatabaseService } from '@memento/shared-types';
 import type { BulkQueryMetrics } from '../database/index.js';
 import type {
   PerformanceHistoryOptions,
@@ -67,7 +68,7 @@ export type DatabaseServiceDeps = {
   redisFactory?: (cfg: NonNullable<DatabaseConfig['redis']>) => IRedisService;
 };
 
-export class DatabaseService {
+export class DatabaseService implements IDatabaseService {
   private neo4jService!: INeo4jService;
   private postgresqlService!: IPostgreSQLService;
   private redisService?: IRedisService;

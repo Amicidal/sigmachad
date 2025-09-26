@@ -1,1 +1,0 @@
-{"version":3,"file":"impact.d.ts","sourceRoot":"","sources":["../../../src/api/routes/impact.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAEH,OAAO,EAAE,eAAe,EAAE,MAAM,SAAS,CAAC;AAC1C,OAAO,EAAE,qBAAqB,EAAE,MAAM,mDAAmD,CAAC;AAC1F,OAAO,EAAE,eAAe,EAAE,MAAM,wCAAwC,CAAC;AAMzE,wBAAsB,oBAAoB,CACxC,GAAG,EAAE,eAAe,EACpB,SAAS,EAAE,qBAAqB,EAChC,SAAS,EAAE,eAAe,GACzB,OAAO,CAAC,IAAI,CAAC,CA4uBf"}
