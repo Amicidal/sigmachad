@@ -1,5 +1,18 @@
 # Spec Relationship Blueprint
 
+## Metadata
+
+- Scope: knowledge-graph
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: knowledge-graph).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Specification edges (`REQUIRES`, `IMPACTS`, `IMPLEMENTS_SPEC`, `IMPLEMENTS_CLUSTER`) connect product requirements to implementation artifacts. They enable requirement traceability, impact analysis, and coverage tracking. For multi-file specs, prefer `IMPLEMENTS_CLUSTER` to attach refactor-resilient groups of entities, avoiding per-symbol maintenance.
 

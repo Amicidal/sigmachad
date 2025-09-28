@@ -1,23 +1,23 @@
-import type { Pool as PgPool, PoolClient as PgPoolClient } from "pg";
+import type { Pool as PgPool, PoolClient as PgPoolClient } from 'pg';
 import {
   IPostgreSQLService,
   type BulkQueryInstrumentationConfig,
   type BulkQueryMetrics,
   type BulkQueryMetricsSnapshot,
   type BulkQueryTelemetryEntry,
-} from "./interfaces.js";
+} from '../interfaces.js';
 import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
   SCMCommitRecord,
-} from "../../models/types.js";
+} from '@memento/core/types/types.js';
 import type {
   PerformanceMetricSample,
   PerformanceRelationship,
-} from "../../models/relationships.js";
-import { normalizeMetricIdForId } from "../../utils/codeEdges.js";
-import { sanitizeEnvironment } from "../../utils/environment.js";
-import { performance } from "node:perf_hooks";
+} from '@memento/core/models/relationships.js';
+import { normalizeMetricIdForId } from '@memento/core/utils/codeEdges.js';
+import { sanitizeEnvironment } from '@memento/core/utils/environment.js';
+import { performance } from 'node:perf_hooks';
 
 interface BulkTelemetryListenerPayload {
   entry: BulkQueryTelemetryEntry;
@@ -60,7 +60,9 @@ export class PostgreSQLService implements IPostgreSQLService {
     queueDepthWarningThreshold: 3,
     historyLimit: 10,
   };
-  private bulkTelemetryEmitter?: (payload: BulkTelemetryListenerPayload) => void;
+  private bulkTelemetryEmitter?: (
+    payload: BulkTelemetryListenerPayload
+  ) => void;
 
   constructor(
     config: {
@@ -111,7 +113,7 @@ export class PostgreSQLService implements IPostgreSQLService {
         this.postgresPool = this.poolFactory();
 
         // Also configure type parsers for test pools
-        const { types } = await import("pg");
+        const { types } = await import('pg');
         // Configure numeric type parsing for test environments
         types.setTypeParser(1700, (value: string) => parseFloat(value)); // numeric/decimal
         types.setTypeParser(701, (value: string) => parseFloat(value)); // real/float4
@@ -121,12 +123,12 @@ export class PostgreSQLService implements IPostgreSQLService {
         types.setTypeParser(20, (value: string) => parseInt(value, 10)); // int8/bigint
       } else {
         // Dynamically import pg so test mocks (vi.mock) reliably intercept
-        const { Pool, types } = await import("pg");
+        const { Pool, types } = await import('pg');
 
         // Configure JSONB parsing based on environment
         if (
-          process.env.NODE_ENV === "test" ||
-          process.env.RUN_INTEGRATION === "1"
+          process.env.NODE_ENV === 'test' ||
+          process.env.RUN_INTEGRATION === '1'
         ) {
           // In tests, parse JSONB as objects for easier assertions (callers can re-stringify if needed)
           types.setTypeParser(3802, (value: string) => JSON.parse(value)); // JSONB oid = 3802
@@ -155,15 +157,15 @@ export class PostgreSQLService implements IPostgreSQLService {
       // Always validate the connection using a client
       const client = await this.postgresPool.connect();
       try {
-        await client.query("SELECT NOW()");
+        await client.query('SELECT NOW()');
       } finally {
         client.release();
       }
 
       this.initialized = true;
-      console.log("✅ PostgreSQL connection established");
+      console.log('✅ PostgreSQL connection established');
     } catch (error) {
-      console.error("❌ PostgreSQL initialization failed:", error);
+      console.error('❌ PostgreSQL initialization failed:', error);
       throw error;
     }
   }
@@ -172,7 +174,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     try {
       if (
         this.postgresPool &&
-        typeof (this.postgresPool as any).end === "function"
+        typeof (this.postgresPool as any).end === 'function'
       ) {
         await this.postgresPool.end();
       }
@@ -192,7 +194,7 @@ export class PostgreSQLService implements IPostgreSQLService {
 
   getPool() {
     if (!this.initialized) {
-      throw new Error("PostgreSQL not initialized");
+      throw new Error('PostgreSQL not initialized');
     }
     return this.postgresPool;
   }
@@ -206,10 +208,10 @@ export class PostgreSQLService implements IPostgreSQLService {
   private validateQueryParams(params: any[]): void {
     for (let i = 0; i < params.length; i++) {
       const param = params[i];
-      if (typeof param === "string" && param.length === 36) {
+      if (typeof param === 'string' && param.length === 36) {
         // Only validate strings that look like UUIDs (contain hyphens in UUID format)
         // This avoids false positives with JSON strings that happen to be 36 characters
-        if (param.includes("-") && !this.validateUuid(param)) {
+        if (param.includes('-') && !this.validateUuid(param)) {
           throw new Error(
             `Parameter at index ${i} appears to be a UUID but is invalid: ${param}`
           );
@@ -224,7 +226,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     options: { timeout?: number } = {}
   ): Promise<any> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL not initialized");
+      throw new Error('PostgreSQL not initialized');
     }
 
     const client = await this.postgresPool.connect();
@@ -240,15 +242,15 @@ export class PostgreSQLService implements IPostgreSQLService {
       const result = await client.query(query, params);
       return result;
     } catch (error) {
-      console.error("PostgreSQL query error:", error);
-      console.error("Query was:", query);
-      console.error("Params were:", params);
+      console.error('PostgreSQL query error:', error);
+      console.error('Query was:', query);
+      console.error('Params were:', params);
       throw error;
     } finally {
       try {
         client.release();
       } catch (releaseError) {
-        console.error("Error releasing PostgreSQL client:", releaseError);
+        console.error('Error releasing PostgreSQL client:', releaseError);
       }
     }
   }
@@ -258,7 +260,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     options: { timeout?: number; isolationLevel?: string } = {}
   ): Promise<T> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL not initialized");
+      throw new Error('PostgreSQL not initialized');
     }
 
     const client = await this.postgresPool.connect();
@@ -272,21 +274,21 @@ export class PostgreSQLService implements IPostgreSQLService {
       if (options.isolationLevel) {
         await client.query(`BEGIN ISOLATION LEVEL ${options.isolationLevel}`);
       } else {
-        await client.query("BEGIN");
+        await client.query('BEGIN');
       }
 
       // Note: We can't validate parameters here since they're passed to the callback
       // The callback should handle its own parameter validation
 
       const result = await callback(client);
-      await client.query("COMMIT");
+      await client.query('COMMIT');
       return result;
     } catch (error) {
-      console.error("Transaction error:", error);
+      console.error('Transaction error:', error);
       try {
-        await client.query("ROLLBACK");
+        await client.query('ROLLBACK');
       } catch (rollbackError) {
-        console.error("Error during rollback:", rollbackError);
+        console.error('Error during rollback:', rollbackError);
         // Don't throw rollback error, throw original error instead
       }
       throw error;
@@ -295,7 +297,7 @@ export class PostgreSQLService implements IPostgreSQLService {
         client.release();
       } catch (releaseError) {
         console.error(
-          "Error releasing PostgreSQL client in transaction:",
+          'Error releasing PostgreSQL client in transaction:',
           releaseError
         );
       }
@@ -307,7 +309,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     options: { continueOnError?: boolean } = {}
   ): Promise<any[]> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL not initialized");
+      throw new Error('PostgreSQL not initialized');
     }
 
     // Validate all query parameters
@@ -327,7 +329,9 @@ export class PostgreSQLService implements IPostgreSQLService {
     let capturedError: unknown;
 
     const activeAtStart = ++this.bulkMetrics.activeBatches;
-    if (this.bulkMetrics.activeBatches > this.bulkMetrics.maxConcurrentBatches) {
+    if (
+      this.bulkMetrics.activeBatches > this.bulkMetrics.maxConcurrentBatches
+    ) {
       this.bulkMetrics.maxConcurrentBatches = this.bulkMetrics.activeBatches;
     }
     const queueDepthAtStart = Math.max(0, activeAtStart - 1);
@@ -345,27 +349,27 @@ export class PostgreSQLService implements IPostgreSQLService {
             const result = await client.query(query, params);
             results.push(result);
           } catch (error) {
-            console.warn("Bulk query error (continuing):", error);
+            console.warn('Bulk query error (continuing):', error);
             results.push({ error });
           }
         }
         return results;
       }
 
-      await client.query("BEGIN");
+      await client.query('BEGIN');
       transactionStarted = true;
       for (const { query, params } of queries) {
         const result = await client.query(query, params);
         results.push(result);
       }
-      await client.query("COMMIT");
+      await client.query('COMMIT');
       transactionStarted = false;
       return results;
     } catch (error) {
       capturedError = error;
       if (transactionStarted && client) {
         try {
-          await client.query("ROLLBACK");
+          await client.query('ROLLBACK');
         } catch {}
       }
       throw error;
@@ -377,7 +381,7 @@ export class PostgreSQLService implements IPostgreSQLService {
           client.release();
         } catch (releaseError) {
           console.error(
-            "Error releasing PostgreSQL client in bulk operation:",
+            'Error releasing PostgreSQL client in bulk operation:',
             releaseError
           );
         }
@@ -418,7 +422,7 @@ export class PostgreSQLService implements IPostgreSQLService {
       startedAt: params.startedAt,
       finishedAt: new Date().toISOString(),
       queueDepth: Math.max(0, params.queueDepth || 0),
-      mode: params.continueOnError ? "independent" : "transaction",
+      mode: params.continueOnError ? 'independent' : 'transaction',
       success: !params.error,
       error: params.error
         ? params.error instanceof Error
@@ -520,7 +524,7 @@ export class PostgreSQLService implements IPostgreSQLService {
         },
       });
     } catch (error) {
-      console.error("Bulk telemetry emitter threw an error:", error);
+      console.error('Bulk telemetry emitter threw an error:', error);
     }
   }
 
@@ -531,9 +535,7 @@ export class PostgreSQLService implements IPostgreSQLService {
       `mode=${entry.mode} queueDepth=${entry.queueDepth}`;
 
     if (!entry.success) {
-      console.error(
-        `${baseMessage} failed: ${entry.error ?? "unknown error"}`
-      );
+      console.error(`${baseMessage} failed: ${entry.error ?? 'unknown error'}`);
       return;
     }
 
@@ -547,16 +549,14 @@ export class PostgreSQLService implements IPostgreSQLService {
 
     if (isLargeBatch || isSlow || hasBackpressure) {
       const flags = [
-        isLargeBatch ? "large-batch" : null,
-        isSlow ? "slow" : null,
-        hasBackpressure ? "backpressure" : null,
+        isLargeBatch ? 'large-batch' : null,
+        isSlow ? 'slow' : null,
+        hasBackpressure ? 'backpressure' : null,
       ]
         .filter(Boolean)
-        .join(", ");
+        .join(', ');
 
-      console.warn(
-        `${baseMessage}${flags.length ? ` flags=[${flags}]` : ""}`
-      );
+      console.warn(`${baseMessage}${flags.length ? ` flags=[${flags}]` : ''}`);
       return;
     }
 
@@ -584,17 +584,17 @@ export class PostgreSQLService implements IPostgreSQLService {
 
   async setupSchema(): Promise<void> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL not initialized");
+      throw new Error('PostgreSQL not initialized');
     }
 
-    console.log("🔧 Setting up PostgreSQL schema...");
+    console.log('🔧 Setting up PostgreSQL schema...');
 
     // Create extensions first
     try {
       await this.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
       await this.query('CREATE EXTENSION IF NOT EXISTS "pg_trgm"');
     } catch (error) {
-      console.warn("Warning: Could not create extensions:", error);
+      console.warn('Warning: Could not create extensions:', error);
     }
 
     // Simplified schema setup - create all tables in correct dependency order
@@ -781,8 +781,8 @@ export class PostgreSQLService implements IPostgreSQLService {
       try {
         await this.query(query);
       } catch (error) {
-        console.warn("Warning: Could not execute schema query:", error);
-        console.warn("Query was:", query);
+        console.warn('Warning: Could not execute schema query:', error);
+        console.warn('Query was:', query);
       }
     }
 
@@ -817,69 +817,69 @@ export class PostgreSQLService implements IPostgreSQLService {
       try {
         await this.query(query);
       } catch (error) {
-        console.warn("Warning: Could not add constraint:", error);
+        console.warn('Warning: Could not add constraint:', error);
       }
     }
 
     // Create indexes
     const indexQueries = [
-      "CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type)",
-      "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)",
-      "CREATE INDEX IF NOT EXISTS idx_documents_content_gin ON documents USING GIN(content)",
-      "CREATE INDEX IF NOT EXISTS idx_changes_entity_id ON changes(entity_id)",
-      "CREATE INDEX IF NOT EXISTS idx_changes_timestamp ON changes(timestamp)",
-      "CREATE INDEX IF NOT EXISTS idx_changes_session_id ON changes(session_id)",
-      "CREATE INDEX IF NOT EXISTS idx_scm_commits_branch ON scm_commits(branch)",
-      "CREATE INDEX IF NOT EXISTS idx_scm_commits_created_at ON scm_commits(created_at)",
-      "CREATE INDEX IF NOT EXISTS idx_test_suites_timestamp ON test_suites(timestamp)",
-      "CREATE INDEX IF NOT EXISTS idx_test_suites_framework ON test_suites(framework)",
-      "CREATE INDEX IF NOT EXISTS idx_test_results_test_id ON test_results(test_id)",
-      "CREATE INDEX IF NOT EXISTS idx_test_results_timestamp ON test_results(timestamp)",
-      "CREATE INDEX IF NOT EXISTS idx_test_results_status ON test_results(status)",
-      "CREATE INDEX IF NOT EXISTS idx_test_results_suite_id ON test_results(suite_id)",
-      "CREATE INDEX IF NOT EXISTS idx_test_coverage_test_id ON test_coverage(test_id)",
-      "CREATE INDEX IF NOT EXISTS idx_test_coverage_suite_id ON test_coverage(suite_id)",
-      "CREATE INDEX IF NOT EXISTS idx_test_performance_test_id ON test_performance(test_id)",
-      "CREATE INDEX IF NOT EXISTS idx_test_performance_suite_id ON test_performance(suite_id)",
-      "CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_test_id ON flaky_test_analyses(test_id)",
-      "CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_flaky_score ON flaky_test_analyses(flaky_score)",
-      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_test_id ON performance_metric_snapshots(test_id)",
-      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_metric_id ON performance_metric_snapshots(metric_id)",
-      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_environment ON performance_metric_snapshots(environment)",
-      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_severity ON performance_metric_snapshots(severity)",
-      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_trend ON performance_metric_snapshots(trend)",
-      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_metric_env ON performance_metric_snapshots(metric_id, environment)",
-      "CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_detected ON performance_metric_snapshots(detected_at)",
-      "CREATE INDEX IF NOT EXISTS idx_coverage_history_entity_id ON coverage_history(entity_id)",
-      "CREATE INDEX IF NOT EXISTS idx_coverage_history_timestamp ON coverage_history(timestamp)",
+      'CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type)',
+      'CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_documents_content_gin ON documents USING GIN(content)',
+      'CREATE INDEX IF NOT EXISTS idx_changes_entity_id ON changes(entity_id)',
+      'CREATE INDEX IF NOT EXISTS idx_changes_timestamp ON changes(timestamp)',
+      'CREATE INDEX IF NOT EXISTS idx_changes_session_id ON changes(session_id)',
+      'CREATE INDEX IF NOT EXISTS idx_scm_commits_branch ON scm_commits(branch)',
+      'CREATE INDEX IF NOT EXISTS idx_scm_commits_created_at ON scm_commits(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_test_suites_timestamp ON test_suites(timestamp)',
+      'CREATE INDEX IF NOT EXISTS idx_test_suites_framework ON test_suites(framework)',
+      'CREATE INDEX IF NOT EXISTS idx_test_results_test_id ON test_results(test_id)',
+      'CREATE INDEX IF NOT EXISTS idx_test_results_timestamp ON test_results(timestamp)',
+      'CREATE INDEX IF NOT EXISTS idx_test_results_status ON test_results(status)',
+      'CREATE INDEX IF NOT EXISTS idx_test_results_suite_id ON test_results(suite_id)',
+      'CREATE INDEX IF NOT EXISTS idx_test_coverage_test_id ON test_coverage(test_id)',
+      'CREATE INDEX IF NOT EXISTS idx_test_coverage_suite_id ON test_coverage(suite_id)',
+      'CREATE INDEX IF NOT EXISTS idx_test_performance_test_id ON test_performance(test_id)',
+      'CREATE INDEX IF NOT EXISTS idx_test_performance_suite_id ON test_performance(suite_id)',
+      'CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_test_id ON flaky_test_analyses(test_id)',
+      'CREATE INDEX IF NOT EXISTS idx_flaky_test_analyses_flaky_score ON flaky_test_analyses(flaky_score)',
+      'CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_test_id ON performance_metric_snapshots(test_id)',
+      'CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_metric_id ON performance_metric_snapshots(metric_id)',
+      'CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_environment ON performance_metric_snapshots(environment)',
+      'CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_severity ON performance_metric_snapshots(severity)',
+      'CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_trend ON performance_metric_snapshots(trend)',
+      'CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_metric_env ON performance_metric_snapshots(metric_id, environment)',
+      'CREATE INDEX IF NOT EXISTS idx_perf_metric_snapshots_detected ON performance_metric_snapshots(detected_at)',
+      'CREATE INDEX IF NOT EXISTS idx_coverage_history_entity_id ON coverage_history(entity_id)',
+      'CREATE INDEX IF NOT EXISTS idx_coverage_history_timestamp ON coverage_history(timestamp)',
     ];
 
     for (const query of indexQueries) {
       try {
         await this.query(query);
       } catch (error) {
-        console.warn("Warning: Could not create index:", error);
+        console.warn('Warning: Could not create index:', error);
       }
     }
 
-    console.log("✅ PostgreSQL schema setup complete");
+    console.log('✅ PostgreSQL schema setup complete');
   }
 
   async healthCheck(): Promise<boolean> {
     let client: any = null;
     try {
       client = await this.postgresPool.connect();
-      await client.query("SELECT 1");
+      await client.query('SELECT 1');
       return true;
     } catch (error) {
-      console.error("PostgreSQL health check failed:", error);
+      console.error('PostgreSQL health check failed:', error);
       return false;
     } finally {
       if (client) {
         try {
           client.release();
         } catch (releaseError) {
-          console.error("Error releasing PostgreSQL client:", releaseError);
+          console.error('Error releasing PostgreSQL client:', releaseError);
         }
       }
     }
@@ -887,7 +887,7 @@ export class PostgreSQLService implements IPostgreSQLService {
 
   async storeTestSuiteResult(suiteResult: any): Promise<any> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const result = await this.transaction(async (client) => {
@@ -998,7 +998,7 @@ export class PostgreSQLService implements IPostgreSQLService {
 
       return {
         suiteId: null,
-        message: "Failed to create or find test suite",
+        message: 'Failed to create or find test suite',
       };
     });
 
@@ -1007,7 +1007,7 @@ export class PostgreSQLService implements IPostgreSQLService {
 
   async storeFlakyTestAnalyses(analyses: any[]): Promise<any> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const result = await this.transaction(async (client) => {
@@ -1091,7 +1091,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     snapshot: PerformanceRelationship
   ): Promise<void> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const client = await this.postgresPool.connect();
@@ -1109,14 +1109,12 @@ export class PostgreSQLService implements IPostgreSQLService {
       };
 
       const metricsHistory = Array.isArray(snapshot.metricsHistory)
-        ? snapshot.metricsHistory
-            .slice(-50)
-            .map((entry) => ({
-              ...entry,
-              timestamp: entry.timestamp
-                ? new Date(entry.timestamp as Date).toISOString()
-                : undefined,
-            }))
+        ? snapshot.metricsHistory.slice(-50).map((entry) => ({
+            ...entry,
+            timestamp: entry.timestamp
+              ? new Date(entry.timestamp as Date).toISOString()
+              : undefined,
+          }))
         : null;
 
       const metadata = {
@@ -1177,7 +1175,7 @@ export class PostgreSQLService implements IPostgreSQLService {
 
   async recordSCMCommit(commit: SCMCommitRecord): Promise<void> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const changes = Array.isArray(commit.changes)
@@ -1189,7 +1187,8 @@ export class PostgreSQLService implements IPostgreSQLService {
 
     const metadata = commit.metadata ? JSON.stringify(commit.metadata) : null;
     const validationResults =
-      commit.validationResults !== undefined && commit.validationResults !== null
+      commit.validationResults !== undefined &&
+      commit.validationResults !== null
         ? JSON.stringify(commit.validationResults)
         : null;
 
@@ -1257,8 +1256,8 @@ export class PostgreSQLService implements IPostgreSQLService {
       testResults,
       validationResults,
       commit.prUrl ?? null,
-      commit.provider ?? "local",
-      commit.status ?? "committed",
+      commit.provider ?? 'local',
+      commit.status ?? 'committed',
       commit.createdAt ? new Date(commit.createdAt) : null,
       commit.updatedAt ? new Date(commit.updatedAt) : null,
     ]);
@@ -1268,7 +1267,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     commitHash: string
   ): Promise<SCMCommitRecord | null> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const result = await this.query(
@@ -1303,7 +1302,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     const row = result.rows[0];
     const parseJson = (value: unknown) => {
       if (value == null) return undefined;
-      if (typeof value === "object") return value as Record<string, any>;
+      if (typeof value === 'object') return value as Record<string, any>;
       try {
         return JSON.parse(String(value));
       } catch {
@@ -1320,7 +1319,9 @@ export class PostgreSQLService implements IPostgreSQLService {
       author: row.author ?? undefined,
       changes: Array.isArray(row.changes) ? row.changes : [],
       relatedSpecId: row.related_spec_id ?? undefined,
-      testResults: Array.isArray(row.test_results) ? row.test_results : undefined,
+      testResults: Array.isArray(row.test_results)
+        ? row.test_results
+        : undefined,
       validationResults: parseJson(row.validation_results),
       prUrl: row.pr_url ?? undefined,
       provider: row.provider ?? undefined,
@@ -1333,7 +1334,7 @@ export class PostgreSQLService implements IPostgreSQLService {
 
   async listSCMCommits(limit: number = 50): Promise<SCMCommitRecord[]> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const sanitizedLimit = Math.max(1, Math.min(Math.floor(limit), 200));
@@ -1370,7 +1371,7 @@ export class PostgreSQLService implements IPostgreSQLService {
 
     const parseJson = (value: unknown) => {
       if (value == null) return undefined;
-      if (typeof value === "object") return value as Record<string, any>;
+      if (typeof value === 'object') return value as Record<string, any>;
       try {
         return JSON.parse(String(value));
       } catch {
@@ -1405,7 +1406,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     limit: number = 50
   ): Promise<any[]> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const client = await this.postgresPool.connect();
@@ -1413,7 +1414,7 @@ export class PostgreSQLService implements IPostgreSQLService {
       let query: string;
       let params: any[];
 
-      if (entityId && entityId.trim() !== "") {
+      if (entityId && entityId.trim() !== '') {
         // If entityId is provided, search for specific test
         query = `
           SELECT tr.*, ts.suite_name, ts.framework, ts.timestamp as suite_timestamp
@@ -1448,13 +1449,11 @@ export class PostgreSQLService implements IPostgreSQLService {
     options: number | PerformanceHistoryOptions = {}
   ): Promise<PerformanceHistoryRecord[]> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const normalizedOptions: PerformanceHistoryOptions =
-      typeof options === "number"
-        ? { days: options }
-        : options ?? {};
+      typeof options === 'number' ? { days: options } : options ?? {};
 
     const {
       days = 30,
@@ -1465,21 +1464,21 @@ export class PostgreSQLService implements IPostgreSQLService {
     } = normalizedOptions;
 
     const sanitizedMetricId =
-      typeof metricId === "string" && metricId.trim().length > 0
+      typeof metricId === 'string' && metricId.trim().length > 0
         ? normalizeMetricIdForId(metricId)
         : undefined;
     const sanitizedEnvironment =
-      typeof environment === "string" && environment.trim().length > 0
+      typeof environment === 'string' && environment.trim().length > 0
         ? sanitizeEnvironment(environment)
         : undefined;
     const sanitizedSeverity = (() => {
-      if (typeof severity !== "string") return undefined;
+      if (typeof severity !== 'string') return undefined;
       const normalized = severity.trim().toLowerCase();
       switch (normalized) {
-        case "critical":
-        case "high":
-        case "medium":
-        case "low":
+        case 'critical':
+        case 'high':
+        case 'medium':
+        case 'low':
           return normalized;
         default:
           return undefined;
@@ -1489,13 +1488,13 @@ export class PostgreSQLService implements IPostgreSQLService {
       ? Math.min(500, Math.max(1, Math.floor(limit)))
       : 100;
     const safeDays =
-      typeof days === "number" && Number.isFinite(days)
+      typeof days === 'number' && Number.isFinite(days)
         ? Math.min(365, Math.max(1, Math.floor(days)))
         : undefined;
 
     const client = await this.postgresPool.connect();
     try {
-      const conditions: string[] = ["(pm.test_id = $1 OR pm.target_id = $1)"];
+      const conditions: string[] = ['(pm.test_id = $1 OR pm.target_id = $1)'];
       const params: any[] = [entityId];
       let paramIndex = 2;
 
@@ -1517,7 +1516,7 @@ export class PostgreSQLService implements IPostgreSQLService {
         paramIndex += 1;
       }
 
-      if (typeof safeDays === "number") {
+      if (typeof safeDays === 'number') {
         conditions.push(
           `(pm.detected_at IS NULL OR pm.detected_at >= NOW() - $${paramIndex} * INTERVAL '1 day')`
         );
@@ -1525,7 +1524,8 @@ export class PostgreSQLService implements IPostgreSQLService {
         paramIndex += 1;
       }
 
-      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
       params.push(safeLimit);
       const snapshotQuery = `
@@ -1561,8 +1561,8 @@ export class PostgreSQLService implements IPostgreSQLService {
 
       const parseJson = (value: unknown): any => {
         if (value == null) return null;
-        if (typeof value === "object") return value;
-        if (typeof value === "string" && value.trim().length > 0) {
+        if (typeof value === 'object') return value;
+        if (typeof value === 'string' && value.trim().length > 0) {
           try {
             return JSON.parse(value);
           } catch {
@@ -1582,9 +1582,9 @@ export class PostgreSQLService implements IPostgreSQLService {
         const metadata = parseJson(row.metadata) ?? undefined;
         const historyRaw = parseJson(row.metrics_history);
         const metricsHistory = Array.isArray(historyRaw)
-          ? historyRaw
+          ? (historyRaw
               .map((entry: any) => {
-                if (!entry || typeof entry !== "object") return null;
+                if (!entry || typeof entry !== 'object') return null;
                 const normalized = { ...entry };
                 if (normalized.timestamp) {
                   const ts = toDateOrNull(normalized.timestamp);
@@ -1592,7 +1592,7 @@ export class PostgreSQLService implements IPostgreSQLService {
                 }
                 return normalized;
               })
-              .filter(Boolean) as PerformanceMetricSample[]
+              .filter(Boolean) as PerformanceMetricSample[])
           : undefined;
 
         return {
@@ -1620,7 +1620,7 @@ export class PostgreSQLService implements IPostgreSQLService {
           metricsHistory: metricsHistory ?? undefined,
           metadata,
           createdAt: toDateOrNull(row.created_at),
-          source: "snapshot",
+          source: 'snapshot',
         };
       };
 
@@ -1637,7 +1637,7 @@ export class PostgreSQLService implements IPostgreSQLService {
     days: number = 30
   ): Promise<any[]> {
     if (!this.initialized) {
-      throw new Error("PostgreSQL service not initialized");
+      throw new Error('PostgreSQL service not initialized');
     }
 
     const client = await this.postgresPool.connect();

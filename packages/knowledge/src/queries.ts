@@ -2,18 +2,18 @@
  * Shared Cypher query utilities for analysis operations
  */
 
-import { RelationshipType } from '@memento/core';
+import { RelationshipType } from '@memento/shared-types.js';
 
 export interface TraversalOptions {
   startNodeId: string;
   relationshipTypes: string[];
   maxDepth: number;
-  direction?: "OUTGOING" | "INCOMING" | "BOTH";
+  direction?: 'OUTGOING' | 'INCOMING' | 'BOTH';
   nodeFilter?: string;
 }
 
 export interface PathExpansionOptions extends TraversalOptions {
-  uniqueness?: "NODE_GLOBAL" | "RELATIONSHIP_GLOBAL";
+  uniqueness?: 'NODE_GLOBAL' | 'RELATIONSHIP_GLOBAL';
 }
 
 /**
@@ -24,22 +24,22 @@ export function buildPathExpansionQuery(options: PathExpansionOptions): string {
     startNodeId,
     relationshipTypes,
     maxDepth,
-    direction = "OUTGOING",
+    direction = 'OUTGOING',
     nodeFilter,
-    uniqueness = "NODE_GLOBAL",
+    uniqueness = 'NODE_GLOBAL',
   } = options;
 
   const relFilter =
     relationshipTypes.length > 0
-      ? relationshipTypes.join("|")
-      : "DEPENDS_ON|CALLS|REFERENCES|IMPLEMENTS|EXTENDS|TYPE_USES";
+      ? relationshipTypes.join('|')
+      : 'DEPENDS_ON|CALLS|REFERENCES|IMPLEMENTS|EXTENDS|TYPE_USES';
 
-  let query = `
+  const query = `
     MATCH (start:Entity {id: $startNodeId})
     CALL apoc.path.expand(
       start,
       "${relFilter}",
-      ${nodeFilter ? `"${nodeFilter}"` : "null"},
+      ${nodeFilter ? `"${nodeFilter}"` : 'null'},
       1,
       $maxDepth,
       "${uniqueness}"
@@ -56,10 +56,10 @@ export function buildPathExpansionQuery(options: PathExpansionOptions): string {
 export function buildDirectRelationshipQuery(
   entityId: string,
   relationshipTypes: string[],
-  direction: "OUTGOING" | "INCOMING" = "OUTGOING"
+  direction: 'OUTGOING' | 'INCOMING' = 'OUTGOING'
 ): string {
-  const relFilter = relationshipTypes.join("|");
-  const arrow = direction === "OUTGOING" ? "->" : "<-";
+  const relFilter = relationshipTypes.join('|');
+  const arrow = direction === 'OUTGOING' ? '->' : '<-';
 
   return `
     MATCH (e:Entity {id: $entityId})-[r:${relFilter}]${arrow}(target)
@@ -122,10 +122,10 @@ export function buildBetweennessQuery(
  */
 export function buildDijkstraQuery(
   relationshipTypes: string[],
-  weightProperty = "weight",
+  weightProperty = 'weight',
   defaultWeight = 1
 ): string {
-  const relTypes = relationshipTypes.join("|");
+  const relTypes = relationshipTypes.join('|');
 
   return `
     MATCH (from:Entity {id: $fromId}), (to:Entity {id: $toId})

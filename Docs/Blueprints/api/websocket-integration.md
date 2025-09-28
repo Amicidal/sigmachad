@@ -1,5 +1,23 @@
 # WebSocket Integration Blueprint
 
+## Metadata
+
+- Scope: api
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: api).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
+## Desired Capabilities
+
+- [ ] Define required capabilities and acceptance criteria.
+- [ ] Note API/Graph impacts.
+
 ## 1. Overview
 The WebSocket router (in `@memento/api`) delivers real-time graph and file system events to connected clients, integrating with Redis pub-sub for ephemeral session handoffs (e.g., multi-agent notifications). Integration coverage now exercises connection concurrency, subscription state introspection, and broadcast fan-out across multiple clients. To keep the channel useful for IDEs and background agents we need to tighten the protocol contract and address replay semantics surfaced while hardening the tests.
 

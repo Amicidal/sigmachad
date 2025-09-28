@@ -4,11 +4,11 @@
  * Refactored into modular components for better maintainability
  */
 
-import { EventEmitter } from "events";
-import { Neo4jService } from "./Neo4jService.js";
-import { Entity } from '@memento/core';
-import { RelationshipType } from '@memento/core';
-import { TimeRangeParams, TraversalQuery } from "../../models/types.js";
+import { EventEmitter } from 'events';
+import { Neo4jService } from './Neo4jService.js';
+import { Entity } from '@memento/shared-types.js';
+import { RelationshipType } from '@memento/shared-types.js';
+import { TimeRangeParams, TraversalQuery } from '../../models/types.js';
 import {
   VersionManager,
   CheckpointService,
@@ -19,7 +19,7 @@ import {
   HistoryMetrics,
   CheckpointSummary,
   SessionImpact,
-} from "./history/index.js";
+} from './history/index.js';
 
 export {
   CheckpointOptions,
@@ -44,23 +44,23 @@ export class HistoryService extends EventEmitter {
     this.temporalQueryService = new TemporalQueryService(neo4j);
 
     // Forward events from sub-services
-    this.versionManager.on("version:created", (data) =>
-      this.emit("version:created", data)
+    this.versionManager.on('version:created', (data) =>
+      this.emit('version:created', data)
     );
-    this.versionManager.on("history:pruned", (data) =>
-      this.emit("history:pruned", data)
+    this.versionManager.on('history:pruned', (data) =>
+      this.emit('history:pruned', data)
     );
-    this.checkpointService.on("checkpoint:created", (data) =>
-      this.emit("checkpoint:created", data)
+    this.checkpointService.on('checkpoint:created', (data) =>
+      this.emit('checkpoint:created', data)
     );
-    this.checkpointService.on("checkpoint:deleted", (data) =>
-      this.emit("checkpoint:deleted", data)
+    this.checkpointService.on('checkpoint:deleted', (data) =>
+      this.emit('checkpoint:deleted', data)
     );
-    this.temporalQueryService.on("edge:opened", (data) =>
-      this.emit("edge:opened", data)
+    this.temporalQueryService.on('edge:opened', (data) =>
+      this.emit('edge:opened', data)
     );
-    this.temporalQueryService.on("edge:closed", (data) =>
-      this.emit("edge:closed", data)
+    this.temporalQueryService.on('edge:closed', (data) =>
+      this.emit('edge:closed', data)
     );
   }
 
@@ -169,7 +169,7 @@ export class HistoryService extends EventEmitter {
     });
     const versionsDeleted = versionResult[0]?.count || 0;
 
-    this.emit("history:pruned", {
+    this.emit('history:pruned', {
       dryRun,
       retentionDays,
       cutoff,
@@ -211,8 +211,8 @@ export class HistoryService extends EventEmitter {
 
     const result = await this.neo4j.executeCypher(cypherQuery, {
       startId: query.startId,
-      relationshipFilter: query.relationshipTypes?.join("|") || null,
-      labelFilter: query.nodeLabels?.join("|") || null,
+      relationshipFilter: query.relationshipTypes?.join('|') || null,
+      labelFilter: query.nodeLabels?.join('|') || null,
       maxDepth,
       until: until.toISOString(),
     });
@@ -252,21 +252,21 @@ export class HistoryService extends EventEmitter {
     const params: Record<string, any> = {};
 
     if (options?.reason) {
-      where.push("c.reason = $reason");
+      where.push('c.reason = $reason');
       params.reason = options.reason;
     }
 
     if (options?.since) {
-      where.push("c.timestamp >= $since");
+      where.push('c.timestamp >= $since');
       params.since = options.since.toISOString();
     }
 
     if (options?.until) {
-      where.push("c.timestamp <= $until");
+      where.push('c.timestamp <= $until');
       params.until = options.until.toISOString();
     }
 
-    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+    const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
     // Count total
     const countQuery = `
@@ -299,7 +299,7 @@ export class HistoryService extends EventEmitter {
       id: row.c.properties.id,
       timestamp: new Date(row.c.properties.timestamp),
       reason: row.c.properties.reason,
-      seedEntities: JSON.parse(row.c.properties.seedEntities || "[]"),
+      seedEntities: JSON.parse(row.c.properties.seedEntities || '[]'),
       memberCount: row.memberCount,
       metadata: row.c.properties.metadata
         ? JSON.parse(row.c.properties.metadata)
@@ -314,22 +314,22 @@ export class HistoryService extends EventEmitter {
    */
   async getHistoryMetrics(): Promise<HistoryMetrics> {
     const queries = [
-      { name: "versions", query: "MATCH (v:Version) RETURN count(v) as c" },
+      { name: 'versions', query: 'MATCH (v:Version) RETURN count(v) as c' },
       {
-        name: "checkpoints",
-        query: "MATCH (c:Checkpoint) RETURN count(c) as c",
+        name: 'checkpoints',
+        query: 'MATCH (c:Checkpoint) RETURN count(c) as c',
       },
       {
-        name: "openEdges",
-        query: "MATCH ()-[r]->() WHERE r.validTo IS NULL RETURN count(r) as c",
+        name: 'openEdges',
+        query: 'MATCH ()-[r]->() WHERE r.validTo IS NULL RETURN count(r) as c',
       },
       {
-        name: "closedEdges",
+        name: 'closedEdges',
         query:
-          "MATCH ()-[r]->() WHERE r.validTo IS NOT NULL RETURN count(r) as c",
+          'MATCH ()-[r]->() WHERE r.validTo IS NOT NULL RETURN count(r) as c',
       },
       {
-        name: "checkpointMembers",
+        name: 'checkpointMembers',
         query: `
           MATCH (c:Checkpoint)
           OPTIONAL MATCH (c)-[:INCLUDES]->(m)
@@ -369,11 +369,11 @@ export class HistoryService extends EventEmitter {
     for (const [key, value] of Object.entries(properties)) {
       if (value === null || value === undefined) continue;
 
-      if (key === "created" || key === "lastModified" || key.endsWith("At")) {
+      if (key === 'created' || key === 'lastModified' || key.endsWith('At')) {
         entity[key] = new Date(value as string);
       } else if (
-        typeof value === "string" &&
-        ((value as string).startsWith("[") || (value as string).startsWith("{"))
+        typeof value === 'string' &&
+        ((value as string).startsWith('[') || (value as string).startsWith('{'))
       ) {
         try {
           entity[key] = JSON.parse(value as string);
@@ -416,7 +416,7 @@ export class HistoryService extends EventEmitter {
       id: row.c.properties.id,
       timestamp: new Date(row.c.properties.timestamp),
       reason: row.c.properties.reason,
-      seedEntities: JSON.parse(row.c.properties.seedEntities || "[]"),
+      seedEntities: JSON.parse(row.c.properties.seedEntities || '[]'),
       memberCount: row.memberCount,
       metadata: row.c.properties.metadata
         ? JSON.parse(row.c.properties.metadata)
@@ -504,7 +504,7 @@ export class HistoryService extends EventEmitter {
     `;
 
     await this.neo4j.executeCypher(query, { checkpointId });
-    this.emit("checkpoint:deleted", { checkpointId });
+    this.emit('checkpoint:deleted', { checkpointId });
   }
 
   /**
@@ -617,7 +617,7 @@ export class HistoryService extends EventEmitter {
       );
     }
 
-    this.emit("checkpoint:imported", {
+    this.emit('checkpoint:imported', {
       checkpointId,
       entityCount: entities.length,
     });
@@ -644,22 +644,22 @@ export class HistoryService extends EventEmitter {
       entityResult.length > 0 ? this.parseEntity(entityResult[0].e) : null;
 
     // Get versions
-    const where: string[] = ["v.entityId = $entityId"];
+    const where: string[] = ['v.entityId = $entityId'];
     const params: Record<string, any> = { entityId };
 
     if (options?.since) {
-      where.push("v.timestamp >= $since");
+      where.push('v.timestamp >= $since');
       params.since = options.since.toISOString();
     }
 
     if (options?.until) {
-      where.push("v.timestamp <= $until");
+      where.push('v.timestamp <= $until');
       params.until = options.until.toISOString();
     }
 
     const versionQuery = `
       MATCH (v:Version)
-      WHERE ${where.join(" AND ")}
+      WHERE ${where.join(' AND ')}
       RETURN v
       ORDER BY v.timestamp DESC
       LIMIT $limit
@@ -707,22 +707,22 @@ export class HistoryService extends EventEmitter {
     relationshipId: string,
     options?: { since?: Date; until?: Date; limit?: number }
   ): Promise<any[]> {
-    const where: string[] = ["r.id = $relationshipId"];
+    const where: string[] = ['r.id = $relationshipId'];
     const params: Record<string, any> = { relationshipId };
 
     if (options?.since) {
-      where.push("r.validFrom >= $since");
+      where.push('r.validFrom >= $since');
       params.since = options.since.toISOString();
     }
 
     if (options?.until) {
-      where.push("r.validTo <= $until");
+      where.push('r.validTo <= $until');
       params.until = options.until.toISOString();
     }
 
     const query = `
       MATCH ()-[r]->()
-      WHERE ${where.join(" AND ")}
+      WHERE ${where.join(' AND ')}
       RETURN r, startNode(r).id as fromId, endNode(r).id as toId
       ORDER BY r.validFrom DESC
       LIMIT $limit
@@ -753,16 +753,16 @@ export class HistoryService extends EventEmitter {
     const params: Record<string, any> = { sessionId };
 
     if (options?.since) {
-      where.push("timestamp >= $since");
+      where.push('timestamp >= $since');
       params.since = options.since.toISOString();
     }
 
     if (options?.until) {
-      where.push("timestamp <= $until");
+      where.push('timestamp <= $until');
       params.until = options.until.toISOString();
     }
 
-    const whereClause = where.length > 0 ? `AND ${where.join(" AND ")}` : "";
+    const whereClause = where.length > 0 ? `AND ${where.join(' AND ')}` : '';
 
     // Get versions for session
     const versionQuery = `
@@ -821,7 +821,7 @@ export class HistoryService extends EventEmitter {
       id: row.c.properties.id,
       timestamp: new Date(row.c.properties.timestamp),
       reason: row.c.properties.reason,
-      seedEntities: JSON.parse(row.c.properties.seedEntities || "[]"),
+      seedEntities: JSON.parse(row.c.properties.seedEntities || '[]'),
       memberCount: row.memberCount,
       metadata: row.c.properties.metadata
         ? JSON.parse(row.c.properties.metadata)
@@ -931,22 +931,22 @@ export class HistoryService extends EventEmitter {
       timespan: { start: Date; end: Date };
     }>;
   }> {
-    const where: string[] = ["v.entityId = $entityId"];
+    const where: string[] = ['v.entityId = $entityId'];
     const params: Record<string, any> = { entityId };
 
     if (options?.since) {
-      where.push("v.timestamp >= $since");
+      where.push('v.timestamp >= $since');
       params.since = options.since.toISOString();
     }
 
     if (options?.until) {
-      where.push("v.timestamp <= $until");
+      where.push('v.timestamp <= $until');
       params.until = options.until.toISOString();
     }
 
     const query = `
       MATCH (v:Version)
-      WHERE ${where.join(" AND ")} AND v.changeSetId IS NOT NULL
+      WHERE ${where.join(' AND ')} AND v.changeSetId IS NOT NULL
       OPTIONAL MATCH (e:Entity {id: $entityId})-[r]->()
       WHERE r.changeSetId = v.changeSetId
       WITH v.changeSetId as sessionId,
@@ -1002,7 +1002,7 @@ export class HistoryService extends EventEmitter {
     const versionQuery = `
       MATCH (v:Version {changeSetId: $sessionId})
       MATCH (v)-[:VERSION_OF]->(e:Entity)
-      ${options?.entityTypes ? "WHERE e.type IN $entityTypes" : ""}
+      ${options?.entityTypes ? 'WHERE e.type IN $entityTypes' : ''}
       RETURN v, e.type as entityType
       ORDER BY v.timestamp DESC
       LIMIT $limit
@@ -1031,7 +1031,7 @@ export class HistoryService extends EventEmitter {
     const relQuery = `
       MATCH ()-[r]->()
       WHERE r.changeSetId = $sessionId
-      ${options?.relationshipTypes ? "AND type(r) IN $relationshipTypes" : ""}
+      ${options?.relationshipTypes ? 'AND type(r) IN $relationshipTypes' : ''}
       RETURN r, type(r) as relType, startNode(r).id as fromId, endNode(r).id as toId
       ORDER BY r.validFrom DESC
       LIMIT $limit

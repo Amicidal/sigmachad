@@ -28,12 +28,10 @@ export class SessionManager extends EventEmitter implements ISessionManager {
   private store: SessionStore;
   private knowledgeGraph?: any; // KnowledgeGraphService - optional dependency
   private eventSequences = new Map<string, number>(); // Track sequence numbers
+  private sequencePromises = new Map<string, Promise<number>>(); // Serialize sequence calculation per session
   private config: Required<SessionManagerConfig>;
 
-  constructor(
-    config: SessionManagerConfig,
-    knowledgeGraph?: any
-  ) {
+  constructor(config: SessionManagerConfig, knowledgeGraph?: any) {
     super();
 
     // Set default configuration
@@ -55,6 +53,7 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     this.knowledgeGraph = knowledgeGraph;
 
     this.setupEventHandlers();
+    this.initializeEventSequences();
     console.log('[SessionManager] Initialized with configuration:', {
       defaultTTL: this.config.defaultTTL,
       checkpointInterval: this.config.checkpointInterval,
@@ -64,9 +63,15 @@ export class SessionManager extends EventEmitter implements ISessionManager {
 
   private setupEventHandlers(): void {
     // Forward store events
-    this.store.on('session:created', (data) => this.emit('session:created', data));
-    this.store.on('session:updated', (data) => this.emit('session:updated', data));
-    this.store.on('session:deleted', (data) => this.emit('session:deleted', data));
+    this.store.on('session:created', (data) =>
+      this.emit('session:created', data)
+    );
+    this.store.on('session:updated', (data) =>
+      this.emit('session:updated', data)
+    );
+    this.store.on('session:deleted', (data) =>
+      this.emit('session:deleted', data)
+    );
     this.store.on('event:added', (data) => this.emit('event:added', data));
     this.store.on('agent:added', (data) => this.emit('agent:added', data));
     this.store.on('agent:removed', (data) => this.emit('agent:removed', data));
@@ -78,6 +83,57 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     });
   }
 
+  private async initializeEventSequences(): Promise<void> {
+    // Initialize sequence tracking - will be populated on-demand when sessions are accessed
+    // This avoids loading all sessions at startup which could be expensive
+    console.log(
+      '[SessionManager] Event sequences will be initialized on-demand'
+    );
+  }
+
+  private async getNextSequenceNumber(sessionId: string): Promise<number> {
+    // Serialize sequence number calculation per session to prevent race conditions
+    const sequencePromise = this.sequencePromises.get(sessionId);
+    if (sequencePromise) {
+      await sequencePromise;
+    }
+
+    const calculationPromise = this.calculateNextSequenceNumber(sessionId);
+    this.sequencePromises.set(sessionId, calculationPromise);
+
+    try {
+      return await calculationPromise;
+    } finally {
+      this.sequencePromises.delete(sessionId);
+    }
+  }
+
+  private async calculateNextSequenceNumber(
+    sessionId: string
+  ): Promise<number> {
+    let current = this.eventSequences.get(sessionId);
+
+    // If we don't have a cached sequence number, get the max from the store
+    if (current === undefined) {
+      try {
+        const events = await this.store.getEvents(sessionId);
+        current =
+          events.length > 0 ? Math.max(...events.map((e) => e.seq)) + 1 : 1;
+      } catch (error) {
+        console.warn(
+          `[SessionManager] Failed to get events for session ${sessionId}:`,
+          error
+        );
+        current = 1; // Default to 1 if we can't get events
+      }
+      this.eventSequences.set(sessionId, current);
+    }
+
+    const next = current;
+    this.eventSequences.set(sessionId, current + 1);
+    return next;
+  }
+
   // ========== Core Session Operations ==========
 
   async createSession(
@@ -87,8 +143,8 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     try {
       const sessionId = `sess-${uuidv4()}`;
 
-      // Initialize sequence tracking
-      this.eventSequences.set(sessionId, 1);
+      // Sequence tracking will be initialized on-demand when first event is emitted
+      // This ensures proper sequencing when initialEntityIds create synthetic events
 
       // Create session in store
       await this.store.createSession(sessionId, agentId, {
@@ -103,13 +159,20 @@ export class SessionManager extends EventEmitter implements ISessionManager {
         initiator: agentId,
       });
 
-      console.log(`[SessionManager] Created session ${sessionId} for agent ${agentId}`);
+      console.log(
+        `[SessionManager] Created session ${sessionId} for agent ${agentId}`
+      );
       return sessionId;
     } catch (error) {
-      console.error(`[SessionManager] Failed to create session for agent ${agentId}:`, error);
+      console.error(
+        `[SessionManager] Failed to create session for agent ${agentId}:`,
+        error
+      );
       if (error instanceof SessionError) throw error;
       throw new SessionError(
-        `Failed to create session: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to create session: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_CREATE_FAILED',
         undefined,
         { agentId, options, originalError: error }
@@ -128,27 +191,38 @@ export class SessionManager extends EventEmitter implements ISessionManager {
       await this.store.addAgent(sessionId, agentId);
 
       // Emit handoff event
-      await this.emitEvent(sessionId, {
-        type: 'handoff',
-        changeInfo: {
-          elementType: 'session',
-          entityIds: [],
-          operation: 'modified',
+      await this.emitEvent(
+        sessionId,
+        {
+          type: 'handoff',
+          changeInfo: {
+            elementType: 'session',
+            entityIds: [],
+            operation: 'modified',
+          },
+          actor: agentId,
         },
-        actor: agentId,
-      }, agentId);
+        agentId
+      );
 
       // Subscribe to session updates
       await this.store.subscribeToSession(sessionId, (message) => {
         this.emit('session:update', { sessionId, agentId, message });
       });
 
-      console.log(`[SessionManager] Agent ${agentId} joined session ${sessionId}`);
+      console.log(
+        `[SessionManager] Agent ${agentId} joined session ${sessionId}`
+      );
     } catch (error) {
-      console.error(`[SessionManager] Failed to join session ${sessionId} for agent ${agentId}:`, error);
+      console.error(
+        `[SessionManager] Failed to join session ${sessionId} for agent ${agentId}:`,
+        error
+      );
       if (error instanceof SessionError) throw error;
       throw new SessionError(
-        `Failed to join session: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to join session: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_JOIN_FAILED',
         sessionId,
         { agentId, originalError: error }
@@ -161,22 +235,33 @@ export class SessionManager extends EventEmitter implements ISessionManager {
       await this.store.removeAgent(sessionId, agentId);
 
       // Emit handoff event
-      await this.emitEvent(sessionId, {
-        type: 'handoff',
-        changeInfo: {
-          elementType: 'session',
-          entityIds: [],
-          operation: 'modified',
+      await this.emitEvent(
+        sessionId,
+        {
+          type: 'handoff',
+          changeInfo: {
+            elementType: 'session',
+            entityIds: [],
+            operation: 'modified',
+          },
+          actor: agentId,
         },
-        actor: agentId,
-      }, agentId);
+        agentId
+      );
 
-      console.log(`[SessionManager] Agent ${agentId} left session ${sessionId}`);
+      console.log(
+        `[SessionManager] Agent ${agentId} left session ${sessionId}`
+      );
     } catch (error) {
-      console.error(`[SessionManager] Failed to leave session ${sessionId} for agent ${agentId}:`, error);
+      console.error(
+        `[SessionManager] Failed to leave session ${sessionId} for agent ${agentId}:`,
+        error
+      );
       if (error instanceof SessionError) throw error;
       throw new SessionError(
-        `Failed to leave session: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to leave session: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_LEAVE_FAILED',
         sessionId,
         { agentId, originalError: error }
@@ -192,8 +277,7 @@ export class SessionManager extends EventEmitter implements ISessionManager {
   ): Promise<void> {
     try {
       // Get next sequence number
-      const seq = this.eventSequences.get(sessionId) || 1;
-      this.eventSequences.set(sessionId, seq + 1);
+      const seq = await this.getNextSequenceNumber(sessionId);
 
       // Create complete event
       const event: SessionEvent = {
@@ -225,17 +309,27 @@ export class SessionManager extends EventEmitter implements ISessionManager {
       }
 
       // Auto-checkpoint if configured
-      if (options.autoCheckpoint !== false &&
-          (event.type === 'checkpoint' || seq % this.config.checkpointInterval === 0)) {
+      if (
+        options.autoCheckpoint !== false &&
+        (event.type === 'checkpoint' ||
+          seq % this.config.checkpointInterval === 0)
+      ) {
         await this.checkpoint(sessionId, { graceTTL: this.config.graceTTL });
       }
 
-      console.log(`[SessionManager] Emitted event ${seq} for session ${sessionId}: ${event.type}`);
+      console.log(
+        `[SessionManager] Emitted event ${seq} for session ${sessionId}: ${event.type}`
+      );
     } catch (error) {
-      console.error(`[SessionManager] Failed to emit event for session ${sessionId}:`, error);
+      console.error(
+        `[SessionManager] Failed to emit event for session ${sessionId}:`,
+        error
+      );
       if (error instanceof SessionError) throw error;
       throw new SessionError(
-        `Failed to emit event: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to emit event: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_EMIT_FAILED',
         sessionId,
         { eventData, actor, options, originalError: error }
@@ -247,10 +341,15 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     try {
       return await this.store.getSession(sessionId);
     } catch (error) {
-      console.error(`[SessionManager] Failed to get session ${sessionId}:`, error);
+      console.error(
+        `[SessionManager] Failed to get session ${sessionId}:`,
+        error
+      );
       if (error instanceof SessionError) throw error;
       throw new SessionError(
-        `Failed to get session: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to get session: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_GET_FAILED',
         sessionId,
         { originalError: error }
@@ -270,7 +369,9 @@ export class SessionManager extends EventEmitter implements ISessionManager {
         throw new SessionNotFoundError(sessionId);
       }
 
-      const checkpointId = `cp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const checkpointId = `cp-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`;
       const graceTTL = options.graceTTL || this.config.graceTTL;
 
       // Aggregate events for summary
@@ -294,9 +395,15 @@ export class SessionManager extends EventEmitter implements ISessionManager {
       }
 
       // Handle failure snapshots if enabled
-      if (options.includeFailureSnapshot ||
-          (this.config.enableFailureSnapshots && summary.outcome === 'broken')) {
-        await this.createFailureSnapshot(sessionId, session.events, summary.outcome);
+      if (
+        options.includeFailureSnapshot ||
+        (this.config.enableFailureSnapshots && summary.outcome === 'broken')
+      ) {
+        await this.createFailureSnapshot(
+          sessionId,
+          session.events,
+          summary.outcome
+        );
       }
 
       // Set grace TTL for handoffs
@@ -307,7 +414,10 @@ export class SessionManager extends EventEmitter implements ISessionManager {
         try {
           await this.cleanup(sessionId);
         } catch (error) {
-          console.error(`[SessionManager] Failed to cleanup session ${sessionId}:`, error);
+          console.error(
+            `[SessionManager] Failed to cleanup session ${sessionId}:`,
+            error
+          );
         }
       }, graceTTL * 1000);
 
@@ -318,13 +428,20 @@ export class SessionManager extends EventEmitter implements ISessionManager {
         outcome: summary.outcome,
       });
 
-      console.log(`[SessionManager] Created checkpoint ${checkpointId} for session ${sessionId}`);
+      console.log(
+        `[SessionManager] Created checkpoint ${checkpointId} for session ${sessionId}`
+      );
       return checkpointId;
     } catch (error) {
-      console.error(`[SessionManager] Failed to create checkpoint for session ${sessionId}:`, error);
+      console.error(
+        `[SessionManager] Failed to create checkpoint for session ${sessionId}:`,
+        error
+      );
       if (error instanceof SessionError) throw error;
       throw new SessionError(
-        `Failed to create checkpoint: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to create checkpoint: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_CHECKPOINT_FAILED',
         sessionId,
         { options, originalError: error }
@@ -336,12 +453,18 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     try {
       await this.store.deleteSession(sessionId);
       this.eventSequences.delete(sessionId);
+      this.sequencePromises.delete(sessionId);
       console.log(`[SessionManager] Cleaned up session ${sessionId}`);
     } catch (error) {
-      console.error(`[SessionManager] Failed to cleanup session ${sessionId}:`, error);
+      console.error(
+        `[SessionManager] Failed to cleanup session ${sessionId}:`,
+        error
+      );
       if (error instanceof SessionError) throw error;
       throw new SessionError(
-        `Failed to cleanup session: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to cleanup session: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_CLEANUP_FAILED',
         sessionId,
         { originalError: error }
@@ -357,7 +480,9 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     } catch (error) {
       console.error('[SessionManager] Failed to list active sessions:', error);
       throw new SessionError(
-        `Failed to list sessions: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to list sessions: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_LIST_FAILED',
         undefined,
         { originalError: error }
@@ -379,9 +504,14 @@ export class SessionManager extends EventEmitter implements ISessionManager {
 
       return agentSessions;
     } catch (error) {
-      console.error(`[SessionManager] Failed to get sessions for agent ${agentId}:`, error);
+      console.error(
+        `[SessionManager] Failed to get sessions for agent ${agentId}:`,
+        error
+      );
       throw new SessionError(
-        `Failed to get agent sessions: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to get agent sessions: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_AGENT_SESSIONS_FAILED',
         undefined,
         { agentId, originalError: error }
@@ -395,7 +525,9 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     } catch (error) {
       console.error('[SessionManager] Failed to get stats:', error);
       throw new SessionError(
-        `Failed to get stats: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to get stats: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_STATS_FAILED',
         undefined,
         { originalError: error }
@@ -410,13 +542,19 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     keyImpacts: string[];
     perfDelta: number;
   } {
-    const broken = events.some(e => e.stateTransition?.to === 'broken');
+    const broken = events.some((e) => e.stateTransition?.to === 'broken');
     const highImpacts = events
-      .filter(e => e.impact?.severity === 'high' || e.impact?.severity === 'critical')
-      .map(e => e.changeInfo.entityIds[0])
+      .filter(
+        (e) =>
+          e.impact?.severity === 'high' || e.impact?.severity === 'critical'
+      )
+      .map((e) => e.changeInfo.entityIds[0])
       .filter(Boolean);
 
-    const perfDelta = events.reduce((sum, e) => sum + (e.impact?.perfDelta || 0), 0);
+    const perfDelta = events.reduce(
+      (sum, e) => sum + (e.impact?.perfDelta || 0),
+      0
+    );
 
     return {
       outcome: broken ? 'broken' : 'working',
@@ -427,13 +565,16 @@ export class SessionManager extends EventEmitter implements ISessionManager {
 
   private extractEntityIds(events: SessionEvent[]): string[] {
     const entityIds = new Set<string>();
-    events.forEach(event => {
-      event.changeInfo.entityIds.forEach(id => entityIds.add(id));
+    events.forEach((event) => {
+      event.changeInfo.entityIds.forEach((id) => entityIds.add(id));
     });
     return Array.from(entityIds);
   }
 
-  private async appendKGAnchor(entityIds: string[], anchor: SessionAnchor): Promise<void> {
+  private async appendKGAnchor(
+    entityIds: string[],
+    anchor: SessionAnchor
+  ): Promise<void> {
     if (!this.knowledgeGraph) return;
 
     try {
@@ -441,13 +582,19 @@ export class SessionManager extends EventEmitter implements ISessionManager {
       const cypher = `
         UNWIND $entityIds as entityId
         MATCH (e:CodebaseEntity {id: entityId})
-        SET e.metadata.sessions = CASE
-          WHEN e.metadata.sessions IS NULL THEN [$anchor]
-          ELSE e.metadata.sessions + [$anchor]
+        SET e.metadata = CASE
+          WHEN e.metadata IS NULL THEN {sessions: [$anchor]}
+          ELSE e.metadata + {sessions: CASE
+            WHEN e.metadata.sessions IS NULL THEN [$anchor]
+            ELSE e.metadata.sessions + [$anchor]
+          END}
         END
-        // Keep only last 5 sessions
+        // Keep only last 5 sessions (only trim if we have more than 5)
         WITH e
-        SET e.metadata.sessions = tail(e.metadata.sessions)[-5..]
+        SET e.metadata = e.metadata + {sessions: CASE
+          WHEN size(e.metadata.sessions) > 5 THEN e.metadata.sessions[-5..]
+          ELSE e.metadata.sessions
+        END}
       `;
 
       if (this.knowledgeGraph.query) {
@@ -456,7 +603,9 @@ export class SessionManager extends EventEmitter implements ISessionManager {
         await this.knowledgeGraph.neo4j.query(cypher, { entityIds, anchor });
       }
 
-      console.log(`[SessionManager] Appended KG anchor for ${entityIds.length} entities`);
+      console.log(
+        `[SessionManager] Appended KG anchor for ${entityIds.length} entities`
+      );
     } catch (error) {
       console.error('[SessionManager] Failed to append KG anchor:', error);
       // Don't throw - this is non-critical
@@ -473,19 +622,32 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     try {
       // TODO: Implement Postgres failure snapshot
       // For now, just log the failure
-      console.log(`[SessionManager] Would create failure snapshot for session ${sessionId}`, {
-        outcome,
-        eventCount: events.length,
-      });
+      console.log(
+        `[SessionManager] Would create failure snapshot for session ${sessionId}`,
+        {
+          outcome,
+          eventCount: events.length,
+        }
+      );
     } catch (error) {
-      console.error(`[SessionManager] Failed to create failure snapshot for session ${sessionId}:`, error);
+      console.error(
+        `[SessionManager] Failed to create failure snapshot for session ${sessionId}:`,
+        error
+      );
       // Don't throw - this is non-critical
     }
   }
 
-  private async publishGlobalUpdate(message: SessionPubSubMessage): Promise<void> {
+  private async publishGlobalUpdate(
+    message: SessionPubSubMessage
+  ): Promise<void> {
     try {
-      await this.store.publishSessionUpdate(this.config.pubSubChannels.global, message);
+      const globalChannel = this.config.pubSubChannels?.global;
+      if (!globalChannel) {
+        return;
+      }
+
+      await this.store.publishSessionUpdate(globalChannel, message);
     } catch (error) {
       console.error('[SessionManager] Failed to publish global update:', error);
       // Don't throw - this is non-critical
@@ -508,6 +670,13 @@ export class SessionManager extends EventEmitter implements ISessionManager {
       for (const sessionId of [...this.eventSequences.keys()]) {
         if (!activeSet.has(sessionId)) {
           this.eventSequences.delete(sessionId);
+        }
+      }
+
+      // Clean up orphaned sequence promises
+      for (const sessionId of [...this.sequencePromises.keys()]) {
+        if (!activeSet.has(sessionId)) {
+          this.sequencePromises.delete(sessionId);
         }
       }
 
@@ -540,7 +709,11 @@ export class SessionManager extends EventEmitter implements ISessionManager {
       return {
         healthy: false,
         sessionManager: false,
-        store: { healthy: false, latency: 0, error: error instanceof Error ? error.message : String(error) },
+        store: {
+          healthy: false,
+          latency: 0,
+          error: error instanceof Error ? error.message : String(error),
+        },
         activeSessions: 0,
       };
     }
@@ -552,12 +725,15 @@ export class SessionManager extends EventEmitter implements ISessionManager {
     try {
       await this.store.close();
       this.eventSequences.clear();
+      this.sequencePromises.clear();
       this.emit('closed');
       console.log('[SessionManager] Closed successfully');
     } catch (error) {
       console.error('[SessionManager] Error during close:', error);
       throw new SessionError(
-        `Failed to close: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to close: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'SESSION_MANAGER_CLOSE_FAILED',
         undefined,
         { originalError: error }

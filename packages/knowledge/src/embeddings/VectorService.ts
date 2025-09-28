@@ -3,8 +3,8 @@
  * Handles vector operations, embeddings, and similarity search
  */
 
-import { EventEmitter } from "events";
-import { CypherExecutor } from "./CypherExecutor.js";
+import { EventEmitter } from 'events';
+import { CypherExecutor } from '../graph/CypherExecutor.js';
 
 export interface VectorSearchOptions {
   limit?: number;
@@ -17,7 +17,7 @@ export interface VectorIndexConfig {
   nodeLabel: string;
   propertyKey: string;
   dimensions: number;
-  similarityFunction?: "cosine" | "euclidean";
+  similarityFunction?: 'cosine' | 'euclidean';
 }
 
 export class VectorService extends EventEmitter {
@@ -34,32 +34,32 @@ export class VectorService extends EventEmitter {
       nodeLabel,
       propertyKey,
       dimensions,
-      similarityFunction = "cosine",
+      similarityFunction = 'cosine',
     } = config;
 
     try {
       // Check if index already exists
       const existingIndexes = await this.executor.callApoc(
-        "db.index.vector.list"
+        'db.index.vector.list'
       );
       const indexExists = existingIndexes.some((idx: any) => idx.name === name);
 
       if (!indexExists) {
         // Create vector index using APOC
-        await this.executor.callApoc("db.index.vector.createNodeIndex", {
+        await this.executor.callApoc('db.index.vector.createNodeIndex', {
           indexName: name,
-          nodeLabel: nodeLabel,
-          propertyKey: propertyKey,
-          similarityFunction: similarityFunction,
+          nodeLabel,
+          propertyKey,
+          similarityFunction,
           vectorDimensions: dimensions,
         });
 
-        this.emit("vectorIndex:created", { name, dimensions });
+        this.emit('vectorIndex:created', { name, dimensions });
       }
     } catch (error) {
       // Fallback to basic index if vector index creation fails
       console.warn(
-        "Vector index creation failed, falling back to basic index:",
+        'Vector index creation failed, falling back to basic index:',
         error
       );
       await this.executor.executeCypher(
@@ -85,7 +85,7 @@ export class VectorService extends EventEmitter {
         MATCH (e:Entity {id: $entityId})
         SET e.embedding = $vector
         SET e.embeddingUpdated = $timestamp
-        ${metadata ? "SET e.embeddingMetadata = $metadata" : ""}
+        ${metadata ? 'SET e.embeddingMetadata = $metadata' : ''}
       `,
       params: {
         entityId,
@@ -96,7 +96,7 @@ export class VectorService extends EventEmitter {
     }));
 
     await this.executor.executeTransaction(queries);
-    this.emit("vectors:upserted", { count: vectors.length });
+    this.emit('vectors:upserted', { count: vectors.length });
   }
 
   /**
@@ -118,15 +118,15 @@ export class VectorService extends EventEmitter {
     const {
       limit = 10,
       minScore = 0.1,
-      indexName = "entity_embedding",
-      nodeLabel = "Entity",
+      indexName = 'entity_embedding',
+      nodeLabel = 'Entity',
       filter = {},
     } = options;
 
     try {
       // Use APOC vector search if available
       const results = await this.executor.callApoc(
-        "db.index.vector.queryNodes",
+        'db.index.vector.queryNodes',
         {
           indexName,
           queryVector,
@@ -145,7 +145,7 @@ export class VectorService extends EventEmitter {
     } catch (error) {
       // Fallback to basic similarity search
       console.warn(
-        "Vector search failed, falling back to basic search:",
+        'Vector search failed, falling back to basic search:',
         error
       );
       return this.fallbackSimilaritySearch(queryVector, {
@@ -172,7 +172,7 @@ export class VectorService extends EventEmitter {
   > {
     // Get the entity's embedding
     const embeddingQuery = await this.executor.executeCypher(
-      "MATCH (e:Entity {id: $entityId}) RETURN e.embedding as embedding",
+      'MATCH (e:Entity {id: $entityId}) RETURN e.embedding as embedding',
       { entityId }
     );
 
@@ -192,7 +192,7 @@ export class VectorService extends EventEmitter {
     if (options.filter?.includeEntity) {
       const entityIds = similar.map((s) => s.entityId);
       const entities = await this.executor.executeCypher(
-        "MATCH (e:Entity) WHERE e.id IN $entityIds RETURN e",
+        'MATCH (e:Entity) WHERE e.id IN $entityIds RETURN e',
         { entityIds }
       );
 
@@ -225,7 +225,12 @@ export class VectorService extends EventEmitter {
     }>
   > {
     const { batchSize = 50, skipExisting = true } = options;
-    const results = [];
+    const results: Array<{
+      entityId: string;
+      vector: number[];
+      success: boolean;
+      error?: string;
+    }> = [];
 
     // Process in batches
     for (let i = 0; i < entities.length; i += batchSize) {
@@ -240,10 +245,10 @@ export class VectorService extends EventEmitter {
       const vectorsToUpsert = embeddings
         .filter((e) => e.success)
         .map((e) => ({
-          entityId: batch[e.index].id,
+          entityId: e.entityId,
           vector: e.vector,
           metadata: {
-            source: "batch_embed",
+            source: 'batch_embed',
             timestamp: new Date().toISOString(),
           },
         }));
@@ -267,7 +272,7 @@ export class VectorService extends EventEmitter {
     // Get content if not provided
     if (!embeddingContent) {
       const result = await this.executor.executeCypher(
-        "MATCH (e:Entity {id: $entityId}) RETURN e.content as content",
+        'MATCH (e:Entity {id: $entityId}) RETURN e.content as content',
         { entityId }
       );
       embeddingContent = result[0]?.content;
@@ -292,7 +297,7 @@ export class VectorService extends EventEmitter {
       {
         entityId,
         vector: embedding.vector,
-        metadata: { source: "update", timestamp: new Date().toISOString() },
+        metadata: { source: 'update', timestamp: new Date().toISOString() },
       },
     ]);
   }
@@ -302,10 +307,10 @@ export class VectorService extends EventEmitter {
    */
   async deleteEmbedding(entityId: string): Promise<void> {
     await this.executor.executeCypher(
-      "MATCH (e:Entity {id: $entityId}) REMOVE e.embedding, e.embeddingUpdated, e.embeddingMetadata",
+      'MATCH (e:Entity {id: $entityId}) REMOVE e.embedding, e.embeddingUpdated, e.embeddingMetadata',
       { entityId }
     );
-    this.emit("embedding:deleted", { entityId });
+    this.emit('embedding:deleted', { entityId });
   }
 
   /**
@@ -376,7 +381,7 @@ export class VectorService extends EventEmitter {
     items: Array<{ text: string; metadata?: any }>
   ): Promise<
     Array<{
-      index: number;
+      entityId: string;
       vector: number[];
       success: boolean;
       error?: string;
@@ -385,7 +390,7 @@ export class VectorService extends EventEmitter {
     // Placeholder implementation - would integrate with actual embedding service
     // For now, generate random vectors as a demonstration
     return items.map((item, index) => ({
-      index,
+      entityId: item.metadata?.id || `item-${index}`,
       vector: Array.from({ length: 384 }, () => Math.random() * 2 - 1), // 384 dimensions
       success: true,
     }));

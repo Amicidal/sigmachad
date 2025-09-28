@@ -3,13 +3,13 @@
  * Handles checkpoint creation, management, and member operations
  */
 
-import { EventEmitter } from "events";
-import { Neo4jService } from "../Neo4jService.js";
-import { Entity } from '@memento/core';
-import { TimeRangeParams } from "../../../models/types.js";
+import { EventEmitter } from 'events';
+import { Neo4jService } from '../Neo4jService.js';
+import { Entity } from '@memento/shared-types.js';
+import { TimeRangeParams } from '../../../models/types.js';
 
 export interface CheckpointOptions {
-  reason: "daily" | "incident" | "manual";
+  reason: 'daily' | 'incident' | 'manual';
   hops?: number;
   window?: TimeRangeParams;
   description?: string;
@@ -36,7 +36,7 @@ export class CheckpointService extends EventEmitter {
 
   constructor(private neo4j: Neo4jService) {
     super();
-    this.historyEnabled = process.env.HISTORY_ENABLED !== "false";
+    this.historyEnabled = process.env.HISTORY_ENABLED !== 'false';
   }
 
   /**
@@ -107,7 +107,7 @@ export class CheckpointService extends EventEmitter {
       );
     }
 
-    this.emit("checkpoint:created", {
+    this.emit('checkpoint:created', {
       checkpointId,
       seedCount: seedEntities.length,
       memberCount: memberIds.length,
@@ -156,9 +156,9 @@ export class CheckpointService extends EventEmitter {
         id: checkpoint.id,
         timestamp: new Date(checkpoint.timestamp),
         reason: checkpoint.reason,
-        seedEntities: JSON.parse(checkpoint.seedEntities || "[]"),
+        seedEntities: JSON.parse(checkpoint.seedEntities || '[]'),
         memberCount: 0, // Will be populated by getCheckpointMembers if needed
-        metadata: JSON.parse(checkpoint.metadata || "{}"),
+        metadata: JSON.parse(checkpoint.metadata || '{}'),
       };
     });
   }
@@ -194,9 +194,9 @@ export class CheckpointService extends EventEmitter {
       id: checkpoint.id,
       timestamp: new Date(checkpoint.timestamp),
       reason: checkpoint.reason,
-      seedEntities: JSON.parse(checkpoint.seedEntities || "[]"),
+      seedEntities: JSON.parse(checkpoint.seedEntities || '[]'),
       memberCount: record.memberCount,
-      metadata: JSON.parse(checkpoint.metadata || "{}"),
+      metadata: JSON.parse(checkpoint.metadata || '{}'),
     };
   }
 
@@ -272,7 +272,7 @@ export class CheckpointService extends EventEmitter {
     `;
 
     await this.neo4j.executeCypher(query, { checkpointId });
-    this.emit("checkpoint:deleted", { checkpointId });
+    this.emit('checkpoint:deleted', { checkpointId });
   }
 
   /**

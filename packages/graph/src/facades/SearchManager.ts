@@ -3,8 +3,8 @@
  * Moved from KnowledgeGraphService.ts during refactoring
  */
 
-import { Entity } from "../models/entities.js";
-import { GraphSearchRequest } from "@memento/core";
+import { Entity } from '@memento/core';
+import { GraphSearchRequest } from '@memento/core';
 
 interface SearchService {
   search(request: GraphSearchRequest): Promise<any[]>;

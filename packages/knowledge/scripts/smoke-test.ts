@@ -63,7 +63,7 @@ class SmokeTestRunner {
     processingTimeMs: 0,
     peakMemoryUsageMB: 0,
     locPerMinute: 0,
-    errors: []
+    errors: [],
   };
 
   constructor(private options: SmokeTestOptions = {}) {}
@@ -100,18 +100,17 @@ class SmokeTestRunner {
       const result: TestResult = {
         success: this.isTestSuccessful(validations),
         metrics: this.metrics,
-        validations
+        validations,
       };
 
       this.printResults(result);
       return result;
-
     } catch (error) {
       console.error('❌ Smoke test failed with unexpected error:', error);
       this.metrics.errors.push({
         type: 'CRITICAL_ERROR',
         message: error instanceof Error ? error.message : 'Unknown error',
-        context: { stack: error instanceof Error ? error.stack : undefined }
+        context: { stack: error instanceof Error ? error.stack : undefined },
       });
 
       return {
@@ -121,8 +120,8 @@ class SmokeTestRunner {
           performanceTarget: false,
           memoryUsage: false,
           errorHandling: false,
-          resourceCleanup: false
-        }
+          resourceCleanup: false,
+        },
       };
     }
   }
@@ -180,7 +179,7 @@ export class User implements UserProfile {
     return new User(data.id, data.name, data.email, new Date(data.createdAt));
   }
 }
-`
+`,
       },
       // Service with dependencies
       {
@@ -232,7 +231,7 @@ export class UserService extends EventEmitter {
     return Math.random().toString(36).substring(2, 15);
   }
 }
-`
+`,
       },
       // Complex utility functions
       {
@@ -292,7 +291,7 @@ export const createValidator = <T>(rules: Array<(value: T) => string | null>) =>
     };
   };
 };
-`
+`,
       },
       // React component
       {
@@ -387,7 +386,7 @@ export const UserCard: React.FC<UserCardProps> = ({
     </div>
   );
 };
-`
+`,
       },
       // Configuration file
       {
@@ -433,8 +432,8 @@ export function createDatabaseConfig(overrides: Partial<DatabaseConfig> = {}): D
     }
   };
 }
-`
-      }
+`,
+      },
     ];
 
     // Add stress test files if requested
@@ -442,7 +441,7 @@ export function createDatabaseConfig(overrides: Partial<DatabaseConfig> = {}): D
       for (let i = 0; i < 50; i++) {
         sampleFiles.push({
           path: `src/generated/Module${i}.ts`,
-          content: this.generateLargeModule(i)
+          content: this.generateLargeModule(i),
         });
       }
     }
@@ -459,7 +458,9 @@ export function createDatabaseConfig(overrides: Partial<DatabaseConfig> = {}): D
   }
 
   private generateLargeModule(index: number): string {
-    const classes = Array.from({ length: 20 }, (_, i) => `
+    const classes = Array.from(
+      { length: 20 },
+      (_, i) => `
 export class Component${index}_${i} {
   private data: Map<string, any> = new Map();
 
@@ -490,7 +491,8 @@ export class Component${index}_${i} {
       lastProcessed: this.data.get('lastResult')?.timestamp
     };
   }
-}`).join('\n');
+}`
+    ).join('\n');
 
     return `
 // Generated module ${index} for stress testing
@@ -537,20 +539,20 @@ export class ModuleManager${index} extends EventEmitter {
     const config: PipelineConfig = {
       eventBus: {
         type: 'memory',
-        partitions: 4
+        partitions: 4,
       },
       workers: {
         parsers: 2,
         entityWorkers: 2,
         relationshipWorkers: 2,
-        embeddingWorkers: 1
+        embeddingWorkers: 1,
       },
       batching: {
         entityBatchSize: 50,
         relationshipBatchSize: 100,
         embeddingBatchSize: 25,
         timeoutMs: 5000,
-        maxConcurrentBatches: 4
+        maxConcurrentBatches: 4,
       },
       queues: {
         maxSize: 10000,
@@ -558,7 +560,7 @@ export class ModuleManager${index} extends EventEmitter {
         batchSize: 20,
         batchTimeout: 1000,
         retryAttempts: 3,
-        retryDelay: 1000
+        retryDelay: 1000,
       },
       monitoring: {
         metricsInterval: 1000,
@@ -566,13 +568,20 @@ export class ModuleManager${index} extends EventEmitter {
         alertThresholds: {
           queueDepth: 1000,
           latency: 5000,
-          errorRate: 0.1
-        }
-      }
+          errorRate: 0.1,
+        },
+      },
     };
 
     // Mock knowledge graph service for testing
     const mockKnowledgeGraphService = {
+      metrics: {
+        totalEntities: 0,
+        totalRelationships: 0,
+      },
+      options: {
+        verbose: true,
+      },
       async createEntitiesBulk(entities: any[]): Promise<any> {
         this.metrics.totalEntities += entities.length;
         if (this.options.verbose) {
@@ -591,10 +600,12 @@ export class ModuleManager${index} extends EventEmitter {
 
       async createEmbeddingsBatch(entities: any[]): Promise<any> {
         if (this.options.verbose) {
-          console.log(`   Mock: Created embeddings for ${entities.length} entities`);
+          console.log(
+            `   Mock: Created embeddings for ${entities.length} entities`
+          );
         }
         return { success: true, count: entities.length };
-      }
+      },
     };
 
     this.pipeline = new HighThroughputIngestionPipeline(
@@ -603,19 +614,21 @@ export class ModuleManager${index} extends EventEmitter {
     );
 
     // Set up monitoring
-    this.pipeline.on('pipeline:error', (error) => {
+    this.pipeline.on('pipeline:error', (error: any) => {
+      // eslint-disable-line @typescript-eslint/no-explicit-any
       this.metrics.errors.push({
         type: 'PIPELINE_ERROR',
         message: error.message,
-        context: { stack: error.stack }
+        context: { stack: error.stack },
       });
     });
 
-    this.pipeline.on('parse:error', (error) => {
+    this.pipeline.on('parse:error', (error: any) => {
+      // eslint-disable-line @typescript-eslint/no-explicit-any
       this.metrics.errors.push({
         type: 'PARSE_ERROR',
         message: error.error,
-        context: { filePath: error.filePath }
+        context: { filePath: error.filePath },
       });
     });
 
@@ -659,8 +672,8 @@ export class ModuleManager${index} extends EventEmitter {
           diffHash: `hash-${Math.random()}`,
           metadata: {
             testRun: true,
-            fileType: this.getFileType(filePath)
-          }
+            fileType: this.getFileType(filePath),
+          },
         };
         changeEvents.push(event);
       }
@@ -672,17 +685,20 @@ export class ModuleManager${index} extends EventEmitter {
         await this.pipeline.ingestChangeEvents(batch);
 
         if (this.options.verbose) {
-          console.log(`   Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(changeEvents.length / batchSize)}`);
+          console.log(
+            `   Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
+              changeEvents.length / batchSize
+            )}`
+          );
         }
 
         // Small delay to simulate real-world timing
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
 
       // Wait for pipeline to complete all processing
       console.log('   Waiting for pipeline to complete...');
       await this.waitForPipelineCompletion();
-
     } finally {
       clearInterval(memoryMonitor);
       this.metrics.peakMemoryUsageMB = peakMemory;
@@ -699,7 +715,10 @@ export class ModuleManager${index} extends EventEmitter {
       if (entry.isDirectory()) {
         const subFiles = await this.discoverSourceFiles(fullPath);
         files.push(...subFiles);
-      } else if (entry.isFile() && (fullPath.endsWith('.ts') || fullPath.endsWith('.tsx'))) {
+      } else if (
+        entry.isFile() &&
+        (fullPath.endsWith('.ts') || fullPath.endsWith('.tsx'))
+      ) {
         files.push(fullPath);
       }
     }
@@ -736,10 +755,14 @@ export class ModuleManager${index} extends EventEmitter {
       }
 
       if (this.options.verbose) {
-        console.log(`   Waiting... Queue depth: ${metrics.queueMetrics.queueDepth}, Load: ${state.currentLoad.toFixed(2)}`);
+        console.log(
+          `   Waiting... Queue depth: ${
+            metrics.queueMetrics.queueDepth
+          }, Load: ${state.currentLoad.toFixed(2)}`
+        );
       }
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       attempts++;
     }
 
@@ -749,22 +772,27 @@ export class ModuleManager${index} extends EventEmitter {
   private calculatePerformanceMetrics(): void {
     // Count total lines of code processed
     let totalLOC = 0;
-    const sampleSizes = [30, 45, 25, 90, 40]; // Approximate LOC per file type
+    const _sampleSizes = [30, 45, 25, 90, 40]; // Approximate LOC per file type
     totalLOC = this.metrics.totalFiles * 50; // Average estimate
 
     if (this.options.stressTest) {
       totalLOC += 50 * 150; // 50 large files * ~150 LOC each
     }
 
-    this.metrics.locPerMinute = (totalLOC / this.metrics.processingTimeMs) * 60 * 1000;
+    this.metrics.locPerMinute =
+      (totalLOC / this.metrics.processingTimeMs) * 60 * 1000;
 
     console.log('\n📊 Performance Metrics:');
-    console.log(`   Processing time: ${this.metrics.processingTimeMs.toFixed(0)}ms`);
+    console.log(
+      `   Processing time: ${this.metrics.processingTimeMs.toFixed(0)}ms`
+    );
     console.log(`   Files processed: ${this.metrics.totalFiles}`);
     console.log(`   Entities created: ${this.metrics.totalEntities}`);
     console.log(`   Relationships created: ${this.metrics.totalRelationships}`);
     console.log(`   Lines per minute: ${this.metrics.locPerMinute.toFixed(0)}`);
-    console.log(`   Peak memory usage: ${this.metrics.peakMemoryUsageMB.toFixed(1)}MB`);
+    console.log(
+      `   Peak memory usage: ${this.metrics.peakMemoryUsageMB.toFixed(1)}MB`
+    );
     console.log(`   Errors encountered: ${this.metrics.errors.length}`);
   }
 
@@ -775,14 +803,26 @@ export class ModuleManager${index} extends EventEmitter {
       performanceTarget: this.metrics.locPerMinute >= TARGET_LOC_PER_MINUTE,
       memoryUsage: this.metrics.peakMemoryUsageMB <= MEMORY_THRESHOLD_MB,
       errorHandling: this.validateErrorHandling(),
-      resourceCleanup: await this.validateResourceCleanup()
+      resourceCleanup: await this.validateResourceCleanup(),
     };
 
     // Log validation results
-    console.log(`   ✅ Performance target (${TARGET_LOC_PER_MINUTE} LOC/min): ${validations.performanceTarget ? 'PASS' : 'FAIL'}`);
-    console.log(`   ✅ Memory usage (<${MEMORY_THRESHOLD_MB}MB): ${validations.memoryUsage ? 'PASS' : 'FAIL'}`);
-    console.log(`   ✅ Error handling: ${validations.errorHandling ? 'PASS' : 'FAIL'}`);
-    console.log(`   ✅ Resource cleanup: ${validations.resourceCleanup ? 'PASS' : 'FAIL'}`);
+    console.log(
+      `   ✅ Performance target (${TARGET_LOC_PER_MINUTE} LOC/min): ${
+        validations.performanceTarget ? 'PASS' : 'FAIL'
+      }`
+    );
+    console.log(
+      `   ✅ Memory usage (<${MEMORY_THRESHOLD_MB}MB): ${
+        validations.memoryUsage ? 'PASS' : 'FAIL'
+      }`
+    );
+    console.log(
+      `   ✅ Error handling: ${validations.errorHandling ? 'PASS' : 'FAIL'}`
+    );
+    console.log(
+      `   ✅ Resource cleanup: ${validations.resourceCleanup ? 'PASS' : 'FAIL'}`
+    );
 
     return validations;
   }
@@ -790,11 +830,13 @@ export class ModuleManager${index} extends EventEmitter {
   private validateErrorHandling(): boolean {
     // For now, we consider it successful if we didn't have any critical errors
     // In a real scenario, we'd test error recovery, retries, etc.
-    const criticalErrors = this.metrics.errors.filter(e => e.type === 'CRITICAL_ERROR');
+    const criticalErrors = this.metrics.errors.filter(
+      (e) => e.type === 'CRITICAL_ERROR'
+    );
     return criticalErrors.length === 0;
   }
 
-  private async validateResourceCleanup(): boolean {
+  private async validateResourceCleanup(): Promise<boolean> {
     if (!this.pipeline) return false;
 
     try {
@@ -806,7 +848,7 @@ export class ModuleManager${index} extends EventEmitter {
     } catch (error) {
       this.metrics.errors.push({
         type: 'CLEANUP_ERROR',
-        message: error instanceof Error ? error.message : 'Cleanup failed'
+        message: error instanceof Error ? error.message : 'Cleanup failed',
       });
       return false;
     }
@@ -843,7 +885,9 @@ export class ModuleManager${index} extends EventEmitter {
 
     console.log('\nValidation Summary:');
     Object.entries(result.validations).forEach(([key, passed]) => {
-      console.log(`  ${passed ? '✅' : '❌'} ${key}: ${passed ? 'PASS' : 'FAIL'}`);
+      console.log(
+        `  ${passed ? '✅' : '❌'} ${key}: ${passed ? 'PASS' : 'FAIL'}`
+      );
     });
 
     if (result.metrics.errors.length > 0) {
@@ -858,10 +902,14 @@ export class ModuleManager${index} extends EventEmitter {
 
     console.log('\nRecommendations:');
     if (!result.validations.performanceTarget) {
-      console.log('  🔧 Consider optimizing parsing performance or increasing worker pool size');
+      console.log(
+        '  🔧 Consider optimizing parsing performance or increasing worker pool size'
+      );
     }
     if (!result.validations.memoryUsage) {
-      console.log('  🔧 Memory usage is high - check for memory leaks or increase batch processing');
+      console.log(
+        '  🔧 Memory usage is high - check for memory leaks or increase batch processing'
+      );
     }
     if (!result.validations.errorHandling) {
       console.log('  🔧 Improve error handling and recovery mechanisms');
@@ -881,7 +929,7 @@ async function main() {
     benchmark: args.includes('--benchmark'),
     stressTest: args.includes('--stress-test'),
     verbose: args.includes('--verbose') || args.includes('-v'),
-    skipCleanup: args.includes('--skip-cleanup')
+    skipCleanup: args.includes('--skip-cleanup'),
   };
 
   if (args.includes('--help') || args.includes('-h')) {
@@ -918,10 +966,15 @@ Examples:
 
 // Only run if this file is executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(error => {
+  main().catch((error) => {
     console.error('Fatal error:', error);
     process.exit(1);
   });
 }
 
-export { SmokeTestRunner, type SmokeTestOptions, type TestResult, type TestMetrics };
+export {
+  SmokeTestRunner,
+  type SmokeTestOptions,
+  type TestResult,
+  type TestMetrics,
+};

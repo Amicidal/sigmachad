@@ -3,10 +3,7 @@
  * Moved from KnowledgeGraphService.ts during refactoring
  */
 
-import {
-  GraphRelationship,
-  RelationshipQuery,
-} from "../models/relationships.js";
+import { GraphRelationship, RelationshipQuery } from '@memento/core';
 
 interface RelationshipService {
   createRelationship(

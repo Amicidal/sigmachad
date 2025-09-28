@@ -5,8 +5,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { Entity } from '@memento/core';
-import { GraphRelationship } from '@memento/core';
+import { Entity } from '@memento/shared-types.js';
+import { GraphRelationship } from '@memento/shared-types.js';
 import {
   BatchConfig,
   BatchMetadata,
@@ -19,7 +19,7 @@ import {
   StreamingWriteConfig,
   BatchProcessingError,
   IngestionError,
-  IngestionEvents
+  IngestionEvents,
 } from './types.js';
 import { KnowledgeGraphServiceIntegration } from './pipeline.js';
 
@@ -31,12 +31,21 @@ export interface BatchProcessorConfig extends BatchConfig {
 }
 
 export interface BatchProcessor {
-  processEntities(entities: Entity[], metadata?: Partial<BatchMetadata>): Promise<BatchResult>;
-  processRelationships(relationships: GraphRelationship[], metadata?: Partial<BatchMetadata>): Promise<BatchResult>;
+  processEntities(
+    entities: Entity[],
+    metadata?: Partial<BatchMetadata>
+  ): Promise<BatchResult>;
+  processRelationships(
+    relationships: GraphRelationship[],
+    metadata?: Partial<BatchMetadata>
+  ): Promise<BatchResult>;
   processChangeFragments(fragments: ChangeFragment[]): Promise<BatchResult[]>;
 }
 
-export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> implements BatchProcessor {
+export class HighThroughputBatchProcessor
+  extends EventEmitter<IngestionEvents>
+  implements BatchProcessor
+{
   private config: BatchProcessorConfig;
   private activeBatches: Map<string, IdempotentBatch> = new Map();
   private processedBatches: Set<string> = new Set();
@@ -46,9 +55,15 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
   private knowledgeGraphService?: KnowledgeGraphServiceIntegration;
 
   // Idempotency tracking
-  private idempotencyKeys: Map<string, { batchId: string; result: BatchResult; expiresAt: Date }> = new Map();
+  private idempotencyKeys: Map<
+    string,
+    { batchId: string; result: BatchResult; expiresAt: Date }
+  > = new Map();
 
-  constructor(config: BatchProcessorConfig, knowledgeGraphService?: KnowledgeGraphServiceIntegration) {
+  constructor(
+    config: BatchProcessorConfig,
+    knowledgeGraphService?: KnowledgeGraphServiceIntegration
+  ) {
     super();
     this.config = config;
     this.knowledgeGraphService = knowledgeGraphService;
@@ -62,7 +77,10 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
    */
   async start(): Promise<void> {
     if (this.running) {
-      throw new IngestionError('Batch processor already running', 'ALREADY_RUNNING');
+      throw new IngestionError(
+        'Batch processor already running',
+        'ALREADY_RUNNING'
+      );
     }
 
     this.running = true;
@@ -88,7 +106,10 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
   /**
    * Process a batch of entities with streaming writes
    */
-  async processEntities(entities: Entity[], metadata: Partial<BatchMetadata> = {}): Promise<BatchResult> {
+  async processEntities(
+    entities: Entity[],
+    metadata: Partial<BatchMetadata> = {}
+  ): Promise<BatchResult> {
     if (!this.running) {
       throw new IngestionError('Batch processor not running', 'NOT_RUNNING');
     }
@@ -100,7 +121,7 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
       priority: metadata.priority || 5,
       createdAt: new Date(),
       epochId: this.generateEpochId(),
-      namespace: metadata.namespace
+      namespace: metadata.namespace,
     };
 
     this.emit('batch:created', batchMeta);
@@ -110,7 +131,9 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
       const idempotencyKey = this.generateIdempotencyKey('entity', entities);
       const existingResult = this.checkIdempotency(idempotencyKey);
       if (existingResult) {
-        console.log(`[BatchProcessor] Returning cached result for batch ${batchMeta.id}`);
+        console.log(
+          `[BatchProcessor] Returning cached result for batch ${batchMeta.id}`
+        );
         return existingResult;
       }
 
@@ -121,7 +144,6 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
 
       this.emit('batch:completed', result);
       return result;
-
     } catch (error) {
       const batchError = new BatchProcessingError(
         `Entity batch processing failed: ${(error as Error).message}`,
@@ -152,28 +174,35 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
       priority: metadata.priority || 5,
       createdAt: new Date(),
       epochId: this.generateEpochId(),
-      namespace: metadata.namespace
+      namespace: metadata.namespace,
     };
 
     this.emit('batch:created', batchMeta);
 
     try {
       // Check for idempotency
-      const idempotencyKey = this.generateIdempotencyKey('relationship', relationships);
+      const idempotencyKey = this.generateIdempotencyKey(
+        'relationship',
+        relationships
+      );
       const existingResult = this.checkIdempotency(idempotencyKey);
       if (existingResult) {
-        console.log(`[BatchProcessor] Returning cached result for batch ${batchMeta.id}`);
+        console.log(
+          `[BatchProcessor] Returning cached result for batch ${batchMeta.id}`
+        );
         return existingResult;
       }
 
-      const result = await this.processRelationshipBatch(relationships, batchMeta);
+      const result = await this.processRelationshipBatch(
+        relationships,
+        batchMeta
+      );
 
       // Store idempotent result
       this.storeIdempotentResult(idempotencyKey, result);
 
       this.emit('batch:completed', result);
       return result;
-
     } catch (error) {
       const batchError = new BatchProcessingError(
         `Relationship batch processing failed: ${(error as Error).message}`,
@@ -189,7 +218,9 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
   /**
    * Process change fragments with dependency DAG ordering
    */
-  async processChangeFragments(fragments: ChangeFragment[]): Promise<BatchResult[]> {
+  async processChangeFragments(
+    fragments: ChangeFragment[]
+  ): Promise<BatchResult[]> {
     if (!this.running) {
       throw new IngestionError('Batch processor not running', 'NOT_RUNNING');
     }
@@ -205,9 +236,11 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
 
       // Process in dependency order
       return await this.processFragmentsWithDAG(dag);
-
     } catch (error) {
-      console.error('[BatchProcessor] DAG processing failed, falling back to simple processing:', error);
+      console.error(
+        '[BatchProcessor] DAG processing failed, falling back to simple processing:',
+        error
+      );
       return this.processFragmentsSimple(fragments);
     }
   }
@@ -215,7 +248,10 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
   /**
    * Process entity batch with streaming writes
    */
-  private async processEntityBatch(entities: Entity[], metadata: BatchMetadata): Promise<BatchResult> {
+  private async processEntityBatch(
+    entities: Entity[],
+    metadata: BatchMetadata
+  ): Promise<BatchResult> {
     const startTime = Date.now();
     const batchId = metadata.id;
 
@@ -227,13 +263,16 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
         operation: 'entity_upsert',
         data: entities,
         metadata: { batchMetadata: metadata },
-        createdAt: metadata.createdAt
+        createdAt: metadata.createdAt,
       };
 
       this.activeBatches.set(batchId, idempotentBatch);
 
       // Split into micro-batches for streaming
-      const microBatches = this.createMicroBatches(entities, this.config.entityBatchSize);
+      const microBatches = this.createMicroBatches(
+        entities,
+        this.config.entityBatchSize
+      );
       let processedCount = 0;
       let failedCount = 0;
       const errors: Error[] = [];
@@ -247,7 +286,10 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
 
         const batchPromises = batchSlice.map(async (microBatch, index) => {
           try {
-            await this.processMicroBatch(microBatch, `${batchId}-micro-${i + index}`);
+            await this.processMicroBatch(
+              microBatch,
+              `${batchId}-micro-${i + index}`
+            );
             processedCount += microBatch.length;
           } catch (error) {
             failedCount += microBatch.length;
@@ -269,7 +311,7 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
         failedCount,
         duration,
         errors,
-        metadata
+        metadata,
       };
 
       // Mark batch as processed
@@ -277,7 +319,6 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
       this.processedBatches.add(batchId);
 
       return result;
-
     } catch (error) {
       this.activeBatches.delete(batchId);
       throw error;
@@ -296,7 +337,9 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
 
     try {
       // Resolve relationship endpoints first
-      const resolvedRelationships = await this.resolveRelationshipEndpoints(relationships);
+      const resolvedRelationships = await this.resolveRelationshipEndpoints(
+        relationships
+      );
 
       // Create idempotent batch record
       const idempotentBatch: IdempotentBatch = {
@@ -305,25 +348,34 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
         operation: 'relationship_upsert',
         data: resolvedRelationships,
         metadata: { batchMetadata: metadata },
-        createdAt: metadata.createdAt
+        createdAt: metadata.createdAt,
       };
 
       this.activeBatches.set(batchId, idempotentBatch);
 
       // Process in micro-batches
-      const microBatches = this.createMicroBatches(resolvedRelationships, this.config.relationshipBatchSize);
+      const microBatches = this.createMicroBatches(
+        resolvedRelationships,
+        this.config.relationshipBatchSize
+      );
       let processedCount = 0;
       let failedCount = 0;
       const errors: Error[] = [];
 
       for (const microBatch of microBatches) {
         try {
-          await this.processMicroBatch(microBatch, `${batchId}-rel-${microBatches.indexOf(microBatch)}`);
+          await this.processMicroBatch(
+            microBatch,
+            `${batchId}-rel-${microBatches.indexOf(microBatch)}`
+          );
           processedCount += microBatch.length;
         } catch (error) {
           failedCount += microBatch.length;
           errors.push(error as Error);
-          console.error(`[BatchProcessor] Relationship micro-batch failed:`, error);
+          console.error(
+            `[BatchProcessor] Relationship micro-batch failed:`,
+            error
+          );
         }
       }
 
@@ -337,14 +389,13 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
         failedCount,
         duration,
         errors,
-        metadata
+        metadata,
       };
 
       this.activeBatches.delete(batchId);
       this.processedBatches.add(batchId);
 
       return result;
-
     } catch (error) {
       this.activeBatches.delete(batchId);
       throw error;
@@ -354,22 +405,28 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
   /**
    * Process fragments without dependency DAG (simple batching)
    */
-  private async processFragmentsSimple(fragments: ChangeFragment[]): Promise<BatchResult[]> {
-    const entityFragments = fragments.filter(f => f.changeType === 'entity');
-    const relationshipFragments = fragments.filter(f => f.changeType === 'relationship');
+  private async processFragmentsSimple(
+    fragments: ChangeFragment[]
+  ): Promise<BatchResult[]> {
+    const entityFragments = fragments.filter((f) => f.changeType === 'entity');
+    const relationshipFragments = fragments.filter(
+      (f) => f.changeType === 'relationship'
+    );
 
     const results: BatchResult[] = [];
 
     // Process entities first
     if (entityFragments.length > 0) {
-      const entities = entityFragments.map(f => f.data as Entity);
+      const entities = entityFragments.map((f) => f.data as Entity);
       const result = await this.processEntities(entities);
       results.push(result);
     }
 
     // Then relationships
     if (relationshipFragments.length > 0) {
-      const relationships = relationshipFragments.map(f => f.data as GraphRelationship);
+      const relationships = relationshipFragments.map(
+        (f) => f.data as GraphRelationship
+      );
       const result = await this.processRelationships(relationships);
       results.push(result);
     }
@@ -394,7 +451,7 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
         dependencies: [],
         dependents: [],
         priority: fragment.confidence,
-        status: 'pending'
+        status: 'pending',
       };
 
       nodes.set(fragment.id, node);
@@ -431,14 +488,16 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
       nodes,
       roots,
       leaves,
-      cycles
+      cycles,
     };
   }
 
   /**
    * Process fragments using dependency DAG ordering
    */
-  private async processFragmentsWithDAG(dag: DependencyDAG): Promise<BatchResult[]> {
+  private async processFragmentsWithDAG(
+    dag: DependencyDAG
+  ): Promise<BatchResult[]> {
     const results: BatchResult[] = [];
     const processed = new Set<string>();
 
@@ -455,7 +514,9 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
         const node = dag.nodes.get(nodeId)!;
 
         // Check if all dependencies are satisfied
-        const allDepsSatisfied = node.dependencies.every(depId => processed.has(depId));
+        const allDepsSatisfied = node.dependencies.every((depId) =>
+          processed.has(depId)
+        );
 
         if (allDepsSatisfied) {
           queue.splice(i, 1);
@@ -468,7 +529,7 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
             operation: 'add', // Simplified
             data: node.data,
             dependencyHints: node.dependencies,
-            confidence: node.priority
+            confidence: node.priority,
           };
 
           currentBatch.push(fragment);
@@ -495,7 +556,9 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
         }
       } else if (queue.length > 0) {
         // Deadlock or cycle detected
-        console.warn('[BatchProcessor] Possible deadlock in DAG, processing remaining nodes');
+        console.warn(
+          '[BatchProcessor] Possible deadlock in DAG, processing remaining nodes'
+        );
         break;
       }
     }
@@ -519,11 +582,16 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
   /**
    * Process a micro-batch with actual KnowledgeGraphService integration
    */
-  private async processMicroBatch(batch: any[], batchId: string): Promise<void> {
+  private async processMicroBatch(
+    batch: any[],
+    batchId: string
+  ): Promise<void> {
     if (!this.knowledgeGraphService) {
-      console.log(`[BatchProcessor] No KnowledgeGraphService available, simulating micro-batch ${batchId} with ${batch.length} items`);
+      console.log(
+        `[BatchProcessor] No KnowledgeGraphService available, simulating micro-batch ${batchId} with ${batch.length} items`
+      );
       // Simulate processing time for fallback
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       return;
     }
 
@@ -535,34 +603,49 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
       for (const item of batch) {
         if (item.type === 'entity' || item.entityType) {
           entities.push(item);
-        } else if (item.type === 'relationship' || item.fromEntityId || item.toEntityId) {
+        } else if (
+          item.type === 'relationship' ||
+          item.fromEntityId ||
+          item.toEntityId
+        ) {
           relationships.push(item);
         }
       }
 
       // Process entities in bulk if we have any
       if (entities.length > 0) {
-        console.log(`[BatchProcessor] Processing ${entities.length} entities in micro-batch ${batchId}`);
+        console.log(
+          `[BatchProcessor] Processing ${entities.length} entities in micro-batch ${batchId}`
+        );
         await this.knowledgeGraphService.createEntitiesBulk(entities, {
           batchId,
           skipEmbedding: true, // Embeddings are handled separately
-          microBatch: true
+          microBatch: true,
         });
       }
 
       // Process relationships in bulk if we have any
       if (relationships.length > 0) {
-        console.log(`[BatchProcessor] Processing ${relationships.length} relationships in micro-batch ${batchId}`);
-        await this.knowledgeGraphService.createRelationshipsBulk(relationships, {
-          batchId,
-          microBatch: true
-        });
+        console.log(
+          `[BatchProcessor] Processing ${relationships.length} relationships in micro-batch ${batchId}`
+        );
+        await this.knowledgeGraphService.createRelationshipsBulk(
+          relationships,
+          {
+            batchId,
+            microBatch: true,
+          }
+        );
       }
 
-      console.log(`[BatchProcessor] Successfully processed micro-batch ${batchId} with ${entities.length} entities and ${relationships.length} relationships`);
-
+      console.log(
+        `[BatchProcessor] Successfully processed micro-batch ${batchId} with ${entities.length} entities and ${relationships.length} relationships`
+      );
     } catch (error) {
-      console.error(`[BatchProcessor] Error processing micro-batch ${batchId}:`, error);
+      console.error(
+        `[BatchProcessor] Error processing micro-batch ${batchId}:`,
+        error
+      );
       throw error;
     }
   }
@@ -570,15 +653,21 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
   /**
    * Resolve relationship endpoints using cache/lookup
    */
-  private async resolveRelationshipEndpoints(relationships: GraphRelationship[]): Promise<GraphRelationship[]> {
+  private async resolveRelationshipEndpoints(
+    relationships: GraphRelationship[]
+  ): Promise<GraphRelationship[]> {
     // Validate and normalize relationship endpoints
-    return relationships.filter(rel => {
+    return relationships.filter((rel) => {
       // Ensure both endpoints exist
       const hasFromId = rel.fromEntityId || (rel.from && (rel.from as any).id);
       const hasToId = rel.toEntityId || (rel.to && (rel.to as any).id);
 
       if (!hasFromId || !hasToId) {
-        console.warn(`[BatchProcessor] Skipping relationship with missing endpoints: ${JSON.stringify(rel)}`);
+        console.warn(
+          `[BatchProcessor] Skipping relationship with missing endpoints: ${JSON.stringify(
+            rel
+          )}`
+        );
         return false;
       }
 
@@ -613,7 +702,9 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
    */
   private generateIdempotencyKey(type: string, data: any[]): string {
     // Simple hash of the data - in production, use a proper hash function
-    const dataStr = JSON.stringify(data.map(item => ({ id: item.id, type: item.type || type })));
+    const dataStr = JSON.stringify(
+      data.map((item) => ({ id: item.id, type: item.type || type }))
+    );
     return `${type}-${this.simpleHash(dataStr)}`;
   }
 
@@ -632,8 +723,14 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
    * Store idempotent result
    */
   private storeIdempotentResult(key: string, result: BatchResult): void {
-    const expiresAt = new Date(Date.now() + this.config.streaming.idempotencyKeyTTL);
-    this.idempotencyKeys.set(key, { batchId: result.batchId, result, expiresAt });
+    const expiresAt = new Date(
+      Date.now() + this.config.streaming.idempotencyKeyTTL
+    );
+    this.idempotencyKeys.set(key, {
+      batchId: result.batchId,
+      result,
+      expiresAt,
+    });
   }
 
   /**
@@ -643,7 +740,7 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash; // Convert to 32-bit integer
     }
     return Math.abs(hash).toString(36);
@@ -704,11 +801,13 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
 
     while (this.activeBatches.size > 0) {
       if (Date.now() - startTime > timeout) {
-        console.warn('[BatchProcessor] Timeout waiting for active batches to complete');
+        console.warn(
+          '[BatchProcessor] Timeout waiting for active batches to complete'
+        );
         break;
       }
 
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
 
@@ -727,7 +826,9 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
     }
 
     if (cleanedCount > 0) {
-      console.log(`[BatchProcessor] Cleaned up ${cleanedCount} expired idempotency keys`);
+      console.log(
+        `[BatchProcessor] Cleaned up ${cleanedCount} expired idempotency keys`
+      );
     }
   }
 
@@ -742,7 +843,7 @@ export class HighThroughputBatchProcessor extends EventEmitter<IngestionEvents> 
     return {
       activeBatches: this.activeBatches.size,
       processedBatches: this.processedBatches.size,
-      idempotencyKeys: this.idempotencyKeys.size
+      idempotencyKeys: this.idempotencyKeys.size,
     };
   }
 }

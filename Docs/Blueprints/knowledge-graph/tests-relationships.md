@@ -1,5 +1,18 @@
 # Tests Relationship Blueprint
 
+## Metadata
+
+- Scope: knowledge-graph
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: knowledge-graph).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Testing edges (`TESTS`, `VALIDATES`) connect automated tests to code and specs so that impact analysis, coverage insights, and regression triage can be grounded in graph data. The goal is to elevate these edges to parity with code-edge richness—persisting structured metadata, supporting temporal history, and enabling precise querying.
 

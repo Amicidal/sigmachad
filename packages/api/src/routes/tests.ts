@@ -3,26 +3,30 @@
  * Handles test planning, generation, execution recording, and coverage analysis
  */
 
-import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "@memento/knowledge";
-import { DatabaseService } from "@memento/database";
-import { TestEngine } from "@memento/testing";
-import { TestPlanningService, SpecNotFoundError, TestPlanningValidationError } from "@memento/testing";
-import { RelationshipType } from "@memento/core";
-import type { TestPerformanceMetrics } from "@memento/core";
+import { FastifyInstance } from 'fastify';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database';
+import { TestEngine } from '@memento/testing';
+import {
+  TestPlanningService,
+  SpecNotFoundError,
+  TestPlanningValidationError,
+} from '@memento/testing';
+import { RelationshipType } from '@memento/core';
+import type { TestPerformanceMetrics } from '@memento/core';
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestExecutionResult,
   PerformanceHistoryOptions,
-} from "@memento/core";
-import { resolvePerformanceHistoryOptions } from "@memento/core";
+} from '@memento/core';
+import { resolvePerformanceHistoryOptions } from '@memento/core';
 
 const createEmptyPerformanceMetrics = (): TestPerformanceMetrics => ({
   averageExecutionTime: 0,
   p95ExecutionTime: 0,
   successRate: 0,
-  trend: "stable",
+  trend: 'stable',
   benchmarkComparisons: [],
   historicalData: [],
 });
@@ -40,9 +44,9 @@ export const aggregatePerformanceMetrics = (
       acc.averageExecutionTime += item.averageExecutionTime ?? 0;
       acc.p95ExecutionTime += item.p95ExecutionTime ?? 0;
       acc.successRate += item.successRate ?? 0;
-      if (item.trend === "degrading") {
+      if (item.trend === 'degrading') {
         acc.trend.degrading += 1;
-      } else if (item.trend === "improving") {
+      } else if (item.trend === 'improving') {
         acc.trend.improving += 1;
       } else {
         acc.trend.stable += 1;
@@ -60,55 +64,67 @@ export const aggregatePerformanceMetrics = (
       p95ExecutionTime: 0,
       successRate: 0,
       trend: { improving: 0, stable: 0, degrading: 0 },
-      benchmarkComparisons: [] as TestPerformanceMetrics["benchmarkComparisons"],
-      historicalData: [] as TestPerformanceMetrics["historicalData"],
+      benchmarkComparisons:
+        [] as TestPerformanceMetrics['benchmarkComparisons'],
+      historicalData: [] as TestPerformanceMetrics['historicalData'],
     }
   );
 
-  const trendPriority: Record<TestPerformanceMetrics["trend"], number> = {
+  const trendPriority: Record<TestPerformanceMetrics['trend'], number> = {
     degrading: 0,
     improving: 1,
     stable: 2,
   };
-  const dominantTrend = (Object.entries(sum.trend) as Array<
-    [TestPerformanceMetrics["trend"], number]
-  >).reduce(
+  const dominantTrend = (
+    Object.entries(sum.trend) as Array<
+      [TestPerformanceMetrics['trend'], number]
+    >
+  ).reduce(
     (best, [trend, count]) => {
       if (count > best.count) {
         return { trend, count };
       }
-      if (count === best.count && trendPriority[trend] < trendPriority[best.trend]) {
+      if (
+        count === best.count &&
+        trendPriority[trend] < trendPriority[best.trend]
+      ) {
         return { trend, count };
       }
       return best;
     },
-    { trend: "stable" as TestPerformanceMetrics["trend"], count: -1 }
+    { trend: 'stable' as TestPerformanceMetrics['trend'], count: -1 }
   ).trend;
 
   // Limit historical data to the most recent entries to avoid large payloads
   const historicalData = sum.historicalData
     .map((entry) => {
       const timestamp = (() => {
-        if (entry.timestamp instanceof Date && !Number.isNaN(entry.timestamp.getTime())) {
+        if (
+          entry.timestamp instanceof Date &&
+          !Number.isNaN(entry.timestamp.getTime())
+        ) {
           return entry.timestamp;
         }
         const parsed = new Date((entry as any).timestamp);
         return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
       })();
 
-      const averageExecutionTime = typeof entry.averageExecutionTime === "number"
-        ? entry.averageExecutionTime
-        : typeof entry.executionTime === "number"
-        ? entry.executionTime
-        : 0;
+      const averageExecutionTime =
+        typeof entry.averageExecutionTime === 'number'
+          ? entry.averageExecutionTime
+          : typeof entry.executionTime === 'number'
+          ? entry.executionTime
+          : 0;
 
-      const p95ExecutionTime = typeof entry.p95ExecutionTime === "number"
-        ? entry.p95ExecutionTime
-        : averageExecutionTime;
+      const p95ExecutionTime =
+        typeof entry.p95ExecutionTime === 'number'
+          ? entry.p95ExecutionTime
+          : averageExecutionTime;
 
-      const executionTime = typeof entry.executionTime === "number"
-        ? entry.executionTime
-        : averageExecutionTime;
+      const executionTime =
+        typeof entry.executionTime === 'number'
+          ? entry.executionTime
+          : averageExecutionTime;
 
       return {
         ...entry,
@@ -137,7 +153,7 @@ const extractSearchTokens = (
   if (!input) {
     return [];
   }
-  const text = Array.isArray(input) ? input.join(" ") : input;
+  const text = Array.isArray(input) ? input.join(' ') : input;
   const matches = text.match(/[A-Za-z][A-Za-z0-9_-]{4,}/g) || [];
   const seen = new Set<string>();
   const tokens: string[] = [];
@@ -164,68 +180,35 @@ const generateTokenVariants = (token: string): string[] => {
     }
   };
 
-  if (base.endsWith("ies") && base.length > 3) {
-    addStem(base.slice(0, -3) + "y");
+  if (base.endsWith('ies') && base.length > 3) {
+    addStem(base.slice(0, -3) + 'y');
   }
-  if (base.endsWith("ing") && base.length > 5) {
+  if (base.endsWith('ing') && base.length > 5) {
     addStem(base.slice(0, -3));
   }
-  if (base.endsWith("ed") && base.length > 4) {
+  if (base.endsWith('ed') && base.length > 4) {
     addStem(base.slice(0, -2));
   }
-  if (base.endsWith("s") && base.length > 5) {
+  if (base.endsWith('s') && base.length > 5) {
     addStem(base.slice(0, -1));
   }
-  if (base.endsWith("ency") && base.length > 6) {
+  if (base.endsWith('ency') && base.length > 6) {
     addStem(base.slice(0, -4));
   }
-  if (base.endsWith("ance") && base.length > 6) {
+  if (base.endsWith('ance') && base.length > 6) {
     addStem(base.slice(0, -4));
   }
-  if ((base.endsWith("ent") || base.endsWith("ant")) && base.length > 5) {
+  if ((base.endsWith('ent') || base.endsWith('ant')) && base.length > 5) {
     addStem(base.slice(0, -3));
   }
-  if (base.endsWith("tion") && base.length > 6) {
+  if (base.endsWith('tion') && base.length > 6) {
     addStem(base.slice(0, -4));
   }
 
   return Array.from(variants);
 };
 
-interface TestCoverage {
-  entityId: string;
-  overallCoverage: any;
-  testBreakdown: {
-    unitTests: any;
-    integrationTests: any;
-    e2eTests: any;
-  };
-  uncoveredLines: number[];
-  uncoveredBranches: number[];
-  testCases: {
-    testId: string;
-    testName: string;
-    covers: string[];
-  }[];
-}
-
-interface PerformanceMetrics {
-  entityId: string;
-  averageExecutionTime: number;
-  p95ExecutionTime: number;
-  successRate: number;
-  trend: "improving" | "stable" | "degrading";
-  benchmarkComparisons: {
-    benchmark: string;
-    value: number;
-    status: "above" | "below" | "at";
-  }[];
-  historicalData: {
-    timestamp: Date;
-    executionTime: number;
-    successRate: number;
-  }[];
-}
+import { TestCoverage, PerformanceMetrics } from '@memento/shared-types';
 
 export async function registerTestRoutes(
   app: FastifyInstance,
@@ -237,29 +220,29 @@ export async function registerTestRoutes(
 
   // POST /api/tests/plan-and-generate - Plan and generate tests
   app.post(
-    "/tests/plan-and-generate",
+    '/tests/plan-and-generate',
     {
       schema: {
         body: {
-          type: "object",
+          type: 'object',
           properties: {
-            specId: { type: "string" },
+            specId: { type: 'string' },
             testTypes: {
-              type: "array",
-              items: { type: "string", enum: ["unit", "integration", "e2e"] },
+              type: 'array',
+              items: { type: 'string', enum: ['unit', 'integration', 'e2e'] },
             },
             coverage: {
-              type: "object",
+              type: 'object',
               properties: {
-                minLines: { type: "number" },
-                minBranches: { type: "number" },
-                minFunctions: { type: "number" },
+                minLines: { type: 'number' },
+                minBranches: { type: 'number' },
+                minFunctions: { type: 'number' },
               },
             },
-            includePerformanceTests: { type: "boolean" },
-            includeSecurityTests: { type: "boolean" },
+            includePerformanceTests: { type: 'boolean' },
+            includeSecurityTests: { type: 'boolean' },
           },
-          required: ["specId"],
+          required: ['specId'],
         },
       },
     },
@@ -290,20 +273,20 @@ export async function registerTestRoutes(
             success: false,
             error: {
               code: error.code,
-              message: "Specification not found",
+              message: 'Specification not found',
             },
             requestId: (request as any).id,
             timestamp: new Date().toISOString(),
           });
         }
 
-        console.error("Test planning error:", error);
+        console.error('Test planning error:', error);
         reply.status(500).send({
           success: false,
           error: {
-            code: "TEST_PLANNING_FAILED",
-            message: "Failed to plan and generate tests",
-            details: error instanceof Error ? error.message : "Unknown error",
+            code: 'TEST_PLANNING_FAILED',
+            message: 'Failed to plan and generate tests',
+            details: error instanceof Error ? error.message : 'Unknown error',
           },
           requestId: (request as any).id,
           timestamp: new Date().toISOString(),
@@ -314,90 +297,90 @@ export async function registerTestRoutes(
 
   // POST /api/tests/record-execution - Record test execution results
   app.post(
-    "/tests/record-execution",
+    '/tests/record-execution',
     {
       schema: {
         body: {
           // Accept either a single object or an array of objects
           oneOf: [
             {
-              type: "object",
+              type: 'object',
               properties: {
-                testId: { type: "string" },
-                testSuite: { type: "string" },
-                testName: { type: "string" },
+                testId: { type: 'string' },
+                testSuite: { type: 'string' },
+                testName: { type: 'string' },
                 status: {
-                  type: "string",
-                  enum: ["passed", "failed", "skipped", "error"],
+                  type: 'string',
+                  enum: ['passed', 'failed', 'skipped', 'error'],
                 },
-                duration: { type: "number" },
-                errorMessage: { type: "string" },
-                stackTrace: { type: "string" },
+                duration: { type: 'number' },
+                errorMessage: { type: 'string' },
+                stackTrace: { type: 'string' },
                 coverage: {
-                  type: "object",
+                  type: 'object',
                   properties: {
-                    lines: { type: "number" },
-                    branches: { type: "number" },
-                    functions: { type: "number" },
-                    statements: { type: "number" },
+                    lines: { type: 'number' },
+                    branches: { type: 'number' },
+                    functions: { type: 'number' },
+                    statements: { type: 'number' },
                   },
                 },
                 performance: {
-                  type: "object",
+                  type: 'object',
                   properties: {
-                    memoryUsage: { type: "number" },
-                    cpuUsage: { type: "number" },
-                    networkRequests: { type: "number" },
+                    memoryUsage: { type: 'number' },
+                    cpuUsage: { type: 'number' },
+                    networkRequests: { type: 'number' },
                   },
                 },
               },
               required: [
-                "testId",
-                "testSuite",
-                "testName",
-                "status",
-                "duration",
+                'testId',
+                'testSuite',
+                'testName',
+                'status',
+                'duration',
               ],
             },
             {
-              type: "array",
+              type: 'array',
               items: {
-                type: "object",
+                type: 'object',
                 properties: {
-                  testId: { type: "string" },
-                  testSuite: { type: "string" },
-                  testName: { type: "string" },
+                  testId: { type: 'string' },
+                  testSuite: { type: 'string' },
+                  testName: { type: 'string' },
                   status: {
-                    type: "string",
-                    enum: ["passed", "failed", "skipped", "error"],
+                    type: 'string',
+                    enum: ['passed', 'failed', 'skipped', 'error'],
                   },
-                  duration: { type: "number" },
-                  errorMessage: { type: "string" },
-                  stackTrace: { type: "string" },
+                  duration: { type: 'number' },
+                  errorMessage: { type: 'string' },
+                  stackTrace: { type: 'string' },
                   coverage: {
-                    type: "object",
+                    type: 'object',
                     properties: {
-                      lines: { type: "number" },
-                      branches: { type: "number" },
-                      functions: { type: "number" },
-                      statements: { type: "number" },
+                      lines: { type: 'number' },
+                      branches: { type: 'number' },
+                      functions: { type: 'number' },
+                      statements: { type: 'number' },
                     },
                   },
                   performance: {
-                    type: "object",
+                    type: 'object',
                     properties: {
-                      memoryUsage: { type: "number" },
-                      cpuUsage: { type: "number" },
-                      networkRequests: { type: "number" },
+                      memoryUsage: { type: 'number' },
+                      cpuUsage: { type: 'number' },
+                      networkRequests: { type: 'number' },
                     },
                   },
                 },
                 required: [
-                  "testId",
-                  "testSuite",
-                  "testName",
-                  "status",
-                  "duration",
+                  'testId',
+                  'testSuite',
+                  'testName',
+                  'status',
+                  'duration',
                 ],
               },
             },
@@ -413,13 +396,13 @@ export async function registerTestRoutes(
 
         // Convert to TestSuiteResult format
         const suiteResult = {
-          suiteName: "API Recorded Tests",
+          suiteName: 'API Recorded Tests',
           timestamp: new Date(),
-          framework: "api",
+          framework: 'api',
           totalTests: results.length,
-          passedTests: results.filter((r) => r.status === "passed").length,
-          failedTests: results.filter((r) => r.status === "failed").length,
-          skippedTests: results.filter((r) => r.status === "skipped").length,
+          passedTests: results.filter((r) => r.status === 'passed').length,
+          failedTests: results.filter((r) => r.status === 'failed').length,
+          skippedTests: results.filter((r) => r.status === 'skipped').length,
           duration: results.reduce((sum, r) => sum + r.duration, 0),
           results: results.map((r) => ({
             testId: r.testId,
@@ -445,8 +428,8 @@ export async function registerTestRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "TEST_RECORDING_FAILED",
-            message: "Failed to record test execution results",
+            code: 'TEST_RECORDING_FAILED',
+            message: 'Failed to record test execution results',
           },
         });
       }
@@ -455,26 +438,26 @@ export async function registerTestRoutes(
 
   // POST /api/tests/parse-results - Parse and record test results from file
   app.post(
-    "/tests/parse-results",
+    '/tests/parse-results',
     {
       schema: {
         body: {
-          type: "object",
+          type: 'object',
           properties: {
-            filePath: { type: "string" },
+            filePath: { type: 'string' },
             format: {
-              type: "string",
+              type: 'string',
               enum: [
-                "junit",
-                "jest",
-                "mocha",
-                "vitest",
-                "cypress",
-                "playwright",
+                'junit',
+                'jest',
+                'mocha',
+                'vitest',
+                'cypress',
+                'playwright',
               ],
             },
           },
-          required: ["filePath", "format"],
+          required: ['filePath', 'format'],
         },
       },
     },
@@ -498,8 +481,8 @@ export async function registerTestRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "TEST_PARSING_FAILED",
-            message: "Failed to parse test results",
+            code: 'TEST_PARSING_FAILED',
+            message: 'Failed to parse test results',
           },
         });
       }
@@ -508,27 +491,27 @@ export async function registerTestRoutes(
 
   // GET /api/tests/performance/{entityId} - Get performance metrics
   app.get(
-    "/tests/performance/:entityId",
+    '/tests/performance/:entityId',
     {
       schema: {
         params: {
-          type: "object",
+          type: 'object',
           properties: {
-            entityId: { type: "string" },
+            entityId: { type: 'string' },
           },
-          required: ["entityId"],
+          required: ['entityId'],
         },
         querystring: {
-          type: "object",
+          type: 'object',
           properties: {
-            metricId: { type: "string" },
-            environment: { type: "string" },
+            metricId: { type: 'string' },
+            environment: { type: 'string' },
             severity: {
-              type: "string",
-              enum: ["critical", "high", "medium", "low"],
+              type: 'string',
+              enum: ['critical', 'high', 'medium', 'low'],
             },
-            limit: { type: "integer", minimum: 1, maximum: 500 },
-            days: { type: "integer", minimum: 1, maximum: 365 },
+            limit: { type: 'integer', minimum: 1, maximum: 500 },
+            days: { type: 'integer', minimum: 1, maximum: 365 },
           },
         },
       },
@@ -539,20 +522,17 @@ export async function registerTestRoutes(
 
         const entity = await kgService.getEntity(entityId);
         if (!entity) {
-          return reply
-            .status(404)
-            .send({
-              success: false,
-              error: { code: "NOT_FOUND", message: "Entity not found" },
-            });
+          return reply.status(404).send({
+            success: false,
+            error: { code: 'NOT_FOUND', message: 'Entity not found' },
+          });
         }
 
         const queryParams = (request.query || {}) as Record<string, any>;
         const historyOptions = resolvePerformanceHistoryOptions(queryParams);
 
         const entityType = (entity as any)?.type;
-        if (entityType === "test") {
-
+        if (entityType === 'test') {
           let metrics = (entity as any)?.performanceMetrics as
             | TestPerformanceMetrics
             | undefined;
@@ -655,12 +635,12 @@ export async function registerTestRoutes(
               try {
                 const results = await kgService.search({
                   query: token,
-                  entityTypes: ["test"],
-                  searchType: "structural",
+                  entityTypes: ['test'],
+                  searchType: 'structural',
                   limit: 5,
                 });
                 for (const result of results) {
-                  if ((result as any)?.type === "test" && result.id) {
+                  if ((result as any)?.type === 'test' && result.id) {
                     relatedTestIds.add(result.id);
                   }
                 }
@@ -673,8 +653,8 @@ export async function registerTestRoutes(
               return reply.status(404).send({
                 success: false,
                 error: {
-                  code: "METRICS_NOT_FOUND",
-                  message: "No performance metrics recorded for this entity",
+                  code: 'METRICS_NOT_FOUND',
+                  message: 'No performance metrics recorded for this entity',
                 },
               });
             }
@@ -685,15 +665,18 @@ export async function registerTestRoutes(
           Array.from(relatedTestIds).map(async (testId) => {
             try {
               const relatedEntity = await kgService.getEntity(testId);
-              if (!relatedEntity || (relatedEntity as any).type !== "test") {
+              if (!relatedEntity || (relatedEntity as any).type !== 'test') {
                 return null;
               }
-              const existing = (relatedEntity as any)
-                .performanceMetrics as TestPerformanceMetrics | undefined;
+              const existing = (relatedEntity as any).performanceMetrics as
+                | TestPerformanceMetrics
+                | undefined;
               if (existing) {
                 return existing;
               }
-              return await testEngine.getPerformanceMetrics(testId).catch(() => null);
+              return await testEngine
+                .getPerformanceMetrics(testId)
+                .catch(() => null);
             } catch (error) {
               return null;
             }
@@ -701,15 +684,16 @@ export async function registerTestRoutes(
         );
 
         const aggregatedMetrics = metricsResults.filter(
-          (item): item is TestPerformanceMetrics => item !== null && item !== undefined
+          (item): item is TestPerformanceMetrics =>
+            item !== null && item !== undefined
         );
 
         if (aggregatedMetrics.length === 0) {
           return reply.status(404).send({
             success: false,
             error: {
-              code: "METRICS_NOT_FOUND",
-              message: "No performance metrics recorded for this entity",
+              code: 'METRICS_NOT_FOUND',
+              message: 'No performance metrics recorded for this entity',
             },
           });
         }
@@ -753,8 +737,8 @@ export async function registerTestRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "METRICS_RETRIEVAL_FAILED",
-            message: "Failed to retrieve performance metrics",
+            code: 'METRICS_RETRIEVAL_FAILED',
+            message: 'Failed to retrieve performance metrics',
           },
         });
       }
@@ -763,15 +747,15 @@ export async function registerTestRoutes(
 
   // GET /api/tests/coverage/{entityId} - Get test coverage
   app.get(
-    "/tests/coverage/:entityId",
+    '/tests/coverage/:entityId',
     {
       schema: {
         params: {
-          type: "object",
+          type: 'object',
           properties: {
-            entityId: { type: "string" },
+            entityId: { type: 'string' },
           },
-          required: ["entityId"],
+          required: ['entityId'],
         },
       },
     },
@@ -782,12 +766,10 @@ export async function registerTestRoutes(
         // Return 404 if the entity doesn't exist in the KG
         const entity = await kgService.getEntity(entityId);
         if (!entity) {
-          return reply
-            .status(404)
-            .send({
-              success: false,
-              error: { code: "NOT_FOUND", message: "Entity not found" },
-            });
+          return reply.status(404).send({
+            success: false,
+            error: { code: 'NOT_FOUND', message: 'Entity not found' },
+          });
         }
 
         const coverage = await testEngine.getCoverageAnalysis(entityId);
@@ -797,8 +779,8 @@ export async function registerTestRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "COVERAGE_RETRIEVAL_FAILED",
-            message: "Failed to retrieve test coverage data",
+            code: 'COVERAGE_RETRIEVAL_FAILED',
+            message: 'Failed to retrieve test coverage data',
           },
         });
       }
@@ -807,15 +789,15 @@ export async function registerTestRoutes(
 
   // GET /api/tests/flaky-analysis/{entityId} - Get flaky test analysis
   app.get(
-    "/tests/flaky-analysis/:entityId",
+    '/tests/flaky-analysis/:entityId',
     {
       schema: {
         params: {
-          type: "object",
+          type: 'object',
           properties: {
-            entityId: { type: "string" },
+            entityId: { type: 'string' },
           },
-          required: ["entityId"],
+          required: ['entityId'],
         },
       },
     },
@@ -831,8 +813,8 @@ export async function registerTestRoutes(
           return reply.status(404).send({
             success: false,
             error: {
-              code: "ANALYSIS_NOT_FOUND",
-              message: "No flaky test analysis found for this entity",
+              code: 'ANALYSIS_NOT_FOUND',
+              message: 'No flaky test analysis found for this entity',
             },
           });
         }
@@ -845,8 +827,8 @@ export async function registerTestRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "FLAKY_ANALYSIS_FAILED",
-            message: "Failed to retrieve flaky test analysis",
+            code: 'FLAKY_ANALYSIS_FAILED',
+            message: 'Failed to retrieve flaky test analysis',
           },
         });
       }

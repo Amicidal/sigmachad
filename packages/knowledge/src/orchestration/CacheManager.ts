@@ -3,11 +3,14 @@
  * Handles file caching, symbol indexing, and export maps for efficient parsing
  */
 
-import { Entity, Symbol as SymbolEntity } from '@memento/core';
-import { GraphRelationship } from '@memento/core';
-import { createHash } from "./utils.js";
-import { CachedFileInfo, ExportMapEntry } from "./types.js";
-import { PerformanceOptimizer } from "./PerformanceOptimizer.js";
+import {
+  Entity,
+  Symbol as SymbolEntity,
+} from '@memento/shared-types.js';
+import { GraphRelationship } from '@memento/shared-types.js';
+import { createHash } from './utils.js';
+import { CachedFileInfo, ExportMapEntry } from './types.js';
+import { PerformanceOptimizer } from './PerformanceOptimizer.js';
 
 // Re-export types for backward compatibility
 export type { CachedFileInfo, ExportMapEntry };
@@ -32,7 +35,9 @@ export class CacheManager {
 
   constructor(maxCacheSize: number = 1000) {
     this.optimizer = new PerformanceOptimizer({ maxCacheSize });
-    this.fileCache = this.optimizer.createLRUCache<string, CachedFileInfo>(maxCacheSize);
+    this.fileCache = this.optimizer.createLRUCache<string, CachedFileInfo>(
+      maxCacheSize
+    );
   }
 
   /**
@@ -81,7 +86,10 @@ export class CacheManager {
    * @param absolutePath - Absolute path to the module
    * @param exportMap - Export map to cache
    */
-  setExportMap(absolutePath: string, exportMap: Map<string, ExportMapEntry>): void {
+  setExportMap(
+    absolutePath: string,
+    exportMap: Map<string, ExportMapEntry>
+  ): void {
     this.exportMapCache.set(absolutePath, exportMap);
   }
 
@@ -167,7 +175,7 @@ export class CacheManager {
       for (const key of this.getGlobalSymbolKeys()) {
         if (key.startsWith(`${fileRelPath}:`)) {
           const sym = this.globalSymbolIndex.get(key);
-          if (sym && "name" in sym) {
+          if (sym && 'name' in sym) {
             const nm = sym.name as string;
             if (nm && this.hasSymbolName(nm)) {
               const arr = this.getSymbolsByName(nm).filter(
@@ -190,7 +198,7 @@ export class CacheManager {
   addSymbolsToIndexes(fileRelPath: string, symbols: SymbolEntity[]): void {
     try {
       for (const sym of symbols) {
-        if (!sym || !("name" in sym)) continue;
+        if (!sym || !('name' in sym)) continue;
         const nm = sym.name as string;
         if (!nm) continue;
         const key = `${fileRelPath}:${nm}`;
@@ -214,7 +222,7 @@ export class CacheManager {
   createSymbolMap(entities: Entity[]): Map<string, SymbolEntity> {
     const symbolMap = new Map<string, SymbolEntity>();
     for (const entity of entities) {
-      if (entity.type === "symbol") {
+      if (entity.type === 'symbol') {
         const symbol = entity as SymbolEntity;
         if (symbol.path) {
           symbolMap.set(symbol.path, symbol);
@@ -297,10 +305,7 @@ export class CacheManager {
 
     // Rebuild indexes for this file
     this.removeFileFromIndexes(fileRelPath);
-    this.addSymbolsToIndexes(
-      fileRelPath,
-      Array.from(symbolMap.values())
-    );
+    this.addSymbolsToIndexes(fileRelPath, Array.from(symbolMap.values()));
   }
 
   /**
@@ -320,7 +325,10 @@ export class CacheManager {
     let removedCount = 0;
 
     // Optimize symbol map
-    removedCount += this.optimizer.optimizeSymbolMap(this.globalSymbolIndex, maxAge);
+    removedCount += this.optimizer.optimizeSymbolMap(
+      this.globalSymbolIndex,
+      maxAge
+    );
 
     // Clear export map cache periodically
     if (this.exportMapCache.size > 100) {

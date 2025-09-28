@@ -1,10 +1,10 @@
-import { KnowledgeGraphService } from "@memento/graph";
-import type { EntityTimelineResult } from "@memento/graph";
+import { KnowledgeGraphService } from '@memento/knowledge';
+import type { EntityTimelineResult } from '@memento/core';
 
 export type TemporalValidationIssueType =
-  | "missing_previous"
-  | "misordered_previous"
-  | "unexpected_head";
+  | 'missing_previous'
+  | 'misordered_previous'
+  | 'unexpected_head';
 
 export interface TemporalValidationIssue {
   entityId: string;
@@ -39,7 +39,10 @@ export class TemporalHistoryValidator {
     options: TemporalValidationOptions = {}
   ): Promise<TemporalValidationReport> {
     const batchSize = Math.max(1, Math.min(100, options.batchSize ?? 25));
-    const timelineLimit = Math.max(10, Math.min(200, options.timelineLimit ?? 200));
+    const timelineLimit = Math.max(
+      10,
+      Math.min(200, options.timelineLimit ?? 200)
+    );
     const autoRepair = Boolean(options.autoRepair);
     const dryRun = Boolean(options.dryRun);
     const log = options.logger ?? (() => undefined);
@@ -65,7 +68,7 @@ export class TemporalHistoryValidator {
       for (const entity of entities) {
         scannedEntities += 1;
         if (
-          typeof options.maxEntities === "number" &&
+          typeof options.maxEntities === 'number' &&
           scannedEntities > options.maxEntities
         ) {
           return {
@@ -87,7 +90,7 @@ export class TemporalHistoryValidator {
           dryRun,
           timelineLimit,
           () => {
-            log("temporal_history_validator.missing_previous", {
+            log('temporal_history_validator.missing_previous', {
               entityId: timeline.entityId,
               versionId: timeline.versions.length
                 ? timeline.versions[timeline.versions.length - 1].versionId
@@ -103,7 +106,7 @@ export class TemporalHistoryValidator {
             for (const issue of issues) {
               if (
                 issue.entityId === timeline.entityId &&
-                issue.type === "missing_previous"
+                issue.type === 'missing_previous'
               ) {
                 if (repairedIds.includes(issue.versionId)) {
                   issue.repaired = true;
@@ -112,7 +115,7 @@ export class TemporalHistoryValidator {
                 }
               }
             }
-            log("temporal_history_validator.repaired", {
+            log('temporal_history_validator.repaired', {
               entityId: timeline.entityId,
               repairs: repairedIds.length,
             });
@@ -120,7 +123,7 @@ export class TemporalHistoryValidator {
             for (const issue of issues) {
               if (
                 issue.entityId === timeline.entityId &&
-                issue.type === "missing_previous" &&
+                issue.type === 'missing_previous' &&
                 issue.repaired === undefined
               ) {
                 issue.repaired = false;
@@ -131,7 +134,7 @@ export class TemporalHistoryValidator {
       }
 
       offset += batchSize;
-      if (typeof totalEntities === "number" && offset >= totalEntities) {
+      if (typeof totalEntities === 'number' && offset >= totalEntities) {
         break;
       }
     }
@@ -147,8 +150,8 @@ export class TemporalHistoryValidator {
     timelineLimit: number,
     onMissing?: () => void
   ): void {
-    const versions = [...timeline.versions].sort((a, b) =>
-      a.timestamp.getTime() - b.timestamp.getTime()
+    const versions = [...timeline.versions].sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
     );
     if (versions.length === 0) {
       return;
@@ -161,9 +164,9 @@ export class TemporalHistoryValidator {
       issues.push({
         entityId: timeline.entityId,
         versionId: first.versionId,
-        type: "unexpected_head",
+        type: 'unexpected_head',
         actualPreviousId: first.previousVersionId,
-        message: "Earliest version should not reference a previous version",
+        message: 'Earliest version should not reference a previous version',
       });
     }
 
@@ -178,7 +181,7 @@ export class TemporalHistoryValidator {
         issues.push({
           entityId: timeline.entityId,
           versionId: current.versionId,
-          type: "missing_previous",
+          type: 'missing_previous',
           expectedPreviousId: expectedPrev,
           repaired: autoRepair && !dryRun ? undefined : false,
         });
@@ -189,7 +192,7 @@ export class TemporalHistoryValidator {
         issues.push({
           entityId: timeline.entityId,
           versionId: current.versionId,
-          type: "misordered_previous",
+          type: 'misordered_previous',
           expectedPreviousId: expectedPrev,
           actualPreviousId: actualPrev,
         });
@@ -197,10 +200,10 @@ export class TemporalHistoryValidator {
         issues.push({
           entityId: timeline.entityId,
           versionId: current.versionId,
-          type: "misordered_previous",
+          type: 'misordered_previous',
           expectedPreviousId: expectedPrev,
           actualPreviousId: actualPrev,
-          message: "Version timestamp is older than its predecessor",
+          message: 'Version timestamp is older than its predecessor',
         });
       }
     }

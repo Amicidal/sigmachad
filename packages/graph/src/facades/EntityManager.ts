@@ -3,7 +3,7 @@
  * Moved from KnowledgeGraphService.ts during refactoring
  */
 
-import { Entity } from "../models/entities.js";
+import { Entity } from '@memento/core';
 
 interface EntityService {
   createEntity(entity: Entity): Promise<Entity>;
@@ -47,7 +47,7 @@ export class EntityManager {
     if (!options?.skipEmbedding) {
       this.embeddingService
         .generateAndStore(created)
-        .catch((err) => console.warn("Failed to generate embedding:", err));
+        .catch((err) => console.warn('Failed to generate embedding:', err));
     }
 
     return created;
@@ -58,13 +58,13 @@ export class EntityManager {
 
     // Update embedding if content changed
     if (
-      ("content" in updates && updates.content) ||
-      ("name" in updates && updates.name) ||
-      ("description" in updates && updates.description)
+      ('content' in updates && updates.content) ||
+      ('name' in updates && updates.name) ||
+      ('description' in updates && updates.description)
     ) {
       this.embeddingService
         .updateEmbedding(id)
-        .catch((err) => console.warn("Failed to update embedding:", err));
+        .catch((err) => console.warn('Failed to update embedding:', err));
     }
 
     return updated;
@@ -115,7 +115,7 @@ export class EntityManager {
     // Generate embeddings in background
     this.embeddingService
       .batchEmbed(entities)
-      .catch((err) => console.warn("Failed to generate bulk embeddings:", err));
+      .catch((err) => console.warn('Failed to generate bulk embeddings:', err));
 
     return result;
   }
@@ -127,8 +127,8 @@ export class EntityManager {
   async findRecentEntityIds(limit?: number): Promise<string[]> {
     const result = await this.entityService.listEntities({
       limit: limit || 100,
-      orderBy: "lastModified",
-      orderDirection: "DESC",
+      orderBy: 'lastModified',
+      orderDirection: 'DESC',
     });
     return result.items.map((e) => e.id);
   }

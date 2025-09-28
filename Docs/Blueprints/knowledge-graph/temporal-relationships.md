@@ -1,5 +1,18 @@
 # Temporal Relationship Blueprint
 
+## Metadata
+
+- Scope: knowledge-graph
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: knowledge-graph).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Temporal relationships (`PREVIOUS_VERSION`, `MODIFIED_BY`, `CREATED_IN`, `MODIFIED_IN`, `REMOVED_IN`, `OF`) provide the timeline backbone of the knowledge graph. They link entities to versions and SCM changes, enabling historical reconstruction, auditing, and rollback support. (Ephemeral sessions ref via metadata anchors; no persistent ties.)
 

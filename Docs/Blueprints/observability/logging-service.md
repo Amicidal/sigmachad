@@ -1,5 +1,18 @@
 # Logging Service Blueprint
 
+## Metadata
+
+- Scope: observability
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: observability).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 The logging service captures runtime events across Memento, piping console output and process-level failures into an in-memory ring buffer with optional JSONL persistence. Downstream analytics expect aggregated statistics (`byLevel`, `byComponent`) and file exports to drive operational tooling.
 

@@ -2,11 +2,25 @@
   "name": "@memento/graph",
   "version": "1.0.0",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./facades": "./src/facades/index.ts",
-    "./models": "./src/models/index.ts"
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./facades": {
+      "import": "./dist/facades/index.js",
+      "types": "./dist/facades/index.d.ts"
+    },
+    "./models": {
+      "import": "./dist/models/index.js",
+      "types": "./dist/models/index.d.ts"
+    },
+    "./models-ogm": {
+      "import": "./dist/models-ogm/index.js",
+      "types": "./dist/models-ogm/index.d.ts"
+    }
   },
   "dependencies": {
     "@memento/core": "workspace:*",

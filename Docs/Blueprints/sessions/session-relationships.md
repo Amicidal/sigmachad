@@ -1,5 +1,18 @@
 # Session Relationships Blueprint
 
+## Metadata
+
+- Scope: sessions
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: sessions).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Session management is ephemeral in Redis cache for live multi-agent coordination—store events (modified, impacted, checkpoint) with TTL to next checkpoint (15-60 min) or fixed discard. No persistent KG nodes/edges for depth; use anchors (metadata refs on entities/clusters) for awareness. Bridge service enables graph-aware queries (e.g., transitions/isolation). Focus: Velocity for 100+ agents, zero bloat.
 

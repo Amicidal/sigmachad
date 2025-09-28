@@ -1,5 +1,5 @@
-import { QdrantClient } from "@qdrant/js-client-rest";
-import { IQdrantService } from "./interfaces.js";
+import { QdrantClient } from '@qdrant/js-client-rest';
+import { IQdrantService } from '../interfaces.js';
 
 export class QdrantService implements IQdrantService {
   private qdrantClient!: QdrantClient;
@@ -24,9 +24,9 @@ export class QdrantService implements IQdrantService {
       // Test Qdrant connection
       await this.qdrantClient.getCollections();
       this.initialized = true;
-      console.log("✅ Qdrant connection established");
+      console.log('✅ Qdrant connection established');
     } catch (error) {
-      console.error("❌ Qdrant initialization failed:", error);
+      console.error('❌ Qdrant initialization failed:', error);
       throw error;
     }
   }
@@ -42,14 +42,14 @@ export class QdrantService implements IQdrantService {
 
   getClient(): QdrantClient {
     if (!this.initialized) {
-      throw new Error("Qdrant not initialized");
+      throw new Error('Qdrant not initialized');
     }
     return this.qdrantClient;
   }
 
   async setupCollections(): Promise<void> {
     if (!this.initialized) {
-      throw new Error("Qdrant not initialized");
+      throw new Error('Qdrant not initialized');
     }
 
     try {
@@ -57,35 +57,35 @@ export class QdrantService implements IQdrantService {
       const collections = await this.qdrantClient.getCollections();
 
       if (!collections || !collections.collections) {
-        throw new Error("Invalid collections response from Qdrant");
+        throw new Error('Invalid collections response from Qdrant');
       }
       const existingCollections = collections.collections.map((c) => c.name);
 
-      if (!existingCollections.includes("code_embeddings")) {
-        await this.qdrantClient.createCollection("code_embeddings", {
+      if (!existingCollections.includes('code_embeddings')) {
+        await this.qdrantClient.createCollection('code_embeddings', {
           vectors: {
             size: 1536, // OpenAI Ada-002 dimensions
-            distance: "Cosine",
+            distance: 'Cosine',
           },
         });
       }
 
       // Create documentation_embeddings collection
-      if (!existingCollections.includes("documentation_embeddings")) {
+      if (!existingCollections.includes('documentation_embeddings')) {
         try {
-          await this.qdrantClient.createCollection("documentation_embeddings", {
+          await this.qdrantClient.createCollection('documentation_embeddings', {
             vectors: {
               size: 1536,
-              distance: "Cosine",
+              distance: 'Cosine',
             },
           });
         } catch (error: any) {
           if (
             error.status === 409 ||
-            error.message?.includes("already exists")
+            error.message?.includes('already exists')
           ) {
             console.log(
-              "📊 documentation_embeddings collection already exists, skipping creation"
+              '📊 documentation_embeddings collection already exists, skipping creation'
             );
           } else {
             throw error;
@@ -94,21 +94,21 @@ export class QdrantService implements IQdrantService {
       }
 
       // Create integration_test collection
-      if (!existingCollections.includes("integration_test")) {
+      if (!existingCollections.includes('integration_test')) {
         try {
-          await this.qdrantClient.createCollection("integration_test", {
+          await this.qdrantClient.createCollection('integration_test', {
             vectors: {
               size: 1536,
-              distance: "Cosine",
+              distance: 'Cosine',
             },
           });
         } catch (error: any) {
           if (
             error.status === 409 ||
-            error.message?.includes("already exists")
+            error.message?.includes('already exists')
           ) {
             console.log(
-              "📊 integration_test collection already exists, skipping creation"
+              '📊 integration_test collection already exists, skipping creation'
             );
           } else {
             throw error;
@@ -116,9 +116,9 @@ export class QdrantService implements IQdrantService {
         }
       }
 
-      console.log("✅ Qdrant collections setup complete");
+      console.log('✅ Qdrant collections setup complete');
     } catch (error) {
-      console.error("❌ Qdrant setup failed:", error);
+      console.error('❌ Qdrant setup failed:', error);
       throw error;
     }
   }
@@ -133,7 +133,7 @@ export class QdrantService implements IQdrantService {
       await this.qdrantClient.getCollections();
       return true;
     } catch (error) {
-      console.error("Qdrant health check failed:", error);
+      console.error('Qdrant health check failed:', error);
       return false;
     }
   }
@@ -143,7 +143,7 @@ export class QdrantService implements IQdrantService {
    */
   async upsert(collectionName: string, points: any): Promise<any> {
     if (!this.initialized) {
-      throw new Error("Qdrant not initialized");
+      throw new Error('Qdrant not initialized');
     }
 
     try {
@@ -162,7 +162,7 @@ export class QdrantService implements IQdrantService {
    */
   async scroll(collectionName: string, options: any): Promise<any> {
     if (!this.initialized) {
-      throw new Error("Qdrant not initialized");
+      throw new Error('Qdrant not initialized');
     }
 
     try {
@@ -181,7 +181,7 @@ export class QdrantService implements IQdrantService {
    */
   async createCollection(collectionName: string, options: any): Promise<any> {
     if (!this.initialized) {
-      throw new Error("Qdrant not initialized");
+      throw new Error('Qdrant not initialized');
     }
 
     try {
@@ -200,7 +200,7 @@ export class QdrantService implements IQdrantService {
    */
   async deleteCollection(collectionName: string): Promise<any> {
     if (!this.initialized) {
-      throw new Error("Qdrant not initialized");
+      throw new Error('Qdrant not initialized');
     }
 
     try {
@@ -219,7 +219,7 @@ export class QdrantService implements IQdrantService {
    */
   async search(collectionName: string, options: any): Promise<any> {
     if (!this.initialized) {
-      throw new Error("Qdrant not initialized");
+      throw new Error('Qdrant not initialized');
     }
 
     try {

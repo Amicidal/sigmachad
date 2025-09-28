@@ -1,8 +1,12 @@
-import { DocumentationIntent, DocumentationNodeType, DocumentationSource } from '@memento/core';
+import {
+  DocumentationIntent,
+  DocumentationNodeType,
+  DocumentationSource,
+} from '@memento/shared-types.js';
 
 export interface DocumentationIntelligenceRequest {
   content: string;
-  format: "markdown" | "plaintext" | "rst" | "asciidoc";
+  format: 'markdown' | 'plaintext' | 'rst' | 'asciidoc';
   filePath?: string;
   docTypeHint?: DocumentationNodeType;
   metadata?: Record<string, unknown>;
@@ -39,44 +43,44 @@ DO NOT include explanations or comments, respond with raw JSON only.`;
 
 class NarrativeSplitter {
   private static connectorPatterns = [
-    " with ",
-    " including ",
-    " using ",
-    " through ",
-    " across ",
-    " featuring ",
-    " leveraging ",
-    " for ",
+    ' with ',
+    ' including ',
+    ' using ',
+    ' through ',
+    ' across ',
+    ' featuring ',
+    ' leveraging ',
+    ' for ',
   ];
 
   private static narrativeBreakers = [
-    " we ",
-    " our ",
-    " handles ",
-    " supports ",
-    " provides ",
-    " offers ",
-    " includes ",
-    " delivers ",
-    " enables ",
-    " ensures ",
-    " powers ",
-    " maintains ",
-    " real-time ",
+    ' we ',
+    ' our ',
+    ' handles ',
+    ' supports ',
+    ' provides ',
+    ' offers ',
+    ' includes ',
+    ' delivers ',
+    ' enables ',
+    ' ensures ',
+    ' powers ',
+    ' maintains ',
+    ' real-time ',
   ];
 
   static cleanCandidate(raw: string): string | undefined {
     if (!raw) return undefined;
     let candidate = raw
-      .replace(/[`*_~]/g, "")
-      .replace(/\[[^\]]*\]\([^)]*\)/g, "")
-      .replace(/\((?:[^)])+\)/g, "")
-      .replace(/^[^A-Za-z0-9]+/, "")
-      .replace(/[:\-–—]+$/g, "")
+      .replace(/[`*_~]/g, '')
+      .replace(/\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\((?:[^)])+\)/g, '')
+      .replace(/^[^A-Za-z0-9]+/, '')
+      .replace(/[:\-–—]+$/g, '')
       .trim();
 
     if (!candidate) return undefined;
-    candidate = candidate.replace(/\s*\n\s*/g, " ");
+    candidate = candidate.replace(/\s*\n\s*/g, ' ');
 
     const lowerCandidate = candidate.toLowerCase();
     for (const connector of this.connectorPatterns) {
@@ -97,10 +101,13 @@ class NarrativeSplitter {
     }
 
     candidate = candidate
-      .replace(/\bdomains?\b/gi, "")
-      .replace(/\b(?:core|key|primary|major|main)\s+(?=business\b)/gi, "")
-      .replace(/\b(?:business|critical|core|key|primary|major|main)\s+(?=domain\b)/gi, "")
-      .replace(/\s{2,}/g, " ")
+      .replace(/\bdomains?\b/gi, '')
+      .replace(/\b(?:core|key|primary|major|main)\s+(?=business\b)/gi, '')
+      .replace(
+        /\b(?:business|critical|core|key|primary|major|main)\s+(?=domain\b)/gi,
+        ''
+      )
+      .replace(/\s{2,}/g, ' ')
       .trim();
 
     if (!candidate) return undefined;
@@ -116,85 +123,85 @@ class NarrativeSplitter {
 }
 
 const STOP_VALUES = new Set<string>([
-  "",
-  "domain",
-  "domains",
-  "business",
-  "core",
-  "core business",
-  "key",
-  "key business",
-  "primary",
-  "primary business",
-  "overview",
-  "introduction",
-  "summary",
-  "governance",
-  "capability",
-  "capabilities",
-  "function",
-  "functions",
+  '',
+  'domain',
+  'domains',
+  'business',
+  'core',
+  'core business',
+  'key',
+  'key business',
+  'primary',
+  'primary business',
+  'overview',
+  'introduction',
+  'summary',
+  'governance',
+  'capability',
+  'capabilities',
+  'function',
+  'functions',
 ]);
 
 const SUFFIX_KEYWORDS = [
-  "management",
-  "processing",
-  "services",
-  "service",
-  "operations",
-  "support",
-  "experience",
-  "governance",
-  "compliance",
-  "authentication",
-  "analytics",
-  "reporting",
-  "integration",
-  "intelligence",
-  "platform",
-  "security",
-  "architecture",
-  "automation",
-  "enablement",
-  "monitoring",
-  "delivery",
-  "engagement",
-  "observability",
-  "continuity",
-  "planning",
-  "assurance",
-  "registration",
-  "onboarding",
-  "billing",
-  "payment",
-  "payments",
-  "logistics",
-  "chain",
-  "inventory",
-  "relationship",
-  "marketing",
-  "sales",
+  'management',
+  'processing',
+  'services',
+  'service',
+  'operations',
+  'support',
+  'experience',
+  'governance',
+  'compliance',
+  'authentication',
+  'analytics',
+  'reporting',
+  'integration',
+  'intelligence',
+  'platform',
+  'security',
+  'architecture',
+  'automation',
+  'enablement',
+  'monitoring',
+  'delivery',
+  'engagement',
+  'observability',
+  'continuity',
+  'planning',
+  'assurance',
+  'registration',
+  'onboarding',
+  'billing',
+  'payment',
+  'payments',
+  'logistics',
+  'chain',
+  'inventory',
+  'relationship',
+  'marketing',
+  'sales',
 ];
 
 const SINGLE_KEYWORDS = [
-  "authentication",
-  "security",
-  "compliance",
-  "financial",
-  "risk",
-  "governance",
-  "analytics",
-  "reporting",
-  "observability",
-  "infrastructure",
-  "architecture",
-  "marketing",
-  "sales",
-  "logistics",
-  "inventory",
-  "payments",
-  "payment",
-  "billing",
+  'authentication',
+  'security',
+  'compliance',
+  'financial',
+  'risk',
+  'governance',
+  'analytics',
+  'reporting',
+  'observability',
+  'infrastructure',
+  'architecture',
+  'marketing',
+  'sales',
+  'logistics',
+  'inventory',
+  'payments',
+  'payment',
+  'billing',
 ];
 
 const STAKEHOLDER_PATTERNS = [
@@ -226,7 +233,10 @@ export class HeuristicDocumentationIntelligenceProvider
   async extractSignals(
     request: DocumentationIntelligenceRequest
   ): Promise<DocumentationSignals> {
-    const businessDomains = this.extractBusinessDomains(request.content, request.metadata);
+    const businessDomains = this.extractBusinessDomains(
+      request.content,
+      request.metadata
+    );
     const stakeholders = this.extractStakeholders(request.content);
     const technologies = this.extractTechnologies(request.content);
 
@@ -235,7 +245,7 @@ export class HeuristicDocumentationIntelligenceProvider
       stakeholders,
       technologies,
       docIntent: undefined,
-      docSource: "parser",
+      docSource: 'parser',
     };
   }
 
@@ -243,11 +253,14 @@ export class HeuristicDocumentationIntelligenceProvider
     content: string,
     metadata?: Record<string, unknown>
   ): string[] {
-    const normalizedContent = content.replace(/\r\n/g, "\n");
-    const lines = normalizedContent.split("\n");
+    const normalizedContent = content.replace(/\r\n/g, '\n');
+    const lines = normalizedContent.split('\n');
     const domains = new Set<string>();
 
-    const addCandidate = (raw: string | undefined, options: { split?: boolean } = {}) => {
+    const addCandidate = (
+      raw: string | undefined,
+      options: { split?: boolean } = {}
+    ) => {
       if (!raw) return;
 
       if (options.split) {
@@ -266,14 +279,23 @@ export class HeuristicDocumentationIntelligenceProvider
       const cleaned = NarrativeSplitter.cleanCandidate(raw);
       if (!cleaned) return;
       if (STOP_VALUES.has(cleaned)) return;
-      if (/^(?:core|key|primary|major|main|business|capabilities?|functions?)$/.test(cleaned)) return;
+      if (
+        /^(?:core|key|primary|major|main|business|capabilities?|functions?)$/.test(
+          cleaned
+        )
+      )
+        return;
 
       if (/\sand\s/i.test(cleaned)) {
         const andSegments = cleaned
           .split(/\sand\s/gi)
           .map((segment) => segment.trim())
           .filter((segment) => segment.length > 2);
-        if (andSegments.length > 1 && andSegments.length <= 3 && andSegments.every((segment) => /\s/.test(segment))) {
+        if (
+          andSegments.length > 1 &&
+          andSegments.length <= 3 &&
+          andSegments.every((segment) => /\s/.test(segment))
+        ) {
           for (const segment of andSegments) {
             addCandidate(segment);
           }
@@ -308,8 +330,11 @@ export class HeuristicDocumentationIntelligenceProvider
         if (/\bdomains?\b/.test(lowerHeading)) {
           domainSectionLevel = level;
           collectingList = true;
-          const baseHeading = lowerHeading.replace(/\bdomains?\b/g, "").trim();
-          if (baseHeading && !/^(?:business|core\s+business|key\s+business)$/.test(baseHeading)) {
+          const baseHeading = lowerHeading.replace(/\bdomains?\b/g, '').trim();
+          if (
+            baseHeading &&
+            !/^(?:business|core\s+business|key\s+business)$/.test(baseHeading)
+          ) {
             addCandidate(headingText);
           }
         }
@@ -318,7 +343,10 @@ export class HeuristicDocumentationIntelligenceProvider
           collectingList = false;
         }
 
-        if (/\bdomain\b/.test(lowerHeading) && !/\bdomains\b/.test(lowerHeading)) {
+        if (
+          /\bdomain\b/.test(lowerHeading) &&
+          !/\bdomains\b/.test(lowerHeading)
+        ) {
           addCandidate(headingText);
         }
 
@@ -327,7 +355,7 @@ export class HeuristicDocumentationIntelligenceProvider
 
       if (domainSectionLevel !== null) {
         if (bulletRegex.test(line) && collectingList) {
-          const bulletText = line.replace(bulletRegex, "$1").trim();
+          const bulletText = line.replace(bulletRegex, '$1').trim();
           addCandidate(bulletText);
           continue;
         }
@@ -346,13 +374,13 @@ export class HeuristicDocumentationIntelligenceProvider
       }
     }
 
-    const extractionText = normalizedContent.replace(/&/g, " and ");
+    const extractionText = normalizedContent.replace(/&/g, ' and ');
 
     for (const keyword of SUFFIX_KEYWORDS) {
-      const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const pattern = new RegExp(
         `\\b([A-Za-z][A-Za-z/&-]*(?:\\s+[A-Za-z][A-Za-z/&-]*){0,3})\\s+${escaped}\\b`,
-        "gi"
+        'gi'
       );
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(extractionText)) !== null) {
@@ -361,8 +389,8 @@ export class HeuristicDocumentationIntelligenceProvider
     }
 
     for (const keyword of SINGLE_KEYWORDS) {
-      const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const pattern = new RegExp(`\\b${escaped}\\b`, "gi");
+      const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`\\b${escaped}\\b`, 'gi');
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(extractionText)) !== null) {
         addCandidate(match[0]);
@@ -379,7 +407,7 @@ export class HeuristicDocumentationIntelligenceProvider
       ? (metadata!.headings as Array<{ text: string }>)
       : [];
     for (const heading of headings) {
-      if (typeof heading?.text === "string") {
+      if (typeof heading?.text === 'string') {
         addCandidate(heading.text);
       }
     }
@@ -397,55 +425,60 @@ export class HeuristicDocumentationIntelligenceProvider
           let s = match.toLowerCase().trim();
 
           s = s
-            .replace(/\bdevelopers\b/g, "developer")
-            .replace(/\busers\b/g, "user")
-            .replace(/\bcustomers\b/g, "customer")
-            .replace(/\bclients\b/g, "client")
-            .replace(/\bpartners\b/g, "partner")
-            .replace(/\bvendors\b/g, "vendor")
-            .replace(/\bstakeholders\b/g, "stakeholder")
-            .replace(/\badministrators\b/g, "administrator")
-            .replace(/\bmanagers\b/g, "manager")
-            .replace(/\bteams\b/g, "team")
-            .replace(/\bengineers\b/g, "engineer")
-            .replace(/\banalysts\b/g, "analyst")
-            .replace(/\barchitects\b/g, "architect")
-            .replace(/\bspecialists\b/g, "specialist")
-            .replace(/\bsupervisors\b/g, "supervisor")
-            .replace(/\bmoderators\b/g, "moderator")
-            .replace(/\boperators\b/g, "operator")
-            .replace(/\bmaintainers\b/g, "maintainer")
-            .replace(/\bcoordinators\b/g, "coordinator")
-            .replace(/\bconsultants\b/g, "consultant")
-            .replace(/\bdesigners\b/g, "designer")
-            .replace(/\bprogrammers\b/g, "programmer")
-            .replace(/\bcoders\b/g, "coder")
-            .replace(/\brepresentatives\b/g, "representative")
-            .replace(/\bagents\b/g, "agent")
-            .replace(/\bowners\b/g, "owner")
-            .replace(/\bleads\b/g, "lead")
-            .replace(/\bdirectors\b/g, "director")
-            .replace(/\bvisitors\b/g, "visitor")
-            .replace(/\bmembers\b/g, "member")
-            .replace(/\bparticipants\b/g, "participant")
-            .replace(/\bsubscribers\b/g, "subscriber")
-            .replace(/\bconsumers\b/g, "consumer")
-            .replace(/\bshareholders\b/g, "shareholder")
-            .replace(/\binvestors\b/g, "investor")
-            .replace(/\bcontractors\b/g, "contractor")
-            .replace(/\bsuppliers\b/g, "supplier")
-            .replace(/\bpeople\b/g, "person")
-            .replace(/\bpersonnel\b/g, "person")
-            .replace(/\bend users\b/g, "end user")
-            .replace(/\bsales teams\b/g, "sales team")
-            .replace(/\bmarketing teams\b/g, "marketing team")
-            .replace(/\bsupport teams\b/g, "support team")
-            .replace(/\bcustomer service teams\b/g, "customer service team")
-            .replace(/\bhelp desk teams\b/g, "help desk team")
-            .replace(/\bit teams\b/g, "it team")
-            .replace(/\bhr teams\b/g, "hr team");
+            .replace(/\bdevelopers\b/g, 'developer')
+            .replace(/\busers\b/g, 'user')
+            .replace(/\bcustomers\b/g, 'customer')
+            .replace(/\bclients\b/g, 'client')
+            .replace(/\bpartners\b/g, 'partner')
+            .replace(/\bvendors\b/g, 'vendor')
+            .replace(/\bstakeholders\b/g, 'stakeholder')
+            .replace(/\badministrators\b/g, 'administrator')
+            .replace(/\bmanagers\b/g, 'manager')
+            .replace(/\bteams\b/g, 'team')
+            .replace(/\bengineers\b/g, 'engineer')
+            .replace(/\banalysts\b/g, 'analyst')
+            .replace(/\barchitects\b/g, 'architect')
+            .replace(/\bspecialists\b/g, 'specialist')
+            .replace(/\bsupervisors\b/g, 'supervisor')
+            .replace(/\bmoderators\b/g, 'moderator')
+            .replace(/\boperators\b/g, 'operator')
+            .replace(/\bmaintainers\b/g, 'maintainer')
+            .replace(/\bcoordinators\b/g, 'coordinator')
+            .replace(/\bconsultants\b/g, 'consultant')
+            .replace(/\bdesigners\b/g, 'designer')
+            .replace(/\bprogrammers\b/g, 'programmer')
+            .replace(/\bcoders\b/g, 'coder')
+            .replace(/\brepresentatives\b/g, 'representative')
+            .replace(/\bagents\b/g, 'agent')
+            .replace(/\bowners\b/g, 'owner')
+            .replace(/\bleads\b/g, 'lead')
+            .replace(/\bdirectors\b/g, 'director')
+            .replace(/\bvisitors\b/g, 'visitor')
+            .replace(/\bmembers\b/g, 'member')
+            .replace(/\bparticipants\b/g, 'participant')
+            .replace(/\bsubscribers\b/g, 'subscriber')
+            .replace(/\bconsumers\b/g, 'consumer')
+            .replace(/\bshareholders\b/g, 'shareholder')
+            .replace(/\binvestors\b/g, 'investor')
+            .replace(/\bcontractors\b/g, 'contractor')
+            .replace(/\bsuppliers\b/g, 'supplier')
+            .replace(/\bpeople\b/g, 'person')
+            .replace(/\bpersonnel\b/g, 'person')
+            .replace(/\bend users\b/g, 'end user')
+            .replace(/\bsales teams\b/g, 'sales team')
+            .replace(/\bmarketing teams\b/g, 'marketing team')
+            .replace(/\bsupport teams\b/g, 'support team')
+            .replace(/\bcustomer service teams\b/g, 'customer service team')
+            .replace(/\bhelp desk teams\b/g, 'help desk team')
+            .replace(/\bit teams\b/g, 'it team')
+            .replace(/\bhr teams\b/g, 'hr team');
 
-          if (s !== "person" && s !== "people" && s !== "personnel" && s.length > 2) {
+          if (
+            s !== 'person' &&
+            s !== 'people' &&
+            s !== 'personnel' &&
+            s.length > 2
+          ) {
             stakeholders.add(s);
           }
         });
@@ -457,16 +490,16 @@ export class HeuristicDocumentationIntelligenceProvider
 
   private extractTechnologies(content: string): string[] {
     const technologies = new Set<string>();
-    const normalizedContent = content.replace(/\bC\+\+\b/g, "cpp");
+    const normalizedContent = content.replace(/\bC\+\+\b/g, 'cpp');
     if (/c\+\+/i.test(content)) {
-      technologies.add("cpp");
+      technologies.add('cpp');
     }
     for (const pattern of TECHNOLOGY_PATTERNS) {
       const matches = normalizedContent.match(pattern);
       if (matches) {
         matches.forEach((match) => {
           let m = match.toLowerCase().trim();
-          if (m === "c++") m = "cpp";
+          if (m === 'c++') m = 'cpp';
           technologies.add(m);
         });
       }

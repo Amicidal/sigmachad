@@ -3,38 +3,44 @@
  * Handles graph search, entity examples, and dependency analysis
  */
 
-import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService } from "@memento/knowledge";
-import { DatabaseService } from "@memento/database";
-import { RelationshipType } from "@memento/core";
+import { FastifyInstance } from 'fastify';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database';
+import { RelationshipType } from '@memento/core';
+import {
+  GraphSearchRequest,
+  GraphSearchResult,
+  GraphExamples,
+  DependencyAnalysis,
+} from '@memento/shared-types';
 
 const GRAPH_ENTITY_TYPE_LOOKUP: Record<string, string> = {
-  change: "change",
-  directory: "directory",
-  file: "file",
-  module: "module",
-  spec: "spec",
-  symbol: "symbol",
-  test: "test",
+  change: 'change',
+  directory: 'directory',
+  file: 'file',
+  module: 'module',
+  spec: 'spec',
+  symbol: 'symbol',
+  test: 'test',
 };
 
 const GRAPH_SYMBOL_KIND_LOOKUP: Record<string, string> = {
-  class: "class",
-  function: "function",
-  interface: "interface",
-  method: "method",
-  property: "property",
-  typealias: "typeAlias",
-  unknown: "unknown",
-  variable: "variable",
+  class: 'class',
+  function: 'function',
+  interface: 'interface',
+  method: 'method',
+  property: 'property',
+  typealias: 'typeAlias',
+  unknown: 'unknown',
+  variable: 'variable',
 };
 
 const parseBooleanParam = (value: unknown): boolean | undefined => {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
-    if (normalized === "true") return true;
-    if (normalized === "false") return false;
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
   }
   return undefined;
 };
@@ -42,15 +48,13 @@ const parseBooleanParam = (value: unknown): boolean | undefined => {
 const parseStringArrayParam = (value: unknown): string[] => {
   if (Array.isArray(value)) {
     return value
-      .flatMap((entry) =>
-        typeof entry === "string" ? entry.split(",") : []
-      )
+      .flatMap((entry) => (typeof entry === 'string' ? entry.split(',') : []))
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0);
   }
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     return value
-      .split(",")
+      .split(',')
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0);
   }
@@ -63,80 +67,9 @@ const buildErrorResponse = (
 ) => ({
   success: false,
   error,
-  requestId: request?.id ?? "unknown",
+  requestId: request?.id ?? 'unknown',
   timestamp: new Date().toISOString(),
 });
-
-interface GraphSearchRequest {
-  query: string;
-  entityTypes?: ("function" | "class" | "interface" | "file" | "module")[];
-  searchType?: "semantic" | "structural" | "usage" | "dependency";
-  filters?: {
-    language?: string;
-    path?: string;
-    tags?: string[];
-    lastModified?: {
-      since?: Date;
-      until?: Date;
-    };
-    checkpointId?: string;
-  };
-  includeRelated?: boolean;
-  limit?: number;
-}
-
-interface GraphSearchResult {
-  entities: any[];
-  relationships: any[];
-  clusters: any[];
-  relevanceScore: number;
-}
-
-interface GraphExamples {
-  entityId: string;
-  signature: string;
-  usageExamples: {
-    context: string;
-    code: string;
-    file: string;
-    line: number;
-  }[];
-  testExamples: {
-    testId: string;
-    testName: string;
-    testCode: string;
-    assertions: string[];
-  }[];
-  relatedPatterns: {
-    pattern: string;
-    frequency: number;
-    confidence: number;
-  }[];
-}
-
-interface DependencyAnalysis {
-  entityId: string;
-  directDependencies: {
-    entity: any;
-    relationship: string;
-    confidence: number;
-  }[];
-  indirectDependencies: {
-    entity: any;
-    path: any[];
-    relationship: string;
-    distance: number;
-  }[];
-  reverseDependencies: {
-    entity: any;
-    relationship: string;
-    impact: "high" | "medium" | "low";
-  }[];
-  circularDependencies: {
-    cycle: any[];
-    severity: "critical" | "warning" | "info";
-  }[];
-}
 
 export async function registerGraphRoutes(
   app: FastifyInstance,
@@ -149,13 +82,13 @@ export async function registerGraphRoutes(
   });
   // GET /api/graph/entity/:entityId - Get single entity by ID
   app.get(
-    "/graph/entity/:entityId",
+    '/graph/entity/:entityId',
     {
       schema: {
         params: {
-          type: "object",
-          properties: { entityId: { type: "string" } },
-          required: ["entityId"],
+          type: 'object',
+          properties: { entityId: { type: 'string' } },
+          required: ['entityId'],
         },
       },
     },
@@ -163,10 +96,17 @@ export async function registerGraphRoutes(
       try {
         const { entityId } = request.params as { entityId: string };
 
-        if (!entityId || typeof entityId !== "string" || entityId.trim() === "") {
+        if (
+          !entityId ||
+          typeof entityId !== 'string' ||
+          entityId.trim() === ''
+        ) {
           return reply.status(400).send({
             success: false,
-            error: { code: "INVALID_REQUEST", message: "Entity ID must be a non-empty string" },
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Entity ID must be a non-empty string',
+            },
           });
         }
 
@@ -174,18 +114,18 @@ export async function registerGraphRoutes(
         if (!entity) {
           return reply.status(404).send({
             success: false,
-            error: { code: "ENTITY_NOT_FOUND", message: "Entity not found" },
+            error: { code: 'ENTITY_NOT_FOUND', message: 'Entity not found' },
           });
         }
 
         reply.send({ success: true, data: entity });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "ENTITY_FETCH_FAILED",
-            message: "Failed to fetch entity",
+            code: 'ENTITY_FETCH_FAILED',
+            message: 'Failed to fetch entity',
             details,
           })
         );
@@ -194,49 +134,51 @@ export async function registerGraphRoutes(
   );
 
   // Alias: /graph/entities/:entityId -> /graph/entity/:entityId
-  app.get(
-    "/graph/entities/:entityId",
-    async (request, reply) => {
-      const params = request.params as { entityId: string };
-      const res = await (app as any).inject({
-        method: "GET",
-        url: `/graph/entity/${encodeURIComponent(params.entityId)}`,
-      });
-      const headers = res.headers ?? {};
-      const contentTypeHeader = headers["content-type"];
+  app.get('/graph/entities/:entityId', async (request, reply) => {
+    const params = request.params as { entityId: string };
+    const res = await (app as any).inject({
+      method: 'GET',
+      url: `/graph/entity/${encodeURIComponent(params.entityId)}`,
+    });
+    const headers = res.headers ?? {};
+    const contentTypeHeader = headers['content-type'];
 
-      Object.entries(headers).forEach(([key, value]) => {
-        if (key.toLowerCase() === "content-length" || typeof value === "undefined") {
-          return;
-        }
-
-        reply.header(key, value as any);
-      });
-
-      let payload: unknown = res.body ?? res.payload;
-      const isJsonResponse = typeof contentTypeHeader === "string" && contentTypeHeader.includes("application/json");
-
-      if (isJsonResponse && typeof payload === "string") {
-        try {
-          payload = JSON.parse(payload);
-        } catch {
-          // fall back to sending raw payload if parsing fails
-        }
+    Object.entries(headers).forEach(([key, value]) => {
+      if (
+        key.toLowerCase() === 'content-length' ||
+        typeof value === 'undefined'
+      ) {
+        return;
       }
 
-      reply.status(res.statusCode).send(payload);
+      reply.header(key, value as any);
+    });
+
+    let payload: unknown = res.body ?? res.payload;
+    const isJsonResponse =
+      typeof contentTypeHeader === 'string' &&
+      contentTypeHeader.includes('application/json');
+
+    if (isJsonResponse && typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        // fall back to sending raw payload if parsing fails
+      }
     }
-  );
+
+    reply.status(res.statusCode).send(payload);
+  });
 
   // GET /api/graph/relationship/:relationshipId - Get single relationship by ID
   app.get(
-    "/graph/relationship/:relationshipId",
+    '/graph/relationship/:relationshipId',
     {
       schema: {
         params: {
-          type: "object",
-          properties: { relationshipId: { type: "string" } },
-          required: ["relationshipId"],
+          type: 'object',
+          properties: { relationshipId: { type: 'string' } },
+          required: ['relationshipId'],
         },
       },
     },
@@ -244,10 +186,17 @@ export async function registerGraphRoutes(
       try {
         const { relationshipId } = request.params as { relationshipId: string };
 
-        if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
+        if (
+          !relationshipId ||
+          typeof relationshipId !== 'string' ||
+          relationshipId.trim() === ''
+        ) {
           return reply.status(400).send({
             success: false,
-            error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" },
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Relationship ID must be a non-empty string',
+            },
           });
         }
 
@@ -255,18 +204,21 @@ export async function registerGraphRoutes(
         if (!rel) {
           return reply.status(404).send({
             success: false,
-            error: { code: "RELATIONSHIP_NOT_FOUND", message: "Relationship not found" },
+            error: {
+              code: 'RELATIONSHIP_NOT_FOUND',
+              message: 'Relationship not found',
+            },
           });
         }
 
         reply.send({ success: true, data: rel });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "RELATIONSHIP_FETCH_FAILED",
-            message: "Failed to fetch relationship",
+            code: 'RELATIONSHIP_FETCH_FAILED',
+            message: 'Failed to fetch relationship',
             details,
           })
         );
@@ -275,41 +227,35 @@ export async function registerGraphRoutes(
   );
 
   app.get(
-    "/graph/modules/children",
+    '/graph/modules/children',
     {
       schema: {
         querystring: {
-          type: "object",
+          type: 'object',
           properties: {
-            modulePath: { type: "string" },
+            modulePath: { type: 'string' },
             includeFiles: {
-              anyOf: [
-                { type: "boolean" },
-                { type: "string" },
-              ],
+              anyOf: [{ type: 'boolean' }, { type: 'string' }],
             },
             includeSymbols: {
-              anyOf: [
-                { type: "boolean" },
-                { type: "string" },
-              ],
+              anyOf: [{ type: 'boolean' }, { type: 'string' }],
             },
             language: {
               anyOf: [
-                { type: "string" },
-                { type: "array", items: { type: "string" } },
+                { type: 'string' },
+                { type: 'array', items: { type: 'string' } },
               ],
             },
             symbolKind: {
               anyOf: [
-                { type: "string" },
-                { type: "array", items: { type: "string" } },
+                { type: 'string' },
+                { type: 'array', items: { type: 'string' } },
               ],
             },
-            modulePathPrefix: { type: "string" },
-            limit: { type: "integer", minimum: 1, maximum: 500 },
+            modulePathPrefix: { type: 'string' },
+            limit: { type: 'integer', minimum: 1, maximum: 500 },
           },
-          required: ["modulePath"],
+          required: ['modulePath'],
         },
       },
     },
@@ -330,20 +276,22 @@ export async function registerGraphRoutes(
         const languages = parseStringArrayParam(query.language);
         const symbolKinds = parseStringArrayParam(query.symbolKind);
         const modulePathPrefix =
-          typeof query.modulePathPrefix === "string"
+          typeof query.modulePathPrefix === 'string'
             ? query.modulePathPrefix.trim()
             : undefined;
         const limit =
-          typeof query.limit === "number"
+          typeof query.limit === 'number'
             ? query.limit
-            : typeof query.limit === "string" && query.limit.trim().length > 0
+            : typeof query.limit === 'string' && query.limit.trim().length > 0
             ? Number(query.limit)
             : undefined;
 
-        const options: Parameters<KnowledgeGraphService["listModuleChildren"]>[1] =
-          {};
-        if (typeof includeFiles === "boolean") options.includeFiles = includeFiles;
-        if (typeof includeSymbols === "boolean")
+        const options: Parameters<
+          KnowledgeGraphService['listModuleChildren']
+        >[1] = {};
+        if (typeof includeFiles === 'boolean')
+          options.includeFiles = includeFiles;
+        if (typeof includeSymbols === 'boolean')
           options.includeSymbols = includeSymbols;
         if (languages.length === 1) {
           options.language = languages[0];
@@ -358,19 +306,24 @@ export async function registerGraphRoutes(
         if (modulePathPrefix && modulePathPrefix.length > 0) {
           options.modulePathPrefix = modulePathPrefix;
         }
-        if (typeof limit === "number" && !Number.isNaN(limit)) {
+        if (typeof limit === 'number' && !Number.isNaN(limit)) {
           options.limit = limit;
         }
 
-        const result = await kgService.listModuleChildren(query.modulePath, options);
+        const result = await kgService.listModuleChildren(
+          query.modulePath,
+          options
+        );
         reply.send({ success: true, data: result });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Failed to list module children";
+          error instanceof Error
+            ? error.message
+            : 'Failed to list module children';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "MODULE_CHILDREN_FAILED",
-            message: "Failed to list module children",
+            code: 'MODULE_CHILDREN_FAILED',
+            message: 'Failed to list module children',
             details,
           })
         );
@@ -379,60 +332,72 @@ export async function registerGraphRoutes(
   );
 
   app.get(
-    "/graph/entity/:entityId/imports",
+    '/graph/entity/:entityId/imports',
     {
       schema: {
         params: {
-          type: "object",
-          properties: { entityId: { type: "string" } },
-          required: ["entityId"],
+          type: 'object',
+          properties: { entityId: { type: 'string' } },
+          required: ['entityId'],
         },
         querystring: {
-          type: "object",
+          type: 'object',
           properties: {
-            resolvedOnly: { type: "boolean" },
+            resolvedOnly: { type: 'boolean' },
             language: {
               anyOf: [
-                { type: "string" },
-                { type: "array", items: { type: "string" } },
+                { type: 'string' },
+                { type: 'array', items: { type: 'string' } },
               ],
             },
             symbolKind: {
               anyOf: [
-                { type: "string" },
-                { type: "array", items: { type: "string" } },
+                { type: 'string' },
+                { type: 'array', items: { type: 'string' } },
               ],
             },
             importAlias: {
               anyOf: [
-                { type: "string" },
-                { type: "array", items: { type: "string" } },
+                { type: 'string' },
+                { type: 'array', items: { type: 'string' } },
               ],
             },
             importType: {
               anyOf: [
                 {
-                  type: "string",
-                  enum: ["default", "named", "namespace", "wildcard", "side-effect"],
+                  type: 'string',
+                  enum: [
+                    'default',
+                    'named',
+                    'namespace',
+                    'wildcard',
+                    'side-effect',
+                  ],
                 },
                 {
-                  type: "array",
+                  type: 'array',
                   items: {
-                    type: "string",
-                    enum: ["default", "named", "namespace", "wildcard", "side-effect"],
+                    type: 'string',
+                    enum: [
+                      'default',
+                      'named',
+                      'namespace',
+                      'wildcard',
+                      'side-effect',
+                    ],
                   },
                 },
               ],
             },
-            isNamespace: { type: "boolean" },
+            isNamespace: { type: 'boolean' },
             modulePath: {
               anyOf: [
-                { type: "string" },
-                { type: "array", items: { type: "string" } },
+                { type: 'string' },
+                { type: 'array', items: { type: 'string' } },
               ],
             },
-            modulePathPrefix: { type: "string" },
-            limit: { type: "integer", minimum: 1, maximum: 1000 },
+            modulePathPrefix: { type: 'string' },
+            limit: { type: 'integer', minimum: 1, maximum: 1000 },
           },
         },
       },
@@ -456,28 +421,29 @@ export async function registerGraphRoutes(
         const languages = parseStringArrayParam(query.language).map((value) =>
           value.toLowerCase()
         );
-        const symbolKinds = parseStringArrayParam(query.symbolKind).map((value) =>
-          value.toLowerCase()
+        const symbolKinds = parseStringArrayParam(query.symbolKind).map(
+          (value) => value.toLowerCase()
         );
         const importAliases = parseStringArrayParam(query.importAlias);
-        const importTypes = parseStringArrayParam(query.importType).map((value) =>
-          value.toLowerCase()
+        const importTypes = parseStringArrayParam(query.importType).map(
+          (value) => value.toLowerCase()
         );
         const isNamespace = parseBooleanParam(query.isNamespace);
         const modulePaths = parseStringArrayParam(query.modulePath);
         const modulePathPrefix =
-          typeof query.modulePathPrefix === "string"
+          typeof query.modulePathPrefix === 'string'
             ? query.modulePathPrefix.trim()
             : undefined;
         const limit =
-          typeof query.limit === "number"
+          typeof query.limit === 'number'
             ? query.limit
-            : typeof query.limit === "string" && query.limit.trim().length > 0
+            : typeof query.limit === 'string' && query.limit.trim().length > 0
             ? Number(query.limit)
             : undefined;
 
-        const options: Parameters<KnowledgeGraphService["listImports"]>[1] = {};
-        if (typeof resolvedOnly === "boolean") options.resolvedOnly = resolvedOnly;
+        const options: Parameters<KnowledgeGraphService['listImports']>[1] = {};
+        if (typeof resolvedOnly === 'boolean')
+          options.resolvedOnly = resolvedOnly;
         if (languages.length === 1) {
           options.language = languages[0];
         } else if (languages.length > 1) {
@@ -498,7 +464,7 @@ export async function registerGraphRoutes(
         } else if (importTypes.length > 1) {
           options.importType = importTypes as any;
         }
-        if (typeof isNamespace === "boolean") {
+        if (typeof isNamespace === 'boolean') {
           options.isNamespace = isNamespace;
         }
         if (modulePaths.length === 1) {
@@ -509,7 +475,7 @@ export async function registerGraphRoutes(
         if (modulePathPrefix && modulePathPrefix.length > 0) {
           options.modulePathPrefix = modulePathPrefix;
         }
-        if (typeof limit === "number" && !Number.isNaN(limit)) {
+        if (typeof limit === 'number' && !Number.isNaN(limit)) {
           options.limit = limit;
         }
 
@@ -517,11 +483,11 @@ export async function registerGraphRoutes(
         reply.send({ success: true, data: result });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Failed to list imports";
+          error instanceof Error ? error.message : 'Failed to list imports';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "LIST_IMPORTS_FAILED",
-            message: "Failed to list imports",
+            code: 'LIST_IMPORTS_FAILED',
+            message: 'Failed to list imports',
             details,
           })
         );
@@ -530,13 +496,13 @@ export async function registerGraphRoutes(
   );
 
   app.get(
-    "/graph/symbol/:symbolId/definition",
+    '/graph/symbol/:symbolId/definition',
     {
       schema: {
         params: {
-          type: "object",
-          properties: { symbolId: { type: "string" } },
-          required: ["symbolId"],
+          type: 'object',
+          properties: { symbolId: { type: 'string' } },
+          required: ['symbolId'],
         },
       },
     },
@@ -548,11 +514,13 @@ export async function registerGraphRoutes(
         reply.send({ success: true, data: result });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Failed to resolve definition";
+          error instanceof Error
+            ? error.message
+            : 'Failed to resolve definition';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "FIND_DEFINITION_FAILED",
-            message: "Failed to find symbol definition",
+            code: 'FIND_DEFINITION_FAILED',
+            message: 'Failed to find symbol definition',
             details,
           })
         );
@@ -562,17 +530,17 @@ export async function registerGraphRoutes(
 
   // GET /api/graph/relationship/:relationshipId/evidence - List auxiliary evidence nodes
   app.get(
-    "/graph/relationship/:relationshipId/evidence",
+    '/graph/relationship/:relationshipId/evidence',
     {
       schema: {
         params: {
-          type: "object",
-          properties: { relationshipId: { type: "string" } },
-          required: ["relationshipId"],
+          type: 'object',
+          properties: { relationshipId: { type: 'string' } },
+          required: ['relationshipId'],
         },
         querystring: {
-          type: "object",
-          properties: { limit: { type: "number" } },
+          type: 'object',
+          properties: { limit: { type: 'number' } },
         },
       },
     },
@@ -580,20 +548,44 @@ export async function registerGraphRoutes(
       try {
         const { relationshipId } = request.params as { relationshipId: string };
         const { limit } = (request.query as any) || {};
-        if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
-          return reply.status(400).send({ success: false, error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" } });
+        if (
+          !relationshipId ||
+          typeof relationshipId !== 'string' ||
+          relationshipId.trim() === ''
+        ) {
+          return reply
+            .status(400)
+            .send({
+              success: false,
+              error: {
+                code: 'INVALID_REQUEST',
+                message: 'Relationship ID must be a non-empty string',
+              },
+            });
         }
         const rel = await kgService.getRelationshipById(relationshipId);
-        if (!rel) return reply.status(404).send({ success: false, error: { code: 'RELATIONSHIP_NOT_FOUND', message: 'Relationship not found' } });
-        const evidence = await kgService.getEdgeEvidenceNodes(relationshipId, Math.max(1, Math.min(Number(limit) || 200, 1000)));
+        if (!rel)
+          return reply
+            .status(404)
+            .send({
+              success: false,
+              error: {
+                code: 'RELATIONSHIP_NOT_FOUND',
+                message: 'Relationship not found',
+              },
+            });
+        const evidence = await kgService.getEdgeEvidenceNodes(
+          relationshipId,
+          Math.max(1, Math.min(Number(limit) || 200, 1000))
+        );
         reply.send({ success: true, data: evidence });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "EVIDENCE_FETCH_FAILED",
-            message: "Failed to fetch evidence",
+            code: 'EVIDENCE_FETCH_FAILED',
+            message: 'Failed to fetch evidence',
             details,
           })
         );
@@ -603,17 +595,17 @@ export async function registerGraphRoutes(
 
   // GET /api/graph/relationship/:relationshipId/sites - List auxiliary site nodes
   app.get(
-    "/graph/relationship/:relationshipId/sites",
+    '/graph/relationship/:relationshipId/sites',
     {
       schema: {
         params: {
-          type: "object",
-          properties: { relationshipId: { type: "string" } },
-          required: ["relationshipId"],
+          type: 'object',
+          properties: { relationshipId: { type: 'string' } },
+          required: ['relationshipId'],
         },
         querystring: {
-          type: "object",
-          properties: { limit: { type: "number" } },
+          type: 'object',
+          properties: { limit: { type: 'number' } },
         },
       },
     },
@@ -621,20 +613,44 @@ export async function registerGraphRoutes(
       try {
         const { relationshipId } = request.params as { relationshipId: string };
         const { limit } = (request.query as any) || {};
-        if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
-          return reply.status(400).send({ success: false, error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" } });
+        if (
+          !relationshipId ||
+          typeof relationshipId !== 'string' ||
+          relationshipId.trim() === ''
+        ) {
+          return reply
+            .status(400)
+            .send({
+              success: false,
+              error: {
+                code: 'INVALID_REQUEST',
+                message: 'Relationship ID must be a non-empty string',
+              },
+            });
         }
         const rel = await kgService.getRelationshipById(relationshipId);
-        if (!rel) return reply.status(404).send({ success: false, error: { code: 'RELATIONSHIP_NOT_FOUND', message: 'Relationship not found' } });
-        const sites = await kgService.getEdgeSites(relationshipId, Math.max(1, Math.min(Number(limit) || 50, 500)));
+        if (!rel)
+          return reply
+            .status(404)
+            .send({
+              success: false,
+              error: {
+                code: 'RELATIONSHIP_NOT_FOUND',
+                message: 'Relationship not found',
+              },
+            });
+        const sites = await kgService.getEdgeSites(
+          relationshipId,
+          Math.max(1, Math.min(Number(limit) || 50, 500))
+        );
         reply.send({ success: true, data: sites });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "SITES_FETCH_FAILED",
-            message: "Failed to fetch sites",
+            code: 'SITES_FETCH_FAILED',
+            message: 'Failed to fetch sites',
             details,
           })
         );
@@ -644,17 +660,17 @@ export async function registerGraphRoutes(
 
   // GET /api/graph/relationship/:relationshipId/candidates - List auxiliary candidate nodes
   app.get(
-    "/graph/relationship/:relationshipId/candidates",
+    '/graph/relationship/:relationshipId/candidates',
     {
       schema: {
         params: {
-          type: "object",
-          properties: { relationshipId: { type: "string" } },
-          required: ["relationshipId"],
+          type: 'object',
+          properties: { relationshipId: { type: 'string' } },
+          required: ['relationshipId'],
         },
         querystring: {
-          type: "object",
-          properties: { limit: { type: "number" } },
+          type: 'object',
+          properties: { limit: { type: 'number' } },
         },
       },
     },
@@ -662,20 +678,44 @@ export async function registerGraphRoutes(
       try {
         const { relationshipId } = request.params as { relationshipId: string };
         const { limit } = (request.query as any) || {};
-        if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
-          return reply.status(400).send({ success: false, error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" } });
+        if (
+          !relationshipId ||
+          typeof relationshipId !== 'string' ||
+          relationshipId.trim() === ''
+        ) {
+          return reply
+            .status(400)
+            .send({
+              success: false,
+              error: {
+                code: 'INVALID_REQUEST',
+                message: 'Relationship ID must be a non-empty string',
+              },
+            });
         }
         const rel = await kgService.getRelationshipById(relationshipId);
-        if (!rel) return reply.status(404).send({ success: false, error: { code: 'RELATIONSHIP_NOT_FOUND', message: 'Relationship not found' } });
-        const candidates = await kgService.getEdgeCandidates(relationshipId, Math.max(1, Math.min(Number(limit) || 50, 500)));
+        if (!rel)
+          return reply
+            .status(404)
+            .send({
+              success: false,
+              error: {
+                code: 'RELATIONSHIP_NOT_FOUND',
+                message: 'Relationship not found',
+              },
+            });
+        const candidates = await kgService.getEdgeCandidates(
+          relationshipId,
+          Math.max(1, Math.min(Number(limit) || 50, 500))
+        );
         reply.send({ success: true, data: candidates });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "CANDIDATES_FETCH_FAILED",
-            message: "Failed to fetch candidates",
+            code: 'CANDIDATES_FETCH_FAILED',
+            message: 'Failed to fetch candidates',
             details,
           })
         );
@@ -685,23 +725,30 @@ export async function registerGraphRoutes(
 
   // GET /api/graph/relationship/:relationshipId/full - Relationship with resolved endpoints
   app.get(
-    "/graph/relationship/:relationshipId/full",
+    '/graph/relationship/:relationshipId/full',
     {
       schema: {
         params: {
-          type: "object",
-          properties: { relationshipId: { type: "string" } },
-          required: ["relationshipId"],
+          type: 'object',
+          properties: { relationshipId: { type: 'string' } },
+          required: ['relationshipId'],
         },
       },
     },
     async (request, reply) => {
       try {
         const { relationshipId } = request.params as { relationshipId: string };
-        if (!relationshipId || typeof relationshipId !== "string" || relationshipId.trim() === "") {
+        if (
+          !relationshipId ||
+          typeof relationshipId !== 'string' ||
+          relationshipId.trim() === ''
+        ) {
           return reply.status(400).send({
             success: false,
-            error: { code: "INVALID_REQUEST", message: "Relationship ID must be a non-empty string" },
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Relationship ID must be a non-empty string',
+            },
           });
         }
 
@@ -709,7 +756,10 @@ export async function registerGraphRoutes(
         if (!rel) {
           return reply.status(404).send({
             success: false,
-            error: { code: "RELATIONSHIP_NOT_FOUND", message: "Relationship not found" },
+            error: {
+              code: 'RELATIONSHIP_NOT_FOUND',
+              message: 'Relationship not found',
+            },
           });
         }
 
@@ -721,11 +771,11 @@ export async function registerGraphRoutes(
         reply.send({ success: true, data: { relationship: rel, from, to } });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "RELATIONSHIP_FULL_FETCH_FAILED",
-            message: "Failed to fetch relationship details",
+            code: 'RELATIONSHIP_FULL_FETCH_FAILED',
+            message: 'Failed to fetch relationship details',
             details,
           })
         );
@@ -734,68 +784,65 @@ export async function registerGraphRoutes(
   );
 
   // Alias: /graph/relationships/:relationshipId -> /graph/relationship/:relationshipId
-  app.get(
-    "/graph/relationships/:relationshipId",
-    async (request, reply) => {
-      const params = request.params as { relationshipId: string };
-      const res = await (app as any).inject({
-        method: "GET",
-        url: `/graph/relationship/${encodeURIComponent(params.relationshipId)}`,
-      });
-      reply.status(res.statusCode).send(res.body ?? res.payload);
-    }
-  );
+  app.get('/graph/relationships/:relationshipId', async (request, reply) => {
+    const params = request.params as { relationshipId: string };
+    const res = await (app as any).inject({
+      method: 'GET',
+      url: `/graph/relationship/${encodeURIComponent(params.relationshipId)}`,
+    });
+    reply.status(res.statusCode).send(res.body ?? res.payload);
+  });
   // POST /api/graph/search - Perform semantic and structural searches
   app.post(
-    "/graph/search",
+    '/graph/search',
     {
       schema: {
         body: {
-          type: "object",
+          type: 'object',
           properties: {
-            query: { type: "string" },
+            query: { type: 'string' },
             entityTypes: {
-              type: "array",
+              type: 'array',
               items: {
-                type: "string",
+                type: 'string',
                 enum: [
-                  "function",
-                  "class",
-                  "interface",
-                  "file",
-                  "module",
-                  "spec",
-                  "test",
-                  "change",
-                  "session",
-                  "directory",
+                  'function',
+                  'class',
+                  'interface',
+                  'file',
+                  'module',
+                  'spec',
+                  'test',
+                  'change',
+                  'session',
+                  'directory',
                 ],
               },
             },
             searchType: {
-              type: "string",
-              enum: ["semantic", "structural", "usage", "dependency"],
+              type: 'string',
+              enum: ['semantic', 'structural', 'usage', 'dependency'],
             },
             filters: {
-              type: "object",
+              type: 'object',
               properties: {
-                language: { type: "string" },
-                path: { type: "string" },
-                tags: { type: "array", items: { type: "string" } },
+                language: { type: 'string' },
+                path: { type: 'string' },
+                tags: { type: 'array', items: { type: 'string' } },
                 lastModified: {
-                  type: "object",
+                  type: 'object',
                   properties: {
-                    since: { type: "string", format: "date-time" },
-                    until: { type: "string", format: "date-time" },
+                    since: { type: 'string', format: 'date-time' },
+                    until: { type: 'string', format: 'date-time' },
                   },
                 },
-                checkpointId: { type: "string" },
+                checkpointId: { type: 'string' },
               },
             },
-            includeRelated: { type: "boolean" },
-            limit: { type: "number" },
+            includeRelated: { type: 'boolean' },
+            limit: { type: 'number' },
           },
-          required: ["query"],
+          required: ['query'],
         },
       },
     },
@@ -804,31 +851,31 @@ export async function registerGraphRoutes(
         const params: GraphSearchRequest = request.body as GraphSearchRequest;
 
         // Validate required parameters with better error handling
-        if (!params || typeof params !== "object") {
+        if (!params || typeof params !== 'object') {
           return reply.status(400).send({
             success: false,
             error: {
-              code: "INVALID_REQUEST",
-              message: "Request body must be a valid JSON object",
+              code: 'INVALID_REQUEST',
+              message: 'Request body must be a valid JSON object',
             },
           });
         }
 
         if (
           !params.query ||
-          (typeof params.query === "string" && params.query.trim() === "")
+          (typeof params.query === 'string' && params.query.trim() === '')
         ) {
           return reply.status(400).send({
             success: false,
             error: {
-              code: "INVALID_REQUEST",
-              message: "Query parameter is required and cannot be empty",
+              code: 'INVALID_REQUEST',
+              message: 'Query parameter is required and cannot be empty',
             },
           });
         }
 
         // Ensure query is a string
-        if (typeof params.query !== "string") {
+        if (typeof params.query !== 'string') {
           params.query = String(params.query);
         }
 
@@ -837,7 +884,7 @@ export async function registerGraphRoutes(
 
         // Get relationships if includeRelated is true
         let relationships: any[] = [];
-        let clusters: any[] = [];
+        const clusters: any[] = [];
         let relevanceScore = 0;
 
         if (params.includeRelated && entities.length > 0) {
@@ -876,13 +923,13 @@ export async function registerGraphRoutes(
           data: results,
         });
       } catch (error) {
-        console.error("Graph search error:", error);
+        console.error('Graph search error:', error);
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "GRAPH_SEARCH_FAILED",
-            message: "Failed to perform graph search",
+            code: 'GRAPH_SEARCH_FAILED',
+            message: 'Failed to perform graph search',
             details,
           })
         );
@@ -892,15 +939,15 @@ export async function registerGraphRoutes(
 
   // GET /api/graph/examples/{entityId} - Get usage examples and tests
   app.get(
-    "/graph/examples/:entityId",
+    '/graph/examples/:entityId',
     {
       schema: {
         params: {
-          type: "object",
+          type: 'object',
           properties: {
-            entityId: { type: "string" },
+            entityId: { type: 'string' },
           },
-          required: ["entityId"],
+          required: ['entityId'],
         },
       },
     },
@@ -911,14 +958,14 @@ export async function registerGraphRoutes(
         // Validate entityId parameter
         if (
           !entityId ||
-          typeof entityId !== "string" ||
-          entityId.trim() === ""
+          typeof entityId !== 'string' ||
+          entityId.trim() === ''
         ) {
           return reply.status(400).send({
             success: false,
             error: {
-              code: "INVALID_REQUEST",
-              message: "Entity ID is required and must be a non-empty string",
+              code: 'INVALID_REQUEST',
+              message: 'Entity ID is required and must be a non-empty string',
             },
           });
         }
@@ -931,8 +978,8 @@ export async function registerGraphRoutes(
           return reply.status(404).send({
             success: false,
             error: {
-              code: "ENTITY_NOT_FOUND",
-              message: "Entity not found",
+              code: 'ENTITY_NOT_FOUND',
+              message: 'Entity not found',
             },
           });
         }
@@ -955,13 +1002,13 @@ export async function registerGraphRoutes(
           data: sanitizedExamples,
         });
       } catch (error) {
-        console.error("Examples retrieval error:", error);
+        console.error('Examples retrieval error:', error);
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "EXAMPLES_RETRIEVAL_FAILED",
-            message: "Failed to retrieve usage examples",
+            code: 'EXAMPLES_RETRIEVAL_FAILED',
+            message: 'Failed to retrieve usage examples',
             details,
           })
         );
@@ -971,15 +1018,15 @@ export async function registerGraphRoutes(
 
   // GET /api/graph/dependencies/{entityId} - Analyze dependency relationships
   app.get(
-    "/graph/dependencies/:entityId",
+    '/graph/dependencies/:entityId',
     {
       schema: {
         params: {
-          type: "object",
+          type: 'object',
           properties: {
-            entityId: { type: "string" },
+            entityId: { type: 'string' },
           },
-          required: ["entityId"],
+          required: ['entityId'],
         },
       },
     },
@@ -990,14 +1037,14 @@ export async function registerGraphRoutes(
         // Validate entityId parameter
         if (
           !entityId ||
-          typeof entityId !== "string" ||
-          entityId.trim() === ""
+          typeof entityId !== 'string' ||
+          entityId.trim() === ''
         ) {
           return reply.status(400).send({
             success: false,
             error: {
-              code: "INVALID_REQUEST",
-              message: "Entity ID is required and must be a non-empty string",
+              code: 'INVALID_REQUEST',
+              message: 'Entity ID is required and must be a non-empty string',
             },
           });
         }
@@ -1010,8 +1057,8 @@ export async function registerGraphRoutes(
           return reply.status(404).send({
             success: false,
             error: {
-              code: "ENTITY_NOT_FOUND",
-              message: "Entity not found",
+              code: 'ENTITY_NOT_FOUND',
+              message: 'Entity not found',
             },
           });
         }
@@ -1037,13 +1084,13 @@ export async function registerGraphRoutes(
           data: sanitizedAnalysis,
         });
       } catch (error) {
-        console.error("Dependency analysis error:", error);
+        console.error('Dependency analysis error:', error);
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "DEPENDENCY_ANALYSIS_FAILED",
-            message: "Failed to analyze dependencies",
+            code: 'DEPENDENCY_ANALYSIS_FAILED',
+            message: 'Failed to analyze dependencies',
             details,
           })
         );
@@ -1053,18 +1100,18 @@ export async function registerGraphRoutes(
 
   // GET /api/graph/entities - List all entities with filtering
   app.get(
-    "/graph/entities",
+    '/graph/entities',
     {
       schema: {
         querystring: {
-          type: "object",
+          type: 'object',
           properties: {
-            type: { type: "string" },
-            language: { type: "string" },
-            path: { type: "string" },
-            tags: { type: "string" }, // comma-separated
-            limit: { type: "number", default: 50 },
-            offset: { type: "number", default: 0 },
+            type: { type: 'string' },
+            language: { type: 'string' },
+            path: { type: 'string' },
+            tags: { type: 'string' }, // comma-separated
+            limit: { type: 'number', default: 50 },
+            offset: { type: 'number', default: 0 },
           },
         },
       },
@@ -1082,7 +1129,7 @@ export async function registerGraphRoutes(
 
         // Parse tags if provided
         const tags = query.tags
-          ? query.tags.split(",").map((t) => t.trim())
+          ? query.tags.split(',').map((t) => t.trim())
           : undefined;
 
         const typeParam = query.type?.trim();
@@ -1094,11 +1141,11 @@ export async function registerGraphRoutes(
           if (GRAPH_ENTITY_TYPE_LOOKUP[lowerType]) {
             entityTypeFilter = GRAPH_ENTITY_TYPE_LOOKUP[lowerType];
           } else if (GRAPH_SYMBOL_KIND_LOOKUP[lowerType]) {
-            entityTypeFilter = "symbol";
+            entityTypeFilter = 'symbol';
             symbolKindFilter = GRAPH_SYMBOL_KIND_LOOKUP[lowerType];
           } else {
             // Fall back to treating unknown types as symbol kinds for forward compatibility
-            entityTypeFilter = "symbol";
+            entityTypeFilter = 'symbol';
             symbolKindFilter = typeParam;
           }
         }
@@ -1126,11 +1173,11 @@ export async function registerGraphRoutes(
         });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "ENTITIES_LIST_FAILED",
-            message: "Failed to list entities",
+            code: 'ENTITIES_LIST_FAILED',
+            message: 'Failed to list entities',
             details,
           })
         );
@@ -1140,17 +1187,17 @@ export async function registerGraphRoutes(
 
   // GET /api/graph/relationships - List relationships with filtering
   app.get(
-    "/graph/relationships",
+    '/graph/relationships',
     {
       schema: {
         querystring: {
-          type: "object",
+          type: 'object',
           properties: {
-            fromEntity: { type: "string" },
-            toEntity: { type: "string" },
-            type: { type: "string" },
-            limit: { type: "number", default: 50 },
-            offset: { type: "number", default: 0 },
+            fromEntity: { type: 'string' },
+            toEntity: { type: 'string' },
+            type: { type: 'string' },
+            limit: { type: 'number', default: 50 },
+            offset: { type: 'number', default: 0 },
           },
         },
       },
@@ -1186,11 +1233,11 @@ export async function registerGraphRoutes(
         });
       } catch (error) {
         const details =
-          error instanceof Error ? error.message : "Unknown error";
+          error instanceof Error ? error.message : 'Unknown error';
         reply.status(500).send(
           buildErrorResponse(request, {
-            code: "RELATIONSHIPS_LIST_FAILED",
-            message: "Failed to list relationships",
+            code: 'RELATIONSHIPS_LIST_FAILED',
+            message: 'Failed to list relationships',
             details,
           })
         );

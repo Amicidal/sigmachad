@@ -16,7 +16,7 @@ import { SessionDocument, SessionEvent } from '../../src/services/SessionTypes.j
 describe('SessionReplay Integration Tests', () => {
   let redis: RedisClientType;
   let sessionReplay: SessionReplay;
-  let testDbIndex = 15; // Use test database
+  const testDbIndex = 15; // Use test database
 
   const replayConfig: ReplayConfig = {
     compressionEnabled: true,

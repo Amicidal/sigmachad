@@ -619,15 +619,20 @@ export class SessionHealthCheck extends EventEmitter {
     }
 
     // Component-specific alerts
-    Object.entries(components).forEach(([componentName, health]) => {
-      if (health.status === 'critical') {
+    for (const [componentName, componentHealth] of Object.entries(components) as Array<[
+      string,
+      ComponentHealth | undefined
+    ]>) {
+      if (!componentHealth) continue;
+
+      if (componentHealth.status === 'critical') {
         alerts.push({
           level: 'critical',
           component: componentName,
           message: `Component ${componentName} is in critical state`,
           timestamp,
         });
-      } else if (health.status === 'warning') {
+      } else if (componentHealth.status === 'warning') {
         alerts.push({
           level: 'warning',
           component: componentName,
@@ -635,7 +640,7 @@ export class SessionHealthCheck extends EventEmitter {
           timestamp,
         });
       }
-    });
+    }
 
     return alerts;
   }

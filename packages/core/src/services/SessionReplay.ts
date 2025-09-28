@@ -13,67 +13,14 @@ import {
   SessionState,
   ISessionStore,
 } from './SessionTypes.js';
-
-export interface ReplayConfig {
-  compressionEnabled: boolean;
-  snapshotInterval: number; // seconds
-  maxReplayDuration: number; // seconds
-  enableStateValidation: boolean;
-  enableDeltaCompression: boolean;
-}
-
-export interface SessionSnapshot {
-  sessionId: string;
-  timestamp: string;
-  sequenceNumber: number;
-  state: SessionState;
-  agentIds: string[];
-  eventCount: number;
-  metadata?: Record<string, any>;
-  checksum?: string;
-}
-
-export interface ReplayFrame {
-  timestamp: string;
-  sequenceNumber: number;
-  event?: SessionEvent;
-  snapshot?: SessionSnapshot;
-  deltaData?: Record<string, any>;
-}
-
-export interface ReplaySession {
-  sessionId: string;
-  originalSessionId: string;
-  startTime: string;
-  endTime?: string;
-  frames: ReplayFrame[];
-  metadata: {
-    totalFrames: number;
-    duration: number;
-    compressionRatio?: number;
-    validationPassed: boolean;
-  };
-}
-
-export interface ReplayOptions {
-  startFromSequence?: number;
-  endAtSequence?: number;
-  speed?: number; // playback speed multiplier
-  includeSnapshots?: boolean;
-  validationMode?: boolean;
-  filterEventTypes?: string[];
-  onlyAgents?: string[];
-}
-
-export interface ReplayStats {
-  totalSessions: number;
-  totalFrames: number;
-  storageUsed: number; // bytes
-  compressionRatio: number;
-  averageSessionDuration: number;
-  oldestReplay: string;
-  newestReplay: string;
-}
+import type {
+  ReplayConfig,
+  SessionSnapshot,
+  ReplayFrame,
+  ReplaySession,
+  ReplayOptions,
+  ReplayStats,
+} from '@memento/shared-types';
 
 export class SessionReplay extends EventEmitter {
   private redis: RedisClientType;
@@ -98,7 +45,10 @@ export class SessionReplay extends EventEmitter {
   /**
    * Start recording a session for replay
    */
-  async startRecording(sessionId: string, initialState?: SessionDocument): Promise<void> {
+  async startRecording(
+    sessionId: string,
+    initialState?: SessionDocument
+  ): Promise<void> {
     const replayId = `replay:${sessionId}:${Date.now()}`;
 
     const replaySession: ReplaySession = {
@@ -138,7 +88,11 @@ export class SessionReplay extends EventEmitter {
   /**
    * Record an event in the replay
    */
-  async recordEvent(sessionId: string, event: SessionEvent, sessionState?: SessionDocument): Promise<void> {
+  async recordEvent(
+    sessionId: string,
+    event: SessionEvent,
+    sessionState?: SessionDocument
+  ): Promise<void> {
     const replaySession = this.activeReplays.get(sessionId);
     if (!replaySession) return;
 
@@ -157,13 +111,14 @@ export class SessionReplay extends EventEmitter {
     replaySession.metadata.totalFrames++;
 
     // Store frame in Redis
-    await this.redis.zAdd(
-      `replay:frames:${replaySession.sessionId}`,
-      { score: event.seq, value: JSON.stringify(frame) }
-    );
+    await this.redis.zAdd(`replay:frames:${replaySession.sessionId}`, {
+      score: event.seq,
+      value: JSON.stringify(frame),
+    });
 
     // Create periodic snapshots
-    if (replaySession.frames.length % 50 === 0) { // Every 50 events
+    if (replaySession.frames.length % 50 === 0) {
+      // Every 50 events
       await this.createPeriodicSnapshot(sessionId, sessionState);
     }
 
@@ -181,16 +136,20 @@ export class SessionReplay extends EventEmitter {
 
     replaySession.endTime = new Date().toISOString();
     replaySession.metadata.duration =
-      new Date(replaySession.endTime).getTime() - new Date(replaySession.startTime).getTime();
+      new Date(replaySession.endTime).getTime() -
+      new Date(replaySession.startTime).getTime();
 
     // Validate replay if enabled
     if (this.config.enableStateValidation) {
-      replaySession.metadata.validationPassed = await this.validateReplay(replaySession);
+      replaySession.metadata.validationPassed = await this.validateReplay(
+        replaySession
+      );
     }
 
     // Calculate compression ratio
     if (this.config.compressionEnabled) {
-      replaySession.metadata.compressionRatio = await this.calculateCompressionRatio(replaySession);
+      replaySession.metadata.compressionRatio =
+        await this.calculateCompressionRatio(replaySession);
     }
 
     // Store final metadata
@@ -203,52 +162,67 @@ export class SessionReplay extends EventEmitter {
     });
 
     // Add to replay index
-    await this.redis.zAdd(
-      'replay:index',
-      { score: Date.now(), value: replaySession.sessionId }
-    );
+    await this.redis.zAdd('replay:index', {
+      score: Date.now(),
+      value: replaySession.sessionId,
+    });
 
     const replayId = replaySession.sessionId;
     this.activeReplays.delete(sessionId);
 
-    this.emit('recording:stopped', { sessionId, replayId, metadata: replaySession.metadata });
+    this.emit('recording:stopped', {
+      sessionId,
+      replayId,
+      metadata: replaySession.metadata,
+    });
     return replayId;
   }
 
   /**
    * Start replaying a session
    */
-  async startReplay(replayId: string, options: ReplayOptions = {}): Promise<ReplaySession> {
+  async startReplay(
+    replayId: string,
+    options: ReplayOptions = {}
+  ): Promise<ReplaySession> {
     const metadata = await this.redis.hGetAll(`replay:meta:${replayId}`);
     if (!metadata.originalSessionId) {
       throw new Error(`Replay not found: ${replayId}`);
     }
 
     // Load frames from Redis
-    const frameData = await this.redis.zRange(`replay:frames:${replayId}`, 0, -1);
-    const frames: ReplayFrame[] = frameData.map(data => JSON.parse(data));
+    const frameData = await this.redis.zRange(
+      `replay:frames:${replayId}`,
+      0,
+      -1
+    );
+    const frames: ReplayFrame[] = frameData.map((data) => JSON.parse(data));
 
     // Apply filters if specified
     let filteredFrames = frames;
 
     if (options.startFromSequence !== undefined) {
-      filteredFrames = filteredFrames.filter(f =>
-        !f.event || f.event.seq >= options.startFromSequence!);
+      filteredFrames = filteredFrames.filter(
+        (f) => !f.event || f.event.seq >= options.startFromSequence!
+      );
     }
 
     if (options.endAtSequence !== undefined) {
-      filteredFrames = filteredFrames.filter(f =>
-        !f.event || f.event.seq <= options.endAtSequence!);
+      filteredFrames = filteredFrames.filter(
+        (f) => !f.event || f.event.seq <= options.endAtSequence!
+      );
     }
 
     if (options.filterEventTypes?.length) {
-      filteredFrames = filteredFrames.filter(f =>
-        !f.event || options.filterEventTypes!.includes(f.event.type));
+      filteredFrames = filteredFrames.filter(
+        (f) => !f.event || options.filterEventTypes!.includes(f.event.type)
+      );
     }
 
     if (options.onlyAgents?.length) {
-      filteredFrames = filteredFrames.filter(f =>
-        !f.event || options.onlyAgents!.includes(f.event.actor));
+      filteredFrames = filteredFrames.filter(
+        (f) => !f.event || options.onlyAgents!.includes(f.event.actor)
+      );
     }
 
     const replaySession: ReplaySession = {
@@ -280,7 +254,10 @@ export class SessionReplay extends EventEmitter {
     const speed = options.speed || 1;
     const frames = replaySession.frames;
 
-    this.emit('replay:play:started', { sessionId: replaySession.sessionId, frameCount: frames.length });
+    this.emit('replay:play:started', {
+      sessionId: replaySession.sessionId,
+      frameCount: frames.length,
+    });
 
     for (let i = 0; i < frames.length; i++) {
       const frame = frames[i];
@@ -293,7 +270,7 @@ export class SessionReplay extends EventEmitter {
         sessionId: replaySession.sessionId,
         frame,
         index: i,
-        total: frames.length
+        total: frames.length,
       });
 
       // Calculate delay until next frame
@@ -303,7 +280,7 @@ export class SessionReplay extends EventEmitter {
         const delay = (nextTime - currentTime) / speed;
 
         if (delay > 0) {
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
     }
@@ -318,8 +295,12 @@ export class SessionReplay extends EventEmitter {
     const metadata = await this.redis.hGetAll(`replay:meta:${replayId}`);
     if (!metadata.originalSessionId) return null;
 
-    const frameData = await this.redis.zRange(`replay:frames:${replayId}`, 0, -1);
-    const frames: ReplayFrame[] = frameData.map(data => JSON.parse(data));
+    const frameData = await this.redis.zRange(
+      `replay:frames:${replayId}`,
+      0,
+      -1
+    );
+    const frames: ReplayFrame[] = frameData.map((data) => JSON.parse(data));
 
     return {
       sessionId: replayId,
@@ -339,8 +320,12 @@ export class SessionReplay extends EventEmitter {
   /**
    * List available replays
    */
-  async listReplays(limit: number = 100): Promise<Array<{ replayId: string; metadata: any }>> {
-    const replayIds = await this.redis.zRevRange('replay:index', 0, limit - 1);
+  async listReplays(
+    limit: number = 100
+  ): Promise<Array<{ replayId: string; metadata: any }>> {
+    const replayIds = await this.redis.zRange('replay:index', 0, limit - 1, {
+      REV: true,
+    });
 
     const replays = await Promise.all(
       replayIds.map(async (replayId) => {
@@ -349,7 +334,7 @@ export class SessionReplay extends EventEmitter {
       })
     );
 
-    return replays.filter(r => r.metadata.originalSessionId);
+    return replays.filter((r) => r.metadata.originalSessionId);
   }
 
   /**
@@ -390,8 +375,10 @@ export class SessionReplay extends EventEmitter {
       totalSessions: allReplays.length,
       totalFrames,
       storageUsed,
-      compressionRatio: compressionCount > 0 ? compressionSum / compressionCount : 1,
-      averageSessionDuration: allReplays.length > 0 ? totalDuration / allReplays.length : 0,
+      compressionRatio:
+        compressionCount > 0 ? compressionSum / compressionCount : 1,
+      averageSessionDuration:
+        allReplays.length > 0 ? totalDuration / allReplays.length : 0,
       oldestReplay: new Date(oldestTime).toISOString(),
       newestReplay: new Date(newestTime).toISOString(),
     };
@@ -414,21 +401,31 @@ export class SessionReplay extends EventEmitter {
    * Clean up old replays
    */
   async cleanupOldReplays(olderThanDays: number): Promise<number> {
-    const cutoff = Date.now() - (olderThanDays * 24 * 60 * 60 * 1000);
-    const oldReplays = await this.redis.zRangeByScore('replay:index', 0, cutoff);
+    const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    const oldReplays = await this.redis.zRangeByScore(
+      'replay:index',
+      0,
+      cutoff
+    );
 
     for (const replayId of oldReplays) {
       await this.deleteReplay(replayId);
     }
 
-    this.emit('cleanup:completed', { removedReplays: oldReplays.length, cutoff });
+    this.emit('cleanup:completed', {
+      removedReplays: oldReplays.length,
+      cutoff,
+    });
     return oldReplays.length;
   }
 
   /**
    * Create a session snapshot
    */
-  private async createSnapshot(sessionId: string, sessionState: SessionDocument): Promise<SessionSnapshot> {
+  private async createSnapshot(
+    sessionId: string,
+    sessionState: SessionDocument
+  ): Promise<SessionSnapshot> {
     const snapshot: SessionSnapshot = {
       sessionId,
       timestamp: new Date().toISOString(),
@@ -436,7 +433,9 @@ export class SessionReplay extends EventEmitter {
       state: sessionState.state,
       agentIds: [...sessionState.agentIds],
       eventCount: sessionState.events.length,
-      metadata: sessionState.metadata ? { ...sessionState.metadata } : undefined,
+      metadata: sessionState.metadata
+        ? { ...sessionState.metadata }
+        : undefined,
     };
 
     // Calculate checksum for validation
@@ -450,7 +449,10 @@ export class SessionReplay extends EventEmitter {
   /**
    * Create periodic snapshot during recording
    */
-  private async createPeriodicSnapshot(sessionId: string, sessionState?: SessionDocument): Promise<void> {
+  private async createPeriodicSnapshot(
+    sessionId: string,
+    sessionState?: SessionDocument
+  ): Promise<void> {
     if (!sessionState) return;
 
     const replaySession = this.activeReplays.get(sessionId);
@@ -466,16 +468,19 @@ export class SessionReplay extends EventEmitter {
     replaySession.frames.push(frame);
 
     // Store snapshot frame
-    await this.redis.zAdd(
-      `replay:frames:${replaySession.sessionId}`,
-      { score: snapshot.sequenceNumber, value: JSON.stringify(frame) }
-    );
+    await this.redis.zAdd(`replay:frames:${replaySession.sessionId}`, {
+      score: snapshot.sequenceNumber,
+      value: JSON.stringify(frame),
+    });
   }
 
   /**
    * Calculate delta between states
    */
-  private async calculateDelta(sessionId: string, currentState: SessionDocument): Promise<Record<string, any>> {
+  private async calculateDelta(
+    sessionId: string,
+    currentState: SessionDocument
+  ): Promise<Record<string, any>> {
     // Simple delta calculation - in practice this would be more sophisticated
     const lastSnapshot = await this.getLastSnapshot(sessionId);
     if (!lastSnapshot) return {};
@@ -488,8 +493,12 @@ export class SessionReplay extends EventEmitter {
 
     if (lastSnapshot.agentIds.length !== currentState.agentIds.length) {
       delta.agentChange = {
-        added: currentState.agentIds.filter(id => !lastSnapshot.agentIds.includes(id)),
-        removed: lastSnapshot.agentIds.filter(id => !currentState.agentIds.includes(id)),
+        added: currentState.agentIds.filter(
+          (id) => !lastSnapshot.agentIds.includes(id)
+        ),
+        removed: lastSnapshot.agentIds.filter(
+          (id) => !currentState.agentIds.includes(id)
+        ),
       };
     }
 
@@ -499,7 +508,9 @@ export class SessionReplay extends EventEmitter {
   /**
    * Get last snapshot for a session
    */
-  private async getLastSnapshot(sessionId: string): Promise<SessionSnapshot | null> {
+  private async getLastSnapshot(
+    sessionId: string
+  ): Promise<SessionSnapshot | null> {
     const replaySession = this.activeReplays.get(sessionId);
     if (!replaySession) return null;
 
@@ -532,7 +543,9 @@ export class SessionReplay extends EventEmitter {
       // Validate snapshot checksums
       for (const frame of replaySession.frames) {
         if (frame.snapshot?.checksum) {
-          const calculatedChecksum = await this.calculateChecksum(frame.snapshot);
+          const calculatedChecksum = await this.calculateChecksum(
+            frame.snapshot
+          );
           if (calculatedChecksum !== frame.snapshot.checksum) {
             return false; // Checksum mismatch
           }
@@ -563,12 +576,14 @@ export class SessionReplay extends EventEmitter {
   /**
    * Calculate compression ratio
    */
-  private async calculateCompressionRatio(replaySession: ReplaySession): Promise<number> {
+  private async calculateCompressionRatio(
+    replaySession: ReplaySession
+  ): Promise<number> {
     if (!this.config.compressionEnabled) return 1;
 
     // Simple compression ratio calculation
     const uncompressedSize = JSON.stringify(replaySession).length;
-    const compressedFrames = replaySession.frames.filter(f => f.deltaData);
+    const compressedFrames = replaySession.frames.filter((f) => f.deltaData);
     const compressionSavings = compressedFrames.length * 0.3; // Estimate 30% savings
 
     return Math.max(0.1, 1 - compressionSavings);

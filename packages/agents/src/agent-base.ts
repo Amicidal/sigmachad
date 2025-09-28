@@ -6,7 +6,7 @@ import {
   AgentTask,
   AgentResult,
   AgentEvent,
-  AgentEventTypes
+  AgentEventTypes,
 } from './types.js';
 
 /**
@@ -17,7 +17,7 @@ import {
 export abstract class BaseAgent extends EventEmitter implements IAgent {
   private _status: AgentStatus = 'idle';
   private _tasksCompleted = 0;
-  private _startTime = Date.now();
+  private readonly _startTime = Date.now();
   private _lastError?: Error;
   private _currentTask?: AgentTask;
   private _coordinator?: any; // Will be injected by registry
@@ -58,7 +58,7 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
       await this.emitAgentEvent(AgentEventTypes.TASK_STARTED, {
         taskId: task.id,
         agentId: this.metadata.id,
-        task
+        task,
       });
 
       // Execute the actual task logic
@@ -73,8 +73,8 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
         metrics: {
           startTime,
           endTime,
-          duration: endTime.getTime() - startTime.getTime()
-        }
+          duration: endTime.getTime() - startTime.getTime(),
+        },
       };
 
       this._status = 'idle';
@@ -85,13 +85,13 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
       await this.emitAgentEvent(AgentEventTypes.TASK_COMPLETED, {
         taskId: task.id,
         agentId: this.metadata.id,
-        result
+        result,
       });
 
       return result;
-
     } catch (error) {
-      this._lastError = error instanceof Error ? error : new Error(String(error));
+      this._lastError =
+        error instanceof Error ? error : new Error(String(error));
       this._status = 'failed';
       this._currentTask = undefined;
 
@@ -104,8 +104,8 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
         metrics: {
           startTime,
           endTime,
-          duration: endTime.getTime() - startTime.getTime()
-        }
+          duration: endTime.getTime() - startTime.getTime(),
+        },
       };
 
       // Emit task failed event
@@ -113,7 +113,7 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
         taskId: task.id,
         agentId: this.metadata.id,
         error: this._lastError,
-        result
+        result,
       });
 
       throw this._lastError;
@@ -166,7 +166,7 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
       status: this._status,
       uptime: Date.now() - this._startTime,
       tasksCompleted: this._tasksCompleted,
-      lastError: this._lastError
+      lastError: this._lastError,
     };
   }
 
@@ -177,11 +177,12 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
     try {
       await this.handleEvent(event);
     } catch (error) {
-      this._lastError = error instanceof Error ? error : new Error(String(error));
+      this._lastError =
+        error instanceof Error ? error : new Error(String(error));
       await this.emitAgentEvent(AgentEventTypes.ERROR, {
         agentId: this.metadata.id,
         error: this._lastError,
-        originalEvent: event
+        originalEvent: event,
       });
     }
   }
@@ -198,11 +199,13 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
    */
   private async emitAgentEvent(type: string, data: any): Promise<void> {
     const event: AgentEvent = {
-      id: `${this.metadata.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `${this.metadata.id}-${Date.now()}-${Math.random()
+        .toString(36)
+        .substring(2, 11)}`,
       type,
       agentId: this.metadata.id,
       timestamp: new Date(),
-      data
+      data,
     };
 
     // Emit locally first
@@ -258,14 +261,18 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
   /**
    * Log a message with agent context
    */
-  protected log(level: 'info' | 'warn' | 'error', message: string, data?: any): void {
+  protected log(
+    level: 'info' | 'warn' | 'error',
+    message: string,
+    data?: any
+  ): void {
     const logData = {
       timestamp: new Date().toISOString(),
       agentId: this.metadata.id,
       agentType: this.metadata.type,
       level,
       message,
-      data
+      data,
     };
 
     console.log(JSON.stringify(logData));
@@ -288,16 +295,28 @@ export abstract class BaseAgent extends EventEmitter implements IAgent {
   /**
    * Update shared state through coordinator
    */
-  protected async updateSharedState(key: string, value: any, sessionId?: string): Promise<void> {
+  protected async updateSharedState(
+    key: string,
+    value: any,
+    sessionId?: string
+  ): Promise<void> {
     if (this._coordinator) {
-      await this._coordinator.updateSharedState(this.metadata.id, key, value, sessionId);
+      await this._coordinator.updateSharedState(
+        this.metadata.id,
+        key,
+        value,
+        sessionId
+      );
     }
   }
 
   /**
    * Get shared state through coordinator
    */
-  protected async getSharedState(key: string, sessionId?: string): Promise<any> {
+  protected async getSharedState(
+    key: string,
+    sessionId?: string
+  ): Promise<any> {
     if (this._coordinator) {
       return await this._coordinator.getSharedState(key, sessionId);
     }

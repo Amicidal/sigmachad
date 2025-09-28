@@ -1,5 +1,23 @@
 # Security Metadata Integration Blueprint
 
+## Metadata
+
+- Scope: security
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: security).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
+## Desired Capabilities
+
+- [ ] Define required capabilities and acceptance criteria.
+- [ ] Note API/Graph impacts.
+
 ## 1. Overview
 Security handling is lightweight and metadata-only: Append vulnerability results from external scans (e.g., Snyk for dependencies, ESLint-security for code) directly to core KG entities (File/Symbol/Cluster) during sync or validation gates. No dedicated nodes or edges to avoid bloat—enables fast prop-based queries (e.g., `WHERE metadata.vulnerabilities.severity = 'critical'`) and traversals (e.g., impacts on a spec's cluster). Critical/high-severity vulns (CVSS >7) trigger immediate refactors via MCP tools (`validate.run` or agent tasks). Full reports offload to external storage (Postgres/S3) for audits, referenced by ID. This integrates seamlessly with KG core (relationships/clusters/benchmarks), supporting multi-agent workflows (e.g., Agent 20 fixes, updates `fixed=true`).
 

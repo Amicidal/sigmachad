@@ -133,12 +133,12 @@ export class GdsService extends EventEmitter {
 
     try {
       const result = await this.executor.callApoc("apoc.path.expand", {
-        startNode: startNode,
-        relationshipFilter: relationshipFilter,
-        labelFilter: labelFilter,
-        minLevel: minLevel,
-        maxLevel: maxLevel,
-        limit: limit,
+        startNode,
+        relationshipFilter,
+        labelFilter,
+        minLevel,
+        maxLevel,
+        limit,
       });
 
       this.emit("pathExpansion:completed", {

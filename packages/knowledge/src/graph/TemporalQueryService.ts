@@ -3,10 +3,10 @@
  * Handles temporal traversals, metrics, and complex time-based queries
  */
 
-import { EventEmitter } from "events";
-import { Neo4jService } from "../Neo4jService.js";
-import { RelationshipType } from '@memento/core';
-import { TimeRangeParams, TraversalQuery } from "../../../models/types.js";
+import { EventEmitter } from 'events';
+import { Neo4jService } from '../Neo4jService.js';
+import { RelationshipType } from '@memento/shared-types.js';
+import { TimeRangeParams, TraversalQuery } from '../../../models/types.js';
 
 export interface HistoryMetrics {
   versions: number;
@@ -35,7 +35,7 @@ export class TemporalQueryService extends EventEmitter {
 
   constructor(private neo4j: Neo4jService) {
     super();
-    this.historyEnabled = process.env.HISTORY_ENABLED !== "false";
+    this.historyEnabled = process.env.HISTORY_ENABLED !== 'false';
   }
 
   /**
@@ -71,7 +71,7 @@ export class TemporalQueryService extends EventEmitter {
       changeSetId: changeSetId || null,
     });
 
-    this.emit("edge:opened", { fromId, toId, type, timestamp: at });
+    this.emit('edge:opened', { fromId, toId, type, timestamp: at });
   }
 
   /**
@@ -100,7 +100,7 @@ export class TemporalQueryService extends EventEmitter {
       at: at.toISOString(),
     });
 
-    this.emit("edge:closed", { fromId, toId, type, timestamp: at });
+    this.emit('edge:closed', { fromId, toId, type, timestamp: at });
   }
 
   /**
@@ -113,22 +113,22 @@ export class TemporalQueryService extends EventEmitter {
       maxDepth = 3,
       relationshipTypes,
     } = query;
-    const direction = "outgoing"; // Default direction
+    const direction = 'outgoing'; // Default direction
 
     const timeCondition = atTime
       ? `WHERE r.validFrom <= $atTime AND (r.validTo IS NULL OR r.validTo > $atTime)`
-      : "";
+      : '';
 
     const relTypeFilter =
       relationshipTypes && relationshipTypes.length > 0
         ? `AND type(r) IN $relationshipTypes`
-        : "";
+        : '';
 
     const traversalQuery = `
       MATCH (start:Entity {id: $startEntityId})
       CALL apoc.path.expandConfig(start, {
         relationshipFilter: '${
-          direction === "outgoing" ? ">" : "<"
+          direction === 'outgoing' ? '>' : '<'
         }${relTypeFilter}',
         minLevel: 1,
         maxLevel: $maxDepth,

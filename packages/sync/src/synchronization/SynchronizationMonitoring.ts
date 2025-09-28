@@ -15,65 +15,15 @@ import { Conflict } from '../scm/ConflictResolution.js';
 import type {
   SessionCheckpointJobMetrics,
   SessionCheckpointJobSnapshot,
-} from '@memento/jobs';
-
-export interface SyncMetrics {
-  operationsTotal: number;
-  operationsSuccessful: number;
-  operationsFailed: number;
-  averageSyncTime: number;
-  totalEntitiesProcessed: number;
-  totalRelationshipsProcessed: number;
-  errorRate: number;
-  throughput: number; // operations per minute
-}
-
-export interface PerformanceMetrics {
-  averageParseTime: number;
-  averageGraphUpdateTime: number;
-  averageEmbeddingTime: number;
-  memoryUsage: number;
-  cacheHitRate: number;
-  ioWaitTime: number;
-}
-
-export interface HealthMetrics {
-  overallHealth: 'healthy' | 'degraded' | 'unhealthy';
-  lastSyncTime: Date;
-  consecutiveFailures: number;
-  queueDepth: number;
-  activeOperations: number;
-  systemLoad: number;
-}
-
-export interface MonitoringAlert {
-  id: string;
-  type: 'error' | 'warning' | 'info';
-  message: string;
-  timestamp: Date;
-  operationId?: string;
-  resolved: boolean;
-  resolution?: string;
-}
-
-export interface SyncLogEntry {
-  timestamp: Date;
-  level: 'debug' | 'info' | 'warn' | 'error';
-  operationId: string;
-  message: string;
-  data?: any;
-}
-
-export interface SessionSequenceAnomaly {
-  sessionId: string;
-  type: RelationshipType | string;
-  sequenceNumber: number;
-  previousSequence: number | null;
-  reason: 'duplicate' | 'out_of_order';
-  eventId?: string;
-  timestamp?: Date;
-  previousType?: RelationshipType | string | null;
-}
+} from '@memento/shared-types';
+import type {
+  SyncMetrics,
+  PerformanceMetrics,
+  HealthMetrics,
+  MonitoringAlert,
+  SyncLogEntry,
+  SessionSequenceAnomaly,
+} from '@memento/shared-types';
 
 export class SynchronizationMonitoring extends EventEmitter {
   private operations = new Map<string, SyncOperation>();
@@ -82,7 +32,10 @@ export class SynchronizationMonitoring extends EventEmitter {
   private alerts: MonitoringAlert[] = [];
   private logs: SyncLogEntry[] = [];
   private healthCheckInterval?: NodeJS.Timeout;
-  private opPhases: Map<string, { phase: string; progress: number; timestamp: Date }> = new Map();
+  private opPhases: Map<
+    string,
+    { phase: string; progress: number; timestamp: Date }
+  > = new Map();
   private sessionSequenceStats = {
     duplicates: 0,
     outOfOrder: 0,
@@ -137,9 +90,7 @@ export class SynchronizationMonitoring extends EventEmitter {
       metrics: { ...snapshot.metrics },
       deadLetters: cloneDeadLetters,
       context: normalizedContext,
-      timestamp: snapshot.timestamp
-        ? new Date(snapshot.timestamp)
-        : new Date(),
+      timestamp: snapshot.timestamp ? new Date(snapshot.timestamp) : new Date(),
     };
 
     const operationId =
@@ -230,8 +181,10 @@ export class SynchronizationMonitoring extends EventEmitter {
 
       this.log('info', operation.id, 'Operation completed successfully', {
         duration: op.endTime.getTime() - op.startTime.getTime(),
-        entitiesProcessed: operation.entitiesCreated + operation.entitiesUpdated,
-        relationshipsProcessed: operation.relationshipsCreated + operation.relationshipsUpdated,
+        entitiesProcessed:
+          operation.entitiesCreated + operation.entitiesUpdated,
+        relationshipsProcessed:
+          operation.relationshipsCreated + operation.relationshipsUpdated,
         errors: operation.errors.length,
       });
 
@@ -251,9 +204,10 @@ export class SynchronizationMonitoring extends EventEmitter {
 
       this.updateSyncMetrics(operation);
 
-      const errMsg = (error && typeof error === 'object' && 'message' in error)
-        ? String((error as any).message)
-        : (operation.errors?.[0]?.message || 'Unknown error');
+      const errMsg =
+        error && typeof error === 'object' && 'message' in error
+          ? String((error as any).message)
+          : operation.errors?.[0]?.message || 'Unknown error';
 
       this.log('error', operation.id, 'Operation failed', {
         error: errMsg,
@@ -275,9 +229,19 @@ export class SynchronizationMonitoring extends EventEmitter {
   /**
    * Record in-progress phase updates for an operation
    */
-  recordProgress(operation: SyncOperation, data: { phase: string; progress?: number }): void {
-    const prog = typeof data.progress === 'number' && isFinite(data.progress) ? data.progress : 0;
-    this.opPhases.set(operation.id, { phase: data.phase, progress: prog, timestamp: new Date() });
+  recordProgress(
+    operation: SyncOperation,
+    data: { phase: string; progress?: number }
+  ): void {
+    const prog =
+      typeof data.progress === 'number' && isFinite(data.progress)
+        ? data.progress
+        : 0;
+    this.opPhases.set(operation.id, {
+      phase: data.phase,
+      progress: prog,
+      timestamp: new Date(),
+    });
 
     this.log('info', operation.id, 'Phase update', {
       phase: data.phase,
@@ -297,7 +261,12 @@ export class SynchronizationMonitoring extends EventEmitter {
   }
 
   recordConflict(conflict: SyncConflict | Conflict): void {
-    const conflictId = 'id' in conflict ? conflict.id : `${conflict.entityId || conflict.relationshipId || 'conflict'}_${Date.now()}`;
+    const conflictId =
+      'id' in conflict
+        ? conflict.id
+        : `${
+            conflict.entityId || conflict.relationshipId || 'conflict'
+          }_${Date.now()}`;
     this.log('warn', conflictId, 'Conflict detected', {
       type: 'sync_conflict',
       entityId: (conflict as Conflict).entityId,
@@ -364,12 +333,17 @@ export class SynchronizationMonitoring extends EventEmitter {
     })();
 
     // Include the error message in the log message to aid debugging/tests
-    this.log('error', operationId, `Sync error occurred: ${normalized.message}`, {
-      file: normalized.file,
-      type: normalized.type,
-      message: normalized.message,
-      recoverable: normalized.recoverable,
-    });
+    this.log(
+      'error',
+      operationId,
+      `Sync error occurred: ${normalized.message}`,
+      {
+        file: normalized.file,
+        type: normalized.type,
+        message: normalized.message,
+        recoverable: normalized.recoverable,
+      }
+    );
 
     // Trigger alert for non-recoverable errors
     if (!normalized.recoverable) {
@@ -382,28 +356,36 @@ export class SynchronizationMonitoring extends EventEmitter {
   }
 
   private updateSyncMetrics(operation: SyncOperation): void {
-    const duration = operation.endTime ?
-      operation.endTime.getTime() - operation.startTime.getTime() : 0;
+    const duration = operation.endTime
+      ? operation.endTime.getTime() - operation.startTime.getTime()
+      : 0;
 
     // Update average sync time
-    const totalDuration = this.metrics.averageSyncTime * (this.metrics.operationsTotal - 1) + duration;
+    const totalDuration =
+      this.metrics.averageSyncTime * (this.metrics.operationsTotal - 1) +
+      duration;
     this.metrics.averageSyncTime = totalDuration / this.metrics.operationsTotal;
 
     // Update entity and relationship counts
     this.metrics.totalEntitiesProcessed +=
-      operation.entitiesCreated + operation.entitiesUpdated + operation.entitiesDeleted;
+      operation.entitiesCreated +
+      operation.entitiesUpdated +
+      operation.entitiesDeleted;
     this.metrics.totalRelationshipsProcessed +=
-      operation.relationshipsCreated + operation.relationshipsUpdated + operation.relationshipsDeleted;
+      operation.relationshipsCreated +
+      operation.relationshipsUpdated +
+      operation.relationshipsDeleted;
 
     // Update error rate
-    this.metrics.errorRate = this.metrics.operationsFailed / this.metrics.operationsTotal;
+    this.metrics.errorRate =
+      this.metrics.operationsFailed / this.metrics.operationsTotal;
 
     // Update throughput (operations per minute)
     const timeWindow = 5 * 60 * 1000; // 5 minutes
-    const recentOps = Array.from(this.operations.values())
-      .filter(op => op.endTime && Date.now() - op.endTime.getTime() < timeWindow)
-      .length;
-    this.metrics.throughput = (recentOps / 5); // operations per minute
+    const recentOps = Array.from(this.operations.values()).filter(
+      (op) => op.endTime && Date.now() - op.endTime.getTime() < timeWindow
+    ).length;
+    this.metrics.throughput = recentOps / 5; // operations per minute
   }
 
   private updatePerformanceMetrics(operation: SyncOperation): void {
@@ -442,8 +424,9 @@ export class SynchronizationMonitoring extends EventEmitter {
   getHealthMetrics(): HealthMetrics {
     const lastSyncTime = this.getLastSyncTime();
     const consecutiveFailures = this.getConsecutiveFailures();
-    const activeOperations = Array.from(this.operations.values())
-      .filter(op => op.status === 'running' || op.status === 'pending').length;
+    const activeOperations = Array.from(this.operations.values()).filter(
+      (op) => op.status === 'running' || op.status === 'pending'
+    ).length;
 
     let overallHealth: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
 
@@ -465,8 +448,8 @@ export class SynchronizationMonitoring extends EventEmitter {
 
   private getLastSyncTime(): Date {
     const completedOps = Array.from(this.operations.values())
-      .filter(op => op.endTime && op.status === 'completed')
-      .sort((a, b) => (b.endTime!.getTime() - a.endTime!.getTime()));
+      .filter((op) => op.endTime && op.status === 'completed')
+      .sort((a, b) => b.endTime!.getTime() - a.endTime!.getTime());
 
     return completedOps.length > 0 ? completedOps[0].endTime! : new Date(0);
   }
@@ -499,8 +482,9 @@ export class SynchronizationMonitoring extends EventEmitter {
   }
 
   getActiveOperations(): SyncOperation[] {
-    return Array.from(this.operations.values())
-      .filter(op => op.status === 'running' || op.status === 'pending');
+    return Array.from(this.operations.values()).filter(
+      (op) => op.status === 'running' || op.status === 'pending'
+    );
   }
 
   getOperationHistory(limit: number = 50): SyncOperation[] {
@@ -511,13 +495,13 @@ export class SynchronizationMonitoring extends EventEmitter {
 
   getAlerts(activeOnly: boolean = false): MonitoringAlert[] {
     if (activeOnly) {
-      return this.alerts.filter(alert => !alert.resolved);
+      return this.alerts.filter((alert) => !alert.resolved);
     }
     return [...this.alerts];
   }
 
   resolveAlert(alertId: string, resolution?: string): boolean {
-    const alert = this.alerts.find(a => a.id === alertId);
+    const alert = this.alerts.find((a) => a.id === alertId);
     if (alert && !alert.resolved) {
       alert.resolved = true;
       alert.resolution = resolution;
@@ -532,7 +516,9 @@ export class SynchronizationMonitoring extends EventEmitter {
     return false;
   }
 
-  private triggerAlert(alert: Omit<MonitoringAlert, 'id' | 'timestamp' | 'resolved'>): void {
+  private triggerAlert(
+    alert: Omit<MonitoringAlert, 'id' | 'timestamp' | 'resolved'>
+  ): void {
     const fullAlert: MonitoringAlert = {
       ...alert,
       id: `alert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -593,7 +579,12 @@ export class SynchronizationMonitoring extends EventEmitter {
     // Additional handling for alerts
   }
 
-  private log(level: 'debug' | 'info' | 'warn' | 'error', operationId: string, message: string, data?: any): void {
+  private log(
+    level: 'debug' | 'info' | 'warn' | 'error',
+    operationId: string,
+    message: string,
+    data?: any
+  ): void {
     const entry: SyncLogEntry = {
       timestamp: new Date(),
       level,
@@ -618,7 +609,7 @@ export class SynchronizationMonitoring extends EventEmitter {
   }
 
   getLogsByOperation(operationId: string): SyncLogEntry[] {
-    return this.logs.filter(log => log.operationId === operationId);
+    return this.logs.filter((log) => log.operationId === operationId);
   }
 
   generateReport(): {
@@ -647,8 +638,13 @@ export class SynchronizationMonitoring extends EventEmitter {
       const now = Date.now();
       const cutoff = now - 24 * 60 * 60 * 1000;
       const ops = Array.from(this.operations.values());
-      const hasOldOps = ops.some(op => op.endTime && op.endTime.getTime() < cutoff);
-      const hasRecentOps = ops.some(op => (op.endTime ? op.endTime.getTime() : op.startTime.getTime()) >= cutoff);
+      const hasOldOps = ops.some(
+        (op) => op.endTime && op.endTime.getTime() < cutoff
+      );
+      const hasRecentOps = ops.some(
+        (op) =>
+          (op.endTime ? op.endTime.getTime() : op.startTime.getTime()) >= cutoff
+      );
 
       // If we have both old and recent, do age-based cleanup; else full reset
       if (hasOldOps && hasRecentOps) {
@@ -695,9 +691,11 @@ export class SynchronizationMonitoring extends EventEmitter {
     }
 
     // Remove old alerts but preserve unresolved ones regardless of age
-    this.alerts = this.alerts.filter(alert => !alert.resolved || alert.timestamp.getTime() > cutoffTime);
+    this.alerts = this.alerts.filter(
+      (alert) => !alert.resolved || alert.timestamp.getTime() > cutoffTime
+    );
 
     // Remove old logs
-    this.logs = this.logs.filter(log => log.timestamp.getTime() > cutoffTime);
+    this.logs = this.logs.filter((log) => log.timestamp.getTime() > cutoffTime);
   }
 }

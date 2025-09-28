@@ -1,10 +1,10 @@
-import { LogEntry } from "../services/LoggingService.js";
+import { LogEntry } from '../services/LoggingService.js';
 
-export type InstrumentationSource = "console" | "process";
+export type InstrumentationSource = 'console' | 'process';
 
 export interface InstrumentationEvent {
   source: InstrumentationSource;
-  level: LogEntry["level"];
+  level: LogEntry['level'];
   component: string;
   message: string;
   data?: unknown;
@@ -40,7 +40,7 @@ interface ConsumerRecord {
   consumer: InstrumentationConsumer;
 }
 
-const GLOBAL_DISPATCHER_KEY = "__mementoLoggingDispatcher__";
+const GLOBAL_DISPATCHER_KEY = '__mementoLoggingDispatcher__';
 
 export class InstrumentationDispatcher {
   private consumers: Map<number, ConsumerRecord> = new Map();
@@ -52,7 +52,10 @@ export class InstrumentationDispatcher {
 
   private originalConsole: OriginalConsoleMethods | null = null;
   private uncaughtExceptionHandler?: (error: unknown) => void;
-  private unhandledRejectionHandler?: (reason: unknown, promise: unknown) => void;
+  private unhandledRejectionHandler?: (
+    reason: unknown,
+    promise: unknown
+  ) => void;
 
   register(consumer: InstrumentationConsumer): InstrumentationSubscription {
     const record: ConsumerRecord = {
@@ -73,29 +76,31 @@ export class InstrumentationDispatcher {
     };
   }
 
-  handleConsole(level: LogEntry["level"], args: unknown[]): void {
-    const message = args.map((part) => this.formatConsoleArg(part)).join(" ");
+  handleConsole(level: LogEntry['level'], args: unknown[]): void {
+    const message = args.map((part) => this.formatConsoleArg(part)).join(' ');
 
     this.dispatch({
-      source: "console",
+      source: 'console',
       level,
-      component: "console",
+      component: 'console',
       message,
       consoleArgs: args,
     });
   }
 
   handleProcessEvent(
-    type: "uncaughtException" | "unhandledRejection",
+    type: 'uncaughtException' | 'unhandledRejection',
     payload: unknown
   ): void {
-    if (type === "uncaughtException") {
+    if (type === 'uncaughtException') {
       const error = payload as Error;
       this.dispatch({
-        source: "process",
-        level: "error",
-        component: "process",
-        message: `Uncaught Exception: ${error instanceof Error ? error.message : String(error)}`,
+        source: 'process',
+        level: 'error',
+        component: 'process',
+        message: `Uncaught Exception: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         data:
           error instanceof Error
             ? { stack: error.stack, name: error.name }
@@ -107,15 +112,18 @@ export class InstrumentationDispatcher {
         ? (payload as [unknown, unknown])
         : [payload, undefined];
       this.dispatch({
-        source: "process",
-        level: "error",
-        component: "process",
+        source: 'process',
+        level: 'error',
+        component: 'process',
         message: `Unhandled Rejection: ${
           reason instanceof Error ? reason.message : String(reason)
         }`,
         data: {
-          promise: this.safeStringifyInline(promise ?? "[unknown promise]"),
-          reason: reason instanceof Error ? { name: reason.name, stack: reason.stack } : reason,
+          promise: this.safeStringifyInline(promise ?? '[unknown promise]'),
+          reason:
+            reason instanceof Error
+              ? { name: reason.name, stack: reason.stack }
+              : reason,
         },
         error: reason,
       });
@@ -158,7 +166,7 @@ export class InstrumentationDispatcher {
         record.consumer.handleEvent(event);
       } catch (error) {
         this.getOriginalConsole().error(
-          "Logging dispatcher consumer threw an error",
+          'Logging dispatcher consumer threw an error',
           error
         );
       }
@@ -178,49 +186,48 @@ export class InstrumentationDispatcher {
     };
 
     console.log = (...args: unknown[]) => {
-      this.handleConsole("info", args);
+      this.handleConsole('info', args);
       Reflect.apply(this.originalConsole!.log, console, args);
     };
 
     console.error = (...args: unknown[]) => {
-      this.handleConsole("error", args);
+      this.handleConsole('error', args);
       Reflect.apply(this.originalConsole!.error, console, args);
     };
 
     console.warn = (...args: unknown[]) => {
-      this.handleConsole("warn", args);
+      this.handleConsole('warn', args);
       Reflect.apply(this.originalConsole!.warn, console, args);
     };
 
     console.debug = (...args: unknown[]) => {
-      this.handleConsole("debug", args);
+      this.handleConsole('debug', args);
       Reflect.apply(this.originalConsole!.debug, console, args);
     };
 
     this.uncaughtExceptionHandler = (error: unknown) => {
-      this.handleProcessEvent("uncaughtException", error);
+      this.handleProcessEvent('uncaughtException', error);
 
       const originalConsole = this.getOriginalConsole();
       const consoleArgs =
         error instanceof Error
           ? [error]
-          : ["Uncaught exception (non-error value):", error];
+          : ['Uncaught exception (non-error value):', error];
 
       Reflect.apply(originalConsole.error, console, consoleArgs);
 
       // Ensure the process reports a failure while allowing other listeners to run.
-      if (typeof process.exitCode !== "number" || process.exitCode === 0) {
+      if (typeof process.exitCode !== 'number' || process.exitCode === 0) {
         process.exitCode = 1;
       }
-
     };
 
     this.unhandledRejectionHandler = (reason: unknown, promise: unknown) => {
-      this.handleProcessEvent("unhandledRejection", [reason, promise]);
+      this.handleProcessEvent('unhandledRejection', [reason, promise]);
     };
 
-    process.on("uncaughtException", this.uncaughtExceptionHandler);
-    process.on("unhandledRejection", this.unhandledRejectionHandler);
+    process.on('uncaughtException', this.uncaughtExceptionHandler);
+    process.on('unhandledRejection', this.unhandledRejectionHandler);
     this.processListenersAttached = 2;
 
     this.consoleOverridesActive = true;
@@ -237,12 +244,18 @@ export class InstrumentationDispatcher {
     console.debug = this.originalConsole.debug;
 
     if (this.uncaughtExceptionHandler) {
-      process.removeListener("uncaughtException", this.uncaughtExceptionHandler);
+      process.removeListener(
+        'uncaughtException',
+        this.uncaughtExceptionHandler
+      );
       this.uncaughtExceptionHandler = undefined;
     }
 
     if (this.unhandledRejectionHandler) {
-      process.removeListener("unhandledRejection", this.unhandledRejectionHandler);
+      process.removeListener(
+        'unhandledRejection',
+        this.unhandledRejectionHandler
+      );
       this.unhandledRejectionHandler = undefined;
     }
 
@@ -251,20 +264,20 @@ export class InstrumentationDispatcher {
   }
 
   private safeStringifyInline(value: unknown): string {
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       return value;
     }
 
     try {
       const serialized = JSON.stringify(value);
-      return typeof serialized === "string" ? serialized : String(value);
+      return typeof serialized === 'string' ? serialized : String(value);
     } catch (error) {
-      return `[unserializable: ${(error as Error)?.message ?? "error"}]`;
+      return `[unserializable: ${(error as Error)?.message ?? 'error'}]`;
     }
   }
 
   private formatConsoleArg(part: unknown): string {
-    if (typeof part === "string") {
+    if (typeof part === 'string') {
       return part;
     }
 
@@ -272,28 +285,28 @@ export class InstrumentationDispatcher {
       return part.stack ?? part.toString();
     }
 
-    if (typeof part === "number" || typeof part === "boolean") {
+    if (typeof part === 'number' || typeof part === 'boolean') {
       return String(part);
     }
 
-    if (typeof part === "bigint") {
+    if (typeof part === 'bigint') {
       return part.toString();
     }
 
-    if (typeof part === "symbol") {
+    if (typeof part === 'symbol') {
       return part.toString();
     }
 
-    if (typeof part === "function") {
-      return part.name ? `[Function: ${part.name}]` : "[Function]";
+    if (typeof part === 'function') {
+      return part.name ? `[Function: ${part.name}]` : '[Function]';
     }
 
     if (part === null) {
-      return "null";
+      return 'null';
     }
 
     if (part === undefined) {
-      return "undefined";
+      return 'undefined';
     }
 
     return this.safeStringifyInline(part);
@@ -305,9 +318,13 @@ export function getInstrumentationDispatcher(): InstrumentationDispatcher {
     [GLOBAL_DISPATCHER_KEY]?: InstrumentationDispatcher;
   };
 
+  // eslint-disable-next-line security/detect-object-injection
   if (!globalWithDispatcher[GLOBAL_DISPATCHER_KEY]) {
-    globalWithDispatcher[GLOBAL_DISPATCHER_KEY] = new InstrumentationDispatcher();
+    // eslint-disable-next-line security/detect-object-injection
+    globalWithDispatcher[GLOBAL_DISPATCHER_KEY] =
+      new InstrumentationDispatcher();
   }
 
+  // eslint-disable-next-line security/detect-object-injection
   return globalWithDispatcher[GLOBAL_DISPATCHER_KEY];
 }

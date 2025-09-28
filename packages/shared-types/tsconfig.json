@@ -1,7 +1,17 @@
 {
-  "extends": "./tsconfig.lib.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "declarationMap": false
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "../../dist/out-tsc",
+    "module": "CommonJS",
+    "target": "ES2020",
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "types": []
   },
-  "include": ["src/**/*.ts", "../../dynamic-libs/**/*.ts"]
+  "include": ["src/**/*"],
+  "exclude": ["**/*.spec.ts", "src/**/*.spec.ts", "src/**/*.test.ts"]
 }

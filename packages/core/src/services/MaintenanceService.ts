@@ -3,7 +3,11 @@
  * Handles system maintenance tasks including cleanup, optimization, reindexing, and validation
  */
 
-import type { IDatabaseService, IKnowledgeGraphService, ITemporalHistoryValidator } from '@memento/shared-types';
+import type {
+  IDatabaseService,
+  IKnowledgeGraphService,
+  ITemporalHistoryValidator,
+} from '@memento/shared-types';
 
 // Local error to avoid cross-package dependency on backup
 export class MaintenanceOperationError extends Error {
@@ -52,7 +56,11 @@ export class MaintenanceService {
 
     const taskId = `${taskType}_${Date.now()}`;
     const metrics = {
-      recordMaintenanceTask: (_: { taskType: string; status: 'success'|'failure'; durationMs: number }) => void 0,
+      recordMaintenanceTask: (_: {
+        taskType: string;
+        status: 'success' | 'failure';
+        durationMs: number;
+      }) => void 0,
     };
     const startedAt = Date.now();
 
@@ -64,7 +72,7 @@ export class MaintenanceService {
       estimatedDuration: this.getEstimatedDuration(taskType),
       status: 'running',
       progress: 0,
-      startTime: new Date()
+      startTime: new Date(),
     };
 
     this.activeTasks.set(taskId, task);
@@ -92,7 +100,7 @@ export class MaintenanceService {
       task.status = 'completed';
       task.endTime = new Date();
       task.progress = 100;
-      
+
       // Move completed task to completed tasks map
       this.completedTasks.set(taskId, { ...task });
 
@@ -103,12 +111,11 @@ export class MaintenanceService {
       });
 
       return result;
-
     } catch (error) {
       task.status = 'failed';
       task.endTime = new Date();
       task.error = error instanceof Error ? error.message : 'Unknown error';
-      
+
       // Move failed task to completed tasks map
       this.completedTasks.set(taskId, { ...task });
 
@@ -126,7 +133,11 @@ export class MaintenanceService {
 
   private async runCleanup(task: MaintenanceTask): Promise<MaintenanceResult> {
     const changes: Array<Record<string, unknown>> = [];
-    const stats = { entitiesRemoved: 0, relationshipsRemoved: 0, orphanedRecords: 0 };
+    const stats = {
+      entitiesRemoved: 0,
+      relationshipsRemoved: 0,
+      orphanedRecords: 0,
+    };
 
     try {
       // 1. Remove orphaned entities (entities with no relationships)
@@ -140,10 +151,14 @@ export class MaintenanceService {
       }
 
       // 2. Remove dangling relationships
-      const danglingRelationshipsCount = await this.removeDanglingRelationships();
+      const danglingRelationshipsCount =
+        await this.removeDanglingRelationships();
       stats.relationshipsRemoved += danglingRelationshipsCount;
       if (danglingRelationshipsCount > 0) {
-        changes.push({ type: 'dangling_relationships_removed', count: danglingRelationshipsCount });
+        changes.push({
+          type: 'dangling_relationships_removed',
+          count: danglingRelationshipsCount,
+        });
       }
 
       // 3. Clean up old sync operation records from PostgreSQL
@@ -151,7 +166,6 @@ export class MaintenanceService {
 
       // 4. Clean up old vector embeddings that don't have corresponding entities
       await this.cleanupOrphanedEmbeddings();
-
     } catch (error) {
       console.warn('Some cleanup operations failed:', error);
     }
@@ -161,13 +175,19 @@ export class MaintenanceService {
       success: true,
       duration: Date.now() - (task.startTime?.getTime() || 0),
       changes,
-      statistics: stats
+      statistics: stats,
     };
   }
 
-  private async runOptimization(task: MaintenanceTask): Promise<MaintenanceResult> {
+  private async runOptimization(
+    task: MaintenanceTask
+  ): Promise<MaintenanceResult> {
     const changes: Array<Record<string, unknown>> = [];
-    const stats = { optimizedCollections: 0, rebalancedIndexes: 0, vacuumedTables: 0 };
+    const stats = {
+      optimizedCollections: 0,
+      rebalancedIndexes: 0,
+      vacuumedTables: 0,
+    };
 
     try {
       // 1. Optimize Qdrant collections
@@ -178,13 +198,16 @@ export class MaintenanceService {
           await qdrantClient.updateCollection(collection.name, {
             optimizers_config: {
               default_segment_number: 2,
-              indexing_threshold: 10000
-            }
+              indexing_threshold: 10000,
+            },
           });
           stats.optimizedCollections++;
           changes.push({ type: 'collection_optimized', name: collection.name });
         } catch (error) {
-          console.warn(`Failed to optimize collection ${collection.name}:`, error);
+          console.warn(
+            `Failed to optimize collection ${collection.name}:`,
+            error
+          );
         }
       }
 
@@ -194,10 +217,9 @@ export class MaintenanceService {
       changes.push({ type: 'postgres_vacuum', tables: 'all' });
 
       // 3. Optimize Redis/FalkorDB memory
-      const falkorClient = this.dbService.getFalkorDBService();
+      const falkorClient = this.dbService.getFalkorDBService() as any;
       await falkorClient.command('MEMORY', 'PURGE');
       changes.push({ type: 'redis_memory_optimized' });
-
     } catch (error) {
       console.warn('Some optimization operations failed:', error);
     }
@@ -207,13 +229,19 @@ export class MaintenanceService {
       success: true,
       duration: Date.now() - (task.startTime?.getTime() || 0),
       changes,
-      statistics: stats
+      statistics: stats,
     };
   }
 
-  private async runReindexing(task: MaintenanceTask): Promise<MaintenanceResult> {
+  private async runReindexing(
+    task: MaintenanceTask
+  ): Promise<MaintenanceResult> {
     const changes: Array<Record<string, unknown>> = [];
-    const stats = { indexesRebuilt: 0, collectionsReindexed: 0, tablesReindexed: 0 };
+    const stats = {
+      indexesRebuilt: 0,
+      collectionsReindexed: 0,
+      tablesReindexed: 0,
+    };
 
     try {
       // 1. Reindex Qdrant collections
@@ -226,7 +254,10 @@ export class MaintenanceService {
           stats.collectionsReindexed++;
           changes.push({ type: 'collection_reindexed', name: collection.name });
         } catch (error) {
-          console.warn(`Failed to reindex collection ${collection.name}:`, error);
+          console.warn(
+            `Failed to reindex collection ${collection.name}:`,
+            error
+          );
         }
       }
 
@@ -242,7 +273,9 @@ export class MaintenanceService {
       ) as Array<{ tablename: string }>;
       for (const table of tables) {
         try {
-          await this.dbService.postgresQuery(`REINDEX TABLE ${table.tablename}`);
+          await this.dbService.postgresQuery(
+            `REINDEX TABLE ${table.tablename}`
+          );
           stats.tablesReindexed++;
           changes.push({ type: 'table_reindexed', name: table.tablename });
         } catch (error) {
@@ -253,7 +286,6 @@ export class MaintenanceService {
       // 3. Reindex FalkorDB graph
       await this.dbService.falkordbQuery('CALL db.rescan()');
       changes.push({ type: 'graph_reindexed' });
-
     } catch (error) {
       console.warn('Some reindexing operations failed:', error);
     }
@@ -263,11 +295,13 @@ export class MaintenanceService {
       success: true,
       duration: Date.now() - (task.startTime?.getTime() || 0),
       changes,
-      statistics: stats
+      statistics: stats,
     };
   }
 
-  private async runValidation(task: MaintenanceTask): Promise<MaintenanceResult> {
+  private async runValidation(
+    task: MaintenanceTask
+  ): Promise<MaintenanceResult> {
     const changes: Array<Record<string, unknown>> = [];
     const stats = {
       invalidEntities: 0,
@@ -281,19 +315,30 @@ export class MaintenanceService {
     try {
       // 1. Validate entity integrity
       const entitiesResult = await this.kgService.listEntities({ limit: 1000 });
-      for (const entity of entitiesResult.entities || entitiesResult.items || []) {
+      for (const entity of entitiesResult.entities ||
+        entitiesResult.items ||
+        []) {
         if (!this.isValidEntity(entity)) {
           stats.invalidEntities++;
-          changes.push({ type: 'invalid_entity', id: entity.id, issues: this.getEntityIssues(entity) });
+          changes.push({
+            type: 'invalid_entity',
+            id: (entity as any).id,
+            issues: this.getEntityIssues(entity),
+          });
         }
       }
 
       // 2. Validate relationship integrity
-      const relationshipsResult = await this.kgService.listRelationships({ limit: 1000 });
+      const relationshipsResult = await this.kgService.listRelationships({
+        limit: 1000,
+      });
       for (const relationship of relationshipsResult.relationships) {
         if (!(await this.isValidRelationship(relationship))) {
           stats.invalidRelationships++;
-          changes.push({ type: 'invalid_relationship', id: relationship.id });
+          changes.push({
+            type: 'invalid_relationship',
+            id: (relationship as any).id,
+          });
         }
       }
 
@@ -303,14 +348,24 @@ export class MaintenanceService {
       for (const collection of collections.collections) {
         try {
           const info = await qdrantClient.getCollection(collection.name);
-          if (info.points_count === undefined || info.points_count === null || info.points_count < 0) {
+          if (
+            info.points_count === undefined ||
+            info.points_count === null ||
+            info.points_count < 0
+          ) {
             stats.integrityIssues++;
-            changes.push({ type: 'collection_integrity_issue', name: collection.name });
+            changes.push({
+              type: 'collection_integrity_issue',
+              name: collection.name,
+            });
           }
           stats.validatedCollections++;
         } catch (error) {
           stats.integrityIssues++;
-          changes.push({ type: 'collection_validation_failed', name: collection.name });
+          changes.push({
+            type: 'collection_validation_failed',
+            name: collection.name,
+          });
         }
       }
 
@@ -319,22 +374,32 @@ export class MaintenanceService {
 
       const temporalReport = this.temporalValidator
         ? await this.temporalValidator.validate({
-          autoRepair: true,
-          dryRun: false,
-          batchSize: 25,
-          timelineLimit: 200,
-          logger: (message, context) =>
-            console.log(`temporal-validator:${message}`, context ?? {}),
-        })
-        : { issues: [], repairedLinks: 0, scannedEntities: 0, inspectedVersions: 0 };
+            autoRepair: true,
+            dryRun: false,
+            batchSize: 25,
+            timelineLimit: 200,
+            logger: (message, context) =>
+              console.log(`temporal-validator:${message}`, context ?? {}),
+          })
+        : {
+            issues: [],
+            repairedLinks: 0,
+            scannedEntities: 0,
+            inspectedVersions: 0,
+          };
 
-      const unresolvedTemporalIssues = (temporalReport.issues || []).filter((issue: any) => issue.repaired !== true).length;
+      const unresolvedTemporalIssues = (temporalReport.issues || []).filter(
+        (issue: any) => issue.repaired !== true
+      ).length;
       stats.temporalIssues += temporalReport.issues?.length ?? 0;
       stats.temporalRepairs += temporalReport.repairedLinks ?? 0;
       stats.integrityIssues += unresolvedTemporalIssues;
-      if ((temporalReport.issues?.length ?? 0) > 0 || (temporalReport.repairedLinks ?? 0) > 0) {
+      if (
+        (temporalReport.issues?.length ?? 0) > 0 ||
+        (temporalReport.repairedLinks ?? 0) > 0
+      ) {
         changes.push({
-          type: "temporal_history_validation",
+          type: 'temporal_history_validation',
           report: {
             scannedEntities: temporalReport.scannedEntities,
             inspectedVersions: temporalReport.inspectedVersions,
@@ -344,7 +409,6 @@ export class MaintenanceService {
           },
         });
       }
-
     } catch (error) {
       console.warn('Some validation operations failed:', error);
     }
@@ -354,7 +418,7 @@ export class MaintenanceService {
       success: true,
       duration: Date.now() - (task.startTime?.getTime() || 0),
       changes,
-      statistics: stats
+      statistics: stats,
     };
   }
 
@@ -368,7 +432,7 @@ export class MaintenanceService {
         LIMIT 100
       `;
       const result = await this.dbService.falkordbQuery(query);
-      return result.map((row: any) => row.id);
+      return result.data?.map((row: any) => row.id) || [];
     } catch (error) {
       console.warn('Failed to find orphaned entities:', error);
       return [];
@@ -385,7 +449,7 @@ export class MaintenanceService {
         RETURN count(r) as count
       `;
       const result = await this.dbService.falkordbQuery(query);
-      return result[0]?.count || 0;
+      return (result.data?.[0]?.[0] as number) || 0;
     } catch (error) {
       console.warn('Failed to remove dangling relationships:', error);
       return 0;
@@ -399,7 +463,9 @@ export class MaintenanceService {
 
       // This would depend on how sync records are stored in PostgreSQL
       // For now, we'll just log the intent
-      console.log(`Cleaning up sync records older than ${thirtyDaysAgo.toISOString()}`);
+      console.log(
+        `Cleaning up sync records older than ${thirtyDaysAgo.toISOString()}`
+      );
     } catch (error) {
       console.warn('Failed to cleanup old sync records:', error);
     }
@@ -422,7 +488,11 @@ export class MaintenanceService {
       await qdrantClient.getCollections();
       await this.dbService.postgresQuery('SELECT 1');
     } catch (error) {
-      throw new Error(`Database connection validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Database connection validation failed: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
     }
   }
 
@@ -442,7 +512,9 @@ export class MaintenanceService {
   private async isValidRelationship(relationship: any): Promise<boolean> {
     try {
       // Check if both entities exist
-      const fromEntity = await this.kgService.getEntity(relationship.fromEntityId);
+      const fromEntity = await this.kgService.getEntity(
+        relationship.fromEntityId
+      );
       const toEntity = await this.kgService.getEntity(relationship.toEntityId);
       return !!fromEntity && !!toEntity;
     } catch (error) {
@@ -455,17 +527,18 @@ export class MaintenanceService {
       cleanup: 'Database Cleanup',
       optimize: 'Performance Optimization',
       reindex: 'Index Rebuilding',
-      validate: 'Data Validation'
+      validate: 'Data Validation',
     };
     return names[taskType as keyof typeof names] || 'Unknown Task';
   }
 
   private getTaskDescription(taskType: string): string {
     const descriptions = {
-      cleanup: 'Remove orphaned entities and relationships, clean up old records',
+      cleanup:
+        'Remove orphaned entities and relationships, clean up old records',
       optimize: 'Optimize database performance and memory usage',
       reindex: 'Rebuild database indexes for better query performance',
-      validate: 'Validate data integrity and database consistency'
+      validate: 'Validate data integrity and database consistency',
     };
     return descriptions[taskType as keyof typeof descriptions] || '';
   }
@@ -475,7 +548,7 @@ export class MaintenanceService {
       cleanup: '2-5 minutes',
       optimize: '5-10 minutes',
       reindex: '10-15 minutes',
-      validate: '3-7 minutes'
+      validate: '3-7 minutes',
     };
     return durations[taskType as keyof typeof durations] || '5 minutes';
   }

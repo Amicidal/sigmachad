@@ -3,8 +3,8 @@
  * Handles raw Cypher execution, transactions, and database operations
  */
 
-import neo4j, { Driver, Session, Result } from "neo4j-driver";
-import { EventEmitter } from "events";
+import neo4j, { Driver, Session, Result } from 'neo4j-driver';
+import { EventEmitter } from 'events';
 
 export interface Neo4jConfig {
   uri: string;
@@ -41,7 +41,7 @@ export class CypherExecutor extends EventEmitter {
         maxTransactionRetryTime: 30000,
       }
     );
-    this.database = config.database || "neo4j";
+    this.database = config.database || 'neo4j';
   }
 
   /**
@@ -71,7 +71,7 @@ export class CypherExecutor extends EventEmitter {
         return obj;
       });
     } catch (error) {
-      this.emit("error", { query, params, error });
+      this.emit('error', { query, params, error });
       throw error;
     } finally {
       await session.close();
@@ -93,7 +93,7 @@ export class CypherExecutor extends EventEmitter {
     const transaction = session.beginTransaction();
 
     try {
-      const results = [];
+      const results: any[] = [];
       for (const { query, params = {} } of queries) {
         const result = await transaction.run(query, params);
         const records = result.records.map((record) => {
@@ -111,7 +111,7 @@ export class CypherExecutor extends EventEmitter {
       return results;
     } catch (error) {
       await transaction.rollback();
-      this.emit("transaction:error", { queries, error });
+      this.emit('transaction:error', { queries, error });
       throw error;
     } finally {
       await session.close();
@@ -128,7 +128,7 @@ export class CypherExecutor extends EventEmitter {
   ): Promise<any[]> {
     const query = `CALL ${procedure}(${Object.keys(params)
       .map((k) => `$${k}`)
-      .join(", ")})`;
+      .join(', ')})`;
     return this.executeCypher(query, params, options);
   }
 
@@ -137,10 +137,10 @@ export class CypherExecutor extends EventEmitter {
    */
   async getStats(): Promise<any> {
     const queries = [
-      "MATCH ()-[r]->() RETURN count(r) as relationships",
-      "MATCH (n) RETURN count(n) as nodes",
-      "CALL db.labels() YIELD label RETURN collect(label) as labels",
-      "CALL db.relationshipTypes() YIELD relationshipType RETURN collect(relationshipType) as relationshipTypes",
+      'MATCH ()-[r]->() RETURN count(r) as relationships',
+      'MATCH (n) RETURN count(n) as nodes',
+      'CALL db.labels() YIELD label RETURN collect(label) as labels',
+      'CALL db.relationshipTypes() YIELD relationshipType RETURN collect(relationshipType) as relationshipTypes',
     ];
 
     const results = await Promise.all(
@@ -148,12 +148,12 @@ export class CypherExecutor extends EventEmitter {
     );
 
     return {
-      nodes: results[0][0]?.nodes || 0,
-      relationships: results[1][0]?.relationships || 0,
+      nodes: results[1][0]?.nodes || 0,
+      relationships: results[0][0]?.relationships || 0,
       labels: results[2][0]?.labels || [],
       relationshipTypes: results[3][0]?.relationshipTypes || [],
-      connectionPoolSize:
-        this.driver._connectionProvider._connectionPool._maxSize,
+      // Note: connectionPoolSize removed as it accessed private properties
+      connectionPoolSize: 0,
     };
   }
 
@@ -162,13 +162,13 @@ export class CypherExecutor extends EventEmitter {
    */
   async createCommonIndexes(): Promise<void> {
     const indexQueries = [
-      "CREATE INDEX entity_id IF NOT EXISTS FOR (n:Entity) ON (n.id)",
-      "CREATE INDEX entity_type IF NOT EXISTS FOR (n:Entity) ON (n.type)",
-      "CREATE INDEX entity_path IF NOT EXISTS FOR (n:Entity) ON (n.path)",
-      "CREATE INDEX relationship_id IF NOT EXISTS FOR ()-[r]-() ON (r.id)",
-      "CREATE INDEX version_id IF NOT EXISTS FOR (n:Version) ON (n.id)",
-      "CREATE INDEX checkpoint_id IF NOT EXISTS FOR (n:Checkpoint) ON (n.id)",
-      "CREATE INDEX documentation_hash IF NOT EXISTS FOR (n:Documentation) ON (n.docHash)",
+      'CREATE INDEX entity_id IF NOT EXISTS FOR (n:Entity) ON (n.id)',
+      'CREATE INDEX entity_type IF NOT EXISTS FOR (n:Entity) ON (n.type)',
+      'CREATE INDEX entity_path IF NOT EXISTS FOR (n:Entity) ON (n.path)',
+      'CREATE INDEX relationship_id IF NOT EXISTS FOR ()-[r]-() ON (r.id)',
+      'CREATE INDEX version_id IF NOT EXISTS FOR (n:Version) ON (n.id)',
+      'CREATE INDEX checkpoint_id IF NOT EXISTS FOR (n:Checkpoint) ON (n.id)',
+      'CREATE INDEX documentation_hash IF NOT EXISTS FOR (n:Documentation) ON (n.docHash)',
     ];
 
     for (const query of indexQueries) {
@@ -186,11 +186,11 @@ export class CypherExecutor extends EventEmitter {
    */
   async getIndexHealth(): Promise<any> {
     try {
-      const result = await this.callApoc("db.indexes");
+      const result = await this.callApoc('db.indexes');
       return result;
     } catch (error) {
       // Fallback if APOC is not available
-      return this.executeCypher("CALL db.indexes()");
+      return this.executeCypher('CALL db.indexes()');
     }
   }
 
@@ -200,11 +200,11 @@ export class CypherExecutor extends EventEmitter {
   async ensureGraphIndexes(): Promise<void> {
     // Additional graph-specific indexes
     const graphIndexQueries = [
-      "CREATE INDEX entity_name IF NOT EXISTS FOR (n:Entity) ON (n.name)",
-      "CREATE INDEX entity_last_modified IF NOT EXISTS FOR (n:Entity) ON (n.lastModified)",
-      "CREATE INDEX relationship_type IF NOT EXISTS FOR ()-[r]-() ON (r.type)",
-      "CREATE INDEX temporal_edge_valid_from IF NOT EXISTS FOR ()-[r]-() ON (r.validFrom)",
-      "CREATE INDEX temporal_edge_valid_to IF NOT EXISTS FOR ()-[r]-() ON (r.validTo)",
+      'CREATE INDEX entity_name IF NOT EXISTS FOR (n:Entity) ON (n.name)',
+      'CREATE INDEX entity_last_modified IF NOT EXISTS FOR (n:Entity) ON (n.lastModified)',
+      'CREATE INDEX relationship_type IF NOT EXISTS FOR ()-[r]-() ON (r.type)',
+      'CREATE INDEX temporal_edge_valid_from IF NOT EXISTS FOR ()-[r]-() ON (r.validFrom)',
+      'CREATE INDEX temporal_edge_valid_to IF NOT EXISTS FOR ()-[r]-() ON (r.validTo)',
     ];
 
     for (const query of graphIndexQueries) {
@@ -242,7 +242,7 @@ export class CypherExecutor extends EventEmitter {
 
       // Run a batch of simple queries
       const queries = Array.from({ length: queryCount }, (_, idx) => ({
-        query: "MATCH (n) RETURN count(n) as count",
+        query: 'MATCH (n) RETURN count(n) as count',
         params: { idx },
       }));
 
@@ -270,7 +270,7 @@ export class CypherExecutor extends EventEmitter {
    */
   async close(): Promise<void> {
     await this.driver.close();
-    this.emit("closed");
+    this.emit('closed');
   }
 
   /**
@@ -283,7 +283,11 @@ export class CypherExecutor extends EventEmitter {
 
     // Handle Neo4j temporal types
     if (neo4j.isDate(value)) {
-      return new Date(value.year, value.month - 1, value.day);
+      return new Date(
+        Number(value.year),
+        Number(value.month) - 1,
+        Number(value.day)
+      );
     }
     if (neo4j.isDateTime(value)) {
       return new Date(value.toString());
@@ -304,7 +308,7 @@ export class CypherExecutor extends EventEmitter {
     if (Array.isArray(value)) {
       return value.map((item) => this.convertNeo4jValue(item));
     }
-    if (typeof value === "object" && value !== null) {
+    if (typeof value === 'object' && value !== null) {
       const converted: any = {};
       for (const [key, val] of Object.entries(value)) {
         converted[key] = this.convertNeo4jValue(val);

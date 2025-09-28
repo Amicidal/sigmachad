@@ -3,84 +3,78 @@
  * Main entry point for all API interactions (REST, WebSocket, MCP)
  */
 
-import Fastify, { FastifyInstance } from "fastify";
-import fastifyCors from "@fastify/cors";
-import fastifyWebsocket from "@fastify/websocket";
-import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
-import { createTRPCContext, appRouter } from "./trpc/router.js";
-import { KnowledgeGraphService, ASTParser, DocumentationParser } from "@memento/knowledge";
-import { DatabaseService } from "@memento/database";
-import { FileWatcher, LoggingService, MaintenanceService, ConfigurationService } from "@memento/core";
-import { SynchronizationCoordinator, SynchronizationMonitoring } from "@memento/sync/synchronization";
-import { ConflictResolution, RollbackCapabilities } from "@memento/sync/scm";
-import { TestEngine, SecurityScanner } from "@memento/testing";
-import { BackupService } from "@memento/backup";
-import { AuthContext } from "./middleware/authentication.js";
+import Fastify, { FastifyInstance } from 'fastify';
+import fastifyCors from '@fastify/cors';
+import fastifyWebsocket from '@fastify/websocket';
+import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
+import { createTRPCContext, appRouter } from './trpc/router.js';
+import {
+  KnowledgeGraphService,
+  ASTParser,
+  DocumentationParser,
+} from '@memento/knowledge';
+import { DatabaseService } from '@memento/database';
+import {
+  FileWatcher,
+  LoggingService,
+  MaintenanceService,
+  ConfigurationService,
+} from '@memento/core';
+import {
+  SynchronizationCoordinator,
+  SynchronizationMonitoring,
+} from '@memento/sync/synchronization';
+import { ConflictResolution } from '@memento/sync/scm';
+import { RollbackCapabilities } from '@memento/sync';
+import { TestEngine, SecurityScanner } from '@memento/testing';
+import { BackupService } from '@memento/backup';
+import { AuthContext } from './middleware/authentication.js';
 
 // Import route handlers
-import { registerDesignRoutes } from "./routes/design.js";
-import { registerTestRoutes } from "./routes/tests.js";
-import { registerGraphRoutes } from "./routes/graph.js";
-import { registerCodeRoutes } from "./routes/code.js";
-import { registerImpactRoutes } from "./routes/impact.js";
+import { registerDesignRoutes } from './routes/design.js';
+import { registerTestRoutes } from './routes/tests.js';
+import { registerGraphRoutes } from './routes/graph.js';
+import { registerCodeRoutes } from './routes/code.js';
+import { registerImpactRoutes } from './routes/impact.js';
 import { registerVDBRoutes } from './routes/vdb.js';
-import { registerSCMRoutes } from "./routes/scm.js";
-import { registerDocsRoutes } from "./routes/docs.js";
-import { registerSecurityRoutes } from "./routes/security.js";
-import { registerHistoryRoutes } from "./routes/history.js";
-import fastifyStatic from "@fastify/static";
-import path from "path";
-import { registerAdminUIRoutes } from "./routes/admin-ui.js";
-import { registerAssetsProxyRoutes } from "./routes/assets.js";
-import { registerGraphViewerRoutes } from "./routes/graph-subgraph.js";
-import { registerAdminRoutes } from "./routes/admin.js";
-import { MCPRouter } from "./mcp-router.js";
-import { WebSocketRouter } from "./websocket-router.js";
-import { sanitizeInput } from "./middleware/validation.js";
+import { registerSCMRoutes } from './routes/scm.js';
+import { registerDocsRoutes } from './routes/docs.js';
+import { registerSecurityRoutes } from './routes/security.js';
+import { registerHistoryRoutes } from './routes/history.js';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
+import { registerAdminUIRoutes } from './routes/admin-ui.js';
+import { registerAssetsProxyRoutes } from './routes/assets.js';
+import { registerGraphViewerRoutes } from './routes/graph-subgraph.js';
+import { registerAdminRoutes } from './routes/admin.js';
+import { MCPRouter } from './mcp-router.js';
+import { WebSocketRouter } from './websocket-router.js';
+import { sanitizeInput } from './middleware/validation.js';
 import {
   defaultRateLimit,
   searchRateLimit,
   adminRateLimit,
   startCleanupInterval,
-} from "./middleware/rate-limiting.js";
+} from './middleware/rate-limiting.js';
 import {
   authenticateRequest,
   sendAuthError,
   scopesSatisfyRequirement,
-} from "./middleware/authentication.js";
-import jwt from "jsonwebtoken";
+} from './middleware/authentication.js';
+import jwt from 'jsonwebtoken';
 import {
   DEFAULT_SCOPE_RULES,
   ScopeCatalog,
   ScopeRequirement,
   ScopeRule,
-} from "./middleware/scope-catalog.js";
-import { RefreshSessionStore } from "./middleware/refresh-session-store.js";
-import { randomUUID } from "crypto";
-import { isApiKeyRegistryConfigured } from "./middleware/api-key-registry.js";
-
-export interface APIGatewayConfig {
-  port: number;
-  host: string;
-  cors: {
-    origin: string | string[];
-    credentials: boolean;
-  };
-  rateLimit: {
-    max: number;
-    timeWindow: string;
-  };
-  auth?: {
-    scopeRules?: ScopeRule[];
-  };
-}
-
-export interface SynchronizationServices {
-  syncCoordinator?: SynchronizationCoordinator;
-  syncMonitor?: SynchronizationMonitoring;
-  conflictResolver?: ConflictResolution;
-  rollbackCapabilities?: RollbackCapabilities;
-}
+} from './middleware/scope-catalog.js';
+import { RefreshSessionStore } from './middleware/refresh-session-store.js';
+import { randomUUID } from 'crypto';
+import { isApiKeyRegistryConfigured } from './middleware/api-key-registry.js';
+import {
+  APIGatewayConfig,
+  SynchronizationServices,
+} from '@memento/shared-types.js';
 
 export class APIGateway {
   private app: FastifyInstance;
@@ -124,20 +118,20 @@ export class APIGateway {
       port:
         config.port !== undefined
           ? config.port
-          : process.env.NODE_ENV === "test"
+          : process.env.NODE_ENV === 'test'
           ? 0
           : 3000,
-      host: config.host || "0.0.0.0",
+      host: config.host || '0.0.0.0',
       cors: {
         origin: config.cors?.origin || [
-          "http://localhost:3000",
-          "http://localhost:5173",
+          'http://localhost:3000',
+          'http://localhost:5173',
         ],
         credentials: config.cors?.credentials ?? true,
       },
       rateLimit: {
         max: config.rateLimit?.max || 100,
-        timeWindow: config.rateLimit?.timeWindow || "1 minute",
+        timeWindow: config.rateLimit?.timeWindow || '1 minute',
       },
       auth: {
         scopeRules: [...initialScopeRules],
@@ -148,7 +142,7 @@ export class APIGateway {
 
     this.app = Fastify({
       logger: {
-        level: process.env.LOG_LEVEL || "info",
+        level: process.env.LOG_LEVEL || 'info',
       },
       disableRequestLogging: false,
       ignoreTrailingSlash: true,
@@ -193,7 +187,7 @@ export class APIGateway {
     );
 
     // Initialize Admin Services
-    this.loggingService = new LoggingService("./logs/memento.log");
+    this.loggingService = new LoggingService('./logs/memento.log');
     this.backupService = new BackupService(
       this.dbService,
       this.dbService.getConfig(),
@@ -218,33 +212,32 @@ export class APIGateway {
     const anyApp: any = this.app as any;
     const originalHasRoute = anyApp.hasRoute;
     if (
-      typeof originalHasRoute !== "function" ||
+      typeof originalHasRoute !== 'function' ||
       originalHasRoute.length !== 2
     ) {
       anyApp.hasRoute = (method: string, path: string): boolean => {
         try {
-          if (typeof originalHasRoute === "function") {
+          if (typeof originalHasRoute === 'function') {
             // Fastify may expect a single options object
             const res = originalHasRoute.call(anyApp, {
               method: method.toUpperCase(),
               url: path,
             });
-            if (typeof res === "boolean") return res;
+            if (typeof res === 'boolean') return res;
           }
         } catch {
           // ignore and fall back
         }
         try {
-          if (typeof anyApp.printRoutes === "function") {
+          if (typeof anyApp.printRoutes === 'function') {
             const routesStr = String(anyApp.printRoutes());
-            const m = String(method || "").toUpperCase();
+            const m = String(method || '').toUpperCase();
             // Build a conservative regex to find exact METHOD + SPACE + PATH on a single line
             const escape = (s: string) =>
-              s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            // eslint-disable-next-line no-useless-escape
+              s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const pattern = new RegExp(
-              `(^|\n)\s*${escape(m)}\s+${escape(path)}(\s|$)`,
-              "m"
+              `(^|\n)\\s*${escape(m)}\\s+${escape(path)}(\\s|$)`,
+              'm'
             );
             return pattern.test(routesStr);
           }
@@ -257,34 +250,34 @@ export class APIGateway {
   }
 
   private setupMiddleware(): void {
-    this.app.decorateRequest("auth", undefined as AuthContext | undefined);
+    this.app.decorateRequest('auth', undefined as AuthContext | undefined);
 
     // Preflight handler to return 200 (tests expect 200, not default 204)
-    this.app.addHook("onRequest", async (request, reply) => {
-      if (request.method === "OPTIONS") {
-        const origin = request.headers["origin"] as string | undefined;
-        const reqMethod = request.headers["access-control-request-method"] as
+    this.app.addHook('onRequest', async (request, reply) => {
+      if (request.method === 'OPTIONS') {
+        const origin = request.headers['origin'] as string | undefined;
+        const reqMethod = request.headers['access-control-request-method'] as
           | string
           | undefined;
-        const reqHeaders = request.headers["access-control-request-headers"] as
+        const reqHeaders = request.headers['access-control-request-headers'] as
           | string
           | undefined;
 
         const allowed = this.isOriginAllowed(origin);
         reply.header(
-          "access-control-allow-origin",
-          allowed ? (origin as string) : "*"
+          'access-control-allow-origin',
+          allowed ? (origin as string) : '*'
         );
         reply.header(
-          "access-control-allow-methods",
-          reqMethod || "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+          'access-control-allow-methods',
+          reqMethod || 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
         );
         reply.header(
-          "access-control-allow-headers",
-          reqHeaders || "content-type,authorization"
+          'access-control-allow-headers',
+          reqHeaders || 'content-type,authorization'
         );
         if (this.config.cors.credentials) {
-          reply.header("access-control-allow-credentials", "true");
+          reply.header('access-control-allow-credentials', 'true');
         }
         return reply.status(200).send();
       }
@@ -297,42 +290,42 @@ export class APIGateway {
     this.app.register(fastifyWebsocket);
 
     // Global input sanitization
-    this.app.addHook("onRequest", async (request, reply) => {
+    this.app.addHook('onRequest', async (request, reply) => {
       await sanitizeInput()(request, reply);
     });
 
     // Global rate limiting
-    this.app.addHook("onRequest", async (request, reply) => {
+    this.app.addHook('onRequest', async (request, reply) => {
       await defaultRateLimit(request, reply);
     });
 
     // Specific rate limiting for search endpoints
-    this.app.addHook("onRequest", async (request, reply) => {
-      if (request.url.includes("/search")) {
+    this.app.addHook('onRequest', async (request, reply) => {
+      if (request.url.includes('/search')) {
         await searchRateLimit(request, reply);
       }
     });
 
     // Specific rate limiting for admin endpoints
-    this.app.addHook("onRequest", async (request, reply) => {
-      if (request.url.includes("/admin")) {
+    this.app.addHook('onRequest', async (request, reply) => {
+      if (request.url.includes('/admin')) {
         await adminRateLimit(request, reply);
       }
     });
 
     // Simple auth guard for admin/history endpoints (optional; enabled when ADMIN_API_TOKEN is set)
-    this.app.addHook("onRequest", async (request, reply) => {
+    this.app.addHook('onRequest', async (request, reply) => {
       try {
         const needsAuth =
-          request.url.startsWith("/api/v1/admin") ||
-          request.url.startsWith("/api/v1/history");
-        const token = process.env.ADMIN_API_TOKEN || "";
+          request.url.startsWith('/api/v1/admin') ||
+          request.url.startsWith('/api/v1/history');
+        const token = process.env.ADMIN_API_TOKEN || '';
         if (needsAuth && token) {
           const headerKey =
-            (request.headers["x-api-key"] as string | undefined) || "";
+            (request.headers['x-api-key'] as string | undefined) || '';
           const authz =
-            (request.headers["authorization"] as string | undefined) || "";
-          const bearer = authz.toLowerCase().startsWith("bearer ")
+            (request.headers['authorization'] as string | undefined) || '';
+          const bearer = authz.toLowerCase().startsWith('bearer ')
             ? authz.slice(7)
             : authz;
           const ok = headerKey === token || bearer === token;
@@ -340,8 +333,8 @@ export class APIGateway {
             reply.status(401).send({
               success: false,
               error: {
-                code: "UNAUTHORIZED",
-                message: "Missing or invalid API key for admin/history",
+                code: 'UNAUTHORIZED',
+                message: 'Missing or invalid API key for admin/history',
               },
             });
           }
@@ -352,23 +345,23 @@ export class APIGateway {
     });
 
     // Request ID middleware
-    this.app.addHook("onRequest", (request, reply, done) => {
+    this.app.addHook('onRequest', (request, reply, done) => {
       request.id =
-        (request.headers["x-request-id"] as string) || this.generateRequestId();
-      reply.header("x-request-id", request.id);
+        (request.headers['x-request-id'] as string) || this.generateRequestId();
+      reply.header('x-request-id', request.id);
       done();
     });
 
     // Request logging middleware (reduced for performance tests)
-    this.app.addHook("onRequest", (request, reply, done) => {
+    this.app.addHook('onRequest', (request, reply, done) => {
       if (
-        process.env.NODE_ENV !== "test" &&
-        process.env.RUN_INTEGRATION !== "1"
+        process.env.NODE_ENV !== 'test' &&
+        process.env.RUN_INTEGRATION !== '1'
       ) {
         request.log.info({
           method: request.method,
           url: request.url,
-          userAgent: request.headers["user-agent"],
+          userAgent: request.headers['user-agent'],
           ip: request.ip,
         });
       }
@@ -376,10 +369,10 @@ export class APIGateway {
     });
 
     // Response logging middleware (reduced for performance tests)
-    this.app.addHook("onResponse", (request, reply, done) => {
+    this.app.addHook('onResponse', (request, reply, done) => {
       if (
-        process.env.NODE_ENV !== "test" &&
-        process.env.RUN_INTEGRATION !== "1"
+        process.env.NODE_ENV !== 'test' &&
+        process.env.RUN_INTEGRATION !== '1'
       ) {
         request.log.info({
           statusCode: reply.statusCode,
@@ -389,15 +382,15 @@ export class APIGateway {
       done();
     });
 
-    this.app.addHook("preHandler", async (request, reply) => {
-      if (request.method === "OPTIONS") {
+    this.app.addHook('preHandler', async (request, reply) => {
+      if (request.method === 'OPTIONS') {
         return;
       }
 
       const rawUrl =
-        (request.raw?.url && request.raw.url.split("?")[0]) ||
-        (request.url && request.url.split("?")[0]) ||
-        "/";
+        (request.raw?.url && request.raw.url.split('?')[0]) ||
+        (request.url && request.url.split('?')[0]) ||
+        '/';
       const requirement = this.resolveScopeRequirement(request.method, rawUrl);
       const authEnabled = this.isAuthEnforced();
 
@@ -405,12 +398,12 @@ export class APIGateway {
       request.auth = authContext;
 
       const logDecision = (
-        decision: "granted" | "denied",
+        decision: 'granted' | 'denied',
         info?: Record<string, unknown>
       ) => {
         authContext.decision = decision;
         const auditPayload = {
-          event: "auth.decision",
+          event: 'auth.decision',
           decision,
           tokenType: authContext.tokenType,
           userId: authContext.user?.userId,
@@ -422,25 +415,25 @@ export class APIGateway {
           ip: request.ip,
           ...info,
         };
-        request.log.info(auditPayload, "Authorization decision evaluated");
+        request.log.info(auditPayload, 'Authorization decision evaluated');
         this.loggingService?.info(
-          "auth",
-          "Authorization decision evaluated",
+          'auth',
+          'Authorization decision evaluated',
           auditPayload
         );
       };
 
       if (authContext.scopes.length > 0) {
-        reply.header("x-auth-scopes", authContext.scopes.join(" "));
+        reply.header('x-auth-scopes', authContext.scopes.join(' '));
       }
 
       if (requirement?.scopes?.length) {
-        reply.header("x-auth-required-scopes", requirement.scopes.join(" "));
+        reply.header('x-auth-required-scopes', requirement.scopes.join(' '));
       }
 
       if (!authEnabled) {
         authContext.requiredScopes = requirement?.scopes;
-        logDecision("granted", { bypass: true });
+        logDecision('granted', { bypass: true });
         return;
       }
 
@@ -457,50 +450,50 @@ export class APIGateway {
         > = {
           INVALID_API_KEY: {
             status: 401,
-            code: "INVALID_API_KEY",
-            message: "Invalid API key provided",
-            remediation: "Generate a new API key or verify the credential",
-            reason: "invalid_api_key",
+            code: 'INVALID_API_KEY',
+            message: 'Invalid API key provided',
+            remediation: 'Generate a new API key or verify the credential',
+            reason: 'invalid_api_key',
           },
           TOKEN_EXPIRED: {
             status: 401,
-            code: "TOKEN_EXPIRED",
-            message: "Authentication token has expired",
-            remediation: "Request a new access token",
-            reason: "token_expired",
+            code: 'TOKEN_EXPIRED',
+            message: 'Authentication token has expired',
+            remediation: 'Request a new access token',
+            reason: 'token_expired',
           },
           MISSING_BEARER: {
             status: 401,
-            code: "UNAUTHORIZED",
-            message: "Bearer authentication scheme is required",
+            code: 'UNAUTHORIZED',
+            message: 'Bearer authentication scheme is required',
             remediation: "Prefix the Authorization header with 'Bearer '",
-            reason: "missing_bearer",
+            reason: 'missing_bearer',
           },
           INVALID_TOKEN: {
             status: 401,
-            code: "INVALID_TOKEN",
-            message: "Invalid authentication token",
-            remediation: "Obtain a valid token before retrying",
-            reason: "invalid_token",
+            code: 'INVALID_TOKEN',
+            message: 'Invalid authentication token',
+            remediation: 'Obtain a valid token before retrying',
+            reason: 'invalid_token',
           },
           MISSING_SCOPES: {
             status: 401,
-            code: "INVALID_TOKEN",
-            message: "Authentication token is missing required scopes",
-            remediation: "Issue the token with the expected scopes",
-            reason: "missing_scopes",
+            code: 'INVALID_TOKEN',
+            message: 'Authentication token is missing required scopes',
+            remediation: 'Issue the token with the expected scopes',
+            reason: 'missing_scopes',
           },
           CHECKSUM_MISMATCH: {
             status: 401,
-            code: "CHECKSUM_MISMATCH",
-            message: "API key registry integrity validation failed",
-            remediation: "Rotate the API key and update the registry entry",
-            reason: "checksum_mismatch",
+            code: 'CHECKSUM_MISMATCH',
+            message: 'API key registry integrity validation failed',
+            remediation: 'Rotate the API key and update the registry entry',
+            reason: 'checksum_mismatch',
           },
         };
 
         const errorDescriptor = tokenErrorMap[authContext.tokenError];
-        logDecision("denied");
+        logDecision('denied');
         return sendAuthError(
           reply,
           request,
@@ -520,51 +513,51 @@ export class APIGateway {
       }
 
       if (!requirement) {
-        logDecision("granted");
+        logDecision('granted');
         return;
       }
 
       authContext.requiredScopes = requirement.scopes;
 
       if (
-        authContext.tokenType === "anonymous" &&
-        requirement.scopes?.includes("session:refresh") &&
-        request.method === "POST" &&
-        rawUrl === "/api/v1/auth/refresh"
+        authContext.tokenType === 'anonymous' &&
+        requirement.scopes?.includes('session:refresh') &&
+        request.method === 'POST' &&
+        rawUrl === '/api/v1/auth/refresh'
       ) {
-        logDecision("granted", { bypass: "refresh_token_exchange" });
+        logDecision('granted', { bypass: 'refresh_token_exchange' });
         return;
       }
 
-      if (authContext.tokenType === "anonymous") {
-        logDecision("denied", { reason: "anonymous access" });
+      if (authContext.tokenType === 'anonymous') {
+        logDecision('denied', { reason: 'anonymous access' });
         return sendAuthError(
           reply,
           request,
           401,
-          "UNAUTHORIZED",
-          "Authentication is required for this endpoint",
+          'UNAUTHORIZED',
+          'Authentication is required for this endpoint',
           {
-            reason: "authentication_required",
+            reason: 'authentication_required',
             detail: requirement.description,
-            remediation: "Attach a valid token with the required scopes",
+            remediation: 'Attach a valid token with the required scopes',
             requiredScopes: requirement.scopes,
           }
         );
       }
 
       if (!scopesSatisfyRequirement(authContext.scopes, requirement.scopes)) {
-        logDecision("denied", { reason: "insufficient_scope" });
+        logDecision('denied', { reason: 'insufficient_scope' });
         return sendAuthError(
           reply,
           request,
           403,
-          "INSUFFICIENT_SCOPES",
-          "Provided credentials do not include the required scopes",
+          'INSUFFICIENT_SCOPES',
+          'Provided credentials do not include the required scopes',
           {
-            reason: "insufficient_scope",
+            reason: 'insufficient_scope',
             remediation:
-              "Re-issue the token with the scopes demanded by this route",
+              'Re-issue the token with the scopes demanded by this route',
             tokenType: authContext.tokenType,
             requiredScopes: requirement.scopes,
             providedScopes: authContext.scopes,
@@ -573,44 +566,44 @@ export class APIGateway {
       }
 
       if (authContext.user?.userId) {
-        reply.header("x-auth-subject", authContext.user.userId);
+        reply.header('x-auth-subject', authContext.user.userId);
       }
 
-      logDecision("granted");
+      logDecision('granted');
     });
 
     // Security headers (minimal set for tests)
-    this.app.addHook("onSend", async (_request, reply, payload) => {
+    this.app.addHook('onSend', async (_request, reply, payload) => {
       // Prevent MIME sniffing
-      reply.header("x-content-type-options", "nosniff");
+      reply.header('x-content-type-options', 'nosniff');
       // Clickjacking protection
-      reply.header("x-frame-options", "DENY");
+      reply.header('x-frame-options', 'DENY');
       // Basic XSS protection header (legacy but expected by tests)
-      reply.header("x-xss-protection", "1; mode=block");
+      reply.header('x-xss-protection', '1; mode=block');
       return payload;
     });
   }
 
   private setupRoutes(): void {
     // Health check endpoint - optimized with caching
-    this.app.get("/health", async (request, reply) => {
+    this.app.get('/health', async (request, reply) => {
       const now = Date.now();
 
       // For performance tests, use cached health check if available and recent
       // But skip cache in tests that might have mocked services
       if (
-        process.env.NODE_ENV === "test" ||
-        process.env.RUN_INTEGRATION === "1"
+        process.env.NODE_ENV === 'test' ||
+        process.env.RUN_INTEGRATION === '1'
       ) {
         if (
           this.healthCheckCache &&
           now - this.healthCheckCache.timestamp < this.HEALTH_CACHE_TTL &&
           // Skip cache if this is a health check test (indicated by request header)
-          !request.headers["x-test-health-check"]
+          !request.headers['x-test-health-check']
         ) {
           const isHealthy = Object.values(
             this.healthCheckCache.data.services
-          ).every((s: any) => s?.status !== "unhealthy");
+          ).every((s: any) => s?.status !== 'unhealthy');
           reply.status(isHealthy ? 200 : 503).send(this.healthCheckCache.data);
           return;
         }
@@ -623,16 +616,16 @@ export class APIGateway {
       const services = {
         ...dbHealth,
         mcp: {
-          status: mcpValidation.isValid ? "healthy" : ("unhealthy" as const),
+          status: mcpValidation.isValid ? 'healthy' : ('unhealthy' as const),
         },
       } as const;
 
       const isHealthy = Object.values(services).every(
-        (s: any) => s?.status !== "unhealthy"
+        (s: any) => s?.status !== 'unhealthy'
       );
 
       const response = {
-        status: isHealthy ? "healthy" : "unhealthy",
+        status: isHealthy ? 'healthy' : 'unhealthy',
         timestamp: new Date().toISOString(),
         services,
         uptime: process.uptime(),
@@ -644,8 +637,8 @@ export class APIGateway {
 
       // Cache the result for performance tests
       if (
-        process.env.NODE_ENV === "test" ||
-        process.env.RUN_INTEGRATION === "1"
+        process.env.NODE_ENV === 'test' ||
+        process.env.RUN_INTEGRATION === '1'
       ) {
         this.healthCheckCache = {
           data: response,
@@ -657,23 +650,23 @@ export class APIGateway {
     });
 
     // OpenAPI documentation endpoint
-    this.app.get("/docs", async (request, reply) => {
-      const { openApiSpec } = await import("./trpc/openapi.js");
+    this.app.get('/docs', async (request, reply) => {
+      const { openApiSpec } = await import('./trpc/openapi.js');
       reply.send(openApiSpec);
     });
 
     // Convenience root aliases for common admin endpoints (no prefix)
     // Forward POST /sync -> /api/v1/sync
-    this.app.post("/sync", async (request, reply) => {
+    this.app.post('/sync', async (request, reply) => {
       const res = await (this.app as any).inject({
-        method: "POST",
-        url: "/api/v1/sync",
+        method: 'POST',
+        url: '/api/v1/sync',
         headers: {
-          "content-type":
-            (request.headers["content-type"] as string) || "application/json",
+          'content-type':
+            (request.headers['content-type'] as string) || 'application/json',
         },
         payload:
-          typeof request.body === "string"
+          typeof request.body === 'string'
             ? request.body
             : JSON.stringify(request.body ?? {}),
       });
@@ -681,25 +674,25 @@ export class APIGateway {
     });
 
     // Forward GET /sync-status -> /api/v1/sync-status
-    this.app.get("/sync-status", async (_request, reply) => {
+    this.app.get('/sync-status', async (_request, reply) => {
       const res = await (this.app as any).inject({
-        method: "GET",
-        url: "/api/v1/sync-status",
+        method: 'GET',
+        url: '/api/v1/sync-status',
       });
       reply.status(res.statusCode).send(res.body ?? res.payload);
     });
 
     // Forward POST /sync/pause -> /api/v1/sync/pause
-    this.app.post("/sync/pause", async (request, reply) => {
+    this.app.post('/sync/pause', async (request, reply) => {
       const res = await (this.app as any).inject({
-        method: "POST",
-        url: "/api/v1/sync/pause",
+        method: 'POST',
+        url: '/api/v1/sync/pause',
         headers: {
-          "content-type":
-            (request.headers["content-type"] as string) || "application/json",
+          'content-type':
+            (request.headers['content-type'] as string) || 'application/json',
         },
         payload:
-          typeof request.body === "string"
+          typeof request.body === 'string'
             ? request.body
             : JSON.stringify(request.body ?? {}),
       });
@@ -707,16 +700,16 @@ export class APIGateway {
     });
 
     // Forward POST /sync/resume -> /api/v1/sync/resume
-    this.app.post("/sync/resume", async (request, reply) => {
+    this.app.post('/sync/resume', async (request, reply) => {
       const res = await (this.app as any).inject({
-        method: "POST",
-        url: "/api/v1/sync/resume",
+        method: 'POST',
+        url: '/api/v1/sync/resume',
         headers: {
-          "content-type":
-            (request.headers["content-type"] as string) || "application/json",
+          'content-type':
+            (request.headers['content-type'] as string) || 'application/json',
         },
         payload:
-          typeof request.body === "string"
+          typeof request.body === 'string'
             ? request.body
             : JSON.stringify(request.body ?? {}),
       });
@@ -724,25 +717,25 @@ export class APIGateway {
     });
 
     // Forward admin-prefixed root aliases for compatibility
-    this.app.post("/admin/sync", async (request, reply) => {
+    this.app.post('/admin/sync', async (request, reply) => {
       const res = await (this.app as any).inject({
-        method: "POST",
-        url: "/api/v1/sync",
+        method: 'POST',
+        url: '/api/v1/sync',
         headers: {
-          "content-type":
-            (request.headers["content-type"] as string) || "application/json",
+          'content-type':
+            (request.headers['content-type'] as string) || 'application/json',
         },
         payload:
-          typeof request.body === "string"
+          typeof request.body === 'string'
             ? request.body
             : JSON.stringify(request.body ?? {}),
       });
       reply.status(res.statusCode).send(res.body ?? res.payload);
     });
-    this.app.get("/admin/sync-status", async (_request, reply) => {
+    this.app.get('/admin/sync-status', async (_request, reply) => {
       const res = await (this.app as any).inject({
-        method: "GET",
-        url: "/api/v1/sync-status",
+        method: 'GET',
+        url: '/api/v1/sync-status',
       });
       reply.status(res.statusCode).send(res.body ?? res.payload);
     });
@@ -751,9 +744,9 @@ export class APIGateway {
     try {
       const staticDir = path.resolve(
         process.cwd(),
-        "web",
-        "graph-viewer",
-        "dist"
+        'web',
+        'graph-viewer',
+        'dist'
       );
 
       // Encapsulate under a prefix to avoid route collisions and enable SPA fallback
@@ -768,30 +761,30 @@ export class APIGateway {
           // SPA fallback: for any not-found within /ui/graph, serve index.html
           app.setNotFoundHandler(async (_req, reply) => {
             try {
-              return (reply as any).sendFile("index.html");
+              return (reply as any).sendFile('index.html');
             } catch {
               reply.code(404).send({
                 success: false,
                 error: {
-                  code: "NOT_BUILT",
-                  message: "Graph viewer not built. Run web build.",
+                  code: 'NOT_BUILT',
+                  message: 'Graph viewer not built. Run web build.',
                 },
               });
             }
           });
         },
-        { prefix: "/ui/graph" }
+        { prefix: '/ui/graph' }
       );
     } catch (e) {
-      console.warn("Graph viewer static not available at startup:", e);
+      console.warn('Graph viewer static not available at startup:', e);
     }
     registerAdminUIRoutes(this.app, this.kgService, this.dbService);
     registerAssetsProxyRoutes(this.app);
 
     // Test route to verify registration is working
-    this.app.get("/api/v1/test", async (request, reply) => {
+    this.app.get('/api/v1/test', async (request, reply) => {
       reply.send({
-        message: "Route registration is working!",
+        message: 'Route registration is working!',
         timestamp: new Date().toISOString(),
       });
     });
@@ -799,10 +792,10 @@ export class APIGateway {
     // API v1 routes
     this.app.register(
       async (app) => {
-        app.post("/auth/refresh", async (request, reply) => {
+        app.post('/auth/refresh', async (request, reply) => {
           const body = (request.body ?? {}) as { refreshToken?: string };
           const refreshToken =
-            typeof body.refreshToken === "string"
+            typeof body.refreshToken === 'string'
               ? body.refreshToken
               : undefined;
 
@@ -811,15 +804,15 @@ export class APIGateway {
               reply,
               request,
               401,
-              "INVALID_TOKEN",
-              "Refresh token is required",
+              'INVALID_TOKEN',
+              'Refresh token is required',
               {
-                reason: "missing_refresh_token",
-                detail: "Missing refreshToken in request payload",
+                reason: 'missing_refresh_token',
+                detail: 'Missing refreshToken in request payload',
                 remediation:
-                  "Include a valid refresh token in the request body",
-                tokenType: "jwt",
-                requiredScopes: ["session:refresh"],
+                  'Include a valid refresh token in the request body',
+                tokenType: 'jwt',
+                requiredScopes: ['session:refresh'],
               }
             );
           }
@@ -830,52 +823,52 @@ export class APIGateway {
               reply,
               request,
               500,
-              "SERVER_MISCONFIGURED",
-              "Refresh token could not be validated",
+              'SERVER_MISCONFIGURED',
+              'Refresh token could not be validated',
               {
-                reason: "server_misconfigured",
-                detail: "JWT_SECRET is not configured",
+                reason: 'server_misconfigured',
+                detail: 'JWT_SECRET is not configured',
                 remediation:
-                  "Set JWT_SECRET before invoking the refresh endpoint",
-                requiredScopes: ["session:refresh"],
+                  'Set JWT_SECRET before invoking the refresh endpoint',
+                requiredScopes: ['session:refresh'],
               }
             );
           }
 
           try {
             const payload = jwt.verify(refreshToken, secret) as jwt.JwtPayload;
-            if (payload.type && payload.type !== "refresh") {
+            if (payload.type && payload.type !== 'refresh') {
               return sendAuthError(
                 reply,
                 request,
                 401,
-                "INVALID_TOKEN",
-                "Refresh token is invalid",
+                'INVALID_TOKEN',
+                'Refresh token is invalid',
                 {
-                  reason: "invalid_token_type",
+                  reason: 'invalid_token_type',
                   detail: `Unexpected token type: ${payload.type}`,
-                  remediation: "Provide a token minted for the refresh flow",
-                  tokenType: "jwt",
+                  remediation: 'Provide a token minted for the refresh flow',
+                  tokenType: 'jwt',
                   providedScopes: Array.isArray(payload.scopes)
                     ? (payload.scopes as string[])
                     : undefined,
-                  requiredScopes: ["session:refresh"],
+                  requiredScopes: ['session:refresh'],
                 }
               );
             }
 
             const sessionIdFromPayload =
-              typeof (payload as any)?.sessionId === "string"
+              typeof (payload as any)?.sessionId === 'string'
                 ? ((payload as any).sessionId as string)
-                : typeof payload.sub === "string"
+                : typeof payload.sub === 'string'
                 ? payload.sub
                 : undefined;
             const rotationIdFromPayload =
-              typeof (payload as any)?.rotationId === "string"
+              typeof (payload as any)?.rotationId === 'string'
                 ? ((payload as any).rotationId as string)
                 : undefined;
             const tokenExpiresAt =
-              typeof payload.exp === "number"
+              typeof payload.exp === 'number'
                 ? (payload.exp as number)
                 : undefined;
 
@@ -890,53 +883,53 @@ export class APIGateway {
                 reply,
                 request,
                 401,
-                "TOKEN_REPLAY",
-                "Refresh token has already been exchanged",
+                'TOKEN_REPLAY',
+                'Refresh token has already been exchanged',
                 {
-                  reason: "token_replayed",
-                  remediation: "Sign in again to obtain a fresh refresh token",
-                  tokenType: "jwt",
+                  reason: 'token_replayed',
+                  remediation: 'Sign in again to obtain a fresh refresh token',
+                  tokenType: 'jwt',
                   providedScopes: Array.isArray(payload.scopes)
                     ? (payload.scopes as string[])
                     : undefined,
-                  requiredScopes: ["session:refresh"],
+                  requiredScopes: ['session:refresh'],
                 }
               );
             }
 
-            if (validation.reason && validation.reason !== "token_replayed") {
+            if (validation.reason && validation.reason !== 'token_replayed') {
               request.log.warn(
                 {
-                  event: "auth.refresh",
+                  event: 'auth.refresh',
                   reason: validation.reason,
                   requestId: request.id,
                 },
-                "Refresh token missing session metadata"
+                'Refresh token missing session metadata'
               );
             }
 
             const baseClaims = {
               userId:
-                payload.userId ?? payload.sub ?? payload.id ?? "unknown-user",
-              role: payload.role ?? "user",
+                payload.userId ?? payload.sub ?? payload.id ?? 'unknown-user',
+              role: payload.role ?? 'user',
               permissions: Array.isArray(payload.permissions)
                 ? (payload.permissions as string[])
                 : [],
               scopes: Array.isArray(payload.scopes)
                 ? (payload.scopes as string[])
-                : ["session:refresh"],
+                : ['session:refresh'],
               sessionId: sessionIdFromPayload,
             };
 
             const resolvedSessionId =
-              typeof baseClaims.sessionId === "string" &&
+              typeof baseClaims.sessionId === 'string' &&
               baseClaims.sessionId.length > 0
                 ? baseClaims.sessionId
                 : sessionIdFromPayload ?? randomUUID();
             baseClaims.sessionId = resolvedSessionId;
 
             const issuer =
-              typeof payload.iss === "string" ? payload.iss : "memento";
+              typeof payload.iss === 'string' ? payload.iss : 'memento';
             const refreshExpiresInSeconds = 7 * 24 * 60 * 60;
             const refreshExpiresAt =
               Math.floor(Date.now() / 1000) + refreshExpiresInSeconds;
@@ -945,14 +938,14 @@ export class APIGateway {
               refreshExpiresAt
             );
             const accessToken = jwt.sign(
-              { ...baseClaims, type: "access" },
+              { ...baseClaims, type: 'access' },
               secret,
-              { expiresIn: "1h", issuer }
+              { expiresIn: '1h', issuer }
             );
             const newRefreshToken = jwt.sign(
-              { ...baseClaims, type: "refresh", rotationId: nextRotationId },
+              { ...baseClaims, type: 'refresh', rotationId: nextRotationId },
               secret,
-              { expiresIn: "7d", issuer }
+              { expiresIn: '7d', issuer }
             );
 
             return reply.send({
@@ -960,7 +953,7 @@ export class APIGateway {
               data: {
                 accessToken,
                 refreshToken: newRefreshToken,
-                tokenType: "Bearer",
+                tokenType: 'Bearer',
                 expiresIn: 3600,
                 scopes: baseClaims.scopes,
               },
@@ -973,15 +966,15 @@ export class APIGateway {
               reply,
               request,
               401,
-              isExpired ? "TOKEN_EXPIRED" : "INVALID_TOKEN",
-              isExpired ? "Refresh token has expired" : "Invalid refresh token",
+              isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+              isExpired ? 'Refresh token has expired' : 'Invalid refresh token',
               {
-                reason: isExpired ? "token_expired" : "invalid_token",
+                reason: isExpired ? 'token_expired' : 'invalid_token',
                 remediation:
-                  "Initiate a new login flow to obtain a fresh refresh token",
-                tokenType: "jwt",
+                  'Initiate a new login flow to obtain a fresh refresh token',
+                tokenType: 'jwt',
                 providedScopes: undefined,
-                requiredScopes: ["session:refresh"],
+                requiredScopes: ['session:refresh'],
               }
             );
           }
@@ -1040,17 +1033,17 @@ export class APIGateway {
             this.maintenanceService,
             this.configurationService
           );
-          console.log("✅ All route modules registered successfully");
+          console.log('✅ All route modules registered successfully');
         } catch (error) {
-          console.error("❌ Error registering routes:", error);
+          console.error('❌ Error registering routes:', error);
         }
       },
-      { prefix: "/api/v1" }
+      { prefix: '/api/v1' }
     );
 
     // Register tRPC routes
     this.app.register(fastifyTRPCPlugin, {
-      prefix: "/api/trpc",
+      prefix: '/api/trpc',
       trpcOptions: {
         router: appRouter,
         createContext: ({ req }) =>
@@ -1065,10 +1058,10 @@ export class APIGateway {
     });
 
     // Compatibility endpoints for tests that probe root tRPC path
-    this.app.get("/api/trpc", async (_req, reply) => {
-      reply.send({ status: "ok", message: "tRPC root available" });
+    this.app.get('/api/trpc', async (_req, reply) => {
+      reply.send({ status: 'ok', message: 'tRPC root available' });
     });
-    this.app.post("/api/trpc", async (request, reply) => {
+    this.app.post('/api/trpc', async (request, reply) => {
       const raw = request.body as any;
 
       const buildResult = (
@@ -1076,16 +1069,16 @@ export class APIGateway {
         result?: any,
         error?: { code: number; message: string }
       ) => ({
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         ...(id !== undefined ? { id } : {}),
         ...(error ? { error } : { result: result ?? { ok: true } }),
       });
 
       const handleSingle = (msg: any) => {
-        if (!msg || typeof msg !== "object") {
+        if (!msg || typeof msg !== 'object') {
           return buildResult(undefined, undefined, {
             code: -32600,
-            message: "Invalid Request",
+            message: 'Invalid Request',
           });
         }
         const { id, method } = msg;
@@ -1094,26 +1087,26 @@ export class APIGateway {
         if (id === undefined || id === null)
           return buildResult(undefined, { ok: true });
 
-        if (typeof method !== "string" || !method.includes(".")) {
+        if (typeof method !== 'string' || !method.includes('.')) {
           return buildResult(id, undefined, {
             code: -32601,
-            message: "Method not found",
+            message: 'Method not found',
           });
         }
 
         // Minimal routing: acknowledge known namespaces
         const known = [
-          "graph.search",
-          "graph.listEntities",
-          "graph.listRelationships",
-          "graph.createEntity",
-          "code.analyze",
-          "design.create",
+          'graph.search',
+          'graph.listEntities',
+          'graph.listRelationships',
+          'graph.createEntity',
+          'code.analyze',
+          'design.create',
         ];
         if (!known.includes(method)) {
           return buildResult(id, undefined, {
             code: -32601,
-            message: "Method not found",
+            message: 'Method not found',
           });
         }
         return buildResult(id, { ok: true });
@@ -1131,7 +1124,7 @@ export class APIGateway {
         return reply.status(400).send(
           buildResult(undefined, undefined, {
             code: -32603,
-            message: "Internal error",
+            message: 'Internal error',
           })
         );
       }
@@ -1146,7 +1139,7 @@ export class APIGateway {
     // 404 handler
     this.app.setNotFoundHandler((request, reply) => {
       reply.status(404).send({
-        error: "Not Found",
+        error: 'Not Found',
         message: `Route ${request.method}:${request.url} not found`,
         requestId: request.id,
         timestamp: new Date().toISOString(),
@@ -1161,7 +1154,7 @@ export class APIGateway {
       const isServerError = statusCode >= 500;
 
       const isValidationError =
-        (error as any)?.code === "FST_ERR_VALIDATION" || statusCode === 400;
+        (error as any)?.code === 'FST_ERR_VALIDATION' || statusCode === 400;
 
       // Log extended context for validation errors to aid debugging tests
       if (isValidationError) {
@@ -1179,7 +1172,7 @@ export class APIGateway {
             query: request.query,
             body: request.body,
           },
-          "Request validation failed"
+          'Request validation failed'
         );
       } else {
         request.log.error({
@@ -1195,9 +1188,9 @@ export class APIGateway {
         success: false,
         error: {
           code: this.getErrorCode(error),
-          message: isServerError ? "Internal Server Error" : error.message,
+          message: isServerError ? 'Internal Server Error' : error.message,
           details:
-            process.env.NODE_ENV === "development" ? error.stack : undefined,
+            process.env.NODE_ENV === 'development' ? error.stack : undefined,
         },
         requestId: request.id,
         timestamp: new Date().toISOString(),
@@ -1205,14 +1198,14 @@ export class APIGateway {
     });
 
     // Handle uncaught exceptions (avoid exiting during tests)
-    if (process.env.NODE_ENV !== "test") {
-      process.on("uncaughtException", (error) => {
-        console.error("Uncaught Exception:", error);
+    if (process.env.NODE_ENV !== 'test') {
+      process.on('uncaughtException', (error) => {
+        console.error('Uncaught Exception:', error);
         process.exit(1);
       });
 
-      process.on("unhandledRejection", (reason, promise) => {
-        console.error("Unhandled Rejection at:", promise, "reason:", reason);
+      process.on('unhandledRejection', (reason, promise) => {
+        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
         process.exit(1);
       });
     }
@@ -1246,9 +1239,9 @@ export class APIGateway {
 
   private getErrorCode(error: any): string {
     if (error.code) return error.code;
-    if (error.name === "ValidationError") return "VALIDATION_ERROR";
-    if (error.name === "NotFoundError") return "NOT_FOUND";
-    return "INTERNAL_ERROR";
+    if (error.name === 'ValidationError') return 'VALIDATION_ERROR';
+    if (error.name === 'NotFoundError') return 'NOT_FOUND';
+    return 'INTERNAL_ERROR';
   }
 
   private generateRequestId(): string {
@@ -1256,17 +1249,17 @@ export class APIGateway {
   }
 
   private async validateMCPServer(): Promise<void> {
-    console.log("🔍 Validating MCP server configuration...");
+    console.log('🔍 Validating MCP server configuration...');
 
     const validation = await this.mcpRouter.validateServer();
 
     if (!validation.isValid) {
-      console.error("❌ MCP server validation failed:");
+      console.error('❌ MCP server validation failed:');
       validation.errors.forEach((error) => console.error(`   - ${error}`));
-      throw new Error("MCP server validation failed");
+      throw new Error('MCP server validation failed');
     }
 
-    console.log("✅ MCP server validation passed");
+    console.log('✅ MCP server validation passed');
   }
 
   /**
@@ -1291,7 +1284,7 @@ export class APIGateway {
 
       // Update config with the actual assigned port (important when port was 0)
       const address = this.app.server?.address();
-      if (address && typeof address === "object" && address.port) {
+      if (address && typeof address === 'object' && address.port) {
         this.config.port = address.port;
       }
 
@@ -1314,10 +1307,10 @@ export class APIGateway {
       try {
         await this.startHistorySchedulers();
       } catch (e) {
-        console.warn("History schedulers could not be started:", e);
+        console.warn('History schedulers could not be started:', e);
       }
     } catch (error) {
-      console.error("Failed to start API Gateway:", error);
+      console.error('Failed to start API Gateway:', error);
       throw error;
     }
   }
@@ -1348,7 +1341,7 @@ export class APIGateway {
     }
 
     await this.app.close();
-    console.log("🛑 API Gateway stopped");
+    console.log('🛑 API Gateway stopped');
   }
 
   getApp(): FastifyInstance {
@@ -1374,28 +1367,28 @@ export class APIGateway {
     const cfg = this.configurationService?.getHistoryConfig?.();
     const enabled =
       cfg?.enabled ??
-      (process.env.HISTORY_ENABLED || "true").toLowerCase() !== "false";
+      (process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false';
     if (!enabled) {
-      console.log("🕒 History disabled; schedulers not started");
+      console.log('🕒 History disabled; schedulers not started');
       return;
     }
 
     const retentionDays =
       cfg?.retentionDays ??
-      (parseInt(process.env.HISTORY_RETENTION_DAYS || "30", 10) || 30);
+      (parseInt(process.env.HISTORY_RETENTION_DAYS || '30', 10) || 30);
     const hops =
       cfg?.checkpoint?.hops ??
-      (parseInt(process.env.HISTORY_CHECKPOINT_HOPS || "2", 10) || 2);
+      (parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '2', 10) || 2);
     const pruneHours =
       cfg?.schedule?.pruneIntervalHours ??
-      (parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || "24", 10) || 24);
+      (parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || '24', 10) || 24);
     const checkpointHours =
       cfg?.schedule?.checkpointIntervalHours ??
-      (parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || "24", 10) ||
+      (parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || '24', 10) ||
         24);
 
     // Daily prune at interval (24h)
-    const dayMs = 24 * 60 * 60 * 1000;
+    const _dayMs = 24 * 60 * 60 * 1000;
     const pruneMs = Math.max(1, pruneHours) * 60 * 60 * 1000;
     const checkpointMs = Math.max(1, checkpointHours) * 60 * 60 * 1000;
     const runPrune = async () => {
@@ -1405,7 +1398,7 @@ export class APIGateway {
           `🧹 Daily prune completed: versions=${r.versionsDeleted}, edges=${r.edgesClosed}, checkpoints=${r.checkpointsDeleted}`
         );
       } catch (e) {
-        console.warn("Daily prune failed:", e);
+        console.warn('Daily prune failed:', e);
       }
     };
     this._historyIntervals.prune = setInterval(runPrune, pruneMs);
@@ -1415,18 +1408,18 @@ export class APIGateway {
       try {
         const seeds = await this.kgService.findRecentEntityIds(200);
         if (seeds.length === 0) {
-          console.log("📌 Daily checkpoint skipped: no recent entities");
+          console.log('📌 Daily checkpoint skipped: no recent entities');
           return;
         }
         const { checkpointId } = await this.kgService.createCheckpoint(seeds, {
-          type: "daily",
+          type: 'daily',
           hops,
         });
         console.log(
           `📌 Daily checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`
         );
       } catch (e) {
-        console.warn("Daily checkpoint failed:", e);
+        console.warn('Daily checkpoint failed:', e);
       }
     };
     this._historyIntervals.checkpoint = setInterval(
@@ -1448,10 +1441,10 @@ export class APIGateway {
   private isOriginAllowed(origin?: string): boolean {
     if (!origin) return false;
     const allowed = this.config.cors.origin;
-    if (typeof allowed === "string")
-      return allowed === "*" || allowed === origin;
+    if (typeof allowed === 'string')
+      return allowed === '*' || allowed === origin;
     if (Array.isArray(allowed))
-      return allowed.includes("*") || allowed.includes(origin);
+      return allowed.includes('*') || allowed.includes(origin);
     return false;
   }
 }

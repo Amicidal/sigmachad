@@ -259,7 +259,7 @@ export const adminRouter = router({
         }
 
         // Validate value based on key
-        let validatedValue = input.value;
+        const validatedValue = input.value;
         if (input.key.startsWith('features.') && typeof input.value !== 'boolean') {
           throw new TRPCError({
             code: 'BAD_REQUEST',

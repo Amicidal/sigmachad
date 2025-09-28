@@ -7,61 +7,16 @@ import { KnowledgeGraphService } from "@memento/knowledge";
 import { DatabaseService } from "@memento/core";
 import { Entity } from "@memento/graph";
 import { GraphRelationship } from "@memento/graph";
+import {
+  RollbackPoint,
+  RollbackEntity,
+  RollbackRelationship,
+  SessionCheckpointRecord,
+  RollbackResult,
+  RollbackError,
+} from "@memento/shared-types";
 
 const SNAPSHOT_PAGE_SIZE = 1000;
-
-export interface RollbackPoint {
-  id: string;
-  operationId: string;
-  timestamp: Date;
-  entities: RollbackEntity[];
-  relationships: RollbackRelationship[];
-  description: string;
-}
-
-export interface RollbackEntity {
-  id: string;
-  action: "create" | "update" | "delete";
-  previousState?: Entity;
-  newState?: Entity;
-}
-
-export interface RollbackRelationship {
-  id: string;
-  action: "create" | "update" | "delete";
-  fromEntityId?: string;
-  toEntityId?: string;
-  type?: GraphRelationship["type"];
-  previousState?: GraphRelationship;
-  newState?: GraphRelationship;
-}
-
-export interface SessionCheckpointRecord {
-  checkpointId: string;
-  sessionId: string;
-  reason: "daily" | "incident" | "manual";
-  hopCount: number;
-  attempts: number;
-  seedEntityIds: string[];
-  jobId?: string;
-  recordedAt: Date;
-}
-
-export interface RollbackResult {
-  success: boolean;
-  rolledBackEntities: number;
-  rolledBackRelationships: number;
-  errors: RollbackError[];
-  partialSuccess: boolean;
-}
-
-export interface RollbackError {
-  type: "entity" | "relationship";
-  id: string;
-  action: string;
-  error: string;
-  recoverable: boolean;
-}
 
 export class RollbackCapabilities {
   private rollbackPoints = new Map<string, RollbackPoint>();

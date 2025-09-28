@@ -5,19 +5,19 @@
 
 import { EventEmitter } from 'events';
 import { NeogmaService } from './NeogmaService.js';
-import { createEntityModels } from '../../models/ogm/EntityModels.js';
+import {
+  createEntityModels,
+  modelToEntity,
+  entityToModelProps,
+} from '../../../graph/src/models-ogm/EntityModels.js';
 import {
   Entity,
   CodebaseEntity,
   File,
   FunctionSymbol,
   ClassSymbol,
-} from '@memento/core';
-import {
-  modelToEntity,
-  entityToModelProps,
-  BatchOperationHelper,
-} from '../../models/ogm/BaseModels.js';
+} from '../../../core/src/index.js';
+import { BatchOperationHelper } from '../../../graph/src/models-ogm/BaseModels.js';
 
 export interface ListEntitiesOptions {
   type?: string;
@@ -100,7 +100,10 @@ export class EntityServiceOGM extends EventEmitter {
       // Try to find existing entity first, then create if not found
       let instance;
       try {
-        const instances = await Model.findMany({ where: { id: entity.id }, limit: 1 });
+        const instances = await Model.findMany({
+          where: { id: entity.id },
+          limit: 1,
+        });
         if (instances.length === 0) {
           instance = await Model.createOne(props);
         } else {
@@ -146,7 +149,9 @@ export class EntityServiceOGM extends EventEmitter {
         throw new Error(`Failed to update entity: ${id}`);
       }
 
-      const updated = modelToEntity<Entity>(Array.isArray(instance) ? instance[0] : instance);
+      const updated = modelToEntity<Entity>(
+        Array.isArray(instance) ? instance[0] : instance
+      );
       this.emit('entity:updated', updated);
       return updated;
     } catch (error) {
@@ -209,9 +214,7 @@ export class EntityServiceOGM extends EventEmitter {
   /**
    * List entities with filtering and pagination using Neogma
    */
-  async listEntities(
-    options: ListEntitiesOptions = {}
-  ): Promise<{
+  async listEntities(options: ListEntitiesOptions = {}): Promise<{
     items: Entity[];
     total: number;
   }> {
@@ -256,7 +259,9 @@ export class EntityServiceOGM extends EventEmitter {
           : undefined,
       });
 
-      const items = instances.map(instance => modelToEntity<Entity>(instance));
+      const items = instances.map((instance) =>
+        modelToEntity<Entity>(instance)
+      );
 
       return { items, total };
     } catch (error) {
@@ -305,7 +310,10 @@ export class EntityServiceOGM extends EventEmitter {
       RETURN count(n) as total
     `;
 
-    const countResult = await this.neogmaService.executeCypher(countQuery, params);
+    const countResult = await this.neogmaService.executeCypher(
+      countQuery,
+      params
+    );
     const total = countResult[0]?.total || 0;
 
     // Data query
@@ -319,7 +327,7 @@ export class EntityServiceOGM extends EventEmitter {
     `;
 
     const result = await this.neogmaService.executeCypher(dataQuery, params);
-    const items = result.map(row => this.parseEntityFromNeo4j(row.n));
+    const items = result.map((row) => this.parseEntityFromNeo4j(row.n));
 
     return { items, total };
   }
@@ -348,15 +356,18 @@ export class EntityServiceOGM extends EventEmitter {
 
         const results = await this.batchHelper.executeBatched(
           entityGroup,
-          async batch => {
-            const props = batch.map(e => entityToModelProps(e));
+          async (batch) => {
+            const props = batch.map((e) => entityToModelProps(e));
 
             if (options.skipExisting) {
               // Create only if not exists
               const createdInstances = [];
               for (const p of props) {
                 try {
-                  const existing = await Model.findMany({ where: { id: (p as any).id }, limit: 1 });
+                  const existing = await Model.findMany({
+                    where: { id: (p as any).id },
+                    limit: 1,
+                  });
                   if (existing.length === 0) {
                     const newInstance = await Model.createOne(p);
                     createdInstances.push(newInstance);
@@ -372,12 +383,14 @@ export class EntityServiceOGM extends EventEmitter {
               const upserted = [];
               for (const p of props) {
                 try {
-                  const existing = await Model.findMany({ where: { id: (p as any).id }, limit: 1 });
+                  const existing = await Model.findMany({
+                    where: { id: (p as any).id },
+                    limit: 1,
+                  });
                   if (existing.length > 0) {
-                    await Model.update(
-                      p,
-                      { where: { id: (p as any).id } as any }
-                    );
+                    await Model.update(p, {
+                      where: { id: (p as any).id } as any,
+                    });
                     updated++;
                   } else {
                     const newInstance = await Model.createOne(p);
@@ -435,7 +448,7 @@ export class EntityServiceOGM extends EventEmitter {
         where: properties as any,
       });
 
-      return instances.map(instance => modelToEntity<Entity>(instance));
+      return instances.map((instance) => modelToEntity<Entity>(instance));
     } catch (error) {
       this.emit('error', {
         operation: 'findEntitiesByProperties',
@@ -514,7 +527,12 @@ export class EntityServiceOGM extends EventEmitter {
     try {
       await this.updateEntity(id, { metadata });
     } catch (error) {
-      this.emit('error', { operation: 'updateEntityMetadata', id, metadata, error });
+      this.emit('error', {
+        operation: 'updateEntityMetadata',
+        id,
+        metadata,
+        error,
+      });
       throw error;
     }
   }
@@ -553,7 +571,7 @@ export class EntityServiceOGM extends EventEmitter {
       ];
 
       const results = await Promise.all(
-        queries.map(q => this.neogmaService.executeCypher(q.query))
+        queries.map((q) => this.neogmaService.executeCypher(q.query))
       );
 
       const byType: Record<string, number> = {};

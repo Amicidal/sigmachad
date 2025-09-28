@@ -1,49 +1,15 @@
 import { BaseAgent } from './agent-base.js';
 import { AgentMetadata, AgentTask, AgentEvent } from './types.js';
+import {
+  SecurityFixTask,
+  SecurityFixResult,
+  SecurityFix,
+  RollbackData,
+} from '@memento/shared-types';
 import { SecurityScanner } from '../../testing/src/security/scanner.js';
 import { SecurityReports } from '../../testing/src/security/reports.js';
 import * as fs from 'fs';
 import * as path from 'path';
-
-export interface SecurityFixTask {
-  id: string;
-  type: 'security-fix';
-  issueId?: string;
-  filePath?: string;
-  ruleId?: string;
-  severity?: string;
-  autoFix?: boolean;
-  dryRun?: boolean;
-  priority: 'immediate' | 'high' | 'medium' | 'low';
-}
-
-export interface SecurityFixResult {
-  issueId: string;
-  filePath: string;
-  ruleId: string;
-  status: 'fixed' | 'partial' | 'failed' | 'skipped';
-  fixes: SecurityFix[];
-  rollbackData?: RollbackData;
-  confidence: number;
-  impact: 'high' | 'medium' | 'low';
-}
-
-export interface SecurityFix {
-  type: 'code-replacement' | 'configuration' | 'dependency-update' | 'manual-review';
-  description: string;
-  originalCode?: string;
-  fixedCode?: string;
-  explanation: string;
-  confidence: number;
-  testable: boolean;
-}
-
-export interface RollbackData {
-  originalContent: string;
-  backupPath: string;
-  timestamp: Date;
-  checksum: string;
-}
 
 /**
  * Security Fix Agent
@@ -73,7 +39,7 @@ export class SecurityFixAgent extends BaseAgent {
 
     this.log('info', 'SecurityFixAgent initialized', {
       config,
-      capabilities: this.getCapabilities()
+      capabilities: this.getCapabilities(),
     });
   }
 
@@ -84,7 +50,7 @@ export class SecurityFixAgent extends BaseAgent {
       taskId: task.id,
       issueId: securityTask.issueId,
       ruleId: securityTask.ruleId,
-      autoFix: securityTask.autoFix
+      autoFix: securityTask.autoFix,
     });
 
     // Get security issue details
@@ -94,7 +60,9 @@ export class SecurityFixAgent extends BaseAgent {
     }
 
     // Generate fixes
-    const fixSuggestion = await this.securityReports.generateSecurityFix(issue.id);
+    const fixSuggestion = await this.securityReports.generateSecurityFix(
+      issue.id
+    );
     const fixes = await this.generateFixes(issue, fixSuggestion);
 
     let result: SecurityFixResult = {
@@ -104,7 +72,7 @@ export class SecurityFixAgent extends BaseAgent {
       status: 'skipped',
       fixes,
       confidence: this.calculateOverallConfidence(fixes),
-      impact: this.assessImpact(issue)
+      impact: this.assessImpact(issue),
     };
 
     // Apply fixes if auto-fix is enabled
@@ -116,7 +84,7 @@ export class SecurityFixAgent extends BaseAgent {
     await this.emitEvent('security-fix-completed', {
       taskId: task.id,
       result,
-      autoFixed: securityTask.autoFix && !securityTask.dryRun
+      autoFixed: securityTask.autoFix && !securityTask.dryRun,
     });
 
     return result;
@@ -179,7 +147,10 @@ export class SecurityFixAgent extends BaseAgent {
     throw new Error('Insufficient task information to identify security issue');
   }
 
-  private async generateFixes(issue: any, fixSuggestion: any): Promise<SecurityFix[]> {
+  private async generateFixes(
+    issue: any,
+    fixSuggestion: any
+  ): Promise<SecurityFix[]> {
     const fixes: SecurityFix[] = [];
 
     // Get rule-specific fix templates
@@ -214,13 +185,16 @@ export class SecurityFixAgent extends BaseAgent {
       description: 'Manual code review and fix required',
       explanation: fixSuggestion.fixes?.[0]?.explanation || issue.remediation,
       confidence: 0.5,
-      testable: true
+      testable: true,
     });
 
     return fixes;
   }
 
-  private async generateCodeFix(issue: any, template: any): Promise<SecurityFix | null> {
+  private async generateCodeFix(
+    issue: any,
+    template: any
+  ): Promise<SecurityFix | null> {
     try {
       const filePath = issue.metadata?.filePath;
       if (!filePath || !fs.existsSync(filePath)) {
@@ -230,10 +204,14 @@ export class SecurityFixAgent extends BaseAgent {
       const content = fs.readFileSync(filePath, 'utf8');
       const lines = content.split('\n');
       const lineIndex = Math.max(0, issue.lineNumber - 1);
+      // eslint-disable-next-line security/detect-object-injection
       const originalLine = lines[lineIndex];
 
       // Apply rule-specific transformations
-      const fixedLine = this.applySecurityTransformation(originalLine, issue.ruleId);
+      const fixedLine = this.applySecurityTransformation(
+        originalLine,
+        issue.ruleId
+      );
 
       if (fixedLine && fixedLine !== originalLine) {
         return {
@@ -243,36 +221,43 @@ export class SecurityFixAgent extends BaseAgent {
           fixedCode: fixedLine.trim(),
           explanation: template.explanation || issue.remediation,
           confidence: template.confidence || 0.8,
-          testable: true
+          testable: true,
         };
       }
     } catch (error) {
-      this.log('error', 'Failed to generate code fix', { issue: issue.id, error });
+      this.log('error', 'Failed to generate code fix', {
+        issue: issue.id,
+        error,
+      });
     }
 
     return null;
   }
 
-  private async generateConfigurationFix(issue: any, template: any): Promise<SecurityFix | null> {
+  private async generateConfigurationFix(
+    issue: any,
+    _template: any
+  ): Promise<SecurityFix | null> {
     // Generate configuration-based fixes (security headers, CORS, etc.)
     const configFixes: Record<string, any> = {
       CORS_MISCONFIGURATION: {
         description: 'Configure CORS with specific origins',
         fixedCode: `// app.js\napp.use(cors({\n  origin: ['https://yourdomain.com'],\n  credentials: true\n}));`,
-        explanation: 'Restrict CORS to specific trusted origins instead of using wildcard'
+        explanation:
+          'Restrict CORS to specific trusted origins instead of using wildcard',
       },
 
       DEBUG_MODE_ENABLED: {
         description: 'Disable debug mode in production',
         fixedCode: `// Environment configuration\nNODE_ENV=production\nDEBUG=false`,
-        explanation: 'Ensure debug mode is disabled in production environments'
+        explanation: 'Ensure debug mode is disabled in production environments',
       },
 
       WEAK_SESSION_CONFIG: {
         description: 'Configure secure session settings',
         fixedCode: `session({\n  secret: process.env.SESSION_SECRET,\n  secure: true,\n  httpOnly: true,\n  sameSite: 'strict'\n})`,
-        explanation: 'Use secure session configuration with proper flags'
-      }
+        explanation: 'Use secure session configuration with proper flags',
+      },
     };
 
     const configFix = configFixes[issue.ruleId];
@@ -283,14 +268,17 @@ export class SecurityFixAgent extends BaseAgent {
         fixedCode: configFix.fixedCode,
         explanation: configFix.explanation,
         confidence: 0.9,
-        testable: true
+        testable: true,
       };
     }
 
     return null;
   }
 
-  private async generateDependencyFix(issue: any, template: any): Promise<SecurityFix | null> {
+  private async generateDependencyFix(
+    issue: any,
+    _template: any
+  ): Promise<SecurityFix | null> {
     // Check if this is a dependency vulnerability
     if (issue.packageName && issue.fixedInVersion) {
       return {
@@ -300,7 +288,7 @@ export class SecurityFixAgent extends BaseAgent {
         fixedCode: `"${issue.packageName}": "${issue.fixedInVersion}"`,
         explanation: `Update dependency to fix ${issue.vulnerabilityId}`,
         confidence: 0.95,
-        testable: true
+        testable: true,
       };
     }
 
@@ -312,9 +300,8 @@ export class SecurityFixAgent extends BaseAgent {
     fixes: SecurityFix[],
     result: SecurityFixResult
   ): Promise<SecurityFixResult> {
-    const applicableFixes = fixes.filter(fix =>
-      fix.type !== 'manual-review' &&
-      fix.confidence >= 0.7
+    const applicableFixes = fixes.filter(
+      (fix) => fix.type !== 'manual-review' && fix.confidence >= 0.7
     );
 
     if (applicableFixes.length === 0) {
@@ -324,7 +311,9 @@ export class SecurityFixAgent extends BaseAgent {
 
     try {
       // Create rollback data before making changes
-      const rollbackData = await this.createRollbackData(issue.metadata?.filePath);
+      const rollbackData = await this.createRollbackData(
+        issue.metadata?.filePath
+      );
       result.rollbackData = rollbackData;
 
       let appliedFixes = 0;
@@ -351,14 +340,13 @@ export class SecurityFixAgent extends BaseAgent {
         issueId: issue.id,
         appliedFixes,
         totalFixes: applicableFixes.length,
-        status: result.status
+        status: result.status,
       });
-
     } catch (error) {
       result.status = 'failed';
       this.log('error', 'Failed to apply security fixes', {
         issueId: issue.id,
-        error: error instanceof Error ? error.message : error
+        error: error instanceof Error ? error.message : error,
       });
 
       // Attempt rollback on failure
@@ -370,7 +358,10 @@ export class SecurityFixAgent extends BaseAgent {
     return result;
   }
 
-  private async applyIndividualFix(issue: any, fix: SecurityFix): Promise<boolean> {
+  private async applyIndividualFix(
+    issue: any,
+    fix: SecurityFix
+  ): Promise<boolean> {
     try {
       switch (fix.type) {
         case 'code-replacement':
@@ -389,13 +380,16 @@ export class SecurityFixAgent extends BaseAgent {
       this.log('error', 'Failed to apply individual fix', {
         issueId: issue.id,
         fixType: fix.type,
-        error
+        error,
       });
       return false;
     }
   }
 
-  private async applyCodeReplacement(issue: any, fix: SecurityFix): Promise<boolean> {
+  private async applyCodeReplacement(
+    issue: any,
+    fix: SecurityFix
+  ): Promise<boolean> {
     const filePath = issue.metadata?.filePath;
     if (!filePath || !fix.originalCode || !fix.fixedCode) {
       return false;
@@ -410,7 +404,7 @@ export class SecurityFixAgent extends BaseAgent {
         this.log('info', 'Applied code replacement', {
           filePath,
           original: fix.originalCode,
-          fixed: fix.fixedCode
+          fixed: fix.fixedCode,
         });
         return true;
       }
@@ -421,24 +415,30 @@ export class SecurityFixAgent extends BaseAgent {
     return false;
   }
 
-  private async applyConfigurationFix(issue: any, fix: SecurityFix): Promise<boolean> {
+  private async applyConfigurationFix(
+    issue: any,
+    fix: SecurityFix
+  ): Promise<boolean> {
     // This would involve more complex configuration management
     // For now, just log the recommended configuration
     this.log('info', 'Configuration fix recommended', {
       issueId: issue.id,
       description: fix.description,
-      recommendation: fix.fixedCode
+      recommendation: fix.fixedCode,
     });
     return true; // Mark as applied for demo purposes
   }
 
-  private async applyDependencyUpdate(issue: any, fix: SecurityFix): Promise<boolean> {
+  private async applyDependencyUpdate(
+    issue: any,
+    fix: SecurityFix
+  ): Promise<boolean> {
     // This would involve updating package.json and running pnpm install
     // For safety, we'll just log the recommendation
     this.log('info', 'Dependency update recommended', {
       issueId: issue.id,
       description: fix.description,
-      update: fix.fixedCode
+      update: fix.fixedCode,
     });
     return true; // Mark as recommended
   }
@@ -449,27 +449,35 @@ export class SecurityFixAgent extends BaseAgent {
     }
 
     const content = fs.readFileSync(filePath, 'utf8');
-    const backupPath = await this.rollbackService.createBackup(filePath, content);
+    const backupPath = await this.rollbackService.createBackup(
+      filePath,
+      content
+    );
 
     return {
       originalContent: content,
       backupPath,
       timestamp: new Date(),
-      checksum: this.calculateChecksum(content)
+      checksum: this.calculateChecksum(content),
     };
   }
 
-  private async verifyFix(issue: any, result: SecurityFixResult): Promise<void> {
+  private async verifyFix(
+    issue: any,
+    result: SecurityFixResult
+  ): Promise<void> {
     // Run a targeted scan to verify the fix
     try {
       const filePath = issue.metadata?.filePath;
       if (!filePath) return;
 
-      const entities = [{
-        id: path.basename(filePath),
-        type: 'file',
-        path: filePath
-      }];
+      const entities = [
+        {
+          id: path.basename(filePath),
+          type: 'file',
+          path: filePath,
+        },
+      ];
 
       const scanResult = await this.securityScanner.scan(entities, {
         includeSAST: true,
@@ -478,34 +486,37 @@ export class SecurityFixAgent extends BaseAgent {
         includeDependencies: false,
         includeCompliance: false,
         severityThreshold: 'info',
-        confidenceThreshold: 0.5
+        confidenceThreshold: 0.5,
       });
 
       // Check if the specific issue still exists
-      const stillExists = scanResult.some(newIssue =>
-        newIssue.ruleId === issue.ruleId &&
-        Math.abs(newIssue.lineNumber - issue.lineNumber) <= 2
+      const stillExists = scanResult.some(
+        (newIssue) =>
+          newIssue.ruleId === issue.ruleId &&
+          Math.abs(newIssue.lineNumber - issue.lineNumber) <= 2
       );
 
       if (!stillExists) {
         this.log('info', 'Fix verification successful - issue resolved', {
           issueId: issue.id,
-          ruleId: issue.ruleId
+          ruleId: issue.ruleId,
         });
       } else {
         this.log('warn', 'Fix verification failed - issue still present', {
           issueId: issue.id,
-          ruleId: issue.ruleId
+          ruleId: issue.ruleId,
         });
         result.status = 'failed';
       }
-
     } catch (error) {
       this.log('error', 'Fix verification error', { issueId: issue.id, error });
     }
   }
 
-  private applySecurityTransformation(line: string, ruleId: string): string | null {
+  private applySecurityTransformation(
+    line: string,
+    ruleId: string
+  ): string | null {
     const transformations: Record<string, (line: string) => string> = {
       SQL_INJECTION: (line: string) => {
         // Transform string concatenation to parameterized query
@@ -524,8 +535,11 @@ export class SecurityFixAgent extends BaseAgent {
       HARDCODED_SECRET: (line: string) => {
         // Transform hardcoded values to environment variables
         if (line.includes('=')) {
-          const [left, right] = line.split('=', 2);
-          const varName = left.trim().replace(/^(const|let|var)\s+/, '').toUpperCase();
+          const [left, _right] = line.split('=', 2);
+          const varName = left
+            .trim()
+            .replace(/^(const|let|var)\s+/, '')
+            .toUpperCase();
           return `${left} = process.env.${varName};`;
         }
         return line;
@@ -534,16 +548,26 @@ export class SecurityFixAgent extends BaseAgent {
       WEAK_CRYPTO: (line: string) => {
         // Transform weak crypto algorithms
         return line
-          .replace(/createHash\s*\(\s*['"]md5['"]\s*\)/g, "createHash('sha256')")
-          .replace(/createHash\s*\(\s*['"]sha1['"]\s*\)/g, "createHash('sha256')");
+          .replace(
+            /createHash\s*\(\s*['"]md5['"]\s*\)/g,
+            "createHash('sha256')"
+          )
+          .replace(
+            /createHash\s*\(\s*['"]sha1['"]\s*\)/g,
+            "createHash('sha256')"
+          );
       },
 
       INSECURE_RANDOM: (line: string) => {
         // Transform Math.random() to crypto.randomBytes()
-        return line.replace(/Math\.random\(\)/g, 'crypto.randomBytes(16).toString("hex")');
-      }
+        return line.replace(
+          /Math\.random\(\)/g,
+          'crypto.randomBytes(16).toString("hex")'
+        );
+      },
     };
 
+    // eslint-disable-next-line security/detect-object-injection
     const transformer = transformations[ruleId];
     return transformer ? transformer(line) : null;
   }
@@ -575,24 +599,24 @@ export class SecurityFixAgent extends BaseAgent {
     return {
       SQL_INJECTION: {
         confidence: 0.9,
-        explanation: 'Replace string concatenation with parameterized queries'
+        explanation: 'Replace string concatenation with parameterized queries',
       },
       XSS_VULNERABILITY: {
         confidence: 0.8,
-        explanation: 'Use safe DOM manipulation methods'
+        explanation: 'Use safe DOM manipulation methods',
       },
       HARDCODED_SECRET: {
         confidence: 0.7,
-        explanation: 'Move secrets to environment variables'
+        explanation: 'Move secrets to environment variables',
       },
       WEAK_CRYPTO: {
         confidence: 0.9,
-        explanation: 'Use strong cryptographic algorithms'
+        explanation: 'Use strong cryptographic algorithms',
       },
       INSECURE_RANDOM: {
         confidence: 0.9,
-        explanation: 'Use cryptographically secure random generation'
-      }
+        explanation: 'Use cryptographically secure random generation',
+      },
     };
   }
 
@@ -603,7 +627,7 @@ export class SecurityFixAgent extends BaseAgent {
       'dependency-updates',
       'rollback-support',
       'fix-verification',
-      'impact-assessment'
+      'impact-assessment',
     ];
   }
 
@@ -622,7 +646,7 @@ export class SecurityFixAgent extends BaseAgent {
         await this.emitEvent('security-fix-needed', {
           issueId: issue.id,
           priority: 'immediate',
-          autoFix: true // Auto-fix critical issues
+          autoFix: true, // Auto-fix critical issues
         });
       }
     }
@@ -635,12 +659,12 @@ export class SecurityFixAgent extends BaseAgent {
       await this.rollbackService.performRollback(rollbackId);
       await this.emitEvent('rollback-completed', {
         rollbackId,
-        status: 'success'
+        status: 'success',
       });
     } catch (error) {
       await this.emitEvent('rollback-failed', {
         rollbackId,
-        error: error instanceof Error ? error.message : error
+        error: error instanceof Error ? error.message : error,
       });
     }
   }
@@ -653,14 +677,14 @@ export class SecurityFixAgent extends BaseAgent {
       'HARDCODED_SECRET',
       'WEAK_CRYPTO',
       'INSECURE_RANDOM',
-      'DEBUG_MODE_ENABLED'
+      'DEBUG_MODE_ENABLED',
     ];
 
     if (autoFixRules.includes(issue.ruleId) && issue.confidence > 0.8) {
       await this.emitEvent('security-fix-needed', {
         issueId: issue.id,
         priority: issue.severity === 'critical' ? 'immediate' : 'high',
-        autoFix: true
+        autoFix: true,
       });
     }
   }
@@ -707,7 +731,10 @@ class RollbackService {
       throw new Error('Rollback by path requires additional metadata');
     } else {
       // Rollback using RollbackData object
-      const originalPath = rollbackData.backupPath.replace(/\.[\d-T]+\.backup$/, '');
+      const originalPath = rollbackData.backupPath.replace(
+        /\.[\d-T]+\.backup$/,
+        ''
+      );
 
       // Verify backup exists
       if (!fs.existsSync(rollbackData.backupPath)) {
@@ -722,7 +749,7 @@ class RollbackService {
   async cleanupOldBackups(olderThanDays: number = 7): Promise<void> {
     const fs = require('fs');
     const files = fs.readdirSync(this.backupDir);
-    const cutoffTime = Date.now() - (olderThanDays * 24 * 60 * 60 * 1000);
+    const cutoffTime = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
 
     for (const file of files) {
       const filePath = path.join(this.backupDir, file);

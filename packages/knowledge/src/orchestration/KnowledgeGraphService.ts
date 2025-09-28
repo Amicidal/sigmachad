@@ -5,44 +5,44 @@
  * Refactored into modular components for better maintainability
  */
 
-import { EventEmitter } from "events";
-import { Neo4jConfig } from "./Neo4jService.js";
-import { RelationshipType } from '@memento/core';
-import { ServiceRegistry } from "./knowledge-graph/ServiceRegistry.js";
-import { EventOrchestrator } from "./knowledge-graph/EventOrchestrator.js";
-import { GraphInitializer } from "./knowledge-graph/GraphInitializer.js";
+import { EventEmitter } from 'events';
+import { Neo4jConfig } from '../graph/Neo4jService';
+import { RelationshipType } from '@memento/shared-types.js';
+import { ServiceRegistry } from './ServiceRegistry';
+import { EventOrchestrator } from './EventOrchestrator';
+import { GraphInitializer } from '../graph/GraphInitializer';
 import {
   EntityManager,
   RelationshipManager,
   SearchManager,
   HistoryManager,
   AnalysisManager,
-} from "../../facades/graph/index.js";
+} from '@memento/graph';
 
 interface KnowledgeGraphDependencies {
-  neo4j?: import("./Neo4jService.js").Neo4jService;
-  neogma?: import("./ogm/NeogmaService.js").NeogmaService;
-  entityService?: import("./ogm/EntityServiceOGM.js").EntityServiceOGM;
-  relationshipService?: import("./ogm/RelationshipServiceOGM.js").RelationshipServiceOGM;
-  searchService?: import("./ogm/SearchServiceOGM.js").SearchServiceOGM;
-  embeddingService?: import("./EmbeddingService.js").EmbeddingService;
-  historyService?: import("./HistoryService.js").HistoryService;
-  analysisService?: import("./AnalysisService.js").AnalysisService;
+  neo4j?: import('../graph/Neo4jService').Neo4jService;
+  neogma?: import('../graph/NeogmaService').NeogmaService;
+  entityService?: import('../graph/EntityServiceOGM').EntityServiceOGM;
+  relationshipService?: import('../graph/RelationshipServiceOGM').RelationshipServiceOGM;
+  searchService?: import('../graph/SearchServiceOGM').SearchServiceOGM;
+  embeddingService?: import('../embeddings/EmbeddingService').EmbeddingService;
+  historyService?: import('../graph/HistoryService').HistoryService;
+  analysisService?: import('../analysis/AnalysisService').AnalysisService;
 }
 
 // Import types
-import { Entity } from '@memento/core';
+import { Entity } from '@memento/shared-types.js';
 import {
   GraphRelationship,
   RelationshipQuery,
   PathQuery,
-} from '@memento/core';
+} from '@memento/shared-types.js';
 import {
   GraphSearchRequest,
   ImpactAnalysisRequest,
   ImpactAnalysis,
   DependencyAnalysis,
-} from "../../models/types.js";
+} from '@memento/shared-types.js';
 
 export class KnowledgeGraphService extends EventEmitter {
   private registry: ServiceRegistry;
@@ -107,48 +107,48 @@ export class KnowledgeGraphService extends EventEmitter {
     );
 
     // Forward events from orchestrator
-    this.eventOrchestrator.on("entity:created", (data) =>
-      this.emit("entity:created", data)
+    this.eventOrchestrator.on('entity:created', (data) =>
+      this.emit('entity:created', data)
     );
-    this.eventOrchestrator.on("entity:updated", (data) =>
-      this.emit("entity:updated", data)
+    this.eventOrchestrator.on('entity:updated', (data) =>
+      this.emit('entity:updated', data)
     );
-    this.eventOrchestrator.on("entity:deleted", (data) =>
-      this.emit("entity:deleted", data)
+    this.eventOrchestrator.on('entity:deleted', (data) =>
+      this.emit('entity:deleted', data)
     );
-    this.eventOrchestrator.on("entities:bulk:created", (data) =>
-      this.emit("entities:bulk:created", data)
+    this.eventOrchestrator.on('entities:bulk:created', (data) =>
+      this.emit('entities:bulk:created', data)
     );
-    this.eventOrchestrator.on("relationship:created", (data) =>
-      this.emit("relationship:created", data)
+    this.eventOrchestrator.on('relationship:created', (data) =>
+      this.emit('relationship:created', data)
     );
-    this.eventOrchestrator.on("relationship:deleted", (data) =>
-      this.emit("relationship:deleted", data)
+    this.eventOrchestrator.on('relationship:deleted', (data) =>
+      this.emit('relationship:deleted', data)
     );
-    this.eventOrchestrator.on("search:completed", (data) =>
-      this.emit("search:completed", data)
+    this.eventOrchestrator.on('search:completed', (data) =>
+      this.emit('search:completed', data)
     );
-    this.eventOrchestrator.on("impact:analyzed", (data) =>
-      this.emit("impact:analyzed", data)
+    this.eventOrchestrator.on('impact:analyzed', (data) =>
+      this.emit('impact:analyzed', data)
     );
 
     // Initialize graph initializer
     this.initializer = new GraphInitializer(this.neo4j, this.embeddings);
 
     // Forward initializer events
-    this.initializer.on("database:initialized", () =>
-      this.emit("database:initialized")
+    this.initializer.on('database:initialized', () =>
+      this.emit('database:initialized')
     );
-    this.initializer.on("database:error", (error) =>
-      this.emit("database:error", error)
+    this.initializer.on('database:error', (error) =>
+      this.emit('database:error', error)
     );
 
     // Initialize database indexes
     this.initializer
       .initializeDatabase()
-      .catch((err) => console.error("Failed to initialize database:", err));
+      .catch((err) => console.error('Failed to initialize database:', err));
 
-    console.log("[KnowledgeGraphService] Initialized with modular facades");
+    console.log('[KnowledgeGraphService] Initialized with modular facades');
   }
 
   // ========== Entity Operations ==========
@@ -434,7 +434,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
   async close(): Promise<void> {
     await this.registry.close();
-    this.emit("service:closed");
+    this.emit('service:closed');
   }
 
   // ========== Additional Utility Methods ==========
@@ -637,7 +637,11 @@ export class KnowledgeGraphService extends EventEmitter {
       batchSize?: number;
       maxConcurrency?: number;
       skipEmbeddings?: boolean;
-      progressCallback?: (progress: { processed: number; total: number; errors: number }) => void;
+      progressCallback?: (progress: {
+        processed: number;
+        total: number;
+        errors: number;
+      }) => void;
       fileFilters?: string[];
     } = {}
   ): Promise<{
@@ -660,8 +664,12 @@ export class KnowledgeGraphService extends EventEmitter {
 
     try {
       // Import the pipeline components only when needed
-      const { HighThroughputIngestionPipeline } = await import('../ingestion/pipeline.js');
-      const { createKnowledgeGraphAdapter } = await import('../ingestion/knowledge-graph-adapter.js');
+      const { HighThroughputIngestionPipeline } = await import(
+        '../ingestion/pipeline'
+      );
+      const { createKnowledgeGraphAdapter } = await import(
+        '../ingestion/knowledge-graph-adapter'
+      );
 
       // Create an adapter that bridges this service to the pipeline
       const adapter = createKnowledgeGraphAdapter(this);
@@ -674,28 +682,32 @@ export class KnowledgeGraphService extends EventEmitter {
           maxSize: 10000,
           partitions: 4,
           persistenceConfig: {
-            enabled: false // In-memory for now
-          }
+            enabled: false, // In-memory for now
+          },
         },
         workerConfig: {
           poolSize: options.maxConcurrency || 4,
-          taskTimeout: 30000
+          taskTimeout: 30000,
         },
         batchConfig: {
           maxBatchSize: options.batchSize || 100,
           flushInterval: 1000,
-          enableCompression: false
+          enableCompression: false,
         },
         enrichmentConfig: {
           enableEmbeddings: !options.skipEmbeddings,
-          batchSize: 25
-        }
+          batchSize: 25,
+        },
       };
 
       // Create and start the pipeline
-      const pipeline = new HighThroughputIngestionPipeline(pipelineConfig, adapter, {
-        embeddingService: this.embeddings
-      });
+      const pipeline = new HighThroughputIngestionPipeline(
+        pipelineConfig,
+        adapter,
+        {
+          embeddingService: this.embeddings,
+        }
+      );
 
       // Set up progress tracking
       pipeline.on('batch:completed', (data: any) => {
@@ -706,7 +718,7 @@ export class KnowledgeGraphService extends EventEmitter {
           options.progressCallback({
             processed: processedFiles,
             total: 0, // Will be updated as we discover files
-            errors: errors.length
+            errors: errors.length,
           });
         }
       });
@@ -714,7 +726,7 @@ export class KnowledgeGraphService extends EventEmitter {
       pipeline.on('error', (error: any) => {
         errors.push({
           file: error.context?.filePath || 'unknown',
-          error: error.message || 'Unknown error'
+          error: error.message || 'Unknown error',
         });
       });
 
@@ -732,7 +744,7 @@ export class KnowledgeGraphService extends EventEmitter {
               options.progressCallback({
                 processed: processedFiles,
                 total: 0, // We don't know total until we scan all files
-                errors: errors.length
+                errors: errors.length,
               });
             }
           }
@@ -740,7 +752,6 @@ export class KnowledgeGraphService extends EventEmitter {
 
         // Wait for pipeline to complete processing
         await pipeline.waitForCompletion();
-
       } finally {
         await pipeline.stop();
       }
@@ -758,15 +769,17 @@ export class KnowledgeGraphService extends EventEmitter {
         metrics: {
           totalTimeMs,
           entitiesPerSecond,
-          filesPerSecond
-        }
+          filesPerSecond,
+        },
       };
-
     } catch (error) {
-      console.error('[KnowledgeGraphService] Directory processing failed:', error);
+      console.error(
+        '[KnowledgeGraphService] Directory processing failed:',
+        error
+      );
       errors.push({
         file: directoryPath,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
 
       const totalTimeMs = Date.now() - startTime;
@@ -779,8 +792,8 @@ export class KnowledgeGraphService extends EventEmitter {
         metrics: {
           totalTimeMs,
           entitiesPerSecond: 0,
-          filesPerSecond: 0
-        }
+          filesPerSecond: 0,
+        },
       };
     }
   }
@@ -805,14 +818,23 @@ export class KnowledgeGraphService extends EventEmitter {
 
         if (entry.isDirectory()) {
           // Skip node_modules and other common directories
-          if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') {
+          if (
+            entry.name === 'node_modules' ||
+            entry.name === '.git' ||
+            entry.name === 'dist'
+          ) {
             continue;
           }
-          await this.processDirectoryRecursively(fullPath, pipeline, fileFilters, onFileProcessed);
+          await this.processDirectoryRecursively(
+            fullPath,
+            pipeline,
+            fileFilters,
+            onFileProcessed
+          );
         } else if (entry.isFile()) {
           // Apply file filters if provided
           if (fileFilters && fileFilters.length > 0) {
-            const shouldProcess = fileFilters.some(filter => {
+            const shouldProcess = fileFilters.some((filter) => {
               if (filter.startsWith('*.')) {
                 return fullPath.endsWith(filter.slice(1));
               }
@@ -822,8 +844,20 @@ export class KnowledgeGraphService extends EventEmitter {
           }
 
           // Default to common source code files
-          const supportedExtensions = ['.ts', '.js', '.tsx', '.jsx', '.py', '.java', '.cpp', '.c', '.h'];
-          const hasValidExtension = supportedExtensions.some(ext => fullPath.endsWith(ext));
+          const supportedExtensions = [
+            '.ts',
+            '.js',
+            '.tsx',
+            '.jsx',
+            '.py',
+            '.java',
+            '.cpp',
+            '.c',
+            '.h',
+          ];
+          const hasValidExtension = supportedExtensions.some((ext) =>
+            fullPath.endsWith(ext)
+          );
 
           if (hasValidExtension) {
             await pipeline.processFile(fullPath);
@@ -832,7 +866,10 @@ export class KnowledgeGraphService extends EventEmitter {
         }
       }
     } catch (error) {
-      console.error(`[KnowledgeGraphService] Error processing directory ${dirPath}:`, error);
+      console.error(
+        `[KnowledgeGraphService] Error processing directory ${dirPath}:`,
+        error
+      );
       throw error;
     }
   }

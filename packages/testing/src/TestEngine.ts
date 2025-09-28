@@ -4,33 +4,32 @@
  * Implements Phase 5.2 requirements for test integration
  */
 
-import { KnowledgeGraphService } from "@memento/knowledge";
-import { DatabaseService } from "@memento/database";
-import { TestResultParser } from "./TestResultParser.js";
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database';
+import { TestResultParser } from './TestResultParser.js';
 import {
   Test,
   TestExecution,
   TestPerformanceMetrics,
   CoverageMetrics,
   TestHistoricalData,
-} from "@memento/core";
+} from '@memento/core';
 import {
   PerformanceRelationship,
   PerformanceMetricSample,
   PerformanceTrend,
   RelationshipType,
-} from "@memento/core";
-import { noiseConfig } from "@memento/core";
-import { sanitizeEnvironment } from "@memento/core";
-import { normalizeMetricIdForId } from "@memento/core";
-import * as fs from "fs/promises";
-import * as path from "path";
+} from '@memento/core';
+import { noiseConfig } from '@memento/core';
+import { sanitizeEnvironment } from '@memento/core';
+import { normalizeMetricIdForId } from '@memento/core';
+import * as fs from 'fs/promises';
 
 export interface TestResult {
   testId: string;
   testSuite: string;
   testName: string;
-  status: "passed" | "failed" | "skipped" | "error";
+  status: 'passed' | 'failed' | 'skipped' | 'error';
   duration: number;
   errorMessage?: string;
   stackTrace?: string;
@@ -92,16 +91,16 @@ export interface FlakyTestAnalysis {
 
 interface PerformanceRelationshipOptions {
   reason: string;
-  severity?: "critical" | "high" | "medium" | "low";
+  severity?: 'critical' | 'high' | 'medium' | 'low';
   scenario?: string;
   environment?: string;
-  trend?: "regression" | "improvement" | "neutral";
+  trend?: 'regression' | 'improvement' | 'neutral';
   resolvedAt?: Date | null;
 }
 
 export class TestEngine {
   private parser: TestResultParser;
-  private perfRelBuffer: import("@memento/core").GraphRelationship[] = [];
+  private perfRelBuffer: import('@memento/core').GraphRelationship[] = [];
   private perfIncidentSeeds: Set<string> = new Set();
   private testSessionSequences: Map<string, number> = new Map();
 
@@ -117,7 +116,7 @@ export class TestEngine {
    */
   async parseAndRecordTestResults(
     filePath: string,
-    format: "junit" | "jest" | "mocha" | "vitest" | "cypress" | "playwright"
+    format: 'junit' | 'jest' | 'mocha' | 'vitest' | 'cypress' | 'playwright'
   ): Promise<void> {
     const suiteResult = await this.parser.parseFile(filePath, format);
     await this.recordTestResults(suiteResult);
@@ -133,24 +132,24 @@ export class TestEngine {
       // Validate test results when present
       for (const result of results) {
         if (!result) {
-          throw new Error("Test suite contains invalid test result entries");
+          throw new Error('Test suite contains invalid test result entries');
         }
         if (!result.testId || result.testId.trim().length === 0) {
-          throw new Error("Test result must have a valid testId");
+          throw new Error('Test result must have a valid testId');
         }
         if (!result.testName || result.testName.trim().length === 0) {
-          throw new Error("Test result must have a valid testName");
+          throw new Error('Test result must have a valid testName');
         }
         if (result.duration < 0) {
-          throw new Error("Test result duration cannot be negative");
+          throw new Error('Test result duration cannot be negative');
         }
-        if (!["passed", "failed", "skipped", "error"].includes(result.status)) {
+        if (!['passed', 'failed', 'skipped', 'error'].includes(result.status)) {
           throw new Error(`Invalid test status: ${result.status}`);
         }
       }
 
       if (results.length === 0) {
-        throw new Error("Test suite must include at least one test result");
+        throw new Error('Test suite must include at least one test result');
       }
 
       if (!suiteResult.coverage) {
@@ -178,20 +177,20 @@ export class TestEngine {
       // Auto-create an incident checkpoint when failures occur (config-gated)
       const hasFailures =
         suiteResult.failedTests > 0 ||
-        results.some((r) => r.status === "failed" || r.status === "error");
+        results.some((r) => r.status === 'failed' || r.status === 'error');
       if (hasFailures) {
         await this.createIncidentCheckpoint(suiteResult).catch((e) => {
-          console.warn("Incident checkpoint creation failed:", e);
+          console.warn('Incident checkpoint creation failed:', e);
         });
       }
 
       // Flush any batched performance relationships
       await this.flushPerformanceRelationships();
     } catch (error) {
-      console.error("Failed to record test results:", error);
+      console.error('Failed to record test results:', error);
       throw new Error(
         `Test result recording failed: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -206,7 +205,7 @@ export class TestEngine {
     const bulkCreate = this.kgService?.createRelationshipsBulk;
     this.perfRelBuffer = [];
 
-    if (typeof bulkCreate !== "function") {
+    if (typeof bulkCreate !== 'function') {
       return;
     }
 
@@ -223,15 +222,23 @@ export class TestEngine {
    * Controlled by env: HISTORY_ENABLED (default true), HISTORY_INCIDENT_ENABLED (default true),
    * HISTORY_INCIDENT_HOPS (default falls back to HISTORY_CHECKPOINT_HOPS or 2).
    */
-  private async createIncidentCheckpoint(suiteResult: TestSuiteResult): Promise<void> {
+  private async createIncidentCheckpoint(
+    suiteResult: TestSuiteResult
+  ): Promise<void> {
     // Feature flags
-    const historyEnabled = (process.env.HISTORY_ENABLED || "true").toLowerCase() !== "false";
-    const incidentEnabled = (process.env.HISTORY_INCIDENT_ENABLED || "true").toLowerCase() !== "false";
+    const historyEnabled =
+      (process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false';
+    const incidentEnabled =
+      (process.env.HISTORY_INCIDENT_ENABLED || 'true').toLowerCase() !==
+      'false';
     if (!historyEnabled || !incidentEnabled) return;
 
     // Determine hops
-    const incidentHopsRaw = parseInt(process.env.HISTORY_INCIDENT_HOPS || "", 10);
-    const baseHopsRaw = parseInt(process.env.HISTORY_CHECKPOINT_HOPS || "", 10);
+    const incidentHopsRaw = parseInt(
+      process.env.HISTORY_INCIDENT_HOPS || '',
+      10
+    );
+    const baseHopsRaw = parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '', 10);
     const hops = Number.isFinite(incidentHopsRaw)
       ? incidentHopsRaw
       : Number.isFinite(baseHopsRaw)
@@ -239,7 +246,7 @@ export class TestEngine {
       : 2;
 
     const failing = suiteResult.results.filter(
-      (r) => r.status === "failed" || r.status === "error"
+      (r) => r.status === 'failed' || r.status === 'error'
     );
     if (failing.length === 0) return;
 
@@ -257,7 +264,9 @@ export class TestEngine {
           if (rel.toEntityId) seedIds.add(rel.toEntityId);
         }
         // Include targetSymbol on the test entity if present
-        const testEntity = (await this.kgService.getEntity(fr.testId)) as Test | null;
+        const testEntity = (await this.kgService.getEntity(
+          fr.testId
+        )) as Test | null;
         if (testEntity?.targetSymbol) seedIds.add(testEntity.targetSymbol);
       } catch {
         // Non-fatal; continue collecting seeds
@@ -267,14 +276,16 @@ export class TestEngine {
     const seeds = Array.from(seedIds);
     if (seeds.length === 0) return;
 
-    if (typeof this.kgService.createCheckpoint !== "function") {
-      console.warn("KnowledgeGraphService#createCheckpoint not available; skipping incident checkpoint.");
+    if (typeof this.kgService.createCheckpoint !== 'function') {
+      console.warn(
+        'KnowledgeGraphService#createCheckpoint not available; skipping incident checkpoint.'
+      );
       return;
     }
 
     const { checkpointId } = await this.kgService.createCheckpoint(seeds, {
-      type: "incident",
-      hops: Math.max(1, Math.min(5, Math.floor(hops)))
+      type: 'incident',
+      hops: Math.max(1, Math.min(5, Math.floor(hops))),
     });
     console.log(
       `📌 Incident checkpoint created: ${checkpointId} (seeds=${seeds.length}, hops=${hops})`
@@ -296,7 +307,10 @@ export class TestEngine {
     }
 
     // Create test execution record
-    const executionEnvironment = this.buildExecutionEnvironment(result, timestamp);
+    const executionEnvironment = this.buildExecutionEnvironment(
+      result,
+      timestamp
+    );
 
     const execution: TestExecution = {
       id: `${result.testId}_${timestamp.getTime()}`,
@@ -311,9 +325,11 @@ export class TestEngine {
     };
 
     // Add execution to test history (avoid duplicates)
-    const priorStatus = testEntity.executionHistory.length > 0
-      ? testEntity.executionHistory[testEntity.executionHistory.length - 1].status
-      : undefined;
+    const priorStatus =
+      testEntity.executionHistory.length > 0
+        ? testEntity.executionHistory[testEntity.executionHistory.length - 1]
+            .status
+        : undefined;
     const existingExecutionIndex = testEntity.executionHistory.findIndex(
       (exec) => exec.id === execution.id
     );
@@ -322,6 +338,7 @@ export class TestEngine {
       testEntity.executionHistory.push(execution);
     } else {
       // Update existing execution
+      // eslint-disable-next-line security/detect-object-injection
       testEntity.executionHistory[existingExecutionIndex] = execution;
     }
 
@@ -354,10 +371,14 @@ export class TestEngine {
               lastModified: timestamp,
               version: 1,
             } as any);
-          } catch {}
+          } catch {
+            // Intentionally empty - error handling is not critical here
+          }
         }
       }
-    } catch {}
+    } catch {
+      // Intentionally empty - error handling is not critical here
+    }
 
     // Emit BROKE_IN / FIXED_IN signals between test and its target symbol on status transition
     try {
@@ -366,48 +387,53 @@ export class TestEngine {
       const target = testEntity.targetSymbol;
       if (target) {
         const eventBase = execution.id;
-        if ((prev === "passed" || prev === "skipped" || prev === undefined) && curr === "failed") {
+        if (
+          (prev === 'passed' || prev === 'skipped' || prev === undefined) &&
+          curr === 'failed'
+        ) {
           await this.emitTestSessionRelationship({
             testEntity,
             timestamp,
             type: RelationshipType.BROKE_IN,
             toEntityId: target,
             eventBase,
-            actor: "test-engine",
-            impact: { severity: "high", testsFailed: [testEntity.id] },
-            impactSeverity: "high",
+            actor: 'test-engine',
+            impact: { severity: 'high', testsFailed: [testEntity.id] },
+            impactSeverity: 'high',
             stateTransition: {
-              from: "working",
-              to: "broken",
-              verifiedBy: "test",
+              from: 'working',
+              to: 'broken',
+              verifiedBy: 'test',
               confidence: 1,
             },
-            metadata: { verifiedBy: "test", runId: execution.id },
-            annotations: ["test-run", "failed"],
+            metadata: { verifiedBy: 'test', runId: execution.id },
+            annotations: ['test-run', 'failed'],
           });
         }
-        if (prev === "failed" && curr === "passed") {
+        if (prev === 'failed' && curr === 'passed') {
           await this.emitTestSessionRelationship({
             testEntity,
             timestamp,
             type: RelationshipType.FIXED_IN,
             toEntityId: target,
             eventBase,
-            actor: "test-engine",
-            impact: { severity: "low", testsFixed: [testEntity.id] },
-            impactSeverity: "low",
+            actor: 'test-engine',
+            impact: { severity: 'low', testsFixed: [testEntity.id] },
+            impactSeverity: 'low',
             stateTransition: {
-              from: "broken",
-              to: "working",
-              verifiedBy: "test",
+              from: 'broken',
+              to: 'working',
+              verifiedBy: 'test',
               confidence: 1,
             },
-            metadata: { verifiedBy: "test", runId: execution.id },
-            annotations: ["test-run", "resolved"],
+            metadata: { verifiedBy: 'test', runId: execution.id },
+            annotations: ['test-run', 'resolved'],
           });
         }
       }
-    } catch {}
+    } catch {
+      // Intentionally empty - error handling is not critical here
+    }
 
     // Update coverage if provided
     if (result.coverage) {
@@ -438,20 +464,20 @@ export class TestEngine {
     metadata?: Record<string, any>;
     annotations?: string[];
     stateTransition?: {
-      from?: "working" | "broken" | "unknown";
-      to?: "working" | "broken" | "unknown";
-      verifiedBy?: "test" | "build" | "manual";
+      from?: 'working' | 'broken' | 'unknown';
+      to?: 'working' | 'broken' | 'unknown';
+      verifiedBy?: 'test' | 'build' | 'manual';
       confidence?: number;
       criticalChange?: Record<string, any>;
     };
     impact?: {
-      severity?: "high" | "medium" | "low";
+      severity?: 'high' | 'medium' | 'low';
       testsFailed?: string[];
       testsFixed?: string[];
       buildError?: string;
       performanceImpact?: number;
     };
-    impactSeverity?: "critical" | "high" | "medium" | "low";
+    impactSeverity?: 'critical' | 'high' | 'medium' | 'low';
   }): Promise<void> {
     const sessionId = `test-session:${options.testEntity.id.toLowerCase()}`;
     const sequenceNumber = this.nextTestSessionSequence(sessionId);
@@ -460,14 +486,14 @@ export class TestEngine {
     const annotations = Array.from(
       new Set(
         (options.annotations || [])
-          .map((value) => (typeof value === "string" ? value.trim() : ""))
+          .map((value) => (typeof value === 'string' ? value.trim() : ''))
           .filter((value) => value.length > 0)
       )
     );
 
     const metadata: Record<string, any> = {
       sessionId,
-      source: "test-engine",
+      source: 'test-engine',
       testId: options.testEntity.id,
       targetEntityId: options.toEntityId,
       ...options.metadata,
@@ -484,7 +510,7 @@ export class TestEngine {
       sequenceNumber,
       timestamp: options.timestamp,
       eventId,
-      actor: options.actor ?? "test-engine",
+      actor: options.actor ?? 'test-engine',
       metadata,
     };
 
@@ -543,10 +569,10 @@ export class TestEngine {
       id: result.testId,
       path: result.testSuite,
       hash: this.generateHash(result.testId),
-      language: "typescript", // Default, could be inferred
+      language: 'typescript', // Default, could be inferred
       lastModified: new Date(),
       created: new Date(),
-      type: "test",
+      type: 'test',
       testType,
       targetSymbol,
       framework: this.inferFramework(result.testSuite),
@@ -563,7 +589,7 @@ export class TestEngine {
         averageExecutionTime: 0,
         p95ExecutionTime: 0,
         successRate: 0,
-        trend: "stable",
+        trend: 'stable',
         benchmarkComparisons: [],
         historicalData: [],
       },
@@ -580,6 +606,7 @@ export class TestEngine {
       : [];
 
     for (let idx = history.length - 1; idx >= 0; idx -= 1) {
+      // eslint-disable-next-line security/detect-object-injection
       const execution = history[idx];
       const normalized = this.extractEnvironmentFromExecution(
         execution?.environment
@@ -594,23 +621,24 @@ export class TestEngine {
 
   private extractEnvironmentFromExecution(env: unknown): string | undefined {
     if (!env) return undefined;
-    if (typeof env === "string") {
+    if (typeof env === 'string') {
       return this.normalizeEnvironmentCandidate(env);
     }
 
-    if (typeof env === "object") {
+    if (typeof env === 'object') {
       const candidateKeys = [
-        "environment",
-        "env",
-        "name",
-        "target",
-        "stage",
-        "nodeEnv",
+        'environment',
+        'env',
+        'name',
+        'target',
+        'stage',
+        'nodeEnv',
       ];
 
       for (const key of candidateKeys) {
+        // eslint-disable-next-line security/detect-object-injection
         const candidate = (env as Record<string, any>)[key];
-        if (typeof candidate === "string") {
+        if (typeof candidate === 'string') {
           const normalized = this.normalizeEnvironmentCandidate(candidate);
           if (normalized) return normalized;
         }
@@ -621,13 +649,13 @@ export class TestEngine {
   }
 
   private normalizeEnvironmentCandidate(value: unknown): string | undefined {
-    if (typeof value !== "string" || value.trim().length === 0) {
+    if (typeof value !== 'string' || value.trim().length === 0) {
       return undefined;
     }
 
     const normalized = sanitizeEnvironment(value);
     if (!normalized) return undefined;
-    return normalized === "unknown" ? undefined : normalized;
+    return normalized === 'unknown' ? undefined : normalized;
   }
 
   private defaultEnvironment(): string {
@@ -635,7 +663,7 @@ export class TestEngine {
       process.env.TEST_RUN_ENVIRONMENT,
       process.env.MEMENTO_ENVIRONMENT,
       process.env.NODE_ENV,
-      "test",
+      'test',
     ];
 
     for (const candidate of candidates) {
@@ -643,33 +671,33 @@ export class TestEngine {
       if (normalized) return normalized;
     }
 
-    return "test";
+    return 'test';
   }
 
   private mapPerformanceTrendToRelationship(
-    trend: TestPerformanceMetrics["trend"] | undefined
+    trend: TestPerformanceMetrics['trend'] | undefined
   ): PerformanceTrend {
     switch (trend) {
-      case "improving":
-        return "improvement";
-      case "degrading":
-        return "regression";
+      case 'improving':
+        return 'improvement';
+      case 'degrading':
+        return 'regression';
       default:
-        return "neutral";
+        return 'neutral';
     }
   }
 
   private hasRecoveredFromPerformanceIncident(testEntity: Test): boolean {
-    if (testEntity.performanceMetrics.trend === "improving") {
+    if (testEntity.performanceMetrics.trend === 'improving') {
       return true;
     }
 
     const avgOk =
-      typeof testEntity.performanceMetrics.averageExecutionTime === "number" &&
+      typeof testEntity.performanceMetrics.averageExecutionTime === 'number' &&
       testEntity.performanceMetrics.averageExecutionTime <
         noiseConfig.PERF_IMPACT_AVG_MS;
     const p95Ok =
-      typeof testEntity.performanceMetrics.p95ExecutionTime === "number" &&
+      typeof testEntity.performanceMetrics.p95ExecutionTime === 'number' &&
       testEntity.performanceMetrics.p95ExecutionTime <
         noiseConfig.PERF_IMPACT_P95_MS;
 
@@ -694,7 +722,7 @@ export class TestEngine {
     const testGroups = new Map<string, TestResult[]>();
     for (const result of results) {
       if (!result || !result.testId) {
-        throw new Error("Invalid test result: missing testId");
+        throw new Error('Invalid test result: missing testId');
       }
       if (!testGroups.has(result.testId)) {
         testGroups.set(result.testId, []);
@@ -733,7 +761,7 @@ export class TestEngine {
     options: { limit?: number } = {}
   ): Promise<FlakyTestAnalysis[]> {
     if (!entityId || entityId.trim().length === 0) {
-      throw new Error("entityId is required to retrieve flaky analysis");
+      throw new Error('entityId is required to retrieve flaky analysis');
     }
 
     const history = await this.dbService.getTestExecutionHistory(
@@ -760,7 +788,7 @@ export class TestEngine {
 
       return {
         testId: row.test_id || row.testId || entityId,
-        testSuite: row.suite_name || row.test_suite || "unknown-suite",
+        testSuite: row.suite_name || row.test_suite || 'unknown-suite',
         testName: row.test_name || row.testName || entityId,
         status: this.normalizeTestStatus(row.status),
         duration: Number.isFinite(numericDuration) ? numericDuration : 0,
@@ -772,22 +800,22 @@ export class TestEngine {
     return this.analyzeFlakyTests(normalizedResults, { persist: false });
   }
 
-  private normalizeTestStatus(status: any): TestResult["status"] {
+  private normalizeTestStatus(status: any): TestResult['status'] {
     switch (String(status).toLowerCase()) {
-      case "passed":
-      case "pass":
-        return "passed";
-      case "failed":
-      case "fail":
-        return "failed";
-      case "skipped":
-      case "skip":
-        return "skipped";
-      case "error":
-      case "errored":
-        return "error";
+      case 'passed':
+      case 'pass':
+        return 'passed';
+      case 'failed':
+      case 'fail':
+        return 'failed';
+      case 'skipped':
+      case 'skip':
+        return 'skipped';
+      case 'error':
+      case 'errored':
+        return 'error';
       default:
-        return "failed";
+        return 'failed';
     }
   }
 
@@ -799,7 +827,7 @@ export class TestEngine {
     results: TestResult[]
   ): Promise<FlakyTestAnalysis> {
     const totalRuns = results.length;
-    const failures = results.filter((r) => r.status === "failed").length;
+    const failures = results.filter((r) => r.status === 'failed').length;
     const failureRate = failures / totalRuns;
     const successRate = 1 - failureRate;
 
@@ -809,7 +837,7 @@ export class TestEngine {
     // High failure rate in recent runs
     const recentRuns = results.slice(-10);
     const recentFailures = recentRuns.filter(
-      (r) => r.status === "failed"
+      (r) => r.status === 'failed'
     ).length;
     const recentFailureRate = recentFailures / recentRuns.length;
     flakyScore += recentFailureRate * 0.4;
@@ -850,7 +878,7 @@ export class TestEngine {
   ): Promise<TestPerformanceMetrics> {
     // Validate input
     if (!entityId || entityId.trim().length === 0) {
-      throw new Error("Entity ID cannot be empty");
+      throw new Error('Entity ID cannot be empty');
     }
 
     const testEntity = (await this.kgService.getEntity(entityId)) as Test;
@@ -867,7 +895,7 @@ export class TestEngine {
   async getCoverageAnalysis(entityId: string): Promise<TestCoverageAnalysis> {
     // Validate input
     if (!entityId || entityId.trim().length === 0) {
-      throw new Error("Entity ID cannot be empty");
+      throw new Error('Entity ID cannot be empty');
     }
 
     const testEntity = (await this.kgService.getEntity(entityId)) as Test;
@@ -882,18 +910,21 @@ export class TestEngine {
     });
 
     const coverages: CoverageMetrics[] = [];
-    const breakdownBuckets: Record<"unit" | "integration" | "e2e", CoverageMetrics[]> = {
+    const breakdownBuckets: Record<
+      'unit' | 'integration' | 'e2e',
+      CoverageMetrics[]
+    > = {
       unit: [],
       integration: [],
       e2e: [],
     };
-    const testCases: TestCoverageAnalysis["testCases"] = [];
+    const testCases: TestCoverageAnalysis['testCases'] = [];
     const processedSources = new Set<string>();
 
     const pushCoverage = (
       sourceId: string,
       coverage: CoverageMetrics | undefined,
-      testType: Test["testType"] | undefined,
+      testType: Test['testType'] | undefined,
       testName: string,
       covers: string[]
     ) => {
@@ -910,14 +941,16 @@ export class TestEngine {
       };
 
       coverages.push(normalized);
-      const bucketKey: Test["testType"] = testType ?? "unit";
+      const bucketKey: Test['testType'] = testType ?? 'unit';
+      // eslint-disable-next-line security/detect-object-injection
       breakdownBuckets[bucketKey].push(normalized);
       testCases.push({ testId: sourceId, testName, covers });
     };
 
     // Include the test entity's own coverage metrics when applicable
     if (testEntity) {
-      const baselineTarget = testEntity.targetSymbol ?? testEntity.id ?? entityId;
+      const baselineTarget =
+        testEntity.targetSymbol ?? testEntity.id ?? entityId;
       const coverageTargets = testEntity.targetSymbol
         ? [testEntity.targetSymbol]
         : [entityId];
@@ -925,7 +958,7 @@ export class TestEngine {
       pushCoverage(
         entityId,
         testEntity.coverage,
-        testEntity.testType ?? "unit",
+        testEntity.testType ?? 'unit',
         baselineTarget,
         coverageTargets
       );
@@ -936,13 +969,14 @@ export class TestEngine {
         continue;
       }
 
-      const relCoverage =
-        (rel as any)?.metadata?.coverage as CoverageMetrics | undefined;
-      const relatedTest = (await this.kgService.getEntity(rel.fromEntityId)) as
-        | Test
-        | null;
+      const relCoverage = (rel as any)?.metadata?.coverage as
+        | CoverageMetrics
+        | undefined;
+      const relatedTest = (await this.kgService.getEntity(
+        rel.fromEntityId
+      )) as Test | null;
 
-      const relationshipTestType = relatedTest?.testType ?? "unit";
+      const relationshipTestType = relatedTest?.testType ?? 'unit';
       const relationshipTestName =
         relatedTest?.targetSymbol ?? relatedTest?.id ?? rel.fromEntityId;
 
@@ -977,24 +1011,24 @@ export class TestEngine {
    */
   async parseTestResults(
     filePath: string,
-    format: "junit" | "jest" | "mocha" | "vitest"
+    format: 'junit' | 'jest' | 'mocha' | 'vitest'
   ): Promise<TestSuiteResult> {
     try {
-      const content = await fs.readFile(filePath, "utf-8");
+      const content = await fs.readFile(filePath, 'utf-8');
 
       // Validate content is not empty
       if (!content || content.trim().length === 0) {
-        throw new Error("Test result file is empty");
+        throw new Error('Test result file is empty');
       }
 
       switch (format) {
-        case "junit":
+        case 'junit':
           return this.parseJUnitXML(content);
-        case "jest":
+        case 'jest':
           return this.parseJestJSON(content);
-        case "mocha":
+        case 'mocha':
           return this.parseMochaJSON(content);
-        case "vitest":
+        case 'vitest':
           return this.parseVitestJSON(content);
         default:
           throw new Error(`Unsupported test format: ${format}`);
@@ -1003,7 +1037,7 @@ export class TestEngine {
       if (error instanceof Error) {
         throw new Error(`Failed to parse test results: ${error.message}`);
       }
-      throw new Error("Failed to parse test results: Unknown error");
+      throw new Error('Failed to parse test results: Unknown error');
     }
   }
 
@@ -1014,21 +1048,22 @@ export class TestEngine {
 
     // Validate content is not empty and contains XML
     if (!content || content.trim().length === 0) {
-      throw new Error("JUnit XML content is empty");
+      throw new Error('JUnit XML content is empty');
     }
 
-    if (!content.includes("<testcase")) {
-      throw new Error("Invalid JUnit XML format: no testcase elements found");
+    if (!content.includes('<testcase')) {
+      throw new Error('Invalid JUnit XML format: no testcase elements found');
     }
 
     const suiteNameMatch = content.match(/<testsuite[^>]*name="([^"]+)"/i);
-    const rawSuiteName = suiteNameMatch?.[1]?.trim() ?? "JUnit Test Suite";
-    const suiteName = rawSuiteName.toLowerCase().includes("junit")
+    const rawSuiteName = suiteNameMatch?.[1]?.trim() ?? 'JUnit Test Suite';
+    const suiteName = rawSuiteName.toLowerCase().includes('junit')
       ? rawSuiteName
       : `JUnit: ${rawSuiteName}`;
 
     const results: TestResult[] = [];
-    const testCaseRegex = /<testcase\b([^>]*)>([\s\S]*?<\/testcase>)?|<testcase\b([^>]*)\/>/gi;
+    const testCaseRegex =
+      /<testcase\b([^>]*)>([\s\S]*?<\/testcase>)?|<testcase\b([^>]*)\/>/gi;
     let match: RegExpExecArray | null;
 
     const parseAttributes = (segment: string): Record<string, string> => {
@@ -1043,13 +1078,13 @@ export class TestEngine {
     };
 
     while ((match = testCaseRegex.exec(content)) !== null) {
-      const attrSegment = match[1] ?? match[3] ?? "";
-      const inner = match[2] ?? "";
+      const attrSegment = match[1] ?? match[3] ?? '';
+      const inner = match[2] ?? '';
       const attrs = parseAttributes(attrSegment);
 
       const className = attrs.classname ?? attrs.class ?? suiteName;
       const testName = attrs.name ?? attrs.id ?? `test-${results.length + 1}`;
-      const timeStr = attrs.time ?? attrs.duration ?? "0";
+      const timeStr = attrs.time ?? attrs.duration ?? '0';
       const durationSeconds = parseFloat(timeStr);
 
       if (Number.isNaN(durationSeconds)) {
@@ -1058,13 +1093,13 @@ export class TestEngine {
         );
       }
 
-      const status = inner.includes("<failure")
-        ? "failed"
-        : inner.includes("<error")
-        ? "error"
-        : inner.includes("<skipped")
-        ? "skipped"
-        : "passed";
+      const status = inner.includes('<failure')
+        ? 'failed'
+        : inner.includes('<error')
+        ? 'error'
+        : inner.includes('<skipped')
+        ? 'skipped'
+        : 'passed';
 
       results.push({
         testId: className ? `${className}.${testName}` : testName,
@@ -1082,18 +1117,18 @@ export class TestEngine {
     }
 
     if (results.length === 0) {
-      throw new Error("Invalid JUnit XML format: no testcase elements found");
+      throw new Error('Invalid JUnit XML format: no testcase elements found');
     }
 
     return {
       suiteName,
       timestamp: new Date(),
-      results: results,
-      framework: "junit",
+      results,
+      framework: 'junit',
       totalTests: results.length,
-      passedTests: results.filter((r) => r.status === "passed").length,
-      failedTests: results.filter((r) => r.status === "failed").length,
-      skippedTests: results.filter((r) => r.status === "skipped").length,
+      passedTests: results.filter((r) => r.status === 'passed').length,
+      failedTests: results.filter((r) => r.status === 'failed').length,
+      skippedTests: results.filter((r) => r.status === 'skipped').length,
       duration: results.reduce((sum, r) => sum + r.duration, 0),
     };
   }
@@ -1103,8 +1138,8 @@ export class TestEngine {
       const data = JSON.parse(content);
 
       // Validate basic structure
-      if (!data || typeof data !== "object") {
-        throw new Error("Invalid Jest JSON format: expected object");
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid Jest JSON format: expected object');
       }
 
       const results: TestResult[] = [];
@@ -1113,23 +1148,23 @@ export class TestEngine {
         data.testResults.forEach((suite: any) => {
           if (!suite.testResults || !Array.isArray(suite.testResults)) {
             throw new Error(
-              "Invalid Jest JSON format: missing or invalid testResults array"
+              'Invalid Jest JSON format: missing or invalid testResults array'
             );
           }
 
           suite.testResults.forEach((test: any) => {
             if (!test.title) {
-              throw new Error("Invalid Jest JSON format: test missing title");
+              throw new Error('Invalid Jest JSON format: test missing title');
             }
 
             results.push({
-              testId: `${suite.testFilePath || "unknown"}:${test.title}`,
-              testSuite: suite.testFilePath || "unknown",
+              testId: `${suite.testFilePath || 'unknown'}:${test.title}`,
+              testSuite: suite.testFilePath || 'unknown',
               testName: test.title,
-              status: test.status === "passed" ? "passed" : "failed",
+              status: test.status === 'passed' ? 'passed' : 'failed',
               duration: test.duration || 0,
               errorMessage: test.failureMessages
-                ? test.failureMessages.join("\n")
+                ? test.failureMessages.join('\n')
                 : undefined,
               coverage: {
                 statements: 0,
@@ -1141,18 +1176,18 @@ export class TestEngine {
           });
         });
       } else {
-        throw new Error("Invalid Jest JSON format: missing testResults array");
+        throw new Error('Invalid Jest JSON format: missing testResults array');
       }
 
       return {
-        suiteName: "Jest Test Suite",
+        suiteName: 'Jest Test Suite',
         timestamp: new Date(),
-        results: results,
-        framework: "jest",
+        results,
+        framework: 'jest',
         totalTests: results.length,
-        passedTests: results.filter((r) => r.status === "passed").length,
-        failedTests: results.filter((r) => r.status === "failed").length,
-        skippedTests: results.filter((r) => r.status === "skipped").length,
+        passedTests: results.filter((r) => r.status === 'passed').length,
+        failedTests: results.filter((r) => r.status === 'failed').length,
+        skippedTests: results.filter((r) => r.status === 'skipped').length,
         duration: results.reduce((sum, r) => sum + r.duration, 0),
       };
     } catch (error) {
@@ -1164,7 +1199,7 @@ export class TestEngine {
       if (error instanceof Error) {
         throw new Error(`Failed to parse Jest JSON: ${error.message}`);
       }
-      throw new Error("Failed to parse Jest JSON: Unknown error");
+      throw new Error('Failed to parse Jest JSON: Unknown error');
     }
   }
 
@@ -1173,8 +1208,8 @@ export class TestEngine {
       const data = JSON.parse(content);
 
       // Validate basic structure
-      if (!data || typeof data !== "object") {
-        throw new Error("Invalid Mocha JSON format: expected object");
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid Mocha JSON format: expected object');
       }
 
       const results: TestResult[] = [];
@@ -1182,15 +1217,15 @@ export class TestEngine {
       if (data.tests && Array.isArray(data.tests)) {
         data.tests.forEach((test: any) => {
           if (!test.title) {
-            throw new Error("Invalid Mocha JSON format: test missing title");
+            throw new Error('Invalid Mocha JSON format: test missing title');
           }
 
           results.push({
             testId:
-              test.fullTitle || `${test.parent || "Mocha Suite"}#${test.title}`,
-            testSuite: test.parent || "Mocha Suite",
+              test.fullTitle || `${test.parent || 'Mocha Suite'}#${test.title}`,
+            testSuite: test.parent || 'Mocha Suite',
             testName: test.title,
-            status: test.state === "passed" ? "passed" : "failed",
+            status: test.state === 'passed' ? 'passed' : 'failed',
             duration: test.duration || 0,
             errorMessage: test.err ? test.err.message : undefined,
             stackTrace: test.err ? test.err.stack : undefined,
@@ -1203,18 +1238,18 @@ export class TestEngine {
           });
         });
       } else {
-        throw new Error("Invalid Mocha JSON format: missing tests array");
+        throw new Error('Invalid Mocha JSON format: missing tests array');
       }
 
       return {
-        suiteName: "Mocha Test Suite",
+        suiteName: 'Mocha Test Suite',
         timestamp: new Date(),
-        results: results,
-        framework: "mocha",
+        results,
+        framework: 'mocha',
         totalTests: results.length,
-        passedTests: results.filter((r) => r.status === "passed").length,
-        failedTests: results.filter((r) => r.status === "failed").length,
-        skippedTests: results.filter((r) => r.status === "skipped").length,
+        passedTests: results.filter((r) => r.status === 'passed').length,
+        failedTests: results.filter((r) => r.status === 'failed').length,
+        skippedTests: results.filter((r) => r.status === 'skipped').length,
         duration: results.reduce((sum, r) => sum + r.duration, 0),
       };
     } catch (error) {
@@ -1226,7 +1261,7 @@ export class TestEngine {
       if (error instanceof Error) {
         throw new Error(`Failed to parse Mocha JSON: ${error.message}`);
       }
-      throw new Error("Failed to parse Mocha JSON: Unknown error");
+      throw new Error('Failed to parse Mocha JSON: Unknown error');
     }
   }
 
@@ -1235,8 +1270,8 @@ export class TestEngine {
       const data = JSON.parse(content);
 
       // Validate basic structure
-      if (!data || typeof data !== "object") {
-        throw new Error("Invalid Vitest JSON format: expected object");
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid Vitest JSON format: expected object');
       }
 
       const results: TestResult[] = [];
@@ -1245,15 +1280,15 @@ export class TestEngine {
         data.testResults.forEach((result: any) => {
           if (!result.name) {
             throw new Error(
-              "Invalid Vitest JSON format: test result missing name"
+              'Invalid Vitest JSON format: test result missing name'
             );
           }
 
           results.push({
             testId: result.name,
-            testSuite: result.filepath || "Vitest Suite",
+            testSuite: result.filepath || 'Vitest Suite',
             testName: result.name,
-            status: result.status === "pass" ? "passed" : "failed",
+            status: result.status === 'pass' ? 'passed' : 'failed',
             duration: result.duration || 0,
             coverage: {
               statements: 0,
@@ -1265,19 +1300,19 @@ export class TestEngine {
         });
       } else {
         throw new Error(
-          "Invalid Vitest JSON format: missing testResults array"
+          'Invalid Vitest JSON format: missing testResults array'
         );
       }
 
       return {
-        suiteName: "Vitest Test Suite",
+        suiteName: 'Vitest Test Suite',
         timestamp: new Date(),
-        results: results,
-        framework: "vitest",
+        results,
+        framework: 'vitest',
         totalTests: results.length,
-        passedTests: results.filter((r) => r.status === "passed").length,
-        failedTests: results.filter((r) => r.status === "failed").length,
-        skippedTests: results.filter((r) => r.status === "skipped").length,
+        passedTests: results.filter((r) => r.status === 'passed').length,
+        failedTests: results.filter((r) => r.status === 'failed').length,
+        skippedTests: results.filter((r) => r.status === 'skipped').length,
         duration: results.reduce((sum, r) => sum + r.duration, 0),
       };
     } catch (error) {
@@ -1289,7 +1324,7 @@ export class TestEngine {
       if (error instanceof Error) {
         throw new Error(`Failed to parse Vitest JSON: ${error.message}`);
       }
-      throw new Error("Failed to parse Vitest JSON: Unknown error");
+      throw new Error('Failed to parse Vitest JSON: Unknown error');
     }
   }
 
@@ -1298,7 +1333,7 @@ export class TestEngine {
   private async findTestEntity(testId: string): Promise<Test | null> {
     try {
       const entity = await this.kgService.getEntity(testId);
-      return entity && entity.type === "test" ? (entity as Test) : null;
+      return entity && entity.type === 'test' ? (entity as Test) : null;
     } catch {
       return null;
     }
@@ -1306,28 +1341,28 @@ export class TestEngine {
 
   private mapStatus(
     status: string
-  ): "passing" | "failing" | "skipped" | "unknown" {
+  ): 'passing' | 'failing' | 'skipped' | 'unknown' {
     switch (status) {
-      case "passed":
-        return "passing";
-      case "failed":
-        return "failing";
-      case "skipped":
-        return "skipped";
+      case 'passed':
+        return 'passing';
+      case 'failed':
+        return 'failing';
+      case 'skipped':
+        return 'skipped';
       default:
-        return "unknown";
+        return 'unknown';
     }
   }
 
   private inferTestType(
     suiteName: string,
     testName: string
-  ): "unit" | "integration" | "e2e" {
+  ): 'unit' | 'integration' | 'e2e' {
     const name = `${suiteName} ${testName}`.toLowerCase();
-    if (name.includes("e2e") || name.includes("end-to-end")) return "e2e";
-    if (name.includes("integration") || name.includes("int"))
-      return "integration";
-    return "unit";
+    if (name.includes('e2e') || name.includes('end-to-end')) return 'e2e';
+    if (name.includes('integration') || name.includes('int'))
+      return 'integration';
+    return 'unit';
   }
 
   private async findTargetSymbol(
@@ -1340,18 +1375,18 @@ export class TestEngine {
 
     // Look for common patterns in test names that indicate what they test
     if (
-      lowerTestName.includes("helper") ||
-      lowerTestName.includes("util") ||
-      lowerTestName.includes("cover") ||
-      lowerSuiteName.includes("coverage") ||
-      lowerSuiteName.includes("coveragetests")
+      lowerTestName.includes('helper') ||
+      lowerTestName.includes('util') ||
+      lowerTestName.includes('cover') ||
+      lowerSuiteName.includes('coverage') ||
+      lowerSuiteName.includes('coveragetests')
     ) {
-      return "coverage-test-entity"; // Match the test entity created in tests
+      return 'coverage-test-entity'; // Match the test entity created in tests
     }
 
     // For unit tests, try to infer from the test name
-    if (lowerSuiteName.includes("unit") && lowerTestName.includes("validate")) {
-      return "coverage-test-entity"; // Common pattern in test suites
+    if (lowerSuiteName.includes('unit') && lowerTestName.includes('validate')) {
+      return 'coverage-test-entity'; // Common pattern in test suites
     }
 
     // This would use the AST parser to find what the test is testing
@@ -1360,20 +1395,20 @@ export class TestEngine {
   }
 
   private inferFramework(suiteName: string): string {
-    if (suiteName.toLowerCase().includes("jest")) return "jest";
-    if (suiteName.toLowerCase().includes("mocha")) return "mocha";
-    if (suiteName.toLowerCase().includes("vitest")) return "vitest";
-    return "unknown";
+    if (suiteName.toLowerCase().includes('jest')) return 'jest';
+    if (suiteName.toLowerCase().includes('mocha')) return 'mocha';
+    if (suiteName.toLowerCase().includes('vitest')) return 'vitest';
+    return 'unknown';
   }
 
   private extractTags(testName: string): string[] {
     const tags: string[] = [];
     const lowerName = testName.toLowerCase();
 
-    if (lowerName.includes("slow")) tags.push("slow");
-    if (lowerName.includes("fast")) tags.push("fast");
-    if (lowerName.includes("flaky")) tags.push("flaky");
-    if (lowerName.includes("critical")) tags.push("critical");
+    if (lowerName.includes('slow')) tags.push('slow');
+    if (lowerName.includes('fast')) tags.push('fast');
+    if (lowerName.includes('flaky')) tags.push('flaky');
+    if (lowerName.includes('critical')) tags.push('critical');
 
     return tags;
   }
@@ -1394,7 +1429,7 @@ export class TestEngine {
     if (history.length === 0) return;
 
     const environment = this.resolveEnvironmentForTest(testEntity);
-    const successfulRuns = history.filter((h) => h.status === "passed");
+    const successfulRuns = history.filter((h) => h.status === 'passed');
     const successfulDurations = successfulRuns
       .map((h) => Number(h.duration))
       .filter((value) => Number.isFinite(value) && value >= 0);
@@ -1414,6 +1449,7 @@ export class TestEngine {
       const sorted = [...durationSamples].sort((a, b) => a - b);
       const p95Index = Math.floor(sorted.length * 0.95);
       testEntity.performanceMetrics.p95ExecutionTime =
+        // eslint-disable-next-line security/detect-object-injection
         sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0;
     } else {
       testEntity.performanceMetrics.averageExecutionTime = 0;
@@ -1459,9 +1495,9 @@ export class TestEngine {
         testEntity.targetSymbol ?? testEntity.id,
         RelationshipType.PERFORMANCE_IMPACT,
         {
-          reason: "Performance metrics snapshot",
-          severity: "low",
-          scenario: "test-latency-observation",
+          reason: 'Performance metrics snapshot',
+          severity: 'low',
+          scenario: 'test-latency-observation',
           environment,
           trend: this.mapPerformanceTrendToRelationship(
             testEntity.performanceMetrics.trend
@@ -1483,7 +1519,9 @@ export class TestEngine {
       if (testEntity.targetSymbol) {
         const target = await this.kgService.getEntity(testEntity.targetSymbol);
         if (target) {
-          const hist = Array.isArray(testEntity.performanceMetrics.historicalData)
+          const hist = Array.isArray(
+            testEntity.performanceMetrics.historicalData
+          )
             ? testEntity.performanceMetrics.historicalData
             : [];
           const validHistorySamples = hist.filter((entry) =>
@@ -1518,7 +1556,7 @@ export class TestEngine {
               ? lastExecs[lastExecs.length - 1] - lastExecs[0]
               : 0;
           const degradingOk =
-            testEntity.performanceMetrics.trend === "degrading" &&
+            testEntity.performanceMetrics.trend === 'degrading' &&
             historyOk &&
             monotonicIncrease &&
             increaseDelta >= noiseConfig.PERF_DEGRADING_MIN_DELTA_MS;
@@ -1530,9 +1568,9 @@ export class TestEngine {
               testEntity.targetSymbol,
               RelationshipType.PERFORMANCE_REGRESSION,
               {
-                reason: "Sustained regression detected via historical trend",
-                severity: "high",
-                scenario: "test-latency-regression",
+                reason: 'Sustained regression detected via historical trend',
+                severity: 'high',
+                scenario: 'test-latency-regression',
                 environment,
               }
             );
@@ -1545,19 +1583,20 @@ export class TestEngine {
             this.perfIncidentSeeds.add(testEntity.id);
           } else if (
             // Performance impact if latency is above configurable high-water marks
-            historyOk && (
-              testEntity.performanceMetrics.p95ExecutionTime >= noiseConfig.PERF_IMPACT_P95_MS ||
-              testEntity.performanceMetrics.averageExecutionTime >= noiseConfig.PERF_IMPACT_AVG_MS
-            )
+            historyOk &&
+            (testEntity.performanceMetrics.p95ExecutionTime >=
+              noiseConfig.PERF_IMPACT_P95_MS ||
+              testEntity.performanceMetrics.averageExecutionTime >=
+                noiseConfig.PERF_IMPACT_AVG_MS)
           ) {
             const impactRel = this.buildPerformanceRelationship(
               testEntity,
               testEntity.targetSymbol,
               RelationshipType.PERFORMANCE_IMPACT,
               {
-                reason: "Latency threshold breached in latest run",
-                severity: "medium",
-                scenario: "test-latency-threshold",
+                reason: 'Latency threshold breached in latest run',
+                severity: 'medium',
+                scenario: 'test-latency-threshold',
                 environment,
               }
             );
@@ -1578,11 +1617,11 @@ export class TestEngine {
               testEntity.targetSymbol,
               RelationshipType.PERFORMANCE_REGRESSION,
               {
-                reason: "Performance metrics returned to baseline",
-                severity: "low",
-                scenario: "test-latency-regression",
+                reason: 'Performance metrics returned to baseline',
+                severity: 'low',
+                scenario: 'test-latency-regression',
                 environment,
-                trend: "improvement",
+                trend: 'improvement',
                 resolvedAt: testEntity.lastRunAt ?? new Date(),
               }
             );
@@ -1646,17 +1685,17 @@ export class TestEngine {
         };
       })
       .filter(Boolean) as Array<{
-        value: number;
-        timestamp?: Date;
-        runId?: string;
-      }>;
+      value: number;
+      timestamp?: Date;
+      runId?: string;
+    }>;
 
     const metricsHistory = historySamples.map((sample) => ({
       value: sample.value,
       timestamp: sample.timestamp,
       runId: sample.runId,
       environment: normalizedEnvironment,
-      unit: "ms",
+      unit: 'ms',
     })) as PerformanceMetricSample[];
 
     const firstSample = historySamples[0];
@@ -1667,8 +1706,7 @@ export class TestEngine {
 
     const baselineCandidate =
       firstSample?.value ??
-      (metrics.benchmarkComparisons &&
-      metrics.benchmarkComparisons.length > 0
+      (metrics.benchmarkComparisons && metrics.benchmarkComparisons.length > 0
         ? metrics.benchmarkComparisons[0].threshold
         : metrics.p95ExecutionTime ?? metrics.averageExecutionTime);
     const currentCandidate =
@@ -1699,55 +1737,55 @@ export class TestEngine {
     const metricId = normalizeMetricIdForId(rawMetricId);
     const severity =
       opts.severity ??
-      (type === RelationshipType.PERFORMANCE_REGRESSION ? "high" : "medium");
-    const trend = opts.trend ?? "regression";
+      (type === RelationshipType.PERFORMANCE_REGRESSION ? 'high' : 'medium');
+    const trend = opts.trend ?? 'regression';
     const resolvedAtValue =
       opts.resolvedAt !== undefined && opts.resolvedAt !== null
         ? new Date(opts.resolvedAt)
         : undefined;
 
-      const successRatePercent =
-        typeof metrics.successRate === "number"
-          ? Math.round(metrics.successRate * 10000) / 100
-          : undefined;
+    const successRatePercent =
+      typeof metrics.successRate === 'number'
+        ? Math.round(metrics.successRate * 10000) / 100
+        : undefined;
 
-      const metadata = {
-        reason: opts.reason,
-        testId: testEntity.id,
-        testSuite: testEntity.path,
-        framework: testEntity.framework,
-        trend,
-        environment: normalizedEnvironment,
-        avgMs: metrics.averageExecutionTime,
-        p95Ms: metrics.p95ExecutionTime,
-        successRate: metrics.successRate,
-        benchmarkComparisons: (metrics.benchmarkComparisons || []).slice(0, 5),
-        status: resolvedAtValue ? "resolved" : "active",
-        resolvedAt: resolvedAtValue ? resolvedAtValue.toISOString() : undefined,
-        metrics: [
-          {
-            id: "averageExecutionTime",
-            name: "Average execution time",
-            value: metrics.averageExecutionTime,
-            unit: "ms",
-          },
-          {
-            id: "p95ExecutionTime",
-            name: "P95 execution time",
-            value: metrics.p95ExecutionTime,
-            unit: "ms",
-          },
-          {
-            id: "successRate",
-            name: "Success rate",
-            value: successRatePercent ?? null,
-            unit: "percent",
-          },
-        ],
-      };
+    const metadata = {
+      reason: opts.reason,
+      testId: testEntity.id,
+      testSuite: testEntity.path,
+      framework: testEntity.framework,
+      trend,
+      environment: normalizedEnvironment,
+      avgMs: metrics.averageExecutionTime,
+      p95Ms: metrics.p95ExecutionTime,
+      successRate: metrics.successRate,
+      benchmarkComparisons: (metrics.benchmarkComparisons || []).slice(0, 5),
+      status: resolvedAtValue ? 'resolved' : 'active',
+      resolvedAt: resolvedAtValue ? resolvedAtValue.toISOString() : undefined,
+      metrics: [
+        {
+          id: 'averageExecutionTime',
+          name: 'Average execution time',
+          value: metrics.averageExecutionTime,
+          unit: 'ms',
+        },
+        {
+          id: 'p95ExecutionTime',
+          name: 'P95 execution time',
+          value: metrics.p95ExecutionTime,
+          unit: 'ms',
+        },
+        {
+          id: 'successRate',
+          name: 'Success rate',
+          value: successRatePercent ?? null,
+          unit: 'percent',
+        },
+      ],
+    };
 
     const relationship: PerformanceRelationship = {
-      id: "",
+      id: '',
       fromEntityId: testEntity.id,
       toEntityId: targetEntityId,
       type,
@@ -1755,15 +1793,14 @@ export class TestEngine {
       lastModified: detectedAt,
       version: 1,
       metricId,
-      scenario: opts.scenario ?? "test-suite",
+      scenario: opts.scenario ?? 'test-suite',
       environment: normalizedEnvironment,
       baselineValue: baseline,
       currentValue: current,
       delta,
       percentChange,
-      unit: "ms",
-      sampleSize:
-        metricsHistory.length > 0 ? metricsHistory.length : undefined,
+      unit: 'ms',
+      sampleSize: metricsHistory.length > 0 ? metricsHistory.length : undefined,
       metricsHistory,
       trend,
       severity,
@@ -1772,7 +1809,7 @@ export class TestEngine {
       metadata,
       evidence: [
         {
-          source: "heuristic",
+          source: 'heuristic',
           note: opts.reason,
         },
       ],
@@ -1869,6 +1906,7 @@ export class TestEngine {
 
     let alternations = 0;
     for (let i = 1; i < results.length; i++) {
+      // eslint-disable-next-line security/detect-object-injection
       if (results[i].status !== results[i - 1].status) {
         alternations++;
       }
@@ -1887,10 +1925,10 @@ export class TestEngine {
 
   private identifyFailurePatterns(results: TestResult[]): any {
     const patterns: any = {
-      timeOfDay: "various",
-      environment: "unknown",
-      duration: "stable",
-      alternating: "low",
+      timeOfDay: 'various',
+      environment: 'unknown',
+      duration: 'stable',
+      alternating: 'low',
     };
 
     if (results.length < 2) {
@@ -1904,37 +1942,37 @@ export class TestEngine {
     const durationCoeffOfVariation = durationVariability / avgDuration;
 
     if (durationCoeffOfVariation > 0.5) {
-      patterns.duration = "variable";
+      patterns.duration = 'variable';
     } else if (durationCoeffOfVariation > 0.2) {
-      patterns.duration = "moderate";
+      patterns.duration = 'moderate';
     }
 
     // Analyze alternating pattern
     const alternatingScore = this.detectAlternatingPattern(results);
     if (alternatingScore > 0.7) {
-      patterns.alternating = "high";
+      patterns.alternating = 'high';
     } else if (alternatingScore > 0.4) {
-      patterns.alternating = "moderate";
+      patterns.alternating = 'moderate';
     }
 
     // Check for resource contention patterns
     const failureMessages = results
-      .filter((r) => r.status === "failed" && r.errorMessage)
+      .filter((r) => r.status === 'failed' && r.errorMessage)
       .map((r) => r.errorMessage!.toLowerCase());
 
     const resourceKeywords = [
-      "timeout",
-      "connection",
-      "network",
-      "memory",
-      "resource",
+      'timeout',
+      'connection',
+      'network',
+      'memory',
+      'resource',
     ];
     const hasResourceIssues = failureMessages.some((msg) =>
       resourceKeywords.some((keyword) => msg.includes(keyword))
     );
 
     if (hasResourceIssues) {
-      patterns.environment = "resource_contention";
+      patterns.environment = 'resource_contention';
     }
 
     return patterns;
@@ -1949,85 +1987,85 @@ export class TestEngine {
     // High flakiness recommendations
     if (score > 0.8) {
       recommendations.push(
-        "This test has critical flakiness - immediate investigation required"
+        'This test has critical flakiness - immediate investigation required'
       );
       recommendations.push(
-        "Consider disabling this test temporarily until stability is improved"
+        'Consider disabling this test temporarily until stability is improved'
       );
       recommendations.push(
-        "Review test setup and teardown for resource cleanup issues"
+        'Review test setup and teardown for resource cleanup issues'
       );
       recommendations.push(
-        "Check for global state pollution between test runs"
+        'Check for global state pollution between test runs'
       );
     } else if (score > 0.7) {
       recommendations.push(
-        "Consider rewriting this test to be more deterministic"
+        'Consider rewriting this test to be more deterministic'
       );
-      recommendations.push("Check for race conditions or timing dependencies");
-      recommendations.push("Add explicit waits instead of relying on timing");
+      recommendations.push('Check for race conditions or timing dependencies');
+      recommendations.push('Add explicit waits instead of relying on timing');
     }
 
     // Medium flakiness recommendations
     if (score > 0.5) {
       recommendations.push(
-        "Run this test in isolation to identify external dependencies"
+        'Run this test in isolation to identify external dependencies'
       );
-      recommendations.push("Add retry logic if the failure is intermittent");
+      recommendations.push('Add retry logic if the failure is intermittent');
       recommendations.push(
-        "Check for network or I/O dependencies that may cause variability"
+        'Check for network or I/O dependencies that may cause variability'
       );
     }
 
     // Pattern-based recommendations
-    if (patterns.duration === "variable") {
+    if (patterns.duration === 'variable') {
       recommendations.push(
-        "Test duration varies significantly - investigate timing-related issues"
+        'Test duration varies significantly - investigate timing-related issues'
       );
       recommendations.push(
-        "Consider adding timeouts and ensuring async operations complete"
+        'Consider adding timeouts and ensuring async operations complete'
       );
     }
 
-    if (patterns.alternating === "high") {
+    if (patterns.alternating === 'high') {
       recommendations.push(
-        "Test alternates between pass/fail - check for initialization order issues"
+        'Test alternates between pass/fail - check for initialization order issues'
       );
-      recommendations.push("Verify test isolation and cleanup between runs");
+      recommendations.push('Verify test isolation and cleanup between runs');
       // Add the deterministic rewrite recommendation for alternating patterns too
       if (
         !recommendations.includes(
-          "Consider rewriting this test to be more deterministic"
+          'Consider rewriting this test to be more deterministic'
         )
       ) {
         recommendations.push(
-          "Consider rewriting this test to be more deterministic"
+          'Consider rewriting this test to be more deterministic'
         );
       }
       // Add race conditions recommendation for alternating patterns
       if (
         !recommendations.includes(
-          "Check for race conditions or timing dependencies"
+          'Check for race conditions or timing dependencies'
         )
       ) {
         recommendations.push(
-          "Check for race conditions or timing dependencies"
+          'Check for race conditions or timing dependencies'
         );
       }
     }
 
     // Environment-specific recommendations
-    if (patterns.environment === "resource_contention") {
+    if (patterns.environment === 'resource_contention') {
       recommendations.push(
-        "Test may be affected by resource contention - consider adding delays"
+        'Test may be affected by resource contention - consider adding delays'
       );
       recommendations.push(
-        "Run test with reduced parallelism to isolate resource issues"
+        'Run test with reduced parallelism to isolate resource issues'
       );
     }
 
     // General monitoring recommendation
-    recommendations.push("Monitor this test closely in future runs");
+    recommendations.push('Monitor this test closely in future runs');
 
     return recommendations;
   }
@@ -2040,9 +2078,9 @@ export class TestEngine {
 
   private calculateTrend(
     history: TestExecution[]
-  ): "improving" | "stable" | "degrading" {
+  ): 'improving' | 'stable' | 'degrading' {
     if (!Array.isArray(history) || history.length === 0) {
-      return "stable";
+      return 'stable';
     }
 
     const windowSize = Math.max(noiseConfig.PERF_TREND_MIN_RUNS ?? 3, 3);
@@ -2063,40 +2101,46 @@ export class TestEngine {
         previous.length > 0 ? average(previous) : recentAverage;
       const delta = recentAverage - previousAverage;
       const percentChange =
-        previousAverage > 0 ? (delta / previousAverage) * 100 : delta > 0 ? Infinity : delta < 0 ? -Infinity : 0;
+        previousAverage > 0
+          ? (delta / previousAverage) * 100
+          : delta > 0
+          ? Infinity
+          : delta < 0
+          ? -Infinity
+          : 0;
 
       if (
         delta >= noiseConfig.PERF_DEGRADING_MIN_DELTA_MS ||
         percentChange >= 5
       ) {
-        return "degrading";
+        return 'degrading';
       }
 
       if (
         delta <= -noiseConfig.PERF_DEGRADING_MIN_DELTA_MS ||
         percentChange <= -5
       ) {
-        return "improving";
+        return 'improving';
       }
     }
 
-    if (history.length < 5) return "stable";
+    if (history.length < 5) return 'stable';
 
     const recent = history.slice(-5);
     const older = history.slice(-10, -5);
 
-    if (recent.length === 0 || older.length === 0) return "stable";
+    if (recent.length === 0 || older.length === 0) return 'stable';
 
     const recentSuccessRate =
-      recent.filter((h) => h.status === "passed").length / recent.length;
+      recent.filter((h) => h.status === 'passed').length / recent.length;
     const olderSuccessRate =
-      older.filter((h) => h.status === "passed").length / older.length;
+      older.filter((h) => h.status === 'passed').length / older.length;
 
     const diff = recentSuccessRate - olderSuccessRate;
 
-    if (diff > 0.1) return "improving";
-    if (diff < -0.1) return "degrading";
-    return "stable";
+    if (diff > 0.1) return 'improving';
+    if (diff < -0.1) return 'degrading';
+    return 'stable';
   }
 
   private aggregateCoverage(coverages: CoverageMetrics[]): CoverageMetrics {
@@ -2118,12 +2162,12 @@ export class TestEngine {
   private calculateFlakyScore(history: TestExecution[]): number {
     if (history.length < 3) return 0;
 
-    const failures = history.filter((h) => h.status === "failed").length;
+    const failures = history.filter((h) => h.status === 'failed').length;
     const failureRate = failures / history.length;
 
     // Weight recent failures more heavily
     const recent = history.slice(-5);
-    const recentFailures = recent.filter((h) => h.status === "failed").length;
+    const recentFailures = recent.filter((h) => h.status === 'failed').length;
     const recentFailureRate = recentFailures / recent.length;
 
     return failureRate * 0.6 + recentFailureRate * 0.4;

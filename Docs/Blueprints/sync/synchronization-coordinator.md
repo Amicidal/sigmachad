@@ -1,5 +1,18 @@
 # Synchronization Coordinator Blueprint
 
+## Metadata
+
+- Scope: sync
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: sync).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 The Synchronization Coordinator orchestrates repository scans, AST ingestion, and graph persistence across FalkorDB, Qdrant, and PostgreSQL. Recent integration work hardened the service around initialization and testability, but the execution path still leaks infrastructure assertions (Falkor bulk upserts, embedding batches) and lacks configuration hooks that integration environments rely on. This blueprint catalogs the outstanding gaps that surfaced while getting `tests/integration/services/SynchronizationCoordinator.integration.test.ts` back to green.
 

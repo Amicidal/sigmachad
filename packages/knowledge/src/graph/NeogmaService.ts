@@ -9,6 +9,7 @@ import { Neo4jConfig } from '../Neo4jService.js';
 
 export class NeogmaService extends EventEmitter {
   private neogma: Neogma;
+  private readonly connectionReady: Promise<void>;
 
   constructor(config: Neo4jConfig) {
     super();
@@ -21,8 +22,14 @@ export class NeogmaService extends EventEmitter {
       database: config.database || 'neo4j',
     } as any);
 
-    // Verify connection
-    this.verifyConnection();
+    // Verify connection and guard against unhandled rejections
+    this.connectionReady = this.verifyConnection();
+    this.connectionReady.catch((error) => {
+      this.emit('error', {
+        message: 'Failed to connect to Neo4j during initialization',
+        error,
+      });
+    });
   }
 
   /**
@@ -55,10 +62,11 @@ export class NeogmaService extends EventEmitter {
     params: Record<string, any> = {}
   ): Promise<any[]> {
     try {
+      await this.connectionReady;
       const result = await this.neogma.queryRunner.run(query, params);
-      return result.records.map(record => {
+      return result.records.map((record) => {
         const obj: any = {};
-        record.keys.forEach(key => {
+        record.keys.forEach((key) => {
           obj[key] = record.get(key);
         });
         return obj;
@@ -75,5 +83,9 @@ export class NeogmaService extends EventEmitter {
   async close(): Promise<void> {
     await this.neogma.driver.close();
     this.emit('disconnected');
+  }
+
+  async ensureConnected(): Promise<void> {
+    return this.connectionReady;
   }
 }

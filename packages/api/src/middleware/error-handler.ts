@@ -6,57 +6,48 @@
 import { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { TRPCError } from '@trpc/server';
 import { ZodError } from 'zod';
-
-export interface ErrorContext {
-  requestId: string;
-  method: string;
-  url: string;
-  userAgent?: string;
-  ip: string;
-  timestamp: string;
-  duration?: number;
-}
-
-export interface ErrorMetadata {
-  code: string;
-  statusCode: number;
-  category: 'validation' | 'authentication' | 'authorization' | 'rate_limit' | 'not_found' | 'server_error' | 'service_unavailable';
-  retryable: boolean;
-  details?: Record<string, any>;
-}
-
-export interface StandardErrorResponse {
-  success: false;
-  error: {
-    code: string;
-    message: string;
-    category: string;
-    retryable: boolean;
-    details?: Record<string, any>;
-  };
-  context: ErrorContext;
-}
+import {
+  ErrorContext,
+  ErrorMetadata,
+  StandardErrorResponse,
+} from '@memento/shared-types.js';
 
 const getErrorMetadata = (error: any): ErrorMetadata => {
   // TRPC Errors
   if (error instanceof TRPCError) {
-    const category = error.code === 'UNAUTHORIZED' ? 'authentication' :
-                    error.code === 'FORBIDDEN' ? 'authorization' :
-                    error.code === 'BAD_REQUEST' ? 'validation' :
-                    error.code === 'NOT_FOUND' ? 'not_found' :
-                    error.code === 'TOO_MANY_REQUESTS' ? 'rate_limit' :
-                    error.code === 'INTERNAL_SERVER_ERROR' ? 'server_error' :
-                    'server_error';
+    const category =
+      error.code === 'UNAUTHORIZED'
+        ? 'authentication'
+        : error.code === 'FORBIDDEN'
+        ? 'authorization'
+        : error.code === 'BAD_REQUEST'
+        ? 'validation'
+        : error.code === 'NOT_FOUND'
+        ? 'not_found'
+        : error.code === 'TOO_MANY_REQUESTS'
+        ? 'rate_limit'
+        : error.code === 'INTERNAL_SERVER_ERROR'
+        ? 'server_error'
+        : 'server_error';
 
-    const statusCode = error.code === 'UNAUTHORIZED' ? 401 :
-                      error.code === 'FORBIDDEN' ? 403 :
-                      error.code === 'BAD_REQUEST' ? 400 :
-                      error.code === 'NOT_FOUND' ? 404 :
-                      error.code === 'TOO_MANY_REQUESTS' ? 429 :
-                      error.code === 'TIMEOUT' ? 408 :
-                      error.code === 'CONFLICT' ? 409 :
-                      error.code === 'PRECONDITION_FAILED' ? 412 :
-                      500;
+    const statusCode =
+      error.code === 'UNAUTHORIZED'
+        ? 401
+        : error.code === 'FORBIDDEN'
+        ? 403
+        : error.code === 'BAD_REQUEST'
+        ? 400
+        : error.code === 'NOT_FOUND'
+        ? 404
+        : error.code === 'TOO_MANY_REQUESTS'
+        ? 429
+        : error.code === 'TIMEOUT'
+        ? 408
+        : error.code === 'CONFLICT'
+        ? 409
+        : error.code === 'PRECONDITION_FAILED'
+        ? 412
+        : 500;
 
     return {
       code: error.code,
@@ -116,7 +107,10 @@ const getErrorMetadata = (error: any): ErrorMetadata => {
   }
 
   // Rate Limiting Errors
-  if (error.message?.includes('rate limit') || error.message?.includes('too many requests')) {
+  if (
+    error.message?.includes('rate limit') ||
+    error.message?.includes('too many requests')
+  ) {
     return {
       code: 'RATE_LIMIT_EXCEEDED',
       statusCode: 429,
@@ -129,7 +123,10 @@ const getErrorMetadata = (error: any): ErrorMetadata => {
   }
 
   // Authentication Errors
-  if (error.message?.includes('unauthorized') || error.message?.includes('invalid token')) {
+  if (
+    error.message?.includes('unauthorized') ||
+    error.message?.includes('invalid token')
+  ) {
     return {
       code: 'UNAUTHORIZED',
       statusCode: 401,
@@ -139,7 +136,10 @@ const getErrorMetadata = (error: any): ErrorMetadata => {
   }
 
   // Authorization Errors
-  if (error.message?.includes('forbidden') || error.message?.includes('insufficient')) {
+  if (
+    error.message?.includes('forbidden') ||
+    error.message?.includes('insufficient')
+  ) {
     return {
       code: 'FORBIDDEN',
       statusCode: 403,
@@ -149,7 +149,11 @@ const getErrorMetadata = (error: any): ErrorMetadata => {
   }
 
   // Network/Connection Errors
-  if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+  if (
+    error.code === 'ECONNREFUSED' ||
+    error.code === 'ENOTFOUND' ||
+    error.code === 'ETIMEDOUT'
+  ) {
     return {
       code: 'SERVICE_UNAVAILABLE',
       statusCode: 503,
@@ -167,10 +171,13 @@ const getErrorMetadata = (error: any): ErrorMetadata => {
     statusCode: error.statusCode || 500,
     category: 'server_error',
     retryable: error.statusCode === 503,
-    details: process.env.NODE_ENV === 'development' ? {
-      stack: error.stack,
-      name: error.name,
-    } : undefined,
+    details:
+      process.env.NODE_ENV === 'development'
+        ? {
+            stack: error.stack,
+            name: error.name,
+          }
+        : undefined,
   };
 };
 
@@ -192,7 +199,10 @@ export const createErrorHandler = () => {
     const metadata = getErrorMetadata(error);
 
     // Log error with appropriate level
-    const logLevel = metadata.category === 'validation' || metadata.category === 'not_found' ? 'warn' : 'error';
+    const logLevel =
+      metadata.category === 'validation' || metadata.category === 'not_found'
+        ? 'warn'
+        : 'error';
     const logData = {
       error: {
         message: error.message,
@@ -212,9 +222,11 @@ export const createErrorHandler = () => {
     }
 
     // Sanitize error message for client
-    const clientMessage = metadata.category === 'server_error' && process.env.NODE_ENV === 'production'
-      ? 'An unexpected error occurred'
-      : error.message;
+    const clientMessage =
+      metadata.category === 'server_error' &&
+      process.env.NODE_ENV === 'production'
+        ? 'An unexpected error occurred'
+        : error.message;
 
     const response: StandardErrorResponse = {
       success: false,
@@ -228,7 +240,8 @@ export const createErrorHandler = () => {
       context: {
         ...context,
         // Remove sensitive headers in production
-        userAgent: process.env.NODE_ENV === 'production' ? undefined : context.userAgent,
+        userAgent:
+          process.env.NODE_ENV === 'production' ? undefined : context.userAgent,
       },
     };
 
@@ -262,20 +275,27 @@ export const createApiError = (
 };
 
 // Common error factory functions
-export const ValidationError = (message: string, details?: Record<string, any>) =>
-  createApiError('VALIDATION_ERROR', message, 400, details);
+export const ValidationError = (
+  message: string,
+  details?: Record<string, any>
+) => createApiError('VALIDATION_ERROR', message, 400, details);
 
-export const AuthenticationError = (message: string = 'Authentication required') =>
-  createApiError('UNAUTHORIZED', message, 401);
+export const AuthenticationError = (
+  message: string = 'Authentication required'
+) => createApiError('UNAUTHORIZED', message, 401);
 
-export const AuthorizationError = (message: string = 'Insufficient permissions') =>
-  createApiError('FORBIDDEN', message, 403);
+export const AuthorizationError = (
+  message: string = 'Insufficient permissions'
+) => createApiError('FORBIDDEN', message, 403);
 
 export const NotFoundError = (message: string = 'Resource not found') =>
   createApiError('NOT_FOUND', message, 404);
 
-export const RateLimitError = (message: string = 'Rate limit exceeded', retryAfter: number = 60) =>
-  createApiError('RATE_LIMIT_EXCEEDED', message, 429, { retryAfter });
+export const RateLimitError = (
+  message: string = 'Rate limit exceeded',
+  retryAfter: number = 60
+) => createApiError('RATE_LIMIT_EXCEEDED', message, 429, { retryAfter });
 
-export const ServiceUnavailableError = (message: string = 'Service temporarily unavailable') =>
-  createApiError('SERVICE_UNAVAILABLE', message, 503);
+export const ServiceUnavailableError = (
+  message: string = 'Service temporarily unavailable'
+) => createApiError('SERVICE_UNAVAILABLE', message, 503);

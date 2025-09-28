@@ -2,22 +2,13 @@
  * Change detection and diff generation for rollback operations
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import {
   DiffEntry,
   DiffOperation,
   RollbackDiff,
   Snapshot,
-  RollbackError
+  RollbackError,
 } from './RollbackTypes.js';
-
-/**
- * Interface for objects that can be diffed
- */
-interface Diffable {
-  id?: string;
-  [key: string]: any;
-}
 
 /**
  * Options for diff generation
@@ -41,7 +32,7 @@ export class DiffEngine {
     maxDepth: 10,
     ignoreProperties: ['__timestamp', '__version', '__metadata'],
     includeMetadata: true,
-    customComparators: new Map()
+    customComparators: new Map(),
   };
 
   /**
@@ -61,14 +52,19 @@ export class DiffEngine {
     }
 
     const mergedOptions = { ...this.defaultOptions, ...options };
-    const changes = this.diffObjects(fromSnapshot.data, toSnapshot.data, '', mergedOptions);
+    const changes = this.diffObjects(
+      fromSnapshot.data,
+      toSnapshot.data,
+      '',
+      mergedOptions
+    );
 
     return {
       from: fromSnapshot.rollbackPointId,
       to: toSnapshot.rollbackPointId,
       changes,
       changeCount: changes.length,
-      generatedAt: new Date()
+      generatedAt: new Date(),
     };
   }
 
@@ -137,7 +133,7 @@ export class DiffEngine {
       [DiffOperation.CREATE]: 0,
       [DiffOperation.UPDATE]: 0,
       [DiffOperation.DELETE]: 0,
-      [DiffOperation.MOVE]: 0
+      [DiffOperation.MOVE]: 0,
     };
 
     const affectedPaths = new Set<string>();
@@ -158,7 +154,7 @@ export class DiffEngine {
       totalChanges: diff.changeCount,
       changesByOperation,
       affectedPaths: Array.from(affectedPaths),
-      estimatedComplexity
+      estimatedComplexity,
     };
   }
 
@@ -185,7 +181,7 @@ export class DiffEngine {
           path,
           operation: DiffOperation.CREATE,
           oldValue: obj1,
-          newValue: obj2
+          newValue: obj2,
         });
       }
       return changes;
@@ -196,7 +192,7 @@ export class DiffEngine {
         path,
         operation: DiffOperation.DELETE,
         oldValue: obj1,
-        newValue: obj2
+        newValue: obj2,
       });
       return changes;
     }
@@ -208,7 +204,7 @@ export class DiffEngine {
           path,
           operation: DiffOperation.UPDATE,
           oldValue: obj1,
-          newValue: obj2
+          newValue: obj2,
         });
       }
       return changes;
@@ -220,8 +216,16 @@ export class DiffEngine {
     }
 
     // Handle objects
-    const keys1 = new Set(Object.keys(obj1).filter(key => !this.shouldIgnoreProperty(key, options)));
-    const keys2 = new Set(Object.keys(obj2).filter(key => !this.shouldIgnoreProperty(key, options)));
+    const keys1 = new Set(
+      Object.keys(obj1).filter(
+        (key) => !this.shouldIgnoreProperty(key, options)
+      )
+    );
+    const keys2 = new Set(
+      Object.keys(obj2).filter(
+        (key) => !this.shouldIgnoreProperty(key, options)
+      )
+    );
     const allKeys = new Set([...Array.from(keys1), ...Array.from(keys2)]);
 
     for (const key of Array.from(allKeys)) {
@@ -229,14 +233,16 @@ export class DiffEngine {
 
       if (keys1.has(key) && keys2.has(key)) {
         // Property exists in both objects
-        changes.push(...this.diffObjects(obj1[key], obj2[key], newPath, options, depth + 1));
+        changes.push(
+          ...this.diffObjects(obj1[key], obj2[key], newPath, options, depth + 1)
+        );
       } else if (keys1.has(key)) {
         // Property removed
         changes.push({
           path: newPath,
           operation: DiffOperation.DELETE,
           oldValue: obj1[key],
-          newValue: undefined
+          newValue: undefined,
         });
       } else {
         // Property added
@@ -244,7 +250,7 @@ export class DiffEngine {
           path: newPath,
           operation: DiffOperation.CREATE,
           oldValue: undefined,
-          newValue: obj2[key]
+          newValue: obj2[key],
         });
       }
     }
@@ -274,13 +280,15 @@ export class DiffEngine {
         // Both arrays have element at this index
         if (!this.areEqual(arr1[i], arr2[i], options)) {
           if (typeof arr1[i] === 'object' && typeof arr2[i] === 'object') {
-            changes.push(...this.diffObjects(arr1[i], arr2[i], newPath, options, depth + 1));
+            changes.push(
+              ...this.diffObjects(arr1[i], arr2[i], newPath, options, depth + 1)
+            );
           } else {
             changes.push({
               path: newPath,
               operation: DiffOperation.UPDATE,
               oldValue: arr1[i],
-              newValue: arr2[i]
+              newValue: arr2[i],
             });
           }
         }
@@ -290,7 +298,7 @@ export class DiffEngine {
           path: newPath,
           operation: DiffOperation.DELETE,
           oldValue: arr1[i],
-          newValue: undefined
+          newValue: undefined,
         });
       } else {
         // Element added
@@ -298,7 +306,7 @@ export class DiffEngine {
           path: newPath,
           operation: DiffOperation.CREATE,
           oldValue: undefined,
-          newValue: arr2[i]
+          newValue: arr2[i],
         });
       }
     }
@@ -375,7 +383,9 @@ export class DiffEngine {
   private areEqual(val1: any, val2: any, options: DiffOptions): boolean {
     // Custom comparator check
     if (options.customComparators) {
-      for (const [pattern, comparator] of Array.from(options.customComparators.entries())) {
+      for (const [pattern, comparator] of Array.from(
+        options.customComparators.entries()
+      )) {
         if (pattern === '*' || val1?.constructor?.name === pattern) {
           return comparator(val1, val2);
         }
@@ -395,18 +405,25 @@ export class DiffEngine {
     // Array comparison
     if (Array.isArray(val1) && Array.isArray(val2)) {
       if (val1.length !== val2.length) return false;
-      return val1.every((item, index) => this.areEqual(item, val2[index], options));
+      return val1.every((item, index) =>
+        this.areEqual(item, val2[index], options)
+      );
     }
 
     // Object comparison
     if (typeof val1 === 'object' && typeof val2 === 'object') {
-      const keys1 = Object.keys(val1).filter(key => !this.shouldIgnoreProperty(key, options));
-      const keys2 = Object.keys(val2).filter(key => !this.shouldIgnoreProperty(key, options));
+      const keys1 = Object.keys(val1).filter(
+        (key) => !this.shouldIgnoreProperty(key, options)
+      );
+      const keys2 = Object.keys(val2).filter(
+        (key) => !this.shouldIgnoreProperty(key, options)
+      );
 
       if (keys1.length !== keys2.length) return false;
 
-      return keys1.every(key =>
-        keys2.includes(key) && this.areEqual(val1[key], val2[key], options)
+      return keys1.every(
+        (key) =>
+          keys2.includes(key) && this.areEqual(val1[key], val2[key], options)
       );
     }
 
@@ -416,7 +433,10 @@ export class DiffEngine {
   /**
    * Check if a property should be ignored during diffing
    */
-  private shouldIgnoreProperty(property: string, options: DiffOptions): boolean {
+  private shouldIgnoreProperty(
+    property: string,
+    options: DiffOptions
+  ): boolean {
     return options.ignoreProperties?.includes(property) || false;
   }
 
@@ -426,7 +446,7 @@ export class DiffEngine {
   private deepClone(obj: any): any {
     if (obj === null || typeof obj !== 'object') return obj;
     if (obj instanceof Date) return new Date(obj);
-    if (Array.isArray(obj)) return obj.map(item => this.deepClone(item));
+    if (Array.isArray(obj)) return obj.map((item) => this.deepClone(item));
 
     const cloned: any = {};
     for (const [key, value] of Object.entries(obj)) {

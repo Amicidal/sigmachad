@@ -1,5 +1,10 @@
 # Knowledge Graph Relationships
 
+## Desired Capabilities
+
+- [ ] Define required capabilities and acceptance criteria.
+- [ ] Note API/Graph impacts.
+
 ## Overview
 Index for relationship blueprints across dimensions:
 - Spec: spec-relationships.md

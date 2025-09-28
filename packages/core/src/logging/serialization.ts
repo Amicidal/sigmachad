@@ -1,4 +1,4 @@
-import { LogEntry } from "../services/LoggingService.js";
+import { LogEntry } from '../services/LoggingService.js';
 
 export interface SerializationOptions {
   maxDepth?: number;
@@ -23,24 +23,26 @@ export function sanitizeData(
   const seen = new WeakSet<object>();
 
   const sanitize = (input: unknown, depth: number): unknown => {
-    if (input === null || typeof input !== "object") {
-      if (typeof input === "string" && input.length > maxStringLength) {
-        return `${input.slice(0, maxStringLength)}…[truncated ${input.length - maxStringLength} chars]`;
+    if (input === null || typeof input !== 'object') {
+      if (typeof input === 'string' && input.length > maxStringLength) {
+        return `${input.slice(0, maxStringLength)}…[truncated ${
+          input.length - maxStringLength
+        } chars]`;
       }
-      if (typeof input === "bigint") {
+      if (typeof input === 'bigint') {
         return `${input.toString()}n`;
       }
-      if (typeof input === "symbol") {
-        return input.description ? `Symbol(${input.description})` : "Symbol()";
+      if (typeof input === 'symbol') {
+        return input.description ? `Symbol(${input.description})` : 'Symbol()';
       }
-      if (typeof input === "function") {
+      if (typeof input === 'function') {
         return `[Function ${input.name || 'anonymous'}]`;
       }
       return input;
     }
 
     if (seen.has(input as object)) {
-      return "[Circular]";
+      return '[Circular]';
     }
 
     if (depth >= maxDepth) {
@@ -50,11 +52,13 @@ export function sanitizeData(
     seen.add(input as object);
 
     if (Array.isArray(input)) {
-      const limited = input.slice(0, maxArrayLength).map((item) =>
-        sanitize(item, depth + 1)
-      );
+      const limited = input
+        .slice(0, maxArrayLength)
+        .map((item) => sanitize(item, depth + 1));
       if (input.length > maxArrayLength) {
-        limited.push(`…[${input.length - maxArrayLength} more items truncated]`);
+        limited.push(
+          `…[${input.length - maxArrayLength} more items truncated]`
+        );
       }
       return limited;
     }
@@ -72,7 +76,10 @@ export function sanitizeData(
     }
 
     const output: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      input as Record<string, unknown>
+    )) {
+      // eslint-disable-next-line security/detect-object-injection
       output[key] = sanitize(value, depth + 1);
     }
     return output;

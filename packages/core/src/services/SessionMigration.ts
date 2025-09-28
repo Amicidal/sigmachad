@@ -144,10 +144,12 @@ export class SessionMigration extends EventEmitter {
   /**
    * Start a full migration of all sessions
    */
-  async startFullMigration(options: {
-    backupFirst?: boolean;
-    validateAfter?: boolean;
-  } = {}): Promise<string> {
+  async startFullMigration(
+    options: {
+      backupFirst?: boolean;
+      validateAfter?: boolean;
+    } = {}
+  ): Promise<string> {
     const taskId = `migration-${Date.now()}`;
 
     const task: MigrationTask = {
@@ -167,7 +169,7 @@ export class SessionMigration extends EventEmitter {
     this.activeTasks.set(taskId, task);
 
     // Execute migration in background
-    this.executeMigration(task, options).catch(error => {
+    this.executeMigration(task, options).catch((error) => {
       task.status = 'failed';
       task.error = error.message;
       task.endTime = new Date().toISOString();
@@ -205,12 +207,14 @@ export class SessionMigration extends EventEmitter {
 
     this.activeTasks.set(taskId, task);
 
-    this.executeIncrementalMigration(task, sinceTimestamp, options).catch(error => {
-      task.status = 'failed';
-      task.error = error.message;
-      task.endTime = new Date().toISOString();
-      this.emit('migration:failed', { taskId, error });
-    });
+    this.executeIncrementalMigration(task, sinceTimestamp, options).catch(
+      (error) => {
+        task.status = 'failed';
+        task.error = error.message;
+        task.endTime = new Date().toISOString();
+        this.emit('migration:failed', { taskId, error });
+      }
+    );
 
     return taskId;
   }
@@ -243,7 +247,7 @@ export class SessionMigration extends EventEmitter {
 
     this.activeTasks.set(taskId, task);
 
-    this.executeSelectiveMigration(task, sessionIds, options).catch(error => {
+    this.executeSelectiveMigration(task, sessionIds, options).catch((error) => {
       task.status = 'failed';
       task.error = error.message;
       task.endTime = new Date().toISOString();
@@ -316,7 +320,10 @@ export class SessionMigration extends EventEmitter {
           continue;
         }
 
-        const mismatches = this.compareSessionData(sourceSession, targetSession);
+        const mismatches = this.compareSessionData(
+          sourceSession,
+          targetSession
+        );
         if (mismatches.length === 0) {
           results.passed++;
           results.details.push({ sessionId, passed: true });
@@ -329,7 +336,11 @@ export class SessionMigration extends EventEmitter {
         results.details.push({
           sessionId,
           passed: false,
-          mismatches: [`Validation error: ${error instanceof Error ? error.message : String(error)}`],
+          mismatches: [
+            `Validation error: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ],
         });
       }
     }
@@ -420,6 +431,10 @@ export class SessionMigration extends EventEmitter {
     return Array.from(this.crossInstanceSessions.values());
   }
 
+  private isTaskCancelled(task: MigrationTask): boolean {
+    return task.status === 'cancelled';
+  }
+
   /**
    * Execute full migration
    */
@@ -443,12 +458,16 @@ export class SessionMigration extends EventEmitter {
 
       // Process sessions in batches
       for (let i = 0; i < sessionKeys.length; i += this.config.batchSize) {
-        if (task.status === 'cancelled') break;
+        if (this.isTaskCancelled(task)) {
+          break;
+        }
 
         const batch = sessionKeys.slice(i, i + this.config.batchSize);
 
         for (const sessionKey of batch) {
-          if (task.status === 'cancelled') break;
+          if (this.isTaskCancelled(task)) {
+            break;
+          }
 
           const sessionId = sessionKey.replace('session:', '');
           task.progress.currentSession = sessionId;
@@ -474,7 +493,9 @@ export class SessionMigration extends EventEmitter {
         }
       }
 
-      task.status = task.status === 'cancelled' ? 'cancelled' : 'completed';
+      if (!this.isTaskCancelled(task)) {
+        task.status = 'completed';
+      }
       task.endTime = new Date().toISOString();
 
       // Validate after migration if requested
@@ -488,7 +509,9 @@ export class SessionMigration extends EventEmitter {
         success: task.status === 'completed',
         migratedSessions: task.progress.migratedSessions,
         failedSessions: task.progress.failedSessions,
-        duration: new Date(task.endTime!).getTime() - new Date(task.startTime!).getTime(),
+        duration:
+          new Date(task.endTime!).getTime() -
+          new Date(task.startTime!).getTime(),
         errors,
         validationResults,
       };
@@ -522,7 +545,11 @@ export class SessionMigration extends EventEmitter {
         const sessionData = await this.sourceRedis.hGetAll(sessionKey);
         // Check if session has events newer than timestamp
         const eventsKey = sessionKey.replace('session:', 'events:');
-        const recentEvents = await this.sourceRedis.zRangeByScore(eventsKey, since, '+inf');
+        const recentEvents = await this.sourceRedis.zRangeByScore(
+          eventsKey,
+          since,
+          '+inf'
+        );
 
         if (recentEvents.length > 0) {
           recentSessions.push(sessionKey.replace('session:', ''));
@@ -533,7 +560,9 @@ export class SessionMigration extends EventEmitter {
 
       // Process incremental sessions
       for (const sessionId of recentSessions) {
-        if (task.status === 'cancelled') break;
+        if (this.isTaskCancelled(task)) {
+          break;
+        }
 
         try {
           const session = await this.getSessionFromSource(sessionId);
@@ -551,7 +580,9 @@ export class SessionMigration extends EventEmitter {
         });
       }
 
-      task.status = task.status === 'cancelled' ? 'cancelled' : 'completed';
+      if (!this.isTaskCancelled(task)) {
+        task.status = 'completed';
+      }
       task.endTime = new Date().toISOString();
 
       this.emit('migration:completed', {
@@ -580,7 +611,9 @@ export class SessionMigration extends EventEmitter {
 
     try {
       for (const sessionId of sessionIds) {
-        if (task.status === 'cancelled') break;
+        if (this.isTaskCancelled(task)) {
+          break;
+        }
 
         task.progress.currentSession = sessionId;
 
@@ -600,7 +633,9 @@ export class SessionMigration extends EventEmitter {
         });
       }
 
-      task.status = task.status === 'cancelled' ? 'cancelled' : 'completed';
+      if (!this.isTaskCancelled(task)) {
+        task.status = 'completed';
+      }
       task.endTime = new Date().toISOString();
 
       this.emit('migration:completed', {
@@ -620,7 +655,10 @@ export class SessionMigration extends EventEmitter {
   /**
    * Migrate a single session
    */
-  private async migrateSession(sessionId: string, session: SessionDocument): Promise<void> {
+  private async migrateSession(
+    sessionId: string,
+    session: SessionDocument
+  ): Promise<void> {
     const sessionKey = `session:${sessionId}`;
     const eventsKey = `events:${sessionId}`;
 
@@ -643,7 +681,7 @@ export class SessionMigration extends EventEmitter {
 
     // Migrate events
     if (session.events.length > 0) {
-      const eventEntries = session.events.map(event => ({
+      const eventEntries = session.events.map((event) => ({
         score: event.seq,
         value: JSON.stringify(event),
       }));
@@ -662,21 +700,28 @@ export class SessionMigration extends EventEmitter {
   /**
    * Get session from source Redis
    */
-  private async getSessionFromSource(sessionId: string): Promise<SessionDocument | null> {
+  private async getSessionFromSource(
+    sessionId: string
+  ): Promise<SessionDocument | null> {
     return this.getSessionFromRedis(this.sourceRedis, sessionId);
   }
 
   /**
    * Get session from target Redis
    */
-  private async getSessionFromTarget(sessionId: string): Promise<SessionDocument | null> {
+  private async getSessionFromTarget(
+    sessionId: string
+  ): Promise<SessionDocument | null> {
     return this.getSessionFromRedis(this.targetRedis, sessionId);
   }
 
   /**
    * Get session from specific Redis instance
    */
-  private async getSessionFromRedis(redis: RedisClientType, sessionId: string): Promise<SessionDocument | null> {
+  private async getSessionFromRedis(
+    redis: RedisClientType,
+    sessionId: string
+  ): Promise<SessionDocument | null> {
     const sessionKey = `session:${sessionId}`;
     const exists = await redis.exists(sessionKey);
 
@@ -691,8 +736,8 @@ export class SessionMigration extends EventEmitter {
     const eventsKey = `events:${sessionId}`;
     const eventData = await redis.zRange(eventsKey, 0, -1);
     const events = eventData
-      .filter(event => event !== 'INIT')
-      .map(eventStr => JSON.parse(eventStr))
+      .filter((event) => event !== 'INIT')
+      .map((eventStr) => JSON.parse(eventStr))
       .sort((a, b) => a.seq - b.seq);
 
     return {
@@ -700,26 +745,38 @@ export class SessionMigration extends EventEmitter {
       agentIds: JSON.parse(sessionData.agentIds || '[]'),
       state: sessionData.state as any,
       events,
-      metadata: sessionData.metadata ? JSON.parse(sessionData.metadata) : undefined,
+      metadata: sessionData.metadata
+        ? JSON.parse(sessionData.metadata)
+        : undefined,
     };
   }
 
   /**
    * Compare session data for validation
    */
-  private compareSessionData(source: SessionDocument, target: SessionDocument): string[] {
+  private compareSessionData(
+    source: SessionDocument,
+    target: SessionDocument
+  ): string[] {
     const mismatches: string[] = [];
 
     if (source.state !== target.state) {
-      mismatches.push(`State mismatch: source=${source.state}, target=${target.state}`);
+      mismatches.push(
+        `State mismatch: source=${source.state}, target=${target.state}`
+      );
     }
 
-    if (JSON.stringify(source.agentIds.sort()) !== JSON.stringify(target.agentIds.sort())) {
+    if (
+      JSON.stringify(source.agentIds.sort()) !==
+      JSON.stringify(target.agentIds.sort())
+    ) {
       mismatches.push('Agent IDs mismatch');
     }
 
     if (source.events.length !== target.events.length) {
-      mismatches.push(`Event count mismatch: source=${source.events.length}, target=${target.events.length}`);
+      mismatches.push(
+        `Event count mismatch: source=${source.events.length}, target=${target.events.length}`
+      );
     }
 
     // Compare metadata
@@ -735,26 +792,36 @@ export class SessionMigration extends EventEmitter {
   /**
    * Get session IDs for validation based on task
    */
-  private async getSessionIdsForValidation(task: MigrationTask): Promise<string[]> {
+  private async getSessionIdsForValidation(
+    task: MigrationTask
+  ): Promise<string[]> {
     if (task.filters?.sessionIds) {
       return task.filters.sessionIds;
     }
 
     // Get all migrated sessions
     const sessionKeys = await this.targetRedis.keys('session:*');
-    return sessionKeys.map(key => key.replace('session:', ''));
+    return sessionKeys.map((key) => key.replace('session:', ''));
   }
 
   /**
    * Detect conflicts between source and target sessions
    */
-  private detectConflicts(source: SessionDocument, target: SessionDocument): Array<{
+  private detectConflicts(
+    source: SessionDocument,
+    target: SessionDocument
+  ): Array<{
     field: string;
     sourceValue: any;
     targetValue: any;
     resolution: 'source' | 'target' | 'merge' | 'manual';
   }> {
-    const conflicts = [];
+    const conflicts: Array<{
+      field: string;
+      sourceValue: any;
+      targetValue: any;
+      resolution: 'source' | 'target' | 'merge' | 'manual';
+    }> = [];
 
     if (source.state !== target.state) {
       conflicts.push({
@@ -780,7 +847,10 @@ export class SessionMigration extends EventEmitter {
   /**
    * Resolve conflicts automatically
    */
-  private async resolveConflicts(sessionId: string, conflicts: any[]): Promise<void> {
+  private async resolveConflicts(
+    sessionId: string,
+    conflicts: any[]
+  ): Promise<void> {
     // Implement conflict resolution strategies
     for (const conflict of conflicts) {
       switch (conflict.resolution) {
@@ -842,10 +912,7 @@ export class SessionMigration extends EventEmitter {
     }
 
     // Close Redis connections
-    await Promise.all([
-      this.sourceRedis?.quit(),
-      this.targetRedis?.quit(),
-    ]);
+    await Promise.all([this.sourceRedis?.quit(), this.targetRedis?.quit()]);
 
     this.emit('shutdown');
   }

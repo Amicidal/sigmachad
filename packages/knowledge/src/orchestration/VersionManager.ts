@@ -3,10 +3,10 @@
  * Handles version creation, pruning, and entity timeline operations
  */
 
-import { EventEmitter } from "events";
-import { Neo4jService } from "../Neo4jService.js";
-import { Entity } from '@memento/core';
-import { TimeRangeParams } from "../../../models/types.js";
+import { EventEmitter } from 'events';
+import { Neo4jService } from '../graph/Neo4jService.js';
+import { Entity } from '@memento/shared-types.js';
+import { TimeRangeParams } from '@memento/graph';
 
 export interface VersionInfo {
   id: string;
@@ -23,7 +23,7 @@ export class VersionManager extends EventEmitter {
 
   constructor(private neo4j: Neo4jService) {
     super();
-    this.historyEnabled = process.env.HISTORY_ENABLED !== "false";
+    this.historyEnabled = process.env.HISTORY_ENABLED !== 'false';
   }
 
   /**
@@ -75,7 +75,7 @@ export class VersionManager extends EventEmitter {
       changeSetId: options?.changeSetId || null,
     });
 
-    this.emit("version:created", { entityId, versionId, timestamp });
+    this.emit('version:created', { entityId, versionId, timestamp });
     return versionId;
   }
 
@@ -149,7 +149,7 @@ export class VersionManager extends EventEmitter {
       totalCheckpoints = checkpointResult[0]?.deleted || 0;
     }
 
-    this.emit("history:pruned", {
+    this.emit('history:pruned', {
       retentionDays,
       cutoff,
       versions: totalVersions,

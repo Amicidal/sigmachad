@@ -64,7 +64,7 @@ describe('RollbackStore', () => {
       await store.storeRollbackPoint(rollbackPoint);
 
       // Should be available immediately
-      let retrieved = await store.getRollbackPoint('point-1');
+      const retrieved = await store.getRollbackPoint('point-1');
       expect(retrieved).toBeDefined();
 
       // Wait for expiry

@@ -3,42 +3,41 @@
  * Provides JWT and API key verification along with scope-aware checks.
  */
 
-import { FastifyReply, FastifyRequest } from "fastify";
-import jwt from "jsonwebtoken";
-import { authenticateApiKey } from "./api-key-registry.js";
-import { normalizeInputToArray, normalizeScopes } from "./scopes.js";
+import { FastifyReply, FastifyRequest } from 'fastify';
+import jwt from 'jsonwebtoken';
+import { authenticateApiKey } from './api-key-registry.js';
+import { normalizeInputToArray, normalizeScopes } from './scopes.js';
 import type {
   AuthTokenType,
   AuthTokenError,
   AuthenticatedUser,
   AuthAuditContext,
   AuthContext,
-} from "@memento/shared-types";
-export type {
-  AuthTokenType,
-  AuthTokenError,
-  AuthenticatedUser,
-  AuthAuditContext,
-  AuthContext,
-} from "@memento/shared-types";
+  AuthErrorDetails,
+} from '@memento/shared-types';
 
 const buildUserFromPayload = (payload: jwt.JwtPayload): AuthenticatedUser => {
   const permissions = normalizeInputToArray(payload.permissions);
   const scopes = normalizeScopes(payload.scopes ?? payload.scope, permissions);
-  const role = typeof payload.role === "string" ? payload.role : "user";
+  const role = typeof payload.role === 'string' ? payload.role : 'user';
   const userIdCandidate =
-    payload.userId ?? payload.sub ?? payload.id ?? payload.login ?? payload.username;
-  const userId = typeof userIdCandidate === "string" && userIdCandidate.length > 0
-    ? userIdCandidate
-    : "anonymous";
+    payload.userId ??
+    payload.sub ??
+    payload.id ??
+    payload.login ??
+    payload.username;
+  const userId =
+    typeof userIdCandidate === 'string' && userIdCandidate.length > 0
+      ? userIdCandidate
+      : 'anonymous';
 
   return {
     userId,
     role,
     scopes,
     permissions,
-    issuer: typeof payload.iss === "string" ? payload.iss : undefined,
-    email: typeof payload.email === "string" ? payload.email : undefined,
+    issuer: typeof payload.iss === 'string' ? payload.iss : undefined,
+    email: typeof payload.email === 'string' ? payload.email : undefined,
     metadata: {
       tokenIssuedAt: payload.iat,
       tokenExpiresAt: payload.exp,
@@ -48,29 +47,41 @@ const buildUserFromPayload = (payload: jwt.JwtPayload): AuthenticatedUser => {
 };
 
 const createAnonymousContext = (): AuthContext => ({
-  tokenType: "anonymous",
+  tokenType: 'anonymous',
   scopes: [],
 });
 
 const createAdminContext = (rawToken: string): AuthContext => ({
-  tokenType: "admin-token",
+  tokenType: 'admin-token',
   rawToken,
-  scopes: ["admin", "graph:read", "graph:write", "code:analyze", "session:manage"],
-  apiKeyId: "admin",
+  scopes: [
+    'admin',
+    'graph:read',
+    'graph:write',
+    'code:analyze',
+    'session:manage',
+  ],
+  apiKeyId: 'admin',
   user: {
-    userId: "admin",
-    role: "admin",
-    scopes: ["admin", "graph:read", "graph:write", "code:analyze", "session:manage"],
-    permissions: ["admin", "read", "write"],
+    userId: 'admin',
+    role: 'admin',
+    scopes: [
+      'admin',
+      'graph:read',
+      'graph:write',
+      'code:analyze',
+      'session:manage',
+    ],
+    permissions: ['admin', 'read', 'write'],
   },
 });
 
 const attachJwtMetadata = (context: AuthContext, payload: jwt.JwtPayload) => {
   const audience = normalizeInputToArray(payload.aud);
   if (audience.length > 0) context.audience = audience;
-  if (typeof payload.iss === "string") context.issuer = payload.iss;
-  if (typeof payload.exp === "number") context.expiresAt = payload.exp;
-  if (typeof (payload as any).sessionId === "string") {
+  if (typeof payload.iss === 'string') context.issuer = payload.iss;
+  if (typeof payload.exp === 'number') context.expiresAt = payload.exp;
+  if (typeof (payload as any).sessionId === 'string') {
     context.sessionId = (payload as any).sessionId;
   }
 };
@@ -79,21 +90,21 @@ export function authenticateRequest(request: FastifyRequest): AuthContext {
   const context = authenticateHeaders(request.headers, {
     requestId: request.id,
     ip: request.ip,
-    userAgent: request.headers["user-agent"] as string | undefined,
+    userAgent: request.headers['user-agent'] as string | undefined,
   });
   return context;
 }
 
 export function authenticateHeaders(
-  headers: FastifyRequest["headers"],
+  headers: FastifyRequest['headers'],
   audit?: AuthAuditContext
 ): AuthContext {
-  const authHeader = (headers["authorization"] as string | undefined) || "";
-  const apiKeyHeader = headers["x-api-key"] as string | undefined;
-  const adminToken = (process.env.ADMIN_API_TOKEN || "").trim();
+  const authHeader = (headers['authorization'] as string | undefined) || '';
+  const apiKeyHeader = headers['x-api-key'] as string | undefined;
+  const adminToken = (process.env.ADMIN_API_TOKEN || '').trim();
 
   if (adminToken && authHeader) {
-    const tokenCandidate = authHeader.toLowerCase().startsWith("bearer ")
+    const tokenCandidate = authHeader.toLowerCase().startsWith('bearer ')
       ? authHeader.slice(7).trim()
       : authHeader.trim();
     if (tokenCandidate === adminToken) {
@@ -104,32 +115,34 @@ export function authenticateHeaders(
   }
 
   if (authHeader) {
-    const hasBearerPrefix = authHeader.toLowerCase().startsWith("bearer ");
-    const token = hasBearerPrefix ? authHeader.slice(7).trim() : authHeader.trim();
+    const hasBearerPrefix = authHeader.toLowerCase().startsWith('bearer ');
+    const token = hasBearerPrefix
+      ? authHeader.slice(7).trim()
+      : authHeader.trim();
 
     const context: AuthContext = {
-      tokenType: "jwt",
+      tokenType: 'jwt',
       rawToken: token,
       scopes: [],
       audit,
     };
 
     if (!hasBearerPrefix) {
-      context.tokenError = "MISSING_BEARER";
-      context.tokenErrorDetail = "Authorization header must use Bearer scheme";
+      context.tokenError = 'MISSING_BEARER';
+      context.tokenErrorDetail = 'Authorization header must use Bearer scheme';
       return context;
     }
 
     if (!token) {
-      context.tokenError = "INVALID_TOKEN";
-      context.tokenErrorDetail = "Bearer token is empty";
+      context.tokenError = 'INVALID_TOKEN';
+      context.tokenErrorDetail = 'Bearer token is empty';
       return context;
     }
 
     const secret = process.env.JWT_SECRET;
     if (!secret) {
-      context.tokenError = "INVALID_TOKEN";
-      context.tokenErrorDetail = "JWT secret is not configured";
+      context.tokenError = 'INVALID_TOKEN';
+      context.tokenErrorDetail = 'JWT secret is not configured';
       return context;
     }
 
@@ -140,11 +153,12 @@ export function authenticateHeaders(
       context.scopes = user.scopes;
       attachJwtMetadata(context, payload);
     } catch (error) {
-      context.tokenError = error instanceof jwt.TokenExpiredError
-        ? "TOKEN_EXPIRED"
-        : "INVALID_TOKEN";
+      context.tokenError =
+        error instanceof jwt.TokenExpiredError
+          ? 'TOKEN_EXPIRED'
+          : 'INVALID_TOKEN';
       context.tokenErrorDetail =
-        error instanceof Error ? error.message : "Unable to verify token";
+        error instanceof Error ? error.message : 'Unable to verify token';
     }
 
     return context;
@@ -158,7 +172,7 @@ export function authenticateHeaders(
     }
 
     const context: AuthContext = {
-      tokenType: "api-key",
+      tokenType: 'api-key',
       rawToken: apiKeyHeader,
       scopes: [],
       audit,
@@ -175,7 +189,7 @@ export function authenticateHeaders(
     context.scopes = verification.scopes;
     context.user = {
       userId: verification.record.id,
-      role: "api-key",
+      role: 'api-key',
       scopes: verification.scopes,
       permissions: [],
       metadata: {
@@ -198,18 +212,10 @@ export const scopesSatisfyRequirement = (
   if (!requiredScopes || requiredScopes.length === 0) return true;
   if (!grantedScopes || grantedScopes.length === 0) return false;
   const granted = new Set(grantedScopes.map((scope) => scope.toLowerCase()));
-  return requiredScopes.every((scope) => granted.has(scope.toLowerCase()) || granted.has("admin"));
+  return requiredScopes.every(
+    (scope) => granted.has(scope.toLowerCase()) || granted.has('admin')
+  );
 };
-
-export interface AuthErrorDetails {
-  reason?: string;
-  detail?: string;
-  remediation?: string;
-  tokenType?: string;
-  expiresAt?: number;
-  requiredScopes?: string[];
-  providedScopes?: string[];
-}
 
 export function sendAuthError(
   reply: FastifyReply,

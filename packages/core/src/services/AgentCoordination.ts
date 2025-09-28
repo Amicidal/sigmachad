@@ -7,82 +7,15 @@
 
 import { EventEmitter } from 'events';
 import type { RedisClientType } from 'redis';
-import {
-  SessionDocument,
-  SessionEvent,
-  SessionError,
-} from './SessionTypes.js';
-
-export interface AgentInfo {
-  id: string;
-  type: string;
-  capabilities: string[];
-  priority: number;
-  load: number;
-  maxLoad: number;
-  status: 'active' | 'busy' | 'idle' | 'dead' | 'maintenance';
-  lastHeartbeat: string;
-  metadata: Record<string, any>;
-  currentSessions: string[];
-  totalTasksCompleted: number;
-  averageTaskDuration: number;
-  errorRate: number;
-}
-
-export interface TaskInfo {
-  id: string;
-  type: string;
-  priority: number;
-  sessionId: string;
-  requiredCapabilities: string[];
-  estimatedDuration: number;
-  deadline?: string;
-  assignedAgent?: string;
-  status: 'queued' | 'assigned' | 'running' | 'completed' | 'failed' | 'cancelled';
-  createdAt: string;
-  assignedAt?: string;
-  completedAt?: string;
-  attempts: number;
-  maxAttempts: number;
-  metadata: Record<string, any>;
-}
-
-export interface LoadBalancingStrategy {
-  type: 'round-robin' | 'least-loaded' | 'priority-based' | 'capability-weighted' | 'dynamic';
-  config: Record<string, any>;
-}
-
-export interface HandoffContext {
-  sessionId: string;
-  fromAgent: string;
-  toAgent: string;
-  reason: string;
-  context: Record<string, any>;
-  timestamp: string;
-  priority: number;
-  estimatedDuration?: number;
-}
-
-export interface CoordinationMetrics {
-  totalAgents: number;
-  activeAgents: number;
-  queuedTasks: number;
-  runningTasks: number;
-  completedTasks: number;
-  failedTasks: number;
-  averageTaskDuration: number;
-  systemLoad: number;
-  deadAgentCount: number;
-  handoffCount: number;
-}
-
-export interface DeadAgentConfig {
-  heartbeatInterval: number; // seconds
-  heartbeatTimeout: number; // seconds
-  maxMissedHeartbeats: number;
-  enableAutoRecovery: boolean;
-  recoveryDelay: number; // seconds
-}
+import { SessionDocument, SessionEvent, SessionError } from './SessionTypes.js';
+import type {
+  AgentInfo,
+  TaskInfo,
+  LoadBalancingStrategy,
+  HandoffContext,
+  CoordinationMetrics,
+  DeadAgentConfig,
+} from '@memento/shared-types';
 
 export class AgentCoordination extends EventEmitter {
   private redis: RedisClientType;
@@ -96,7 +29,10 @@ export class AgentCoordination extends EventEmitter {
 
   constructor(
     redis: RedisClientType,
-    loadBalancingStrategy: LoadBalancingStrategy = { type: 'least-loaded', config: {} },
+    loadBalancingStrategy: LoadBalancingStrategy = {
+      type: 'least-loaded',
+      config: {},
+    },
     deadAgentConfig: Partial<DeadAgentConfig> = {}
   ) {
     super();
@@ -116,7 +52,16 @@ export class AgentCoordination extends EventEmitter {
   /**
    * Register an agent with the coordination system
    */
-  async registerAgent(agentInfo: Omit<AgentInfo, 'lastHeartbeat' | 'currentSessions' | 'totalTasksCompleted' | 'averageTaskDuration' | 'errorRate'>): Promise<void> {
+  async registerAgent(
+    agentInfo: Omit<
+      AgentInfo,
+      | 'lastHeartbeat'
+      | 'currentSessions'
+      | 'totalTasksCompleted'
+      | 'averageTaskDuration'
+      | 'errorRate'
+    >
+  ): Promise<void> {
     const agent: AgentInfo = {
       ...agentInfo,
       lastHeartbeat: new Date().toISOString(),
@@ -177,8 +122,12 @@ export class AgentCoordination extends EventEmitter {
   /**
    * Submit a task to the coordination system
    */
-  async submitTask(taskInfo: Omit<TaskInfo, 'id' | 'status' | 'createdAt' | 'attempts'>): Promise<string> {
-    const taskId = `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  async submitTask(
+    taskInfo: Omit<TaskInfo, 'id' | 'status' | 'createdAt' | 'attempts'>
+  ): Promise<string> {
+    const taskId = `task-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
 
     const task: TaskInfo = {
       ...taskInfo,
@@ -308,12 +257,19 @@ export class AgentCoordination extends EventEmitter {
 
     // Update agent metrics
     agent.load = Math.max(0, agent.load - 1);
-    agent.currentSessions = agent.currentSessions.filter(s => s !== task.sessionId);
+    agent.currentSessions = agent.currentSessions.filter(
+      (s) => s !== task.sessionId
+    );
     agent.totalTasksCompleted++;
 
     if (task.assignedAt) {
-      const duration = new Date(task.completedAt).getTime() - new Date(task.assignedAt).getTime();
-      agent.averageTaskDuration = (agent.averageTaskDuration * (agent.totalTasksCompleted - 1) + duration) / agent.totalTasksCompleted;
+      const duration =
+        new Date(task.completedAt).getTime() -
+        new Date(task.assignedAt).getTime();
+      agent.averageTaskDuration =
+        (agent.averageTaskDuration * (agent.totalTasksCompleted - 1) +
+          duration) /
+        agent.totalTasksCompleted;
     }
 
     if (agent.status === 'busy' && agent.load < agent.maxLoad) {
@@ -356,11 +312,14 @@ export class AgentCoordination extends EventEmitter {
     if (agent) {
       // Update agent error rate
       const totalTasks = agent.totalTasksCompleted + 1;
-      agent.errorRate = (agent.errorRate * agent.totalTasksCompleted + 1) / totalTasks;
+      agent.errorRate =
+        (agent.errorRate * agent.totalTasksCompleted + 1) / totalTasks;
 
       // Reduce agent load
       agent.load = Math.max(0, agent.load - 1);
-      agent.currentSessions = agent.currentSessions.filter(s => s !== task.sessionId);
+      agent.currentSessions = agent.currentSessions.filter(
+        (s) => s !== task.sessionId
+      );
 
       if (agent.status === 'busy' && agent.load < agent.maxLoad) {
         agent.status = 'active';
@@ -443,7 +402,9 @@ export class AgentCoordination extends EventEmitter {
     });
 
     // Update agent sessions
-    fromAgent.currentSessions = fromAgent.currentSessions.filter(s => s !== handoffContext.sessionId);
+    fromAgent.currentSessions = fromAgent.currentSessions.filter(
+      (s) => s !== handoffContext.sessionId
+    );
     toAgent.currentSessions.push(handoffContext.sessionId);
 
     // Update loads
@@ -478,7 +439,11 @@ export class AgentCoordination extends EventEmitter {
   /**
    * Send heartbeat for an agent
    */
-  async sendHeartbeat(agentId: string, status?: string, metadata?: Record<string, any>): Promise<void> {
+  async sendHeartbeat(
+    agentId: string,
+    status?: string,
+    metadata?: Record<string, any>
+  ): Promise<void> {
     const agent = this.agents.get(agentId);
     if (!agent) return;
 
@@ -500,24 +465,40 @@ export class AgentCoordination extends EventEmitter {
    */
   async getMetrics(): Promise<CoordinationMetrics> {
     const totalAgents = this.agents.size;
-    const activeAgents = Array.from(this.agents.values()).filter(a => a.status === 'active' || a.status === 'busy').length;
+    const activeAgents = Array.from(this.agents.values()).filter(
+      (a) => a.status === 'active' || a.status === 'busy'
+    ).length;
 
     const queuedTasks = await this.redis.zCard('task:priority:queue');
     const runningTasks = await this.redis.zCard('task:assigned:queue');
 
     const allTasks = Array.from(this.tasks.values());
-    const completedTasks = allTasks.filter(t => t.status === 'completed').length;
-    const failedTasks = allTasks.filter(t => t.status === 'failed').length;
+    const completedTasks = allTasks.filter(
+      (t) => t.status === 'completed'
+    ).length;
+    const failedTasks = allTasks.filter((t) => t.status === 'failed').length;
 
-    const totalDuration = Array.from(this.agents.values()).reduce((sum, a) => sum + a.averageTaskDuration, 0);
-    const averageTaskDuration = activeAgents > 0 ? totalDuration / activeAgents : 0;
+    const totalDuration = Array.from(this.agents.values()).reduce(
+      (sum, a) => sum + a.averageTaskDuration,
+      0
+    );
+    const averageTaskDuration =
+      activeAgents > 0 ? totalDuration / activeAgents : 0;
 
-    const totalLoad = Array.from(this.agents.values()).reduce((sum, a) => sum + a.load, 0);
-    const totalCapacity = Array.from(this.agents.values()).reduce((sum, a) => sum + a.maxLoad, 0);
+    const totalLoad = Array.from(this.agents.values()).reduce(
+      (sum, a) => sum + a.load,
+      0
+    );
+    const totalCapacity = Array.from(this.agents.values()).reduce(
+      (sum, a) => sum + a.maxLoad,
+      0
+    );
     const systemLoad = totalCapacity > 0 ? totalLoad / totalCapacity : 0;
 
-    const deadAgentCount = Array.from(this.agents.values()).filter(a => a.status === 'dead').length;
-    const handoffCount = await this.redis.zCard('handoff:*') || 0;
+    const deadAgentCount = Array.from(this.agents.values()).filter(
+      (a) => a.status === 'dead'
+    ).length;
+    const handoffCount = (await this.redis.zCard('handoff:*')) || 0;
 
     return {
       totalAgents,
@@ -537,31 +518,41 @@ export class AgentCoordination extends EventEmitter {
    * Get queued tasks sorted by priority
    */
   private async getQueuedTasks(): Promise<TaskInfo[]> {
-    const taskIds = await this.redis.zRevRange('task:priority:queue', 0, -1);
-    return taskIds.map(id => this.tasks.get(id)).filter(Boolean) as TaskInfo[];
+    const taskIds = await this.redis.zRange('task:priority:queue', 0, -1, {
+      REV: true,
+    });
+    return taskIds
+      .map((id) => this.tasks.get(id))
+      .filter(Boolean) as TaskInfo[];
   }
 
   /**
    * Get available agents
    */
   private async getAvailableAgents(): Promise<AgentInfo[]> {
-    return Array.from(this.agents.values()).filter(agent =>
-      (agent.status === 'active' || agent.status === 'idle') && agent.load < agent.maxLoad
+    return Array.from(this.agents.values()).filter(
+      (agent) =>
+        (agent.status === 'active' || agent.status === 'idle') &&
+        agent.load < agent.maxLoad
     );
   }
 
   /**
    * Find suitable agents for a task
    */
-  private findSuitableAgents(task: TaskInfo, availableAgents: AgentInfo[]): AgentInfo[] {
-    return availableAgents.filter(agent => {
+  private findSuitableAgents(
+    task: TaskInfo,
+    availableAgents: AgentInfo[]
+  ): AgentInfo[] {
+    return availableAgents.filter((agent) => {
       // Check capabilities
-      const hasRequiredCapabilities = task.requiredCapabilities.every(cap =>
+      const hasRequiredCapabilities = task.requiredCapabilities.every((cap) =>
         agent.capabilities.includes(cap)
       );
 
       // Check if agent can handle the estimated duration
-      const canHandleDuration = !task.deadline ||
+      const canHandleDuration =
+        !task.deadline ||
         new Date(task.deadline).getTime() > Date.now() + task.estimatedDuration;
 
       return hasRequiredCapabilities && canHandleDuration;
@@ -571,7 +562,10 @@ export class AgentCoordination extends EventEmitter {
   /**
    * Select best agent using load balancing strategy
    */
-  private selectAgent(suitableAgents: AgentInfo[], task: TaskInfo): AgentInfo | null {
+  private selectAgent(
+    suitableAgents: AgentInfo[],
+    task: TaskInfo
+  ): AgentInfo | null {
     if (suitableAgents.length === 0) return null;
 
     switch (this.loadBalancingStrategy.type) {
@@ -601,7 +595,9 @@ export class AgentCoordination extends EventEmitter {
   private selectAgentRoundRobin(agents: AgentInfo[]): AgentInfo {
     // Simple round-robin based on total tasks completed
     return agents.reduce((selected, current) =>
-      current.totalTasksCompleted < selected.totalTasksCompleted ? current : selected
+      current.totalTasksCompleted < selected.totalTasksCompleted
+        ? current
+        : selected
     );
   }
 
@@ -628,7 +624,10 @@ export class AgentCoordination extends EventEmitter {
   /**
    * Capability-weighted agent selection
    */
-  private selectAgentCapabilityWeighted(agents: AgentInfo[], task: TaskInfo): AgentInfo {
+  private selectAgentCapabilityWeighted(
+    agents: AgentInfo[],
+    task: TaskInfo
+  ): AgentInfo {
     return agents.reduce((selected, current) => {
       const selectedScore = this.calculateCapabilityScore(selected, task);
       const currentScore = this.calculateCapabilityScore(current, task);
@@ -653,8 +652,12 @@ export class AgentCoordination extends EventEmitter {
   private calculateCapabilityScore(agent: AgentInfo, task: TaskInfo): number {
     const requiredCaps = new Set(task.requiredCapabilities);
     const agentCaps = new Set(agent.capabilities);
-    const matchingCaps = task.requiredCapabilities.filter(cap => agentCaps.has(cap)).length;
-    const extraCaps = agent.capabilities.filter(cap => !requiredCaps.has(cap)).length;
+    const matchingCaps = task.requiredCapabilities.filter((cap) =>
+      agentCaps.has(cap)
+    ).length;
+    const extraCaps = agent.capabilities.filter(
+      (cap) => !requiredCaps.has(cap)
+    ).length;
 
     return matchingCaps * 2 + extraCaps * 0.5;
   }
@@ -663,17 +666,22 @@ export class AgentCoordination extends EventEmitter {
    * Calculate dynamic score considering multiple factors
    */
   private calculateDynamicScore(agent: AgentInfo, task: TaskInfo): number {
-    const loadFactor = 1 - (agent.load / agent.maxLoad);
+    const loadFactor = 1 - agent.load / agent.maxLoad;
     const priorityFactor = agent.priority / 10;
     const reliabilityFactor = 1 - agent.errorRate;
-    const speedFactor = agent.averageTaskDuration > 0 ? 1 / (agent.averageTaskDuration / 1000) : 1;
+    const speedFactor =
+      agent.averageTaskDuration > 0
+        ? 1 / (agent.averageTaskDuration / 1000)
+        : 1;
     const capabilityFactor = this.calculateCapabilityScore(agent, task) / 10;
 
-    return (loadFactor * 0.3) +
-           (priorityFactor * 0.2) +
-           (reliabilityFactor * 0.2) +
-           (speedFactor * 0.15) +
-           (capabilityFactor * 0.15);
+    return (
+      loadFactor * 0.3 +
+      priorityFactor * 0.2 +
+      reliabilityFactor * 0.2 +
+      speedFactor * 0.15 +
+      capabilityFactor * 0.15
+    );
   }
 
   /**
@@ -681,7 +689,7 @@ export class AgentCoordination extends EventEmitter {
    */
   private async reassignAgentTasks(agentId: string): Promise<void> {
     const agentTasks = Array.from(this.tasks.values()).filter(
-      task => task.assignedAgent === agentId && task.status === 'assigned'
+      (task) => task.assignedAgent === agentId && task.status === 'assigned'
     );
 
     for (const task of agentTasks) {
@@ -764,14 +772,14 @@ export class AgentCoordination extends EventEmitter {
   private initializeTimers(): void {
     // Heartbeat monitoring timer
     this.deadAgentDetectionTimer = setInterval(() => {
-      this.detectDeadAgents().catch(error => {
+      this.detectDeadAgents().catch((error) => {
         this.emit('error', error);
       });
     }, this.deadAgentConfig.heartbeatInterval * 1000);
 
     // Load balancing timer
     this.loadBalancingTimer = setInterval(() => {
-      this.assignTasks().catch(error => {
+      this.assignTasks().catch((error) => {
         this.emit('error', error);
       });
     }, 5000); // Every 5 seconds
@@ -784,7 +792,8 @@ export class AgentCoordination extends EventEmitter {
     // Clear timers
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.loadBalancingTimer) clearInterval(this.loadBalancingTimer);
-    if (this.deadAgentDetectionTimer) clearInterval(this.deadAgentDetectionTimer);
+    if (this.deadAgentDetectionTimer)
+      clearInterval(this.deadAgentDetectionTimer);
 
     // Unregister all agents
     for (const agentId of this.agents.keys()) {

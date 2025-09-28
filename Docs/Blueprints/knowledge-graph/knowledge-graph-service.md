@@ -1,5 +1,18 @@
 # Knowledge Graph Service Blueprint
 
+## Metadata
+
+- Scope: knowledge-graph
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: knowledge-graph).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 `KnowledgeGraphService` orchestrates graph persistence across FalkorDB and Qdrant while maintaining in-memory caches for entity lookups and search. Each instance derives a `NamespaceScope` so every CRUD path consistently applies the active namespace prefix, normalises relationship identifiers, and targets the correct Qdrant collections. Although the wider `DatabaseService` can supply PostgreSQL and Redis clients, the current implementation does not issue calls to those stores; they remain expansion points for future features.
 

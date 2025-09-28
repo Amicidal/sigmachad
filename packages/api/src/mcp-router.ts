@@ -3,9 +3,9 @@
  * Provides MCP protocol support for AI assistants (Claude, etc.)
  */
 
-import { FastifyInstance } from "fastify";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { FastifyInstance } from 'fastify';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -13,35 +13,35 @@ import {
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { KnowledgeGraphService, ASTParser } from "@memento/knowledge";
-import { DatabaseService } from "@memento/database";
-import { TestEngine, SecurityScanner } from "@memento/testing";
-import { spawn } from "child_process";
-import { existsSync } from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import { Project } from "ts-morph";
+} from '@modelcontextprotocol/sdk/types.js';
+import { KnowledgeGraphService, ASTParser } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database';
+import { TestEngine, SecurityScanner } from '@memento/testing';
+import { spawn } from 'child_process';
+import { existsSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { Project } from 'ts-morph';
 import {
   SpecNotFoundError,
   TestPlanningService,
   TestPlanningValidationError,
-} from "@memento/testing";
+} from '@memento/testing';
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestSpec,
-} from "@memento/core";
-import type { CoverageMetrics, Spec } from "@memento/core";
-import { SpecService } from "@memento/testing";
-import { resolvePerformanceHistoryOptions } from "@memento/core";
+} from '@memento/core';
+import type { CoverageMetrics, Spec } from '@memento/core';
+import { SpecService } from '@memento/testing';
+import { resolvePerformanceHistoryOptions } from '@memento/core';
 
 // MCP Tool definitions
 interface MCPToolDefinition {
   name: string;
   description: string;
   inputSchema: {
-    type: "object";
+    type: 'object';
     properties: Record<string, any>;
     required?: string[];
   };
@@ -81,24 +81,26 @@ export class MCPRouter {
     try {
       const moduleDir = path.dirname(fileURLToPath(import.meta.url));
       // Handle both src/api and dist/api execution
-      let root = path.resolve(moduleDir, "..", "..");
+      const root = path.resolve(moduleDir, '..', '..');
       // If a package.json exists at this level, assume project root
-      if (existsSync(path.join(root, "package.json"))) {
-        const candidate = path.join(root, "src");
+      if (existsSync(path.join(root, 'package.json'))) {
+        const candidate = path.join(root, 'src');
         if (existsSync(candidate)) return candidate;
       }
       // Walk up a few levels to find a package.json with a src directory
       let cur = moduleDir;
       for (let i = 0; i < 5; i++) {
-        cur = path.resolve(cur, "..");
-        if (existsSync(path.join(cur, "package.json"))) {
-          const candidate = path.join(cur, "src");
+        cur = path.resolve(cur, '..');
+        if (existsSync(path.join(cur, 'package.json'))) {
+          const candidate = path.join(cur, 'src');
           if (existsSync(candidate)) return candidate;
         }
       }
-    } catch {}
+    } catch {
+      // Intentionally empty - fallback behavior handled below
+    }
     // Fallback: relative src (may fail if CWD not at project root)
-    return "src";
+    return 'src';
   }
 
   constructor(
@@ -112,8 +114,8 @@ export class MCPRouter {
     this.specService = new SpecService(this.kgService, this.dbService);
     this.server = new Server(
       {
-        name: "memento-mcp-server",
-        version: "1.0.0",
+        name: 'memento-mcp-server',
+        version: '1.0.0',
       },
       {
         capabilities: {
@@ -130,283 +132,283 @@ export class MCPRouter {
   private registerTools(): void {
     // Design tools
     this.registerTool({
-      name: "design.create_spec",
+      name: 'design.create_spec',
       description:
-        "Create a new feature specification with acceptance criteria",
+        'Create a new feature specification with acceptance criteria',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           title: {
-            type: "string",
-            description: "Title of the specification",
+            type: 'string',
+            description: 'Title of the specification',
           },
           description: {
-            type: "string",
-            description: "Detailed description of the feature",
+            type: 'string',
+            description: 'Detailed description of the feature',
           },
           acceptanceCriteria: {
-            type: "array",
-            items: { type: "string" },
-            description: "List of acceptance criteria",
+            type: 'array',
+            items: { type: 'string' },
+            description: 'List of acceptance criteria',
           },
           priority: {
-            type: "string",
-            enum: ["low", "medium", "high", "critical"],
-            description: "Priority level",
+            type: 'string',
+            enum: ['low', 'medium', 'high', 'critical'],
+            description: 'Priority level',
           },
           goals: {
-            type: "array",
-            items: { type: "string" },
-            description: "Goals for this specification",
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Goals for this specification',
           },
           tags: {
-            type: "array",
-            items: { type: "string" },
-            description: "Tags for categorization",
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Tags for categorization',
           },
         },
-        required: ["title", "description", "acceptanceCriteria"],
+        required: ['title', 'description', 'acceptanceCriteria'],
       },
       handler: this.handleCreateSpec.bind(this),
     });
 
     // Graph search tools
     this.registerTool({
-      name: "graph.search",
-      description: "Search the knowledge graph for code entities",
+      name: 'graph.search',
+      description: 'Search the knowledge graph for code entities',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           query: {
-            type: "string",
-            description: "Search query",
+            type: 'string',
+            description: 'Search query',
           },
           entityTypes: {
-            type: "array",
+            type: 'array',
             items: {
-              type: "string",
-              enum: ["function", "class", "interface", "file", "module"],
+              type: 'string',
+              enum: ['function', 'class', 'interface', 'file', 'module'],
             },
-            description: "Types of entities to search for",
+            description: 'Types of entities to search for',
           },
           limit: {
-            type: "number",
-            description: "Maximum number of results",
+            type: 'number',
+            description: 'Maximum number of results',
             default: 20,
           },
         },
-        required: ["query"],
+        required: ['query'],
       },
       handler: this.handleGraphSearch.bind(this),
     });
 
     this.registerTool({
-      name: "graph.list_module_children",
+      name: 'graph.list_module_children',
       description:
-        "List structural children for a module or directory with optional filters",
+        'List structural children for a module or directory with optional filters',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           modulePath: {
-            type: "string",
+            type: 'string',
             description:
-              "Module path or entity id (e.g., file:src/app.ts:module)",
+              'Module path or entity id (e.g., file:src/app.ts:module)',
           },
           includeFiles: {
-            type: "boolean",
-            description: "Include file children (default true)",
+            type: 'boolean',
+            description: 'Include file children (default true)',
           },
           includeSymbols: {
-            type: "boolean",
-            description: "Include symbol children (default true)",
+            type: 'boolean',
+            description: 'Include symbol children (default true)',
           },
           language: {
             anyOf: [
-              { type: "string" },
-              { type: "array", items: { type: "string" } },
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
             ],
-            description: "Language filter (case-insensitive)",
+            description: 'Language filter (case-insensitive)',
           },
           symbolKind: {
             anyOf: [
-              { type: "string" },
-              { type: "array", items: { type: "string" } },
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
             ],
-            description: "Symbol kind filter (e.g., class, function)",
+            description: 'Symbol kind filter (e.g., class, function)',
           },
           modulePathPrefix: {
-            type: "string",
+            type: 'string',
             description:
-              "Restrict children to modulePath/path starting with prefix",
+              'Restrict children to modulePath/path starting with prefix',
           },
           limit: {
-            type: "number",
+            type: 'number',
             minimum: 1,
             maximum: 500,
-            description: "Maximum number of children to return (default 50)",
+            description: 'Maximum number of children to return (default 50)',
           },
         },
-        required: ["modulePath"],
+        required: ['modulePath'],
       },
       handler: this.handleListModuleChildren.bind(this),
     });
 
     this.registerTool({
-      name: "graph.list_imports",
-      description: "List structural import edges for a file or module",
+      name: 'graph.list_imports',
+      description: 'List structural import edges for a file or module',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           entityId: {
-            type: "string",
-            description: "Entity id to inspect (e.g., file:src/app.ts:module)",
+            type: 'string',
+            description: 'Entity id to inspect (e.g., file:src/app.ts:module)',
           },
           resolvedOnly: {
-            type: "boolean",
-            description: "Only include resolved imports",
+            type: 'boolean',
+            description: 'Only include resolved imports',
           },
           language: {
             anyOf: [
-              { type: "string" },
-              { type: "array", items: { type: "string" } },
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
             ],
-            description: "Language filter (case-insensitive)",
+            description: 'Language filter (case-insensitive)',
           },
           symbolKind: {
             anyOf: [
-              { type: "string" },
-              { type: "array", items: { type: "string" } },
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
             ],
-            description: "Target symbol kind filter",
+            description: 'Target symbol kind filter',
           },
           importAlias: {
             anyOf: [
-              { type: "string" },
-              { type: "array", items: { type: "string" } },
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
             ],
-            description: "Alias filter (exact match)",
+            description: 'Alias filter (exact match)',
           },
           importType: {
             anyOf: [
               {
-                type: "string",
+                type: 'string',
                 enum: [
-                  "default",
-                  "named",
-                  "namespace",
-                  "wildcard",
-                  "side-effect",
+                  'default',
+                  'named',
+                  'namespace',
+                  'wildcard',
+                  'side-effect',
                 ],
               },
               {
-                type: "array",
+                type: 'array',
                 items: {
-                  type: "string",
+                  type: 'string',
                   enum: [
-                    "default",
-                    "named",
-                    "namespace",
-                    "wildcard",
-                    "side-effect",
+                    'default',
+                    'named',
+                    'namespace',
+                    'wildcard',
+                    'side-effect',
                   ],
                 },
               },
             ],
-            description: "Import kind filter",
+            description: 'Import kind filter',
           },
           isNamespace: {
-            type: "boolean",
-            description: "Filter namespace imports only",
+            type: 'boolean',
+            description: 'Filter namespace imports only',
           },
           modulePath: {
             anyOf: [
-              { type: "string" },
-              { type: "array", items: { type: "string" } },
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
             ],
-            description: "Exact module path filter",
+            description: 'Exact module path filter',
           },
           modulePathPrefix: {
-            type: "string",
-            description: "Prefix filter for module paths",
+            type: 'string',
+            description: 'Prefix filter for module paths',
           },
           limit: {
-            type: "number",
+            type: 'number',
             minimum: 1,
             maximum: 1000,
-            description: "Maximum number of imports to return (default 200)",
+            description: 'Maximum number of imports to return (default 200)',
           },
         },
-        required: ["entityId"],
+        required: ['entityId'],
       },
       handler: this.handleListImports.bind(this),
     });
 
     this.registerTool({
-      name: "graph.find_definition",
-      description: "Find the defining entity for a symbol",
+      name: 'graph.find_definition',
+      description: 'Find the defining entity for a symbol',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           symbolId: {
-            type: "string",
-            description: "Symbol id to resolve",
+            type: 'string',
+            description: 'Symbol id to resolve',
           },
         },
-        required: ["symbolId"],
+        required: ['symbolId'],
       },
       handler: this.handleFindDefinition.bind(this),
     });
 
     // AST-Grep search tool: structure-aware code queries
     this.registerTool({
-      name: "code.ast_grep.search",
+      name: 'code.ast_grep.search',
       description:
-        "Run ast-grep to search code by AST pattern (structure-aware)",
+        'Run ast-grep to search code by AST pattern (structure-aware)',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          pattern: { type: "string", description: "AST-Grep pattern" },
+          pattern: { type: 'string', description: 'AST-Grep pattern' },
           name: {
-            type: "string",
-            description: "Convenience: symbol name to find",
+            type: 'string',
+            description: 'Convenience: symbol name to find',
           },
           kinds: {
-            type: "array",
-            items: { type: "string", enum: ["function", "method"] },
-            description: "Convenience: which declaration kinds to search",
-            default: ["function", "method"],
+            type: 'array',
+            items: { type: 'string', enum: ['function', 'method'] },
+            description: 'Convenience: which declaration kinds to search',
+            default: ['function', 'method'],
           },
           lang: {
-            type: "string",
-            enum: ["ts", "tsx", "js", "jsx"],
-            description: "Language for the pattern",
-            default: "ts",
+            type: 'string',
+            enum: ['ts', 'tsx', 'js', 'jsx'],
+            description: 'Language for the pattern',
+            default: 'ts',
           },
           selector: {
-            type: "string",
+            type: 'string',
             description:
-              "Optional AST kind selector (e.g., function_declaration)",
+              'Optional AST kind selector (e.g., function_declaration)',
           },
           strictness: {
-            type: "string",
-            enum: ["cst", "smart", "ast", "relaxed", "signature", "template"],
-            description: "Match strictness",
+            type: 'string',
+            enum: ['cst', 'smart', 'ast', 'relaxed', 'signature', 'template'],
+            description: 'Match strictness',
           },
           globs: {
-            type: "array",
-            items: { type: "string" },
-            description: "Include/exclude file globs",
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Include/exclude file globs',
           },
-          limit: { type: "number", description: "Max matches to return" },
-          timeoutMs: { type: "number", description: "Max runtime in ms" },
+          limit: { type: 'number', description: 'Max matches to return' },
+          timeoutMs: { type: 'number', description: 'Max runtime in ms' },
           includeText: {
-            type: "boolean",
-            description: "Include matched text snippet",
+            type: 'boolean',
+            description: 'Include matched text snippet',
             default: false,
           },
           noFallback: {
-            type: "boolean",
-            description: "If true, do not fall back to ts-morph or ripgrep",
+            type: 'boolean',
+            description: 'If true, do not fall back to ts-morph or ripgrep',
             default: false,
           },
         },
@@ -422,33 +424,33 @@ export class MCPRouter {
 
     // ts-morph only search
     this.registerTool({
-      name: "code.search.ts_morph",
-      description: "Find function/method declarations by name using ts-morph",
+      name: 'code.search.ts_morph',
+      description: 'Find function/method declarations by name using ts-morph',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          name: { type: "string" },
+          name: { type: 'string' },
           kinds: {
-            type: "array",
-            items: { type: "string", enum: ["function", "method"] },
-            default: ["function", "method"],
+            type: 'array',
+            items: { type: 'string', enum: ['function', 'method'] },
+            default: ['function', 'method'],
           },
-          globs: { type: "array", items: { type: "string" } },
-          limit: { type: "number" },
+          globs: { type: 'array', items: { type: 'string' } },
+          limit: { type: 'number' },
         },
-        required: ["name"],
+        required: ['name'],
       },
       handler: async (params: any) => {
         const name = String(params.name);
         const kinds: string[] =
           Array.isArray(params.kinds) && params.kinds.length
             ? params.kinds
-            : ["function", "method"];
+            : ['function', 'method'];
         const rawGlobs: string[] = Array.isArray(params.globs)
           ? params.globs
-          : ["src/**/*.ts", "src/**/*.tsx"];
+          : ['src/**/*.ts', 'src/**/*.tsx'];
         const globs = rawGlobs.filter(
-          (g) => typeof g === "string" && !g.includes("..")
+          (g) => typeof g === 'string' && !g.includes('..')
         );
         const limit = Math.max(1, Math.min(500, Number(params.limit ?? 200)));
         const matches = await this.searchWithTsMorph(
@@ -463,37 +465,37 @@ export class MCPRouter {
 
     // Aggregate compare search across engines
     this.registerTool({
-      name: "code.search.aggregate",
-      description: "Run graph, ast-grep, and ts-morph to compare results",
+      name: 'code.search.aggregate',
+      description: 'Run graph, ast-grep, and ts-morph to compare results',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          name: { type: "string", description: "Symbol name to search" },
+          name: { type: 'string', description: 'Symbol name to search' },
           engines: {
-            type: "array",
-            items: { type: "string", enum: ["graph", "ast-grep", "ts-morph"] },
-            default: ["graph", "ast-grep", "ts-morph"],
+            type: 'array',
+            items: { type: 'string', enum: ['graph', 'ast-grep', 'ts-morph'] },
+            default: ['graph', 'ast-grep', 'ts-morph'],
           },
-          limit: { type: "number" },
+          limit: { type: 'number' },
         },
-        required: ["name"],
+        required: ['name'],
       },
       handler: async (params: any) => {
         const name = String(params.name);
         const engines: string[] =
           Array.isArray(params.engines) && params.engines.length
             ? params.engines
-            : ["graph", "ast-grep", "ts-morph"];
+            : ['graph', 'ast-grep', 'ts-morph'];
         const limit = Math.max(1, Math.min(500, Number(params.limit ?? 200)));
 
         const results: any = {};
 
-        if (engines.includes("graph")) {
+        if (engines.includes('graph')) {
           try {
             const entities = await this.kgService.search({
               query: name,
-              searchType: "structural",
-              entityTypes: ["function" as any],
+              searchType: 'structural',
+              entityTypes: ['function' as any],
               limit,
             });
             const dedup = Array.from(
@@ -502,7 +504,7 @@ export class MCPRouter {
             results.graph = {
               count: dedup.length,
               items: dedup.map((e: any) => ({
-                file: String((e.path || "").split(":")[0]),
+                file: String((e.path || '').split(':')[0]),
                 symbol: e.name,
                 path: e.path,
               })),
@@ -512,11 +514,11 @@ export class MCPRouter {
           }
         }
 
-        if (engines.includes("ast-grep")) {
+        if (engines.includes('ast-grep')) {
           const ag = await this.runAstGrepOne({
             pattern: `function ${name}($P, ...) { ... }`,
-            selector: "function_declaration",
-            lang: "ts",
+            selector: 'function_declaration',
+            lang: 'ts',
             globs: [],
             includeText: false,
             timeoutMs: 5000,
@@ -525,8 +527,8 @@ export class MCPRouter {
           // Attempt a method match using property_identifier within a class context
           const ag2 = await this.runAstGrepOne({
             pattern: `class $C { ${name}($P, ...) { ... } }`,
-            selector: "property_identifier",
-            lang: "ts",
+            selector: 'property_identifier',
+            lang: 'ts',
             globs: [],
             includeText: false,
             timeoutMs: 5000,
@@ -534,22 +536,22 @@ export class MCPRouter {
           });
           const all = [...ag.matches, ...ag2.matches];
           const dedupFiles = Array.from(new Set(all.map((m) => m.file)));
-          results["ast-grep"] = {
+          results['ast-grep'] = {
             count: all.length,
             files: dedupFiles,
             items: all,
           };
         }
 
-        if (engines.includes("ts-morph")) {
+        if (engines.includes('ts-morph')) {
           const tm = await this.searchWithTsMorph(
             name,
-            ["function", "method"],
-            ["src/**/*.ts", "src/**/*.tsx"],
+            ['function', 'method'],
+            ['src/**/*.ts', 'src/**/*.tsx'],
             limit
           );
           const dedupFiles = Array.from(new Set(tm.map((m) => m.file)));
-          results["ts-morph"] = {
+          results['ts-morph'] = {
             count: tm.length,
             files: dedupFiles,
             items: tm,
@@ -561,7 +563,10 @@ export class MCPRouter {
         // Simple union summary by files
         const fileSets = Object.entries(results).reduce(
           (acc: Record<string, Set<string>>, [k, v]: any) => {
-            if (v && Array.isArray(v.files)) acc[k] = new Set(v.files);
+            if (v && Array.isArray(v.files)) {
+              // eslint-disable-next-line security/detect-object-injection
+              acc[k] = new Set(v.files);
+            }
             return acc;
           },
           {}
@@ -576,105 +581,105 @@ export class MCPRouter {
     });
 
     this.registerTool({
-      name: "graph.examples",
-      description: "Get usage examples and tests for a code entity",
+      name: 'graph.examples',
+      description: 'Get usage examples and tests for a code entity',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           entityId: {
-            type: "string",
-            description: "ID of the entity to get examples for",
+            type: 'string',
+            description: 'ID of the entity to get examples for',
           },
         },
-        required: ["entityId"],
+        required: ['entityId'],
       },
       handler: this.handleGetExamples.bind(this),
     });
 
     // Code analysis tools
     this.registerTool({
-      name: "code.propose_diff",
-      description: "Analyze proposed code changes and their impact",
+      name: 'code.propose_diff',
+      description: 'Analyze proposed code changes and their impact',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           changes: {
-            type: "array",
+            type: 'array',
             items: {
-              type: "object",
+              type: 'object',
               properties: {
-                file: { type: "string" },
+                file: { type: 'string' },
                 type: {
-                  type: "string",
-                  enum: ["create", "modify", "delete", "rename"],
+                  type: 'string',
+                  enum: ['create', 'modify', 'delete', 'rename'],
                 },
-                oldContent: { type: "string" },
-                newContent: { type: "string" },
-                lineStart: { type: "number" },
-                lineEnd: { type: "number" },
+                oldContent: { type: 'string' },
+                newContent: { type: 'string' },
+                lineStart: { type: 'number' },
+                lineEnd: { type: 'number' },
               },
             },
-            description: "List of code changes to analyze",
+            description: 'List of code changes to analyze',
           },
           description: {
-            type: "string",
-            description: "Description of the proposed changes",
+            type: 'string',
+            description: 'Description of the proposed changes',
           },
         },
-        required: ["changes"],
+        required: ['changes'],
       },
       handler: this.handleProposeDiff.bind(this),
     });
 
     // Back-compat alias expected by integration tests
     this.registerTool({
-      name: "code.propose_changes",
-      description: "Alias of code.propose_diff",
+      name: 'code.propose_changes',
+      description: 'Alias of code.propose_diff',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          changes: { type: "array", items: { type: "object" } },
-          description: { type: "string" },
+          changes: { type: 'array', items: { type: 'object' } },
+          description: { type: 'string' },
         },
-        required: ["changes"],
+        required: ['changes'],
       },
       handler: this.handleProposeDiff.bind(this),
     });
 
     // Validation tools
     this.registerTool({
-      name: "validate.run",
-      description: "Run comprehensive validation on code",
+      name: 'validate.run',
+      description: 'Run comprehensive validation on code',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           files: {
-            type: "array",
-            items: { type: "string" },
-            description: "Specific files to validate",
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Specific files to validate',
           },
           specId: {
-            type: "string",
-            description: "Specification ID to validate against",
+            type: 'string',
+            description: 'Specification ID to validate against',
           },
           includeTypes: {
-            type: "array",
+            type: 'array',
             items: {
-              type: "string",
+              type: 'string',
               enum: [
-                "typescript",
-                "eslint",
-                "security",
-                "tests",
-                "coverage",
-                "architecture",
+                'typescript',
+                'eslint',
+                'security',
+                'tests',
+                'coverage',
+                'architecture',
               ],
             },
-            description: "Types of validation to include",
+            description: 'Types of validation to include',
           },
           failOnWarnings: {
-            type: "boolean",
-            description: "Whether to fail on warnings",
+            type: 'boolean',
+            description: 'Whether to fail on warnings',
             default: false,
           },
         },
@@ -684,16 +689,16 @@ export class MCPRouter {
 
     // Back-compat alias expected by integration tests
     this.registerTool({
-      name: "code.validate",
-      description: "Alias of validate.run",
+      name: 'code.validate',
+      description: 'Alias of validate.run',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          files: { type: "array", items: { type: "string" } },
-          validationTypes: { type: "array", items: { type: "string" } },
-          failOnWarnings: { type: "boolean" },
+          files: { type: 'array', items: { type: 'string' } },
+          validationTypes: { type: 'array', items: { type: 'string' } },
+          failOnWarnings: { type: 'boolean' },
         },
-        required: ["files"],
+        required: ['files'],
       },
       handler: async (params: any) => {
         const mapped = {
@@ -707,16 +712,16 @@ export class MCPRouter {
 
     // Aggregated code analysis tool expected by integration tests
     this.registerTool({
-      name: "code.analyze",
-      description: "Analyze code across multiple dimensions",
+      name: 'code.analyze',
+      description: 'Analyze code across multiple dimensions',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          files: { type: "array", items: { type: "string" } },
-          analysisTypes: { type: "array", items: { type: "string" } },
-          options: { type: "object" },
+          files: { type: 'array', items: { type: 'string' } },
+          analysisTypes: { type: 'array', items: { type: 'string' } },
+          options: { type: 'object' },
         },
-        required: ["files"],
+        required: ['files'],
       },
       handler: async (params: any) => {
         const types: string[] = Array.isArray(params.analysisTypes)
@@ -726,26 +731,26 @@ export class MCPRouter {
           filesAnalyzed: Array.isArray(params.files) ? params.files.length : 0,
           analyses: types.map((t) => ({
             analysisType: t,
-            status: "completed",
+            status: 'completed',
           })),
-          message: "Code analysis executed",
+          message: 'Code analysis executed',
         };
       },
     });
 
     // Graph tools expected by integration tests
     this.registerTool({
-      name: "graph.entities.list",
-      description: "List entities in the knowledge graph",
+      name: 'graph.entities.list',
+      description: 'List entities in the knowledge graph',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          limit: { type: "number", default: 20 },
-          entityTypes: { type: "array", items: { type: "string" } },
+          limit: { type: 'number', default: 20 },
+          entityTypes: { type: 'array', items: { type: 'string' } },
         },
       },
       handler: async (params: any) => {
-        const limit = typeof params.limit === "number" ? params.limit : 20;
+        const limit = typeof params.limit === 'number' ? params.limit : 20;
         const { entities, total } = await this.kgService.listEntities({
           limit,
         });
@@ -758,12 +763,12 @@ export class MCPRouter {
     });
 
     this.registerTool({
-      name: "graph.entities.get",
-      description: "Get a single entity by id",
+      name: 'graph.entities.get',
+      description: 'Get a single entity by id',
       inputSchema: {
-        type: "object",
-        properties: { id: { type: "string" } },
-        required: ["id"],
+        type: 'object',
+        properties: { id: { type: 'string' } },
+        required: ['id'],
       },
       handler: async (params: any) => {
         const entity = await this.kgService.getEntity(params.id);
@@ -773,17 +778,17 @@ export class MCPRouter {
     });
 
     this.registerTool({
-      name: "graph.relationships.list",
-      description: "List relationships in the graph",
+      name: 'graph.relationships.list',
+      description: 'List relationships in the graph',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          entityId: { type: "string" },
-          limit: { type: "number", default: 20 },
+          entityId: { type: 'string' },
+          limit: { type: 'number', default: 20 },
         },
       },
       handler: async (params: any) => {
-        const limit = typeof params.limit === "number" ? params.limit : 20;
+        const limit = typeof params.limit === 'number' ? params.limit : 20;
         const { relationships, total } = await this.kgService.listRelationships(
           { fromEntityId: params.entityId, limit }
         );
@@ -792,12 +797,12 @@ export class MCPRouter {
     });
 
     this.registerTool({
-      name: "graph.dependencies.analyze",
-      description: "Analyze dependencies for an entity",
+      name: 'graph.dependencies.analyze',
+      description: 'Analyze dependencies for an entity',
       inputSchema: {
-        type: "object",
-        properties: { entityId: { type: "string" }, depth: { type: "number" } },
-        required: ["entityId"],
+        type: 'object',
+        properties: { entityId: { type: 'string' }, depth: { type: 'number' } },
+        required: ['entityId'],
       },
       handler: async (params: any) => {
         return this.kgService.getEntityDependencies(params.entityId);
@@ -806,13 +811,13 @@ export class MCPRouter {
 
     // Admin tools expected by integration tests
     this.registerTool({
-      name: "admin.health_check",
-      description: "Return system health information",
+      name: 'admin.health_check',
+      description: 'Return system health information',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          includeMetrics: { type: "boolean" },
-          includeServices: { type: "boolean" },
+          includeMetrics: { type: 'boolean' },
+          includeServices: { type: 'boolean' },
         },
       },
       handler: async () => {
@@ -822,13 +827,13 @@ export class MCPRouter {
     });
 
     this.registerTool({
-      name: "admin.sync_status",
-      description: "Return synchronization status overview",
+      name: 'admin.sync_status',
+      description: 'Return synchronization status overview',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          includePerformance: { type: "boolean" },
-          includeErrors: { type: "boolean" },
+          includePerformance: { type: 'boolean' },
+          includeErrors: { type: 'boolean' },
         },
       },
       handler: async () => {
@@ -843,52 +848,52 @@ export class MCPRouter {
 
     // Test management tools
     this.registerTool({
-      name: "tests.plan_and_generate",
+      name: 'tests.plan_and_generate',
       description:
-        "Generate test plans and implementations for a specification",
+        'Generate test plans and implementations for a specification',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           specId: {
-            type: "string",
-            description: "Specification ID to generate tests for",
+            type: 'string',
+            description: 'Specification ID to generate tests for',
           },
           testTypes: {
-            type: "array",
+            type: 'array',
             items: {
-              type: "string",
-              enum: ["unit", "integration", "e2e"],
+              type: 'string',
+              enum: ['unit', 'integration', 'e2e'],
             },
-            description: "Types of tests to generate",
+            description: 'Types of tests to generate',
           },
           includePerformanceTests: {
-            type: "boolean",
-            description: "Whether to include performance tests",
+            type: 'boolean',
+            description: 'Whether to include performance tests',
             default: false,
           },
           includeSecurityTests: {
-            type: "boolean",
-            description: "Whether to include security tests",
+            type: 'boolean',
+            description: 'Whether to include security tests',
             default: false,
           },
         },
-        required: ["specId"],
+        required: ['specId'],
       },
       handler: this.handlePlanTests.bind(this),
     });
 
     // Additional validation helpers expected by integration tests
     this.registerTool({
-      name: "tests.validate_coverage",
-      description: "Validate test coverage against a threshold",
+      name: 'tests.validate_coverage',
+      description: 'Validate test coverage against a threshold',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          files: { type: "array", items: { type: "string" } },
-          minimumCoverage: { type: "number" },
-          reportFormat: { type: "string" },
+          files: { type: 'array', items: { type: 'string' } },
+          minimumCoverage: { type: 'number' },
+          reportFormat: { type: 'string' },
         },
-        required: ["files"],
+        required: ['files'],
       },
       handler: async (params: any) => {
         return {
@@ -901,25 +906,25 @@ export class MCPRouter {
 
     // Additional test analysis tools
     this.registerTool({
-      name: "tests.analyze_results",
-      description: "Analyze test execution results and provide insights",
+      name: 'tests.analyze_results',
+      description: 'Analyze test execution results and provide insights',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           testIds: {
-            type: "array",
-            items: { type: "string" },
+            type: 'array',
+            items: { type: 'string' },
             description:
-              "Test IDs to analyze (optional - analyzes all if empty)",
+              'Test IDs to analyze (optional - analyzes all if empty)',
           },
           includeFlakyAnalysis: {
-            type: "boolean",
-            description: "Whether to include flaky test detection",
+            type: 'boolean',
+            description: 'Whether to include flaky test detection',
             default: true,
           },
           includePerformanceAnalysis: {
-            type: "boolean",
-            description: "Whether to include performance analysis",
+            type: 'boolean',
+            description: 'Whether to include performance analysis',
             default: true,
           },
         },
@@ -929,15 +934,15 @@ export class MCPRouter {
 
     // Design validation tool expected by integration tests
     this.registerTool({
-      name: "design.validate_spec",
-      description: "Validate a specification for completeness and consistency",
+      name: 'design.validate_spec',
+      description: 'Validate a specification for completeness and consistency',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          specId: { type: "string" },
-          validationTypes: { type: "array", items: { type: "string" } },
+          specId: { type: 'string' },
+          validationTypes: { type: 'array', items: { type: 'string' } },
         },
-        required: ["specId"],
+        required: ['specId'],
       },
       handler: async (params: any) => {
         return {
@@ -950,95 +955,95 @@ export class MCPRouter {
     });
 
     this.registerTool({
-      name: "tests.get_coverage",
-      description: "Get test coverage analysis for entities",
+      name: 'tests.get_coverage',
+      description: 'Get test coverage analysis for entities',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           entityId: {
-            type: "string",
-            description: "Entity ID to get coverage for",
+            type: 'string',
+            description: 'Entity ID to get coverage for',
           },
           includeHistorical: {
-            type: "boolean",
-            description: "Whether to include historical coverage data",
+            type: 'boolean',
+            description: 'Whether to include historical coverage data',
             default: false,
           },
         },
-        required: ["entityId"],
+        required: ['entityId'],
       },
       handler: this.handleGetCoverage.bind(this),
     });
 
     this.registerTool({
-      name: "tests.get_performance",
-      description: "Get performance metrics for tests",
+      name: 'tests.get_performance',
+      description: 'Get performance metrics for tests',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           testId: {
-            type: "string",
-            description: "Test ID to get performance metrics for",
+            type: 'string',
+            description: 'Test ID to get performance metrics for',
           },
           days: {
-            type: "number",
-            description: "Number of days of historical data to include",
+            type: 'number',
+            description: 'Number of days of historical data to include',
             default: 30,
           },
         },
-        required: ["testId"],
+        required: ['testId'],
       },
       handler: this.handleGetPerformance.bind(this),
     });
 
     this.registerTool({
-      name: "tests.parse_results",
-      description: "Parse test results from various formats and store them",
+      name: 'tests.parse_results',
+      description: 'Parse test results from various formats and store them',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           filePath: {
-            type: "string",
-            description: "Path to test results file",
+            type: 'string',
+            description: 'Path to test results file',
           },
           format: {
-            type: "string",
-            enum: ["junit", "jest", "mocha", "vitest", "cypress", "playwright"],
-            description: "Format of the test results file",
+            type: 'string',
+            enum: ['junit', 'jest', 'mocha', 'vitest', 'cypress', 'playwright'],
+            description: 'Format of the test results file',
           },
         },
-        required: ["filePath", "format"],
+        required: ['filePath', 'format'],
       },
       handler: this.handleParseTestResults.bind(this),
     });
 
     // Security tools
     this.registerTool({
-      name: "security.scan",
-      description: "Scan entities for security vulnerabilities",
+      name: 'security.scan',
+      description: 'Scan entities for security vulnerabilities',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           entityIds: {
-            type: "array",
-            items: { type: "string" },
-            description: "Specific entity IDs to scan",
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Specific entity IDs to scan',
           },
           scanTypes: {
-            type: "array",
+            type: 'array',
             items: {
-              type: "string",
-              enum: ["sast", "sca", "secrets", "dependency"],
+              type: 'string',
+              enum: ['sast', 'sca', 'secrets', 'dependency'],
             },
-            description: "Types of security scans to perform",
+            description: 'Types of security scans to perform',
           },
           severity: {
-            type: "array",
+            type: 'array',
             items: {
-              type: "string",
-              enum: ["critical", "high", "medium", "low"],
+              type: 'string',
+              enum: ['critical', 'high', 'medium', 'low'],
             },
-            description: "Severity levels to include",
+            description: 'Severity levels to include',
           },
         },
       },
@@ -1047,49 +1052,49 @@ export class MCPRouter {
 
     // Impact analysis tools
     this.registerTool({
-      name: "impact.analyze",
-      description: "Perform cascading impact analysis for proposed changes",
+      name: 'impact.analyze',
+      description: 'Perform cascading impact analysis for proposed changes',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           changes: {
-            type: "array",
+            type: 'array',
             items: {
-              type: "object",
+              type: 'object',
               properties: {
-                entityId: { type: "string" },
+                entityId: { type: 'string' },
                 changeType: {
-                  type: "string",
-                  enum: ["modify", "delete", "rename"],
+                  type: 'string',
+                  enum: ['modify', 'delete', 'rename'],
                 },
-                newName: { type: "string" },
-                signatureChange: { type: "boolean" },
+                newName: { type: 'string' },
+                signatureChange: { type: 'boolean' },
               },
             },
-            description: "Changes to analyze impact for",
+            description: 'Changes to analyze impact for',
           },
           includeIndirect: {
-            type: "boolean",
-            description: "Whether to include indirect impact",
+            type: 'boolean',
+            description: 'Whether to include indirect impact',
             default: true,
           },
           maxDepth: {
-            type: "number",
-            description: "Maximum depth for impact analysis",
+            type: 'number',
+            description: 'Maximum depth for impact analysis',
             default: 3,
           },
         },
-        required: ["changes"],
+        required: ['changes'],
       },
       handler: this.handleImpactAnalysis.bind(this),
     });
 
     // Documentation tools
     this.registerTool({
-      name: "docs.sync",
-      description: "Synchronize documentation with the knowledge graph",
+      name: 'docs.sync',
+      description: 'Synchronize documentation with the knowledge graph',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {},
       },
       handler: this.handleSyncDocs.bind(this),
@@ -1141,9 +1146,9 @@ export class MCPRouter {
         return {
           content: [
             {
-              type: "text",
+              type: 'text',
               text:
-                typeof result === "string"
+                typeof result === 'string'
                   ? result
                   : JSON.stringify(result, null, 2),
             },
@@ -1182,7 +1187,7 @@ export class MCPRouter {
     this.server.setRequestHandler(ReadResourceRequestSchema, async () => {
       throw new McpError(
         ErrorCode.MethodNotFound,
-        "Resource operations not yet implemented"
+        'Resource operations not yet implemented'
       );
     });
   }
@@ -1194,13 +1199,13 @@ export class MCPRouter {
 
     try {
       const payload = {
-        title: params?.title ?? "",
-        description: params?.description ?? "",
+        title: params?.title ?? '',
+        description: params?.description ?? '',
         acceptanceCriteria: Array.isArray(params?.acceptanceCriteria)
           ? params.acceptanceCriteria
           : [],
         priority:
-          typeof params?.priority === "string" ? params.priority : undefined,
+          typeof params?.priority === 'string' ? params.priority : undefined,
         assignee: params?.assignee,
         tags: Array.isArray(params?.tags) ? params.tags : [],
       };
@@ -1218,11 +1223,11 @@ export class MCPRouter {
       const message =
         error instanceof Error
           ? error.message
-          : String(error ?? "Unknown error");
-      console.error("Error in handleCreateSpec:", error);
+          : String(error ?? 'Unknown error');
+      console.error('Error in handleCreateSpec:', error);
       throw new McpError(
         ErrorCode.InternalError,
-        "Tool execution failed",
+        'Tool execution failed',
         `Failed to create specification: ${message}`
       );
     }
@@ -1235,10 +1240,10 @@ export class MCPRouter {
     try {
       if (
         !params ||
-        typeof params.query !== "string" ||
-        params.query.trim() === ""
+        typeof params.query !== 'string' ||
+        params.query.trim() === ''
       ) {
-        throw new Error("Query parameter must be a non-empty string");
+        throw new Error('Query parameter must be a non-empty string');
       }
 
       // Use the KnowledgeGraphService directly for search
@@ -1247,7 +1252,7 @@ export class MCPRouter {
 
       // Get relationships if includeRelated is true
       let relationships: any[] = [];
-      let clusters: any[] = [];
+      const clusters: any[] = [];
       let relevanceScore = 0;
 
       if (params.includeRelated && normalizedEntities.length > 0) {
@@ -1287,7 +1292,7 @@ export class MCPRouter {
         message: `Found ${results.length} entities matching query`,
       };
     } catch (error) {
-      console.error("Error in handleGraphSearch:", error);
+      console.error('Error in handleGraphSearch:', error);
       throw error;
     }
   }
@@ -1298,9 +1303,9 @@ export class MCPRouter {
 
     try {
       const modulePath =
-        typeof params?.modulePath === "string" ? params.modulePath.trim() : "";
+        typeof params?.modulePath === 'string' ? params.modulePath.trim() : '';
       if (!modulePath) {
-        throw new Error("modulePath is required");
+        throw new Error('modulePath is required');
       }
 
       const includeFiles = this.parseBooleanFlag(params?.includeFiles);
@@ -1308,17 +1313,17 @@ export class MCPRouter {
       const languages = this.parseStringArrayFlag(params?.language);
       const symbolKinds = this.parseStringArrayFlag(params?.symbolKind);
       const modulePathPrefix =
-        typeof params?.modulePathPrefix === "string"
+        typeof params?.modulePathPrefix === 'string'
           ? params.modulePathPrefix.trim()
           : undefined;
       const limit = this.parseNumericLimit(params?.limit);
 
       const options: Parameters<
-        KnowledgeGraphService["listModuleChildren"]
+        KnowledgeGraphService['listModuleChildren']
       >[1] = {};
-      if (typeof includeFiles === "boolean")
+      if (typeof includeFiles === 'boolean')
         options.includeFiles = includeFiles;
-      if (typeof includeSymbols === "boolean")
+      if (typeof includeSymbols === 'boolean')
         options.includeSymbols = includeSymbols;
       if (languages.length === 1) {
         options.language = languages[0];
@@ -1333,7 +1338,7 @@ export class MCPRouter {
       if (modulePathPrefix && modulePathPrefix.length > 0) {
         options.modulePathPrefix = modulePathPrefix;
       }
-      if (typeof limit === "number") {
+      if (typeof limit === 'number') {
         options.limit = limit;
       }
 
@@ -1351,12 +1356,12 @@ export class MCPRouter {
         message: `Found ${childCount} children under ${result.modulePath}`,
       };
     } catch (error) {
-      console.error("Error in handleListModuleChildren:", error);
+      console.error('Error in handleListModuleChildren:', error);
       throw new McpError(
         ErrorCode.InternalError,
-        "Tool execution failed",
+        'Tool execution failed',
         `Failed to list module children: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -1368,9 +1373,9 @@ export class MCPRouter {
 
     try {
       const entityId =
-        typeof params?.entityId === "string" ? params.entityId.trim() : "";
+        typeof params?.entityId === 'string' ? params.entityId.trim() : '';
       if (!entityId) {
-        throw new Error("entityId is required");
+        throw new Error('entityId is required');
       }
 
       const resolvedOnly = this.parseBooleanFlag(params?.resolvedOnly);
@@ -1387,13 +1392,13 @@ export class MCPRouter {
       const isNamespace = this.parseBooleanFlag(params?.isNamespace);
       const modulePaths = this.parseStringArrayFlag(params?.modulePath);
       const modulePathPrefix =
-        typeof params?.modulePathPrefix === "string"
+        typeof params?.modulePathPrefix === 'string'
           ? params.modulePathPrefix.trim()
           : undefined;
       const limit = this.parseNumericLimit(params?.limit);
 
-      const options: Parameters<KnowledgeGraphService["listImports"]>[1] = {};
-      if (typeof resolvedOnly === "boolean")
+      const options: Parameters<KnowledgeGraphService['listImports']>[1] = {};
+      if (typeof resolvedOnly === 'boolean')
         options.resolvedOnly = resolvedOnly;
       if (languages.length === 1) {
         options.language = languages[0];
@@ -1415,7 +1420,7 @@ export class MCPRouter {
       } else if (importTypes.length > 1) {
         options.importType = importTypes as any;
       }
-      if (typeof isNamespace === "boolean") {
+      if (typeof isNamespace === 'boolean') {
         options.isNamespace = isNamespace;
       }
       if (modulePaths.length === 1) {
@@ -1426,7 +1431,7 @@ export class MCPRouter {
       if (modulePathPrefix && modulePathPrefix.length > 0) {
         options.modulePathPrefix = modulePathPrefix;
       }
-      if (typeof limit === "number") {
+      if (typeof limit === 'number') {
         options.limit = limit;
       }
 
@@ -1441,12 +1446,12 @@ export class MCPRouter {
         message: `Found ${importCount} imports for ${result.entityId}`,
       };
     } catch (error) {
-      console.error("Error in handleListImports:", error);
+      console.error('Error in handleListImports:', error);
       throw new McpError(
         ErrorCode.InternalError,
-        "Tool execution failed",
+        'Tool execution failed',
         `Failed to list imports: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -1458,9 +1463,9 @@ export class MCPRouter {
 
     try {
       const symbolId =
-        typeof params?.symbolId === "string" ? params.symbolId.trim() : "";
+        typeof params?.symbolId === 'string' ? params.symbolId.trim() : '';
       if (!symbolId) {
-        throw new Error("symbolId is required");
+        throw new Error('symbolId is required');
       }
 
       const result = await this.kgService.findDefinition(symbolId);
@@ -1468,28 +1473,28 @@ export class MCPRouter {
       return {
         ...result,
         message:
-          result && "source" in result && result.source
+          result && 'source' in result && result.source
             ? `Definition resolved to ${(result as any).source.id}`
-            : "Definition not found",
+            : 'Definition not found',
       };
     } catch (error) {
-      console.error("Error in handleFindDefinition:", error);
+      console.error('Error in handleFindDefinition:', error);
       throw new McpError(
         ErrorCode.InternalError,
-        "Tool execution failed",
+        'Tool execution failed',
         `Failed to find definition: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
   }
 
   private parseBooleanFlag(value: unknown): boolean | undefined {
-    if (typeof value === "boolean") return value;
-    if (typeof value === "string") {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
       const normalized = value.trim().toLowerCase();
-      if (normalized === "true") return true;
-      if (normalized === "false") return false;
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
     }
     return undefined;
   }
@@ -1497,13 +1502,13 @@ export class MCPRouter {
   private parseStringArrayFlag(value: unknown): string[] {
     if (Array.isArray(value)) {
       return value
-        .flatMap((entry) => (typeof entry === "string" ? entry.split(",") : []))
+        .flatMap((entry) => (typeof entry === 'string' ? entry.split(',') : []))
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0);
     }
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       return value
-        .split(",")
+        .split(',')
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0);
     }
@@ -1511,10 +1516,10 @@ export class MCPRouter {
   }
 
   private parseNumericLimit(value: unknown): number | undefined {
-    if (typeof value === "number" && Number.isFinite(value)) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
     }
-    if (typeof value === "string" && value.trim().length > 0) {
+    if (typeof value === 'string' && value.trim().length > 0) {
       const parsed = Number(value.trim());
       if (Number.isFinite(parsed)) {
         return parsed;
@@ -1536,7 +1541,7 @@ export class MCPRouter {
         const emptyExamples = { usageExamples: [], testExamples: [] };
         return {
           entityId: params.entityId,
-          signature: "",
+          signature: '',
           usageExamples: [],
           testExamples: [],
           relatedPatterns: [],
@@ -1561,7 +1566,7 @@ export class MCPRouter {
 
       return {
         entityId: examples.entityId ?? params.entityId,
-        signature: examples.signature || "",
+        signature: examples.signature || '',
         usageExamples: normalizedExamples.usageExamples,
         testExamples: normalizedExamples.testExamples,
         relatedPatterns: Array.isArray(examples.relatedPatterns)
@@ -1575,12 +1580,12 @@ export class MCPRouter {
         examples: normalizedExamples,
       };
     } catch (error) {
-      console.error("Error in handleGetExamples:", error);
+      console.error('Error in handleGetExamples:', error);
       // Return empty results instead of throwing
       const failureExamples = { usageExamples: [], testExamples: [] };
       return {
         entityId: params.entityId,
-        signature: "",
+        signature: '',
         usageExamples: [],
         testExamples: [],
         relatedPatterns: [],
@@ -1588,7 +1593,7 @@ export class MCPRouter {
         totalUsageExamples: 0,
         totalTestExamples: 0,
         message: `Error retrieving examples: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`,
         examples: failureExamples,
       };
@@ -1612,24 +1617,24 @@ export class MCPRouter {
         const entityId = `entity_${Date.now()}_${i}`;
 
         // Simple analysis based on change type
-        if (change.type === "modify") {
+        if (change.type === 'modify') {
           affectedEntities.push({
             id: entityId,
             name: change.file,
-            type: "file",
+            type: 'file',
             file: change.file,
-            changeType: "modified",
+            changeType: 'modified',
           });
 
           // Detect potential breaking changes
           if (change.oldContent && change.newContent) {
-            const oldLines = change.oldContent.split("\n").length;
-            const newLines = change.newContent.split("\n").length;
+            const oldLines = change.oldContent.split('\n').length;
+            const newLines = change.newContent.split('\n').length;
 
             // Check for signature changes (simple heuristic)
             if (
-              change.oldContent.includes("function") &&
-              change.newContent.includes("function")
+              change.oldContent.includes('function') &&
+              change.newContent.includes('function')
             ) {
               const oldSignature = change.oldContent.match(
                 /function\s+\w+\([^)]*\)/
@@ -1644,7 +1649,7 @@ export class MCPRouter {
                 oldSignature !== newSignature
               ) {
                 breakingChanges.push({
-                  severity: "breaking",
+                  severity: 'breaking',
                   description: `Function signature changed in ${change.file}`,
                   affectedEntities: [change.file],
                 });
@@ -1653,33 +1658,33 @@ export class MCPRouter {
 
             if (Math.abs(oldLines - newLines) > 10) {
               breakingChanges.push({
-                severity: "potentially-breaking",
+                severity: 'potentially-breaking',
                 description: `Large change detected in ${change.file}`,
                 affectedEntities: [change.file],
               });
             }
           }
-        } else if (change.type === "delete") {
+        } else if (change.type === 'delete') {
           affectedEntities.push({
             id: entityId,
             name: change.file,
-            type: "file",
+            type: 'file',
             file: change.file,
-            changeType: "deleted",
+            changeType: 'deleted',
           });
 
           breakingChanges.push({
-            severity: "breaking",
+            severity: 'breaking',
             description: `File ${change.file} is being deleted`,
             affectedEntities: [change.file],
           });
-        } else if (change.type === "create") {
+        } else if (change.type === 'create') {
           affectedEntities.push({
             id: entityId,
             name: change.file,
-            type: "file",
+            type: 'file',
             file: change.file,
-            changeType: "created",
+            changeType: 'created',
           });
         }
       }
@@ -1687,29 +1692,29 @@ export class MCPRouter {
       // Always provide at least one item in arrays if changes were provided
       if (params.changes.length > 0 && affectedEntities.length === 0) {
         affectedEntities.push({
-          id: "entity_default",
-          name: "Unknown",
-          type: "file",
-          file: params.changes[0].file || "unknown",
-          changeType: "modified",
+          id: 'entity_default',
+          name: 'Unknown',
+          type: 'file',
+          file: params.changes[0].file || 'unknown',
+          changeType: 'modified',
         });
       }
 
       // Generate recommendations
       if (breakingChanges.length > 0) {
         recommendations.push({
-          type: "warning",
+          type: 'warning',
           message: `${breakingChanges.length} breaking change(s) detected`,
           actions: [
-            "Review breaking changes carefully",
-            "Run tests after applying changes",
+            'Review breaking changes carefully',
+            'Run tests after applying changes',
           ],
         });
       } else {
         recommendations.push({
-          type: "info",
-          message: "No breaking changes detected",
-          actions: ["Run tests to verify changes", "Review code for quality"],
+          type: 'info',
+          message: 'No breaking changes detected',
+          actions: ['Run tests to verify changes', 'Review code for quality'],
         });
       }
 
@@ -1730,10 +1735,10 @@ export class MCPRouter {
         impactAnalysis,
         recommendations,
         changes: params.changes,
-        message: "Code change analysis completed successfully",
+        message: 'Code change analysis completed successfully',
       };
     } catch (error) {
-      console.error("Error in handleProposeDiff:", error);
+      console.error('Error in handleProposeDiff:', error);
       // Return default structure instead of throwing
       return {
         affectedEntities: [],
@@ -1746,7 +1751,7 @@ export class MCPRouter {
         recommendations: [],
         changes: params.changes || [],
         message: `Analysis failed: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`,
       };
     }
@@ -1770,15 +1775,15 @@ export class MCPRouter {
 
       // Always include all validation types in the result
       const includeTypes = params.includeTypes || [
-        "typescript",
-        "eslint",
-        "tests",
-        "coverage",
-        "security",
+        'typescript',
+        'eslint',
+        'tests',
+        'coverage',
+        'security',
       ];
 
       // TypeScript validation
-      if (includeTypes.includes("typescript")) {
+      if (includeTypes.includes('typescript')) {
         result.typescript = {
           errors: 0,
           warnings:
@@ -1788,7 +1793,7 @@ export class MCPRouter {
       }
 
       // ESLint validation
-      if (includeTypes.includes("eslint")) {
+      if (includeTypes.includes('eslint')) {
         result.eslint = {
           errors: 0,
           warnings:
@@ -1798,7 +1803,7 @@ export class MCPRouter {
       }
 
       // Security validation
-      if (includeTypes.includes("security")) {
+      if (includeTypes.includes('security')) {
         result.security = {
           critical: 0,
           high: 0,
@@ -1812,15 +1817,15 @@ export class MCPRouter {
           result.security.issues.push({
             file: params.files[0],
             line: Math.floor(Math.random() * 100),
-            severity: "medium",
-            type: "security-issue",
-            message: "Potential security vulnerability detected",
+            severity: 'medium',
+            type: 'security-issue',
+            message: 'Potential security vulnerability detected',
           });
         }
       }
 
       // Tests validation
-      if (includeTypes.includes("tests")) {
+      if (includeTypes.includes('tests')) {
         result.tests = {
           passed:
             params.files?.length > 0 ? Math.floor(Math.random() * 10) + 5 : 0,
@@ -1836,7 +1841,7 @@ export class MCPRouter {
       }
 
       // Coverage validation
-      if (includeTypes.includes("coverage")) {
+      if (includeTypes.includes('coverage')) {
         const baseCoverage =
           params.files?.length > 0 ? 70 + Math.random() * 20 : 0;
         result.coverage = {
@@ -1853,7 +1858,7 @@ export class MCPRouter {
       }
 
       // Architecture validation
-      if (includeTypes.includes("architecture")) {
+      if (includeTypes.includes('architecture')) {
         result.architecture = {
           violations: 0,
           issues: [],
@@ -1887,7 +1892,7 @@ export class MCPRouter {
         message: `Validation completed with score ${result.overall.score}/100`,
       };
     } catch (error) {
-      console.error("Error in handleValidateCode:", error);
+      console.error('Error in handleValidateCode:', error);
       // Return default structure instead of throwing
       return {
         overall: {
@@ -1901,7 +1906,7 @@ export class MCPRouter {
         coverage: { lines: 0, branches: 0, functions: 0, statements: 0 },
         security: { critical: 0, high: 0, medium: 0, low: 0, issues: [] },
         message: `Validation failed: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`,
       };
     }
@@ -1916,11 +1921,11 @@ export class MCPRouter {
       testTypes: Array.isArray(params.testTypes)
         ? params.testTypes.filter(
             (type: unknown) =>
-              type === "unit" || type === "integration" || type === "e2e"
+              type === 'unit' || type === 'integration' || type === 'e2e'
           )
         : undefined,
       coverage:
-        typeof params.coverage === "object" && params.coverage !== null
+        typeof params.coverage === 'object' && params.coverage !== null
           ? {
               minLines: params.coverage.minLines,
               minBranches: params.coverage.minBranches,
@@ -1958,16 +1963,16 @@ export class MCPRouter {
           return fallbackPlan;
         }
 
-        throw new McpError(ErrorCode.InternalError, "Tool execution failed", {
+        throw new McpError(ErrorCode.InternalError, 'Tool execution failed', {
           code: error.code,
           message: `Specification ${request.specId} not found`,
         });
       }
 
-      console.error("Error in handlePlanTests:", error);
+      console.error('Error in handlePlanTests:', error);
       const message =
-        error instanceof Error ? error.message : "Unknown error occurred";
-      throw new McpError(ErrorCode.InternalError, "Tool execution failed", {
+        error instanceof Error ? error.message : 'Unknown error occurred';
+      throw new McpError(ErrorCode.InternalError, 'Tool execution failed', {
         message,
       });
     }
@@ -1976,24 +1981,24 @@ export class MCPRouter {
   private async generateFallbackTestPlan(request: TestPlanRequest): Promise<{
     specId: string;
     testPlan: {
-      unitTests: TestPlanResponse["testPlan"]["unitTests"];
-      integrationTests: TestPlanResponse["testPlan"]["integrationTests"];
-      e2eTests: TestPlanResponse["testPlan"]["e2eTests"];
-      performanceTests: TestPlanResponse["testPlan"]["performanceTests"];
+      unitTests: TestPlanResponse['testPlan']['unitTests'];
+      integrationTests: TestPlanResponse['testPlan']['integrationTests'];
+      e2eTests: TestPlanResponse['testPlan']['e2eTests'];
+      performanceTests: TestPlanResponse['testPlan']['performanceTests'];
     };
     estimatedCoverage: CoverageMetrics;
     changedFiles: string[];
     message: string;
   }> {
     const specId = request.specId && String(request.specId).trim();
-    const safeSpecId = specId && specId.length > 0 ? specId : "unknown-spec";
+    const safeSpecId = specId && specId.length > 0 ? specId : 'unknown-spec';
 
     let rows: Array<Record<string, any>> = [];
-    if (safeSpecId !== "unknown-spec" && this.isValidUuid(safeSpecId)) {
+    if (safeSpecId !== 'unknown-spec' && this.isValidUuid(safeSpecId)) {
       try {
         const queryResult = await this.dbService.postgresQuery(
           `SELECT content FROM documents WHERE id = $1::uuid AND type = $2 LIMIT 1`,
-          [safeSpecId, "spec"]
+          [safeSpecId, 'spec']
         );
         rows = this.extractQueryRows(queryResult);
       } catch (error) {
@@ -2009,7 +2014,7 @@ export class MCPRouter {
       const rawContent = rows[0]?.content ?? rows[0];
       try {
         parsed =
-          typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
+          typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;
       } catch (parseError) {
         console.warn(
           `Failed to parse specification ${safeSpecId} from database:`,
@@ -2021,42 +2026,42 @@ export class MCPRouter {
     const normalizedSpec = {
       id: String(parsed?.id ?? safeSpecId),
       title:
-        typeof parsed?.title === "string" && parsed.title.trim().length > 0
+        typeof parsed?.title === 'string' && parsed.title.trim().length > 0
           ? parsed.title.trim()
           : this.humanizeSpecId(safeSpecId),
       description:
-        typeof parsed?.description === "string" ? parsed.description : "",
+        typeof parsed?.description === 'string' ? parsed.description : '',
       acceptanceCriteria: Array.isArray(parsed?.acceptanceCriteria)
         ? parsed.acceptanceCriteria
             .map((criterion: unknown) =>
-              typeof criterion === "string"
+              typeof criterion === 'string'
                 ? criterion.trim()
                 : JSON.stringify(criterion)
             )
             .filter((criterion: string) => criterion.length > 0)
         : [],
       priority:
-        typeof parsed?.priority === "string"
-          ? (parsed.priority as Spec["priority"])
-          : ("medium" as Spec["priority"]),
+        typeof parsed?.priority === 'string'
+          ? (parsed.priority as Spec['priority'])
+          : ('medium' as Spec['priority']),
     } satisfies Pick<
       Spec,
-      "id" | "title" | "description" | "acceptanceCriteria" | "priority"
+      'id' | 'title' | 'description' | 'acceptanceCriteria' | 'priority'
     >;
 
-    const requestedTypes = new Set<"unit" | "integration" | "e2e">(
+    const requestedTypes = new Set<'unit' | 'integration' | 'e2e'>(
       Array.isArray(request.testTypes) && request.testTypes.length > 0
         ? request.testTypes.filter(
-            (type): type is "unit" | "integration" | "e2e" =>
-              type === "unit" || type === "integration" || type === "e2e"
+            (type): type is 'unit' | 'integration' | 'e2e' =>
+              type === 'unit' || type === 'integration' || type === 'e2e'
           )
-        : ["unit", "integration", "e2e"]
+        : ['unit', 'integration', 'e2e']
     );
 
     const includePerformance =
       request.includePerformanceTests === true ||
-      normalizedSpec.priority === "high" ||
-      normalizedSpec.priority === "critical";
+      normalizedSpec.priority === 'high' ||
+      normalizedSpec.priority === 'critical';
 
     const criteria =
       normalizedSpec.acceptanceCriteria.length > 0
@@ -2067,7 +2072,7 @@ export class MCPRouter {
           ];
 
     const baseTestSpec = (
-      type: "unit" | "integration" | "e2e" | "performance",
+      type: 'unit' | 'integration' | 'e2e' | 'performance',
       name: string,
       description: string,
       extra?: Partial<TestSpec>
@@ -2087,9 +2092,9 @@ export class MCPRouter {
         : {}),
     });
 
-    const unitTests = requestedTypes.has("unit")
+    const unitTests = requestedTypes.has('unit')
       ? criteria.map((criterion, index) =>
-          baseTestSpec("unit", `Unit • AC${index + 1}`, criterion, {
+          baseTestSpec('unit', `Unit • AC${index + 1}`, criterion, {
             assertions: [
               `Should satisfy acceptance criterion #${index + 1}`,
               `Handles error and edge cases for: ${criterion}`,
@@ -2098,35 +2103,35 @@ export class MCPRouter {
         )
       : [];
 
-    const integrationTests = requestedTypes.has("integration")
+    const integrationTests = requestedTypes.has('integration')
       ? [
           baseTestSpec(
-            "integration",
-            "Integration • Primary workflow",
+            'integration',
+            'Integration • Primary workflow',
             `Ensure core collaborators for ${normalizedSpec.title}`,
             {
               assertions: [
-                "All dependent services respond successfully",
-                "Business rules remain consistent end-to-end",
+                'All dependent services respond successfully',
+                'Business rules remain consistent end-to-end',
               ],
               dataRequirements: [
-                "Representative dataset seeded via fixtures or factories",
+                'Representative dataset seeded via fixtures or factories',
               ],
             }
           ),
         ]
       : [];
 
-    const e2eTests = requestedTypes.has("e2e")
+    const e2eTests = requestedTypes.has('e2e')
       ? [
           baseTestSpec(
-            "e2e",
-            "E2E • Critical user journey",
+            'e2e',
+            'E2E • Critical user journey',
             `Simulate a user journey covering ${normalizedSpec.title}`,
             {
               assertions: [
-                "User-facing behaviour remains stable",
-                "Telemetry and logging capture outcomes",
+                'User-facing behaviour remains stable',
+                'Telemetry and logging capture outcomes',
               ],
             }
           ),
@@ -2136,15 +2141,15 @@ export class MCPRouter {
     const performanceTests = includePerformance
       ? [
           baseTestSpec(
-            "performance",
-            "Performance • Baseline throughput",
+            'performance',
+            'Performance • Baseline throughput',
             `Measure performance characteristics for ${normalizedSpec.title}`,
             {
               assertions: [
-                "Throughput meets baseline service level objective",
-                "Degradation alerts fire if threshold breached",
+                'Throughput meets baseline service level objective',
+                'Degradation alerts fire if threshold breached',
               ],
-              dataRequirements: ["Load profile mirroring production scale"],
+              dataRequirements: ['Load profile mirroring production scale'],
             }
           ),
         ]
@@ -2191,14 +2196,14 @@ export class MCPRouter {
   }
 
   private humanizeSpecId(specId: string): string {
-    const cleaned = specId.replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+    const cleaned = specId.replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
     if (cleaned.length === 0) {
-      return "Untitled Specification";
+      return 'Untitled Specification';
     }
     return cleaned
-      .split(" ")
+      .split(' ')
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
+      .join(' ');
   }
 
   private extractQueryRows(result: any): Array<Record<string, any>> {
@@ -2215,7 +2220,7 @@ export class MCPRouter {
   }
 
   private isValidUuid(value: string): boolean {
-    if (typeof value !== "string") {
+    if (typeof value !== 'string') {
       return false;
     }
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -2225,14 +2230,14 @@ export class MCPRouter {
 
   private normalizeErrorMessage(message: string): string {
     if (!message) {
-      return "Tool execution failed";
+      return 'Tool execution failed';
     }
-    const cleaned = message.replace(/^MCP error -?\d+:\s*/, "").trim();
-    return cleaned.length > 0 ? cleaned : "Tool execution failed";
+    const cleaned = message.replace(/^MCP error -?\d+:\s*/, '').trim();
+    return cleaned.length > 0 ? cleaned : 'Tool execution failed';
   }
 
   private async handleSecurityScan(params: any): Promise<any> {
-    console.log("MCP Tool called: security.scan", params);
+    console.log('MCP Tool called: security.scan', params);
 
     try {
       // Convert MCP params to SecurityScanRequest format
@@ -2254,13 +2259,13 @@ export class MCPRouter {
         summary: result.summary,
         message: `Security scan completed. Found ${
           result.summary.totalIssues
-        } issues across ${params.entityIds?.length || "all"} entities`,
+        } issues across ${params.entityIds?.length || 'all'} entities`,
       };
     } catch (error) {
-      console.error("Error in handleSecurityScan:", error);
+      console.error('Error in handleSecurityScan:', error);
       throw new Error(
         `Failed to perform security scan: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -2274,10 +2279,10 @@ export class MCPRouter {
 
     // Mock SAST scan - would integrate with actual SAST tools
     const mockPatterns = [
-      { pattern: "eval(", severity: "critical", type: "code-injection" },
-      { pattern: "innerHTML", severity: "high", type: "xss" },
-      { pattern: "console.log", severity: "low", type: "debug-code" },
-      { pattern: "password.*=", severity: "medium", type: "hardcoded-secret" },
+      { pattern: 'eval(', severity: 'critical', type: 'code-injection' },
+      { pattern: 'innerHTML', severity: 'high', type: 'xss' },
+      { pattern: 'console.log', severity: 'low', type: 'debug-code' },
+      { pattern: 'password.*=', severity: 'medium', type: 'hardcoded-secret' },
     ];
 
     for (const pattern of mockPatterns) {
@@ -2291,14 +2296,14 @@ export class MCPRouter {
             title: `Potential ${pattern.type} vulnerability`,
             description: `Found usage of ${pattern.pattern} which may indicate a security vulnerability`,
             location: {
-              file: entityIds?.[0] || "unknown",
+              file: entityIds?.[0] || 'unknown',
               line: Math.floor(Math.random() * 100) + 1,
               column: Math.floor(Math.random() * 50) + 1,
             },
             codeSnippet: `// Example: ${pattern.pattern}('malicious code');`,
             remediation: `Avoid using ${pattern.pattern}. Use safer alternatives.`,
             cwe: this.getCWEMapping(pattern.type),
-            references: ["OWASP Top 10", "CWE Database"],
+            references: ['OWASP Top 10', 'CWE Database'],
           });
         }
       }
@@ -2316,22 +2321,22 @@ export class MCPRouter {
     // Mock dependency scanning - would integrate with tools like OWASP Dependency Check
     const mockVulnerabilities = [
       {
-        package: "lodash",
-        version: "4.17.4",
-        severity: "high",
-        cve: "CVE-2021-23337",
+        package: 'lodash',
+        version: '4.17.4',
+        severity: 'high',
+        cve: 'CVE-2021-23337',
       },
       {
-        package: "axios",
-        version: "0.21.1",
-        severity: "medium",
-        cve: "CVE-2021-3749",
+        package: 'axios',
+        version: '0.21.1',
+        severity: 'medium',
+        cve: 'CVE-2021-3749',
       },
       {
-        package: "express",
-        version: "4.17.1",
-        severity: "low",
-        cve: "CVE-2020-7656",
+        package: 'express',
+        version: '4.17.1',
+        severity: 'low',
+        cve: 'CVE-2020-7656',
       },
     ];
 
@@ -2368,9 +2373,9 @@ export class MCPRouter {
 
     // Mock secrets scanning
     const secretPatterns = [
-      { type: "api-key", severity: "high", example: "sk-1234567890abcdef" },
-      { type: "password", severity: "high", example: "password123" },
-      { type: "token", severity: "medium", example: "token_abcdef123456" },
+      { type: 'api-key', severity: 'high', example: 'sk-1234567890abcdef' },
+      { type: 'password', severity: 'high', example: 'password123' },
+      { type: 'token', severity: 'medium', example: 'token_abcdef123456' },
     ];
 
     for (const pattern of secretPatterns) {
@@ -2383,15 +2388,15 @@ export class MCPRouter {
             title: `Potential hardcoded ${pattern.type}`,
             description: `Found what appears to be a hardcoded ${pattern.type}`,
             location: {
-              file: entityIds?.[0] || "unknown",
+              file: entityIds?.[0] || 'unknown',
               line: Math.floor(Math.random() * 100) + 1,
               column: Math.floor(Math.random() * 50) + 1,
             },
             codeSnippet: `const apiKey = '${pattern.example}';`,
             remediation:
-              "Move secrets to environment variables or secure credential storage",
-            cwe: "CWE-798",
-            references: ["OWASP Secrets Management Cheat Sheet"],
+              'Move secrets to environment variables or secure credential storage',
+            cwe: 'CWE-798',
+            references: ['OWASP Secrets Management Cheat Sheet'],
           });
         }
       }
@@ -2409,19 +2414,19 @@ export class MCPRouter {
     // Mock dependency analysis for circular dependencies, unused deps, etc.
     const dependencyIssues = [
       {
-        type: "circular-dependency",
-        severity: "medium",
-        description: "Circular dependency detected between modules",
+        type: 'circular-dependency',
+        severity: 'medium',
+        description: 'Circular dependency detected between modules',
       },
       {
-        type: "unused-dependency",
-        severity: "low",
-        description: "Unused dependency in package.json",
+        type: 'unused-dependency',
+        severity: 'low',
+        description: 'Unused dependency in package.json',
       },
       {
-        type: "outdated-dependency",
-        severity: "low",
-        description: "Dependency is significantly outdated",
+        type: 'outdated-dependency',
+        severity: 'low',
+        description: 'Dependency is significantly outdated',
       },
     ];
 
@@ -2435,11 +2440,11 @@ export class MCPRouter {
             title: issue.description,
             description: issue.description,
             location: {
-              file: "package.json",
+              file: 'package.json',
               line: Math.floor(Math.random() * 50) + 1,
             },
             remediation: `Resolve ${issue.type} by refactoring dependencies`,
-            references: ["Dependency Management Best Practices"],
+            references: ['Dependency Management Best Practices'],
           });
         }
       }
@@ -2458,12 +2463,12 @@ export class MCPRouter {
 
   private getCWEMapping(type: string): string {
     const cweMap: Record<string, string> = {
-      "code-injection": "CWE-94",
-      xss: "CWE-79",
-      "hardcoded-secret": "CWE-798",
-      "sql-injection": "CWE-89",
+      'code-injection': 'CWE-94',
+      xss: 'CWE-79',
+      'hardcoded-secret': 'CWE-798',
+      'sql-injection': 'CWE-89',
     };
-    return cweMap[type] || "CWE-710";
+    return cweMap[type] || 'CWE-710';
   }
 
   private getMockCVSSScore(severity: string): number {
@@ -2479,19 +2484,19 @@ export class MCPRouter {
   }
 
   private shouldFlagDocumentationOutdated(change: any): boolean {
-    const changeType = String(change?.changeType || "").toLowerCase();
+    const changeType = String(change?.changeType || '').toLowerCase();
     const impactfulTypes = new Set([
-      "modify",
-      "modified",
-      "update",
-      "updated",
-      "refactor",
-      "rename",
-      "renamed",
-      "delete",
-      "deleted",
-      "remove",
-      "removed",
+      'modify',
+      'modified',
+      'update',
+      'updated',
+      'refactor',
+      'rename',
+      'renamed',
+      'delete',
+      'deleted',
+      'remove',
+      'removed',
     ]);
 
     if (impactfulTypes.has(changeType)) return true;
@@ -2500,12 +2505,12 @@ export class MCPRouter {
   }
 
   private async handleImpactAnalysis(params: any): Promise<any> {
-    console.log("MCP Tool called: impact.analyze", params);
+    console.log('MCP Tool called: impact.analyze', params);
 
     const changes = Array.isArray(params?.changes) ? params.changes : [];
     const includeIndirect = params?.includeIndirect !== false;
     const maxDepth =
-      typeof params?.maxDepth === "number" && Number.isFinite(params.maxDepth)
+      typeof params?.maxDepth === 'number' && Number.isFinite(params.maxDepth)
         ? Math.max(1, Math.min(8, Math.floor(params.maxDepth)))
         : undefined;
 
@@ -2544,7 +2549,7 @@ export class MCPRouter {
       const message =
         summary.totalAffectedEntities > 0
           ? `Impact analysis completed. ${summary.totalAffectedEntities} entities affected`
-          : "Impact analysis completed. No downstream entities detected.";
+          : 'Impact analysis completed. No downstream entities detected.';
 
       return {
         ...analysis,
@@ -2553,7 +2558,7 @@ export class MCPRouter {
         message,
       };
     } catch (error) {
-      console.error("Error in handleImpactAnalysis:", error);
+      console.error('Error in handleImpactAnalysis:', error);
       const fallback = await this.kgService.analyzeImpact({
         changes: [],
         includeIndirect: false,
@@ -2563,12 +2568,12 @@ export class MCPRouter {
         changes,
         summary: {
           totalAffectedEntities: 0,
-          riskLevel: "low",
-          estimatedEffort: "low",
+          riskLevel: 'low',
+          estimatedEffort: 'low',
           deploymentGate: fallback.deploymentGate,
         },
         message: `Impact analysis failed: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`,
       };
     }
@@ -2582,16 +2587,16 @@ export class MCPRouter {
       missingDocs: any[];
       freshnessPenalty: number;
     }
-  ): "low" | "medium" | "high" | "critical" {
+  ): 'low' | 'medium' | 'high' | 'critical' {
     const highSeverityCount = directImpact.filter(
-      (i) => i.severity === "high"
+      (i) => i.severity === 'high'
     ).length;
     const totalAffected = directImpact.length + cascadingImpact.length;
 
-    let base: "low" | "medium" | "high" | "critical" = "low";
-    if (highSeverityCount > 5 || totalAffected > 50) base = "critical";
-    else if (highSeverityCount > 2 || totalAffected > 20) base = "high";
-    else if (highSeverityCount > 0 || totalAffected > 10) base = "medium";
+    let base: 'low' | 'medium' | 'high' | 'critical' = 'low';
+    if (highSeverityCount > 5 || totalAffected > 50) base = 'critical';
+    else if (highSeverityCount > 2 || totalAffected > 20) base = 'high';
+    else if (highSeverityCount > 0 || totalAffected > 10) base = 'medium';
 
     let score = this.riskLevelToScore(base);
 
@@ -2615,14 +2620,14 @@ export class MCPRouter {
   }
 
   private riskLevelToScore(
-    level: "low" | "medium" | "high" | "critical"
+    level: 'low' | 'medium' | 'high' | 'critical'
   ): number {
     switch (level) {
-      case "critical":
+      case 'critical':
         return 3;
-      case "high":
+      case 'high':
         return 2;
-      case "medium":
+      case 'medium':
         return 1;
       default:
         return 0;
@@ -2631,11 +2636,11 @@ export class MCPRouter {
 
   private riskScoreToLabel(
     score: number
-  ): "low" | "medium" | "high" | "critical" {
-    if (score >= 3) return "critical";
-    if (score >= 2) return "high";
-    if (score >= 1) return "medium";
-    return "low";
+  ): 'low' | 'medium' | 'high' | 'critical' {
+    if (score >= 3) return 'critical';
+    if (score >= 2) return 'high';
+    if (score >= 1) return 'medium';
+    return 'low';
   }
 
   private estimateEffort(
@@ -2643,7 +2648,7 @@ export class MCPRouter {
     cascadingImpact: any[],
     testImpact: any,
     documentationImpact: any
-  ): "low" | "medium" | "high" {
+  ): 'low' | 'medium' | 'high' {
     const totalAffected =
       directImpact.length +
       cascadingImpact.length +
@@ -2651,13 +2656,13 @@ export class MCPRouter {
       documentationImpact.staleDocs.length +
       (documentationImpact.missingDocs?.length || 0);
 
-    if (totalAffected > 30) return "high";
-    if (totalAffected > 15) return "medium";
-    return "low";
+    if (totalAffected > 30) return 'high';
+    if (totalAffected > 15) return 'medium';
+    return 'low';
   }
 
   private async handleSyncDocs(params: any): Promise<any> {
-    console.log("MCP Tool called: docs.sync", params);
+    console.log('MCP Tool called: docs.sync', params);
 
     try {
       let processedFiles = 0;
@@ -2667,7 +2672,7 @@ export class MCPRouter {
 
       // Get all documentation files from the knowledge graph
       const docEntities = await this.kgService.search({
-        query: "",
+        query: '',
         limit: 1000,
       });
 
@@ -2688,7 +2693,7 @@ export class MCPRouter {
         } catch (error) {
           errors.push(
             `Failed to process ${docEntity.id}: ${
-              error instanceof Error ? error.message : "Unknown error"
+              error instanceof Error ? error.message : 'Unknown error'
             }`
           );
         }
@@ -2712,15 +2717,15 @@ export class MCPRouter {
           successRate:
             (((processedFiles - errors.length) / processedFiles) * 100).toFixed(
               1
-            ) + "%",
+            ) + '%',
         },
         message: `Documentation sync completed. Processed ${processedFiles} files, discovered ${newDomains} domains, updated ${updatedClusters} clusters`,
       };
     } catch (error) {
-      console.error("Error in handleSyncDocs:", error);
+      console.error('Error in handleSyncDocs:', error);
       throw new Error(
         `Failed to sync documentation: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -2739,23 +2744,23 @@ export class MCPRouter {
       /\b(analytics|reporting|metrics|dashboard)\b/gi,
     ];
 
-    const content = docEntity.content || docEntity.description || "";
+    const content = docEntity.content || docEntity.description || '';
     const foundDomains = new Set<string>();
 
     for (const pattern of domainPatterns) {
       if (pattern.test(content)) {
         // Map pattern to domain name
         const domainMap: Record<string, string> = {
-          "customer|user|client": "User Management",
-          "order|purchase|transaction|payment": "Commerce",
-          "product|inventory|catalog|item": "Product Management",
-          "shipping|delivery|logistics": "Fulfillment",
-          "account|profile|authentication|security": "Identity & Security",
-          "analytics|reporting|metrics|dashboard": "Business Intelligence",
+          'customer|user|client': 'User Management',
+          'order|purchase|transaction|payment': 'Commerce',
+          'product|inventory|catalog|item': 'Product Management',
+          'shipping|delivery|logistics': 'Fulfillment',
+          'account|profile|authentication|security': 'Identity & Security',
+          'analytics|reporting|metrics|dashboard': 'Business Intelligence',
         };
 
         const patternKey = Object.keys(domainMap).find((key) =>
-          new RegExp(key, "gi").test(content)
+          new RegExp(key, 'gi').test(content)
         );
         if (patternKey) {
           foundDomains.add(domainMap[patternKey]);
@@ -2768,8 +2773,8 @@ export class MCPRouter {
     // Create domain entities in knowledge graph if they don't exist
     for (const domain of domains) {
       const domainEntity = {
-        id: `domain_${domain.toLowerCase().replace(/\s+/g, "_")}`,
-        type: "domain",
+        id: `domain_${domain.toLowerCase().replace(/\s+/g, '_')}`,
+        type: 'domain',
         name: domain,
         description: `Business domain: ${domain}`,
         lastModified: new Date(),
@@ -2783,7 +2788,7 @@ export class MCPRouter {
         id: `rel_${docEntity.id}_${domainEntity.id}`,
         fromEntityId: docEntity.id,
         toEntityId: domainEntity.id,
-        type: "DESCRIBES_DOMAIN" as any,
+        type: 'DESCRIBES_DOMAIN' as any,
         created: new Date(),
         lastModified: new Date(),
         version: 1,
@@ -2805,9 +2810,9 @@ export class MCPRouter {
 
     // Group related entities by type to form clusters
     const clusters = {
-      functions: relatedEntities.filter((e) => (e as any).kind === "function"),
-      classes: relatedEntities.filter((e) => (e as any).kind === "class"),
-      modules: relatedEntities.filter((e) => e.type === "module"),
+      functions: relatedEntities.filter((e) => (e as any).kind === 'function'),
+      classes: relatedEntities.filter((e) => (e as any).kind === 'class'),
+      modules: relatedEntities.filter((e) => e.type === 'module'),
     };
 
     // Update cluster relationships
@@ -2817,7 +2822,7 @@ export class MCPRouter {
         const clusterId = `cluster_${clusterType}_${docEntity.id}`;
         const clusterEntity = {
           id: clusterId,
-          type: "cluster",
+          type: 'cluster',
           name: `${
             clusterType.charAt(0).toUpperCase() + clusterType.slice(1)
           } Cluster`,
@@ -2836,14 +2841,14 @@ export class MCPRouter {
           id: `rel_${clusterId}_${docEntity.id}`,
           fromEntityId: clusterId,
           toEntityId: docEntity.id,
-          type: "DOCUMENTED_BY" as any,
+          type: 'DOCUMENTED_BY' as any,
           created: new Date(),
           lastModified: new Date(),
           version: 1,
           metadata: {
             inferred: true,
             confidence: 0.6,
-            source: "mcp-doc-cluster",
+            source: 'mcp-doc-cluster',
           },
         } as any);
 
@@ -2851,21 +2856,21 @@ export class MCPRouter {
         try {
           const domainRels = await this.kgService.getRelationships({
             fromEntityId: docEntity.id,
-            type: "DESCRIBES_DOMAIN" as any,
+            type: 'DESCRIBES_DOMAIN' as any,
           });
           for (const rel of domainRels) {
             await this.kgService.createRelationship({
               id: `rel_${clusterId}_${rel.toEntityId}_BELONGS_TO_DOMAIN`,
               fromEntityId: clusterId,
               toEntityId: rel.toEntityId,
-              type: "BELONGS_TO_DOMAIN" as any,
+              type: 'BELONGS_TO_DOMAIN' as any,
               created: new Date(),
               lastModified: new Date(),
               version: 1,
               metadata: {
                 inferred: true,
                 confidence: 0.6,
-                source: "mcp-cluster-domain",
+                source: 'mcp-cluster-domain',
               },
             } as any);
           }
@@ -2877,14 +2882,14 @@ export class MCPRouter {
             id: `rel_${entity.id}_${clusterId}`,
             fromEntityId: entity.id,
             toEntityId: clusterId,
-            type: "CLUSTER_MEMBER" as any,
+            type: 'CLUSTER_MEMBER' as any,
             created: new Date(),
             lastModified: new Date(),
             version: 1,
             metadata: {
               inferred: true,
               confidence: 0.6,
-              source: "mcp-cluster-member",
+              source: 'mcp-cluster-member',
             },
           } as any);
         }
@@ -2899,13 +2904,13 @@ export class MCPRouter {
 
     // Get all code entities
     const codeEntities = await this.kgService.search({
-      query: "",
+      query: '',
       limit: 500,
     });
 
     // Get all documentation entities
     const docEntities = await this.kgService.search({
-      query: "",
+      query: '',
       limit: 200,
     });
 
@@ -2916,9 +2921,9 @@ export class MCPRouter {
         const content = (
           (docEntity as any).content ||
           (docEntity as any).description ||
-          ""
+          ''
         ).toLowerCase();
-        const entityName = ((codeEntity as any).name || "").toLowerCase();
+        const entityName = ((codeEntity as any).name || '').toLowerCase();
 
         if (content.includes(entityName) && entityName.length > 2) {
           // Create relationship
@@ -2926,7 +2931,7 @@ export class MCPRouter {
             id: `rel_${codeEntity.id}_${docEntity.id}`,
             fromEntityId: codeEntity.id,
             toEntityId: docEntity.id,
-            type: "DOCUMENTED_BY" as any,
+            type: 'DOCUMENTED_BY' as any,
             created: new Date(),
             lastModified: new Date(),
             version: 1,
@@ -2935,8 +2940,8 @@ export class MCPRouter {
 
           // If doc looks like a specification/design, also mark implements-spec
           try {
-            const docType = (docEntity as any).docType || "";
-            const isSpec = ["design-doc", "api-docs", "architecture"].includes(
+            const docType = (docEntity as any).docType || '';
+            const isSpec = ['design-doc', 'api-docs', 'architecture'].includes(
               String(docType)
             );
             if (isSpec) {
@@ -2944,7 +2949,7 @@ export class MCPRouter {
                 id: `rel_${codeEntity.id}_${docEntity.id}_IMPLEMENTS_SPEC`,
                 fromEntityId: codeEntity.id,
                 toEntityId: docEntity.id,
-                type: "IMPLEMENTS_SPEC" as any,
+                type: 'IMPLEMENTS_SPEC' as any,
                 created: new Date(),
                 lastModified: new Date(),
                 version: 1,
@@ -2957,14 +2962,14 @@ export class MCPRouter {
           try {
             const domainRels = await this.kgService.getRelationships({
               fromEntityId: docEntity.id,
-              type: "DESCRIBES_DOMAIN" as any,
+              type: 'DESCRIBES_DOMAIN' as any,
             });
             for (const rel of domainRels) {
               await this.kgService.createRelationship({
                 id: `rel_${codeEntity.id}_${rel.toEntityId}_BELONGS_TO_DOMAIN`,
                 fromEntityId: codeEntity.id,
                 toEntityId: rel.toEntityId,
-                type: "BELONGS_TO_DOMAIN" as any,
+                type: 'BELONGS_TO_DOMAIN' as any,
                 created: new Date(),
                 lastModified: new Date(),
                 version: 1,
@@ -2981,31 +2986,31 @@ export class MCPRouter {
   // Fastify route registration
   public registerRoutes(app: FastifyInstance): void {
     // MCP JSON-RPC endpoint (supports both JSON-RPC and simple tool call formats)
-    app.post("/mcp", {
+    app.post('/mcp', {
       attachValidation: true,
       schema: {
         body: {
-          type: "object",
+          type: 'object',
           oneOf: [
             // JSON-RPC format
             {
-              type: "object",
+              type: 'object',
               properties: {
-                jsonrpc: { type: "string", enum: ["2.0"] },
-                id: { type: ["string", "number"] },
-                method: { type: "string" },
-                params: { type: "object" },
+                jsonrpc: { type: 'string', enum: ['2.0'] },
+                id: { type: ['string', 'number'] },
+                method: { type: 'string' },
+                params: { type: 'object' },
               },
-              required: ["jsonrpc", "method"],
+              required: ['jsonrpc', 'method'],
             },
             // Simple tool call format (for backward compatibility)
             {
-              type: "object",
+              type: 'object',
               properties: {
-                toolName: { type: "string" },
-                arguments: { type: "object" },
+                toolName: { type: 'string' },
+                arguments: { type: 'object' },
               },
-              required: ["toolName"],
+              required: ['toolName'],
             },
           ],
         },
@@ -3017,9 +3022,9 @@ export class MCPRouter {
           if (!Array.isArray(body) && (request as any).validationError) {
             const validationError = (request as any).validationError;
             const message =
-              validationError?.message || "Invalid MCP request payload";
+              validationError?.message || 'Invalid MCP request payload';
             return reply.status(200).send({
-              jsonrpc: "2.0",
+              jsonrpc: '2.0',
               id: null,
               error: {
                 code: -32600,
@@ -3035,13 +3040,13 @@ export class MCPRouter {
           if (Array.isArray(body)) {
             const responses = await Promise.all(
               body.map(async (entry) => {
-                if (!entry || typeof entry !== "object") {
+                if (!entry || typeof entry !== 'object') {
                   return {
-                    jsonrpc: "2.0",
+                    jsonrpc: '2.0',
                     id: null,
                     error: {
                       code: -32600,
-                      message: "Invalid request",
+                      message: 'Invalid request',
                       details: entry,
                     },
                   };
@@ -3055,11 +3060,11 @@ export class MCPRouter {
                       ? batchError.message
                       : String(batchError);
                   return {
-                    jsonrpc: "2.0",
+                    jsonrpc: '2.0',
                     id: entry.id ?? null,
                     error: {
                       code: -32603,
-                      message: "Internal error",
+                      message: 'Internal error',
                       data: errorMessage,
                     },
                   };
@@ -3084,9 +3089,9 @@ export class MCPRouter {
           }
           if (
             response &&
-            typeof response === "object" &&
+            typeof response === 'object' &&
             !Array.isArray(response) &&
-            "error" in response &&
+            'error' in response &&
             (response as any).error?.code === -32600
           ) {
             return reply.status(400).send(response);
@@ -3098,8 +3103,8 @@ export class MCPRouter {
 
           // Handle specific error types
           if (
-            errorMessage.includes("Tool") &&
-            errorMessage.includes("not found")
+            errorMessage.includes('Tool') &&
+            errorMessage.includes('not found')
           ) {
             return reply.status(400).send({
               error: {
@@ -3111,15 +3116,15 @@ export class MCPRouter {
           }
 
           if (
-            errorMessage.includes("Missing required parameters") ||
-            errorMessage.includes("Parameter validation errors") ||
-            errorMessage.includes("must be a non-empty string") ||
-            errorMessage.includes("Invalid params")
+            errorMessage.includes('Missing required parameters') ||
+            errorMessage.includes('Parameter validation errors') ||
+            errorMessage.includes('must be a non-empty string') ||
+            errorMessage.includes('Invalid params')
           ) {
             return reply.status(400).send({
               error: {
                 code: -32602,
-                message: "Invalid parameters",
+                message: 'Invalid parameters',
                 details: errorMessage,
               },
             });
@@ -3128,11 +3133,11 @@ export class MCPRouter {
           // Default to 500 for other errors
           const reqBody: any = (request as any).body;
           return reply.status(500).send({
-            jsonrpc: "2.0",
+            jsonrpc: '2.0',
             id: reqBody?.id,
             error: {
               code: -32603,
-              message: "Internal error",
+              message: 'Internal error',
               data: errorMessage,
             },
           });
@@ -3141,7 +3146,7 @@ export class MCPRouter {
     });
 
     // MCP tool discovery endpoint (for debugging/testing)
-    app.get("/mcp/tools", async (request, reply) => {
+    app.get('/mcp/tools', async (request, reply) => {
       const tools = Array.from(this.tools.values()).map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -3155,7 +3160,7 @@ export class MCPRouter {
     });
 
     // MCP tool execution endpoint (for individual tool calls)
-    app.post("/mcp/tools/:toolName", async (request, reply) => {
+    app.post('/mcp/tools/:toolName', async (request, reply) => {
       try {
         const { toolName } = request.params as any;
         const args = request.body as any;
@@ -3163,7 +3168,7 @@ export class MCPRouter {
         const tool = this.tools.get(toolName);
         if (!tool) {
           return reply.status(404).send({
-            error: "Tool not found",
+            error: 'Tool not found',
             message: `Tool '${toolName}' not found`,
             availableTools: Array.from(this.tools.keys()),
           });
@@ -3173,21 +3178,21 @@ export class MCPRouter {
         return reply.send({ result });
       } catch (error) {
         return reply.status(500).send({
-          error: "Tool execution failed",
+          error: 'Tool execution failed',
           message: error instanceof Error ? error.message : String(error),
         });
       }
     });
 
     // MCP health check with monitoring info
-    app.get("/mcp/health", async (request, reply) => {
+    app.get('/mcp/health', async (request, reply) => {
       const metrics = this.getMetrics();
       const healthStatus = this.determineHealthStatus(metrics);
 
       return reply.send({
         status: healthStatus,
-        server: "memento-mcp-server",
-        version: "1.0.0",
+        server: 'memento-mcp-server',
+        version: '1.0.0',
         tools: this.tools.size,
         monitoring: {
           totalExecutions: metrics.summary.totalExecutions,
@@ -3200,19 +3205,19 @@ export class MCPRouter {
     });
 
     // MCP monitoring endpoints
-    app.get("/mcp/metrics", async (request, reply) => {
+    app.get('/mcp/metrics', async (request, reply) => {
       const metrics = this.getMetrics();
       return reply.send(metrics);
     });
 
     app.get(
-      "/mcp/history",
+      '/mcp/history',
       {
         schema: {
           querystring: {
-            type: "object",
+            type: 'object',
             properties: {
-              limit: { type: "number", default: 50 },
+              limit: { type: 'number', default: 50 },
             },
           },
         },
@@ -3228,12 +3233,12 @@ export class MCPRouter {
       }
     );
 
-    app.get("/mcp/performance", async (request, reply) => {
+    app.get('/mcp/performance', async (request, reply) => {
       const report = this.getPerformanceReport();
       return reply.send(report);
     });
 
-    app.get("/mcp/stats", async (request, reply) => {
+    app.get('/mcp/stats', async (request, reply) => {
       const metrics = this.getMetrics();
       const history = this.getExecutionHistory(10);
       const report = this.getPerformanceReport();
@@ -3314,7 +3319,7 @@ export class MCPRouter {
 
   // Locate ast-grep binary and execute a search; supports convenience name/kinds mode
   private async handleAstGrepSearch(params: any): Promise<any> {
-    const lang: string = params.lang || "ts";
+    const lang: string = params.lang || 'ts';
     const selector: string | undefined = params.selector;
     const strictness: string | undefined = params.strictness;
     const includeText: boolean = Boolean(params.includeText);
@@ -3332,7 +3337,7 @@ export class MCPRouter {
     const userProvidedGlobs = Array.isArray(params.globs);
     const rawGlobs: string[] = userProvidedGlobs ? params.globs : [];
     const globs = rawGlobs
-      .filter((g) => typeof g === "string" && g.length > 0)
+      .filter((g) => typeof g === 'string' && g.length > 0)
       .map((g) => g.trim());
 
     // Convenience: if name provided and no custom pattern, try function+method by name
@@ -3341,15 +3346,15 @@ export class MCPRouter {
       const kinds: string[] =
         Array.isArray(params.kinds) && params.kinds.length
           ? params.kinds
-          : ["function", "method"];
+          : ['function', 'method'];
       let matches: any[] = [];
 
       // Try ast-grep first
-      if (kinds.includes("function")) {
+      if (kinds.includes('function')) {
         const res = await this.runAstGrepOne({
           pattern: `function ${name}($P, ...) { ... }`,
           lang,
-          selector: "function_declaration",
+          selector: 'function_declaration',
           strictness,
           globs,
           includeText,
@@ -3358,12 +3363,12 @@ export class MCPRouter {
         });
         matches = matches.concat(res.matches);
       }
-      if (kinds.includes("method")) {
+      if (kinds.includes('method')) {
         // Use a class context and pick the method's name token; avoids invalid snippet parsing
         const res = await this.runAstGrepOne({
           pattern: `class $C { ${name}($P, ...) { ... } }`,
           lang,
-          selector: "property_identifier",
+          selector: 'property_identifier',
           strictness,
           globs,
           includeText,
@@ -3391,27 +3396,27 @@ export class MCPRouter {
       };
     }
 
-    const pattern: string = String(params.pattern || "");
-    if (!pattern.trim()) throw new Error("Pattern must be a non-empty string");
+    const pattern: string = String(params.pattern || '');
+    if (!pattern.trim()) throw new Error('Pattern must be a non-empty string');
 
     // Resolve ast-grep binary
     const cwd = process.cwd();
     const binCandidates = [
       path.join(
         cwd,
-        "node_modules",
-        ".bin",
-        process.platform === "win32" ? "sg.cmd" : "sg"
+        'node_modules',
+        '.bin',
+        process.platform === 'win32' ? 'sg.cmd' : 'sg'
       ),
-      process.platform === "win32" ? "sg.cmd" : "sg", // if globally available in PATH
+      process.platform === 'win32' ? 'sg.cmd' : 'sg', // if globally available in PATH
     ];
 
     const sgLocalBin = binCandidates[0];
     const hasLocalSg = existsSync(sgLocalBin);
     const brewCandidates = [
-      process.platform === "darwin" ? "/opt/homebrew/bin/sg" : "",
-      "/usr/local/bin/sg",
-      "/usr/bin/sg",
+      process.platform === 'darwin' ? '/opt/homebrew/bin/sg' : '',
+      '/usr/local/bin/sg',
+      '/usr/bin/sg',
     ].filter(Boolean);
     const brewSg = brewCandidates.find((p) => existsSync(p));
 
@@ -3420,55 +3425,55 @@ export class MCPRouter {
       new Promise((resolve, reject) => {
         const args: string[] = [];
 
-        if (bin === "npx") {
+        if (bin === 'npx') {
           // Use a remote package explicitly to avoid local broken binaries
-          args.push("-y", "-p", "@ast-grep/cli@0.39.5", "sg");
+          args.push('-y', '-p', '@ast-grep/cli@0.39.5', 'sg');
         }
 
-        args.push("run", "-l", String(lang), "-p", String(pattern));
+        args.push('run', '-l', String(lang), '-p', String(pattern));
 
         if (selector) {
-          args.push("--selector", selector);
+          args.push('--selector', selector);
         }
         if (strictness) {
-          args.push("--strictness", strictness);
+          args.push('--strictness', strictness);
         }
 
         // Always ask for JSON stream for structured results
-        args.push("--json=stream");
+        args.push('--json=stream');
 
         // Supply globs only if provided explicitly
         for (const g of globs) {
           // Restrict to repo files: if a glob tries to escape, ignore it
-          if (g.includes("..")) continue;
-          args.push("--globs", g);
+          if (g.includes('..')) continue;
+          args.push('--globs', g);
         }
 
         // Search root
         args.push(srcRoot);
 
         // Filter PATH to avoid local node_modules/.bin shadowing npx-installed binaries
-        const filteredPath = (process.env.PATH || "")
+        const filteredPath = (process.env.PATH || '')
           .split(path.delimiter)
-          .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
+          .filter((p) => !p.endsWith(path.join('node_modules', '.bin')))
           .join(path.delimiter);
 
         const child = spawn(bin, args, {
           cwd,
           env: { ...process.env, PATH: filteredPath },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
 
         const timer = setTimeout(() => {
-          child.kill("SIGKILL");
+          child.kill('SIGKILL');
         }, timeoutMs);
 
-        let stdout = "";
-        let stderr = "";
-        child.stdout.on("data", (d) => (stdout += d.toString()));
-        child.stderr.on("data", (d) => (stderr += d.toString()));
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d) => (stdout += d.toString()));
+        child.stderr.on('data', (d) => (stderr += d.toString()));
 
-        child.on("close", (code) => {
+        child.on('close', (code) => {
           clearTimeout(timer);
           // Parse JSONL
           const matches: Array<{
@@ -3504,7 +3509,7 @@ export class MCPRouter {
           if (matches.length === 0 && suspicious) {
             // Treat as a failure to allow fallback to another binary strategy
             return reject(
-              new Error(warn.slice(0, 2000) || "ast-grep execution failed")
+              new Error(warn.slice(0, 2000) || 'ast-grep execution failed')
             );
           }
 
@@ -3521,7 +3526,7 @@ export class MCPRouter {
           return resolve({ success: true, count: matches.length, matches });
         });
 
-        child.on("error", (err) => {
+        child.on('error', (err) => {
           clearTimeout(timer);
           reject(err);
         });
@@ -3530,9 +3535,9 @@ export class MCPRouter {
     // Try binaries in order: Homebrew -> PATH -> local -> npx
     const attempts: string[] = [];
     if (brewSg) attempts.push(brewSg);
-    attempts.push(process.platform === "win32" ? "sg.cmd" : "sg");
+    attempts.push(process.platform === 'win32' ? 'sg.cmd' : 'sg');
     if (hasLocalSg) attempts.push(sgLocalBin);
-    attempts.push("npx");
+    attempts.push('npx');
     let lastErr: any = null;
     for (const bin of attempts) {
       try {
@@ -3577,38 +3582,38 @@ export class MCPRouter {
     const runWith = () =>
       new Promise<{ matches: any[]; warning?: string }>((resolve, reject) => {
         const baseArgs: string[] = [
-          "run",
-          "-l",
+          'run',
+          '-l',
           String(lang),
-          "-p",
+          '-p',
           String(pattern),
         ];
-        if (selector) baseArgs.push("--selector", selector);
-        if (strictness) baseArgs.push("--strictness", strictness);
-        baseArgs.push("--json=stream");
+        if (selector) baseArgs.push('--selector', selector);
+        if (strictness) baseArgs.push('--strictness', strictness);
+        baseArgs.push('--json=stream');
         // Only add globs if provided
-        for (const g of globs) baseArgs.push("--globs", g);
+        for (const g of globs) baseArgs.push('--globs', g);
         baseArgs.push(srcRoot);
 
-        const filteredPath = (process.env.PATH || "")
+        const filteredPath = (process.env.PATH || '')
           .split(path.delimiter)
-          .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
+          .filter((p) => !p.endsWith(path.join('node_modules', '.bin')))
           .join(path.delimiter);
 
         // We'll choose the command outside in a loop; default to PATH sg here
-        const cmd = process.platform === "win32" ? "sg.cmd" : "sg";
+        const cmd = process.platform === 'win32' ? 'sg.cmd' : 'sg';
         const args = baseArgs;
         const child = spawn(cmd, args, {
           cwd,
           env: { ...process.env, PATH: filteredPath },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
-        const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-        let stdout = "";
-        let stderr = "";
-        child.stdout.on("data", (d) => (stdout += d.toString()));
-        child.stderr.on("data", (d) => (stderr += d.toString()));
-        child.on("close", (code) => {
+        const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d) => (stdout += d.toString()));
+        child.stderr.on('data', (d) => (stderr += d.toString()));
+        child.on('close', (code) => {
           clearTimeout(timer);
           const matches: any[] = [];
           const lines = stdout
@@ -3634,12 +3639,12 @@ export class MCPRouter {
             );
           if (matches.length === 0 && suspicious) {
             return reject(
-              new Error(warn.slice(0, 2000) || "ast-grep execution failed")
+              new Error(warn.slice(0, 2000) || 'ast-grep execution failed')
             );
           }
           resolve({ matches, warning: warn.slice(0, 2000) || undefined });
         });
-        child.on("error", (e) => {
+        child.on('error', (e) => {
           clearTimeout(timer);
           reject(e);
         });
@@ -3648,41 +3653,41 @@ export class MCPRouter {
     // Attempt binaries in order
     const localSg = path.join(
       cwd,
-      "node_modules",
-      ".bin",
-      process.platform === "win32" ? "sg.cmd" : "sg"
+      'node_modules',
+      '.bin',
+      process.platform === 'win32' ? 'sg.cmd' : 'sg'
     );
     const hasLocal = existsSync(localSg);
     const brewCandidates = [
-      process.platform === "darwin" ? "/opt/homebrew/bin/sg" : "",
-      "/usr/local/bin/sg",
-      "/usr/bin/sg",
+      process.platform === 'darwin' ? '/opt/homebrew/bin/sg' : '',
+      '/usr/local/bin/sg',
+      '/usr/bin/sg',
     ].filter(Boolean);
     const haveBrew = brewCandidates.find((p) => existsSync(p));
-    const filteredPath = (process.env.PATH || "")
+    const filteredPath = (process.env.PATH || '')
       .split(path.delimiter)
-      .filter((p) => !p.endsWith(path.join("node_modules", ".bin")))
+      .filter((p) => !p.endsWith(path.join('node_modules', '.bin')))
       .join(path.delimiter);
 
     const attempt = (cmd: string) =>
       new Promise<{ matches: any[]; warning?: string }>((resolve, reject) => {
-        const args = ["run", "-l", String(lang), "-p", String(pattern)];
-        if (selector) args.push("--selector", selector);
-        if (strictness) args.push("--strictness", strictness);
-        args.push("--json=stream");
-        for (const g of globs) args.push("--globs", g);
+        const args = ['run', '-l', String(lang), '-p', String(pattern)];
+        if (selector) args.push('--selector', selector);
+        if (strictness) args.push('--strictness', strictness);
+        args.push('--json=stream');
+        for (const g of globs) args.push('--globs', g);
         args.push(srcRoot);
         const child = spawn(cmd, args, {
           cwd,
           env: { ...process.env, PATH: filteredPath },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
-        const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-        let stdout = "";
-        let stderr = "";
-        child.stdout.on("data", (d) => (stdout += d.toString()));
-        child.stderr.on("data", (d) => (stderr += d.toString()));
-        child.on("close", (code) => {
+        const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d) => (stdout += d.toString()));
+        child.stderr.on('data', (d) => (stderr += d.toString()));
+        child.on('close', (code) => {
           clearTimeout(timer);
           const lines = stdout
             .split(/\r?\n/)
@@ -3708,14 +3713,14 @@ export class MCPRouter {
             );
           if (matches.length === 0 && suspicious)
             return reject(
-              new Error(warn.slice(0, 2000) || "ast-grep execution failed")
+              new Error(warn.slice(0, 2000) || 'ast-grep execution failed')
             );
           return resolve({
             matches,
             warning: warn.slice(0, 2000) || undefined,
           });
         });
-        child.on("error", (e) => {
+        child.on('error', (e) => {
           clearTimeout(timer);
           reject(e);
         });
@@ -3723,7 +3728,7 @@ export class MCPRouter {
 
     const attempts: string[] = [];
     if (haveBrew) attempts.push(haveBrew);
-    attempts.push(process.platform === "win32" ? "sg.cmd" : "sg");
+    attempts.push(process.platform === 'win32' ? 'sg.cmd' : 'sg');
     if (hasLocal) attempts.push(localSg);
     // npx as a last resort
     let lastErr: any = null;
@@ -3738,32 +3743,32 @@ export class MCPRouter {
     try {
       return await new Promise((resolve, reject) => {
         const args: string[] = [
-          "-y",
-          "-p",
-          "@ast-grep/cli@0.39.5",
-          "sg",
-          "run",
-          "-l",
+          '-y',
+          '-p',
+          '@ast-grep/cli@0.39.5',
+          'sg',
+          'run',
+          '-l',
           String(lang),
-          "-p",
+          '-p',
           String(pattern),
         ];
-        if (selector) args.push("--selector", selector);
-        if (strictness) args.push("--strictness", strictness);
-        args.push("--json=stream");
-        for (const g of globs) args.push("--globs", g);
+        if (selector) args.push('--selector', selector);
+        if (strictness) args.push('--strictness', strictness);
+        args.push('--json=stream');
+        for (const g of globs) args.push('--globs', g);
         args.push(srcRoot);
-        const child = spawn("npx", args, {
+        const child = spawn('npx', args, {
           cwd,
           env: { ...process.env, PATH: filteredPath },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
-        const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-        let stdout = "";
-        let stderr = "";
-        child.stdout.on("data", (d) => (stdout += d.toString()));
-        child.stderr.on("data", (d) => (stderr += d.toString()));
-        child.on("close", (code) => {
+        const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d) => (stdout += d.toString()));
+        child.stderr.on('data', (d) => (stderr += d.toString()));
+        child.on('close', (code) => {
           clearTimeout(timer);
           const lines = stdout
             .split(/\r?\n/)
@@ -3789,14 +3794,14 @@ export class MCPRouter {
             );
           if (matches.length === 0 && suspicious)
             return reject(
-              new Error(warn.slice(0, 2000) || "ast-grep execution failed")
+              new Error(warn.slice(0, 2000) || 'ast-grep execution failed')
             );
           return resolve({
             matches,
             warning: warn.slice(0, 2000) || undefined,
           });
         });
-        child.on("error", (e) => {
+        child.on('error', (e) => {
           clearTimeout(timer);
           reject(e);
         });
@@ -3808,7 +3813,7 @@ export class MCPRouter {
 
   private async searchWithTsMorph(
     name: string,
-    kinds: Array<"function" | "method">,
+    kinds: Array<'function' | 'method'>,
     globs: string[],
     limit: number
   ): Promise<any[]> {
@@ -3822,12 +3827,12 @@ export class MCPRouter {
       const absGlobs =
         globs && globs.length
           ? globs
-          : [path.join(srcRoot, "**/*.ts"), path.join(srcRoot, "**/*.tsx")];
+          : [path.join(srcRoot, '**/*.ts'), path.join(srcRoot, '**/*.tsx')];
       project.addSourceFilesAtPaths(absGlobs);
       const sourceFiles = project.getSourceFiles();
       const results: any[] = [];
       for (const sf of sourceFiles) {
-        if (kinds.includes("function")) {
+        if (kinds.includes('function')) {
           for (const fn of sf.getFunctions()) {
             if (fn.getName() === name && fn.getBody()) {
               results.push({
@@ -3842,7 +3847,7 @@ export class MCPRouter {
             }
           }
         }
-        if (kinds.includes("method")) {
+        if (kinds.includes('method')) {
           for (const cls of sf.getClasses()) {
             for (const m of cls.getMethods()) {
               if (m.getName() === name && m.getBody()) {
@@ -3887,14 +3892,14 @@ export class MCPRouter {
               (tools.reduce((sum, m) => sum + m.successCount, 0) /
                 tools.reduce((sum, m) => sum + m.executionCount, 0)) *
               100
-            ).toFixed(1) + "%"
-          : "0%",
+            ).toFixed(1) + '%'
+          : '0%',
       mostUsedTool:
         tools.length > 0
           ? tools.reduce((prev, current) =>
               prev.executionCount > current.executionCount ? prev : current
-            )?.toolName || "none"
-          : "none",
+            )?.toolName || 'none'
+          : 'none',
       toolsWithErrors: tools
         .filter((m) => m.errorCount > 0)
         .map((m) => m.toolName),
@@ -3922,7 +3927,7 @@ export class MCPRouter {
 
     return {
       reportGenerated: now.toISOString(),
-      timeRange: "all_time",
+      timeRange: 'all_time',
       tools: metrics.map((metric) => ({
         name: metric.toolName,
         executions: metric.executionCount,
@@ -3930,16 +3935,16 @@ export class MCPRouter {
         successRate:
           metric.executionCount > 0
             ? ((metric.successCount / metric.executionCount) * 100).toFixed(1) +
-              "%"
-            : "0%",
+              '%'
+            : '0%',
         errorRate:
           metric.executionCount > 0
             ? ((metric.errorCount / metric.executionCount) * 100).toFixed(1) +
-              "%"
-            : "0%",
+              '%'
+            : '0%',
         lastExecution: metric.lastExecutionTime?.toISOString(),
         status:
-          metric.errorCount > metric.successCount ? "unhealthy" : "healthy",
+          metric.errorCount > metric.successCount ? 'unhealthy' : 'healthy',
       })),
       recommendations: this.generatePerformanceRecommendations(metrics),
     };
@@ -3959,8 +3964,8 @@ export class MCPRouter {
       recommendations.push(
         `High error rates detected for: ${highErrorTools
           .map((m) => m.toolName)
-          .join(", ")}. ` +
-          "Consider reviewing error handling and input validation."
+          .join(', ')}. ` +
+          'Consider reviewing error handling and input validation.'
       );
     }
 
@@ -3971,7 +3976,7 @@ export class MCPRouter {
       recommendations.push(
         `Slow performance detected for: ${slowTools
           .map((m) => m.toolName)
-          .join(", ")}. ` + "Consider optimization or caching strategies."
+          .join(', ')}. ` + 'Consider optimization or caching strategies.'
       );
     }
 
@@ -3982,13 +3987,13 @@ export class MCPRouter {
       recommendations.push(
         `Unused tools detected: ${unusedTools
           .map((m) => m.toolName)
-          .join(", ")}. ` + "Consider removing or documenting these tools."
+          .join(', ')}. ` + 'Consider removing or documenting these tools.'
       );
     }
 
     if (recommendations.length === 0) {
       recommendations.push(
-        "All tools are performing well. No immediate action required."
+        'All tools are performing well. No immediate action required.'
       );
     }
 
@@ -3998,24 +4003,24 @@ export class MCPRouter {
   private determineHealthStatus(metrics: {
     tools: ToolExecutionMetrics[];
     summary: any;
-  }): "healthy" | "degraded" | "unhealthy" {
+  }): 'healthy' | 'degraded' | 'unhealthy' {
     const { summary, tools } = metrics;
 
     // Check for critical issues
     if (summary.totalExecutions === 0) {
-      return "healthy"; // No executions yet, assume healthy
+      return 'healthy'; // No executions yet, assume healthy
     }
 
     const errorRate = summary.totalErrors / summary.totalExecutions;
 
     // Check for high error rate
     if (errorRate > 0.5) {
-      return "unhealthy";
+      return 'unhealthy';
     }
 
     // Check for degraded performance
     if (errorRate > 0.2) {
-      return "degraded";
+      return 'degraded';
     }
 
     // Check for tools with very high error rates
@@ -4024,16 +4029,16 @@ export class MCPRouter {
     );
 
     if (toolsWithHighErrors.length > 0) {
-      return "degraded";
+      return 'degraded';
     }
 
     // Check for very slow average response time
     if (summary.averageExecutionTime > 10000) {
       // 10 seconds
-      return "degraded";
+      return 'degraded';
     }
 
-    return "healthy";
+    return 'healthy';
   }
 
   // Handle simple tool calls (backward compatibility)
@@ -4064,7 +4069,7 @@ export class MCPRouter {
         (key: string) => !(args && key in args)
       );
       if (missing.length > 0) {
-        const message = `Missing required parameters: ${missing.join(", ")}`;
+        const message = `Missing required parameters: ${missing.join(', ')}`;
         this.recordExecution(
           toolName,
           startTime,
@@ -4097,7 +4102,7 @@ export class MCPRouter {
 
       if (validationErrors.length > 0) {
         const message = `Parameter validation errors: ${validationErrors.join(
-          ", "
+          ', '
         )}`;
         this.recordExecution(
           toolName,
@@ -4119,7 +4124,7 @@ export class MCPRouter {
       // For backward compatibility with tests, check if result already has 'result' property
       // If the handler returns the data directly, wrap it in result
       // If it already has a result property, return as is
-      if (result && typeof result === "object" && "result" in result) {
+      if (result && typeof result === 'object' && 'result' in result) {
         return result;
       }
       return { result };
@@ -4149,7 +4154,7 @@ export class MCPRouter {
   ): string[] {
     const errors: string[] = [];
 
-    if (!schema || typeof schema !== "object") {
+    if (!schema || typeof schema !== 'object') {
       return errors;
     }
 
@@ -4157,35 +4162,35 @@ export class MCPRouter {
 
     // Handle different types
     switch (expectedType) {
-      case "string":
-        if (typeof value !== "string") {
+      case 'string':
+        if (typeof value !== 'string') {
           errors.push(`${paramName} must be a string, got ${typeof value}`);
         }
         break;
 
-      case "number":
-        if (typeof value !== "number" || isNaN(value)) {
+      case 'number':
+        if (typeof value !== 'number' || isNaN(value)) {
           errors.push(
             `${paramName} must be a valid number, got ${typeof value}: ${value}`
           );
         }
         break;
 
-      case "integer":
-        if (typeof value !== "number" || !Number.isInteger(value)) {
+      case 'integer':
+        if (typeof value !== 'number' || !Number.isInteger(value)) {
           errors.push(
             `${paramName} must be an integer, got ${typeof value}: ${value}`
           );
         }
         break;
 
-      case "boolean":
-        if (typeof value !== "boolean") {
+      case 'boolean':
+        if (typeof value !== 'boolean') {
           errors.push(`${paramName} must be a boolean, got ${typeof value}`);
         }
         break;
 
-      case "array":
+      case 'array':
         if (!Array.isArray(value)) {
           errors.push(`${paramName} must be an array, got ${typeof value}`);
         } else if (schema.items && schema.items.type) {
@@ -4201,9 +4206,9 @@ export class MCPRouter {
         }
         break;
 
-      case "object":
+      case 'object':
         if (
-          typeof value !== "object" ||
+          typeof value !== 'object' ||
           value === null ||
           Array.isArray(value)
         ) {
@@ -4228,10 +4233,10 @@ export class MCPRouter {
     const isJsonRpcRequest =
       !isSimpleCall &&
       request &&
-      typeof request === "object" &&
-      request.jsonrpc === "2.0";
+      typeof request === 'object' &&
+      request.jsonrpc === '2.0';
     const isNotificationMethod =
-      typeof method === "string" && method.startsWith("notifications/");
+      typeof method === 'string' && method.startsWith('notifications/');
     const isJsonRpcNotification =
       isJsonRpcRequest &&
       (id === undefined || id === null) &&
@@ -4243,12 +4248,12 @@ export class MCPRouter {
       !isNotificationMethod
     ) {
       return {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id: null,
         error: {
           code: -32600,
           message: `Invalid request: id is required for method '${
-            typeof method === "string" ? method : "unknown"
+            typeof method === 'string' ? method : 'unknown'
           }'`,
         },
       };
@@ -4262,7 +4267,7 @@ export class MCPRouter {
     try {
       if (
         !isSimpleCall &&
-        typeof method === "string" &&
+        typeof method === 'string' &&
         this.tools.has(method)
       ) {
         try {
@@ -4277,31 +4282,31 @@ export class MCPRouter {
 
           const payload =
             toolResult &&
-            typeof toolResult === "object" &&
-            "result" in toolResult
+            typeof toolResult === 'object' &&
+            'result' in toolResult
               ? (toolResult as any).result
               : toolResult;
 
           return {
-            jsonrpc: "2.0",
+            jsonrpc: '2.0',
             id,
             result: payload,
           };
         } catch (toolError) {
           const message =
             toolError instanceof Error ? toolError.message : String(toolError);
-          const code = message.includes("not found") ? -32601 : -32602;
+          const code = message.includes('not found') ? -32601 : -32602;
 
           if (isJsonRpcNotification) {
             return null;
           }
 
           return {
-            jsonrpc: "2.0",
+            jsonrpc: '2.0',
             id,
             error: {
               code,
-              message: code === -32601 ? "Method not found" : "Invalid params",
+              message: code === -32601 ? 'Method not found' : 'Invalid params',
               data: message,
             },
           };
@@ -4309,16 +4314,16 @@ export class MCPRouter {
       }
 
       switch (method) {
-        case "initialize":
+        case 'initialize':
           // Handle MCP server initialization
           if (isJsonRpcNotification) {
             return null;
           }
           return {
-            jsonrpc: "2.0",
+            jsonrpc: '2.0',
             id,
             result: {
-              protocolVersion: "2024-11-05",
+              protocolVersion: '2024-11-05',
               capabilities: {
                 tools: {
                   listChanged: true,
@@ -4326,13 +4331,13 @@ export class MCPRouter {
                 resources: {},
               },
               serverInfo: {
-                name: "memento-mcp-server",
-                version: "1.0.0",
+                name: 'memento-mcp-server',
+                version: '1.0.0',
               },
             },
           };
 
-        case "tools/list":
+        case 'tools/list':
           const tools = Array.from(this.tools.values()).map((tool) => ({
             name: tool.name,
             description: tool.description,
@@ -4342,25 +4347,25 @@ export class MCPRouter {
             return null;
           }
           return {
-            jsonrpc: "2.0",
+            jsonrpc: '2.0',
             id,
             result: { tools },
           };
 
-        case "tools/call": {
+        case 'tools/call': {
           const toolParams = params || {};
           const { name, arguments: args } = toolParams as any;
 
-          if (typeof name !== "string" || name.trim().length === 0) {
+          if (typeof name !== 'string' || name.trim().length === 0) {
             if (isJsonRpcNotification) {
               return null;
             }
             return {
-              jsonrpc: "2.0",
+              jsonrpc: '2.0',
               id,
               error: {
                 code: ErrorCode.InvalidParams,
-                message: "Tool name is required",
+                message: 'Tool name is required',
               },
             };
           }
@@ -4377,24 +4382,24 @@ export class MCPRouter {
 
             const payload =
               simpleResult &&
-              typeof simpleResult === "object" &&
+              typeof simpleResult === 'object' &&
               !Array.isArray(simpleResult) &&
-              "result" in simpleResult
+              'result' in simpleResult
                 ? (simpleResult as any).result
                 : simpleResult;
 
             const contentText =
-              typeof payload === "string"
+              typeof payload === 'string'
                 ? payload
                 : JSON.stringify(payload, null, 2);
 
             return {
-              jsonrpc: "2.0",
+              jsonrpc: '2.0',
               id,
               result: {
                 content: [
                   {
-                    type: "text",
+                    type: 'text',
                     text: contentText,
                   },
                 ],
@@ -4406,7 +4411,7 @@ export class MCPRouter {
             }
 
             let code: number = ErrorCode.InternalError;
-            let message = "Tool execution failed";
+            let message = 'Tool execution failed';
             let data: any =
               toolError instanceof Error
                 ? toolError.message
@@ -4414,36 +4419,36 @@ export class MCPRouter {
 
             if (toolError instanceof McpError) {
               code =
-                typeof toolError.code === "number"
+                typeof toolError.code === 'number'
                   ? toolError.code
                   : ErrorCode.InternalError;
               message = this.normalizeErrorMessage(toolError.message);
               data = toolError.data ?? data;
             } else if (
-              typeof (toolError as any)?.code === "number" &&
+              typeof (toolError as any)?.code === 'number' &&
               !Number.isNaN((toolError as any).code)
             ) {
               code = (toolError as any).code;
             } else if (toolError instanceof Error) {
-              const normalized = toolError.message || "";
+              const normalized = toolError.message || '';
               if (
-                normalized.includes("Missing required parameters") ||
-                normalized.includes("Parameter validation errors")
+                normalized.includes('Missing required parameters') ||
+                normalized.includes('Parameter validation errors')
               ) {
                 code = ErrorCode.InvalidParams;
                 message = normalized;
               }
               if (
                 normalized.includes("Tool '") &&
-                normalized.includes("not found")
+                normalized.includes('not found')
               ) {
                 code = ErrorCode.MethodNotFound;
-                message = "Method not found";
+                message = 'Method not found';
               }
             }
 
             return {
-              jsonrpc: "2.0",
+              jsonrpc: '2.0',
               id,
               error: {
                 code,
@@ -4456,7 +4461,7 @@ export class MCPRouter {
 
         default:
           this.recordExecution(
-            "unknown_method",
+            'unknown_method',
             new Date(),
             new Date(),
             false,
@@ -4467,7 +4472,7 @@ export class MCPRouter {
             return null;
           }
           return {
-            jsonrpc: "2.0",
+            jsonrpc: '2.0',
             id,
             error: {
               code: -32601,
@@ -4477,7 +4482,7 @@ export class MCPRouter {
       }
     } catch (error) {
       this.recordExecution(
-        "unknown_method",
+        'unknown_method',
         new Date(),
         new Date(),
         false,
@@ -4488,11 +4493,11 @@ export class MCPRouter {
         return null;
       }
       return {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id,
         error: {
           code: -32603,
-          message: "Internal error",
+          message: 'Internal error',
           data: error instanceof Error ? error.message : String(error),
         },
       };
@@ -4509,20 +4514,20 @@ export class MCPRouter {
     try {
       // Check if server is properly initialized
       if (!this.server) {
-        errors.push("MCP server not initialized");
+        errors.push('MCP server not initialized');
         return { isValid: false, errors };
       }
 
       // Check if tools are registered
       if (this.tools.size === 0) {
-        errors.push("No MCP tools registered");
+        errors.push('No MCP tools registered');
       } else {
         // Validate each tool has required properties
         for (const [name, tool] of this.tools) {
           if (!tool.name || !tool.description || !tool.inputSchema) {
             errors.push(`Tool '${name}' is missing required properties`);
           }
-          if (!tool.handler || typeof tool.handler !== "function") {
+          if (!tool.handler || typeof tool.handler !== 'function') {
             errors.push(`Tool '${name}' has invalid handler`);
           }
         }
@@ -4531,14 +4536,14 @@ export class MCPRouter {
       // Test a basic tool discovery request
       try {
         const response = await this.processMCPRequest({
-          jsonrpc: "2.0",
-          id: "validation-test",
-          method: "tools/list",
+          jsonrpc: '2.0',
+          id: 'validation-test',
+          method: 'tools/list',
           params: {},
         });
 
-        if (!response || typeof response !== "object" || response.error) {
-          errors.push("Tool discovery request failed");
+        if (!response || typeof response !== 'object' || response.error) {
+          errors.push('Tool discovery request failed');
         }
       } catch (error) {
         errors.push(
@@ -4565,13 +4570,13 @@ export class MCPRouter {
   public async startStdio(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.log("MCP server started with stdio transport");
+    console.log('MCP server started with stdio transport');
   }
 
   // New test tool handlers
 
   private async handleAnalyzeTestResults(params: any): Promise<any> {
-    console.log("MCP Tool called: tests.analyze_results", params);
+    console.log('MCP Tool called: tests.analyze_results', params);
 
     try {
       const testIds = params.testIds || [];
@@ -4599,12 +4604,12 @@ export class MCPRouter {
 
       const analysis = {
         totalTests: testResults.length,
-        passedTests: testResults.filter((r) => r.status === "passed").length,
-        failedTests: testResults.filter((r) => r.status === "failed").length,
-        skippedTests: testResults.filter((r) => r.status === "skipped").length,
+        passedTests: testResults.filter((r) => r.status === 'passed').length,
+        failedTests: testResults.filter((r) => r.status === 'failed').length,
+        skippedTests: testResults.filter((r) => r.status === 'skipped').length,
         successRate:
           testResults.length > 0
-            ? (testResults.filter((r) => r.status === "passed").length /
+            ? (testResults.filter((r) => r.status === 'passed').length /
                 testResults.length) *
               100
             : 0,
@@ -4627,17 +4632,17 @@ export class MCPRouter {
         message: `Analyzed ${testResults.length} test executions with ${analysis.flakyTests.length} potential flaky tests identified`,
       };
     } catch (error) {
-      console.error("Error in handleAnalyzeTestResults:", error);
+      console.error('Error in handleAnalyzeTestResults:', error);
       throw new Error(
         `Failed to analyze test results: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
   }
 
   private async handleGetCoverage(params: any): Promise<any> {
-    console.log("MCP Tool called: tests.get_coverage", params);
+    console.log('MCP Tool called: tests.get_coverage', params);
 
     try {
       const { entityId, includeHistorical } = params;
@@ -4655,17 +4660,17 @@ export class MCPRouter {
         message: `Coverage analysis for entity ${entityId}: ${coverage.overallCoverage.lines}% line coverage`,
       };
     } catch (error) {
-      console.error("Error in handleGetCoverage:", error);
+      console.error('Error in handleGetCoverage:', error);
       throw new Error(
         `Failed to get coverage: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
   }
 
   private async handleGetPerformance(params: any): Promise<any> {
-    console.log("MCP Tool called: tests.get_performance", params);
+    console.log('MCP Tool called: tests.get_performance', params);
 
     try {
       const { testId, days, metricId, environment, severity, limit } = params;
@@ -4692,17 +4697,17 @@ export class MCPRouter {
         }ms, ${Math.round(metrics.successRate * 100)}% success rate`,
       };
     } catch (error) {
-      console.error("Error in handleGetPerformance:", error);
+      console.error('Error in handleGetPerformance:', error);
       throw new Error(
         `Failed to get performance metrics: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
   }
 
   private async handleParseTestResults(params: any): Promise<any> {
-    console.log("MCP Tool called: tests.parse_results", params);
+    console.log('MCP Tool called: tests.parse_results', params);
 
     try {
       const { filePath, format } = params;
@@ -4714,10 +4719,10 @@ export class MCPRouter {
         message: `Successfully parsed and recorded test results from ${filePath} (${format} format)`,
       };
     } catch (error) {
-      console.error("Error in handleParseTestResults:", error);
+      console.error('Error in handleParseTestResults:', error);
       throw new Error(
         `Failed to parse test results: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -4750,7 +4755,7 @@ export class MCPRouter {
         (stats.avgDuration * (stats.count - 1) + result.duration) / stats.count;
       stats.successRate =
         (stats.successRate * (stats.count - 1) +
-          (result.status === "passed" ? 1 : 0)) /
+          (result.status === 'passed' ? 1 : 0)) /
         stats.count;
     }
 
@@ -4768,12 +4773,12 @@ export class MCPRouter {
       successRate: number;
     }>
   ): string {
-    if (dailyStats.length < 2) return "insufficient_data";
+    if (dailyStats.length < 2) return 'insufficient_data';
 
     const recent = dailyStats.slice(-3);
     const older = dailyStats.slice(-7, -3);
 
-    if (older.length === 0) return "insufficient_data";
+    if (older.length === 0) return 'insufficient_data';
 
     const recentAvg =
       recent.reduce((sum, stat) => sum + stat.avgDuration, 0) / recent.length;
@@ -4782,9 +4787,9 @@ export class MCPRouter {
 
     const improvement = ((olderAvg - recentAvg) / olderAvg) * 100;
 
-    if (improvement > 5) return "improving";
-    if (improvement < -5) return "degrading";
-    return "stable";
+    if (improvement > 5) return 'improving';
+    if (improvement < -5) return 'degrading';
+    return 'stable';
   }
 
   private generateTestRecommendations(
@@ -4794,33 +4799,33 @@ export class MCPRouter {
     const recommendations: string[] = [];
 
     const totalTests = testResults.length;
-    const failedTests = testResults.filter((r) => r.status === "failed").length;
+    const failedTests = testResults.filter((r) => r.status === 'failed').length;
     const failureRate = totalTests > 0 ? (failedTests / totalTests) * 100 : 0;
 
     if (failureRate > 20) {
       recommendations.push(
-        "High failure rate detected. Consider reviewing test stability and dependencies."
+        'High failure rate detected. Consider reviewing test stability and dependencies.'
       );
     }
 
     if (failureRate > 50) {
       recommendations.push(
-        "Critical: Over 50% of tests are failing. Immediate attention required."
+        'Critical: Over 50% of tests are failing. Immediate attention required.'
       );
     }
 
     if (includeFlakyAnalysis) {
-      const flakyTests = testResults.filter((r) => r.status === "failed");
+      const flakyTests = testResults.filter((r) => r.status === 'failed');
       if (flakyTests.length > totalTests * 0.1) {
         recommendations.push(
-          "Multiple tests showing inconsistent results. Check for race conditions or environmental dependencies."
+          'Multiple tests showing inconsistent results. Check for race conditions or environmental dependencies.'
         );
       }
     }
 
     if (recommendations.length === 0) {
       recommendations.push(
-        "Test suite appears healthy. Continue monitoring for any emerging issues."
+        'Test suite appears healthy. Continue monitoring for any emerging issues.'
       );
     }
 

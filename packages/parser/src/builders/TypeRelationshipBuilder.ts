@@ -5,36 +5,15 @@
  * Handles EXTENDS, IMPLEMENTS, TYPE_USES, RETURNS_TYPE, PARAM_TYPE, and decorator relationships.
  */
 
-import { Node, SourceFile, SyntaxKind } from "ts-morph";
-import * as path from "path";
+import { Node, SourceFile, SyntaxKind } from 'ts-morph';
+import * as path from 'path';
 import {
   Symbol as SymbolEntity,
   GraphRelationship,
   RelationshipType,
-} from "@memento/graph";
-import { noiseConfig } from "@memento/core";
-
-export interface TypeRelationshipBuilderOptions {
-  globalSymbolIndex: Map<string, SymbolEntity>;
-  nameIndex: Map<string, SymbolEntity[]>;
-  stopNames: Set<string>;
-  shouldUseTypeChecker: (context: any) => boolean;
-  takeTcBudget: () => boolean;
-  resolveWithTypeChecker: (node: any, sourceFile: SourceFile) => any;
-  resolveImportedMemberToFileAndName: (
-    memberName: string,
-    exportName: string,
-    sourceFile: SourceFile,
-    importMap?: Map<string, string>,
-    importSymbolMap?: Map<string, string>
-  ) => any;
-  createRelationship: (
-    fromId: string,
-    toId: string,
-    type: RelationshipType,
-    metadata?: Record<string, any>
-  ) => GraphRelationship;
-}
+} from '@memento/graph';
+import { TypeRelationshipBuilderOptions } from '@memento/shared-types';
+import { noiseConfig } from '@memento/core';
 
 /**
  * TypeRelationshipBuilder handles the extraction of type-related relationships
@@ -164,7 +143,7 @@ export class TypeRelationshipBuilder {
             if (toId) {
               // Concretize file placeholder to symbol id when available
               try {
-                if (toId.startsWith("file:")) {
+                if (toId.startsWith('file:')) {
                   const m = toId.match(/^file:(.+?):(.+)$/);
                   if (m) {
                     const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
@@ -198,10 +177,10 @@ export class TypeRelationshipBuilder {
               }
               if (!resolved) {
                 const tc = this.shouldUseTypeChecker({
-                  context: "heritage",
+                  context: 'heritage',
                   imported: true,
                   ambiguous: true,
-                  nameLength: String(type.getText?.() || "").length,
+                  nameLength: String(type.getText?.() || '').length,
                 })
                   ? this.resolveWithTypeChecker(type as any, sourceFile)
                   : null;
@@ -220,8 +199,8 @@ export class TypeRelationshipBuilder {
                 if (m) {
                   const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
                   if (hit) placeholder = hit.id;
-                } else if (placeholder.startsWith("class:")) {
-                  const nm = placeholder.slice("class:".length);
+                } else if (placeholder.startsWith('class:')) {
+                  const nm = placeholder.slice('class:'.length);
                   const list = this.nameIndex.get(nm) || [];
                   if (list.length === 1) placeholder = list[0].id;
                 }
@@ -260,7 +239,7 @@ export class TypeRelationshipBuilder {
             let toId = localIndex?.get(key);
             if (toId) {
               try {
-                if (toId.startsWith("file:")) {
+                if (toId.startsWith('file:')) {
                   const m = toId.match(/^file:(.+?):(.+)$/);
                   if (m) {
                     const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
@@ -310,8 +289,8 @@ export class TypeRelationshipBuilder {
                 if (m) {
                   const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
                   if (hit) placeholder = hit.id;
-                } else if (placeholder.startsWith("interface:")) {
-                  const nm = placeholder.slice("interface:".length);
+                } else if (placeholder.startsWith('interface:')) {
+                  const nm = placeholder.slice('interface:'.length);
                   const list = this.nameIndex.get(nm) || [];
                   if (list.length === 1) placeholder = list[0].id;
                 }
@@ -361,12 +340,12 @@ export class TypeRelationshipBuilder {
       for (const d of decs) {
         try {
           const expr: any = d.getExpression?.() || d.getNameNode?.() || null;
-          let accessPath = "";
-          let simpleName = "";
-          if (expr && typeof expr.getText === "function") {
+          let accessPath = '';
+          let simpleName = '';
+          if (expr && typeof expr.getText === 'function') {
             accessPath = String(expr.getText());
-            const base = accessPath.split("(")[0];
-            simpleName = (base.split(".").pop() || base).trim();
+            const base = accessPath.split('(')[0];
+            simpleName = (base.split('.').pop() || base).trim();
           }
           if (!simpleName) continue;
           if (
@@ -380,7 +359,7 @@ export class TypeRelationshipBuilder {
             if (
               !toId &&
               this.shouldUseTypeChecker({
-                context: "decorator",
+                context: 'decorator',
                 imported: !!importMap,
                 ambiguous: true,
                 nameLength: simpleName.length,
@@ -404,18 +383,18 @@ export class TypeRelationshipBuilder {
           let column: number | undefined;
           try {
             const pos = (d as any).getStart?.();
-            if (typeof pos === "number") {
+            if (typeof pos === 'number') {
               const lc = sourceFile.getLineAndColumnAtPos(pos);
               line = lc.line;
               column = lc.column;
             }
           } catch {}
           const meta = {
-            kind: "decorator",
+            kind: 'decorator',
             accessPath,
             path: path.relative(process.cwd(), sourceFile.getFilePath()),
-            ...(typeof line === "number" ? { line } : {}),
-            ...(typeof column === "number" ? { column } : {}),
+            ...(typeof line === 'number' ? { line } : {}),
+            ...(typeof column === 'number' ? { column } : {}),
           };
           relationships.push(
             this.createRelationship(
@@ -448,7 +427,7 @@ export class TypeRelationshipBuilder {
     try {
       // RETURNS_TYPE
       const rt: any = (node as any).getReturnTypeNode?.();
-      if (rt && typeof rt.getText === "function") {
+      if (rt && typeof rt.getText === 'function') {
         const tname = rt.getText();
         if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
           let toId: string = `external:${tname}`;
@@ -467,8 +446,8 @@ export class TypeRelationshipBuilder {
             if (m) {
               const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
               if (hit) toId = hit.id;
-            } else if (toId.startsWith("external:")) {
-              const nm = toId.slice("external:".length);
+            } else if (toId.startsWith('external:')) {
+              const nm = toId.slice('external:'.length);
               const list = this.nameIndex.get(nm) || [];
               if (list.length === 1) toId = list[0].id;
               else if (list.length > 1) {
@@ -480,7 +459,7 @@ export class TypeRelationshipBuilder {
           let column: number | undefined;
           try {
             const pos = (rt as any).getStart?.();
-            if (typeof pos === "number") {
+            if (typeof pos === 'number') {
               const lc = sourceFile.getLineAndColumnAtPos(pos);
               line = lc.line;
               column = lc.column;
@@ -488,13 +467,13 @@ export class TypeRelationshipBuilder {
           } catch {}
           const meta: any = {
             inferred: true,
-            kind: "type",
-            ...(typeof line === "number" ? { line } : {}),
-            ...(typeof column === "number" ? { column } : {}),
+            kind: 'type',
+            ...(typeof line === 'number' ? { line } : {}),
+            ...(typeof column === 'number' ? { column } : {}),
           };
           try {
-            if (toId.startsWith("external:")) {
-              const nm = toId.slice("external:".length);
+            if (toId.startsWith('external:')) {
+              const nm = toId.slice('external:'.length);
               const list = this.nameIndex.get(nm) || [];
               if (list.length > 1) {
                 meta.ambiguous = true;
@@ -516,14 +495,14 @@ export class TypeRelationshipBuilder {
         try {
           const t = (node as any).getReturnType?.();
           // Attempt to obtain a readable base name
-          let tname = "";
+          let tname = '';
           try {
-            tname = (t?.getSymbol?.()?.getName?.() || "").toString();
+            tname = (t?.getSymbol?.()?.getName?.() || '').toString();
           } catch {}
           if (!tname) {
             try {
               tname =
-                typeof t?.getText === "function" ? String(t.getText()) : "";
+                typeof t?.getText === 'function' ? String(t.getText()) : '';
             } catch {}
           }
           if (tname) tname = String(tname).split(/[<|&]/)[0].trim();
@@ -544,17 +523,17 @@ export class TypeRelationshipBuilder {
               if (m) {
                 const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
                 if (hit) toId = hit.id;
-              } else if (toId.startsWith("external:")) {
-                const nm = toId.slice("external:".length);
+              } else if (toId.startsWith('external:')) {
+                const nm = toId.slice('external:'.length);
                 const list = this.nameIndex.get(nm) || [];
                 if (list.length === 1) toId = list[0].id;
               }
             } catch {}
             const meta: any = {
               inferred: true,
-              kind: "type",
+              kind: 'type',
               usedTypeChecker: true,
-              resolution: "type-checker",
+              resolution: 'type-checker',
             };
             relationships.push(
               this.createRelationship(
@@ -574,8 +553,8 @@ export class TypeRelationshipBuilder {
       const params: any[] = (node as any).getParameters?.() || [];
       for (const p of params) {
         const tn: any = p.getTypeNode?.();
-        const pname: string = p.getName?.() || "";
-        if (tn && typeof tn.getText === "function") {
+        const pname: string = p.getName?.() || '';
+        if (tn && typeof tn.getText === 'function') {
           const tname = tn.getText();
           if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
             let toId: string = `external:${tname}`;
@@ -594,8 +573,8 @@ export class TypeRelationshipBuilder {
               if (m) {
                 const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
                 if (hit) toId = hit.id;
-              } else if (toId.startsWith("external:")) {
-                const nm = toId.slice("external:".length);
+              } else if (toId.startsWith('external:')) {
+                const nm = toId.slice('external:'.length);
                 const list = this.nameIndex.get(nm) || [];
                 if (list.length === 1) toId = list[0].id;
               }
@@ -604,13 +583,13 @@ export class TypeRelationshipBuilder {
             let pcol: number | undefined;
             try {
               const pos = (tn as any).getStart?.();
-              if (typeof pos === "number") {
+              if (typeof pos === 'number') {
                 const lc = sourceFile.getLineAndColumnAtPos(pos);
                 pline = lc.line;
                 pcol = lc.column;
               }
             } catch {}
-            const meta: any = { inferred: true, kind: "type", param: pname };
+            const meta: any = { inferred: true, kind: 'type', param: pname };
             relationships.push(
               this.createRelationship(
                 symbolEntity.id,
@@ -619,18 +598,18 @@ export class TypeRelationshipBuilder {
                 meta
               )
             );
-            const scope = toId.startsWith("external:")
-              ? "external"
-              : toId.startsWith("file:")
-              ? "imported"
-              : "local";
+            const scope = toId.startsWith('external:')
+              ? 'external'
+              : toId.startsWith('file:')
+              ? 'imported'
+              : 'local';
             const depConfidence =
-              scope === "local" ? 0.9 : scope === "imported" ? 0.6 : 0.4;
+              scope === 'local' ? 0.9 : scope === 'imported' ? 0.6 : 0.4;
             const depMeta = {
               inferred: true,
-              kind: "dependency",
+              kind: 'dependency',
               scope,
-              resolution: "type-annotation",
+              resolution: 'type-annotation',
               confidence: depConfidence,
               param: pname,
             } as any;
@@ -647,14 +626,14 @@ export class TypeRelationshipBuilder {
           // Fallback: infer param type via type checker
           try {
             const t = p.getType?.();
-            let tname = "";
+            let tname = '';
             try {
-              tname = (t?.getSymbol?.()?.getName?.() || "").toString();
+              tname = (t?.getSymbol?.()?.getName?.() || '').toString();
             } catch {}
             if (!tname) {
               try {
                 tname =
-                  typeof t?.getText === "function" ? String(t.getText()) : "";
+                  typeof t?.getText === 'function' ? String(t.getText()) : '';
               } catch {}
             }
             if (tname) tname = String(tname).split(/[<|&]/)[0].trim();
@@ -675,18 +654,18 @@ export class TypeRelationshipBuilder {
                 if (m) {
                   const hit = this.globalSymbolIndex.get(`${m[1]}:${m[2]}`);
                   if (hit) toId = hit.id;
-                } else if (toId.startsWith("external:")) {
-                  const nm = toId.slice("external:".length);
+                } else if (toId.startsWith('external:')) {
+                  const nm = toId.slice('external:'.length);
                   const list = this.nameIndex.get(nm) || [];
                   if (list.length === 1) toId = list[0].id;
                 }
               } catch {}
               const meta: any = {
                 inferred: true,
-                kind: "type",
+                kind: 'type',
                 param: pname,
                 usedTypeChecker: true,
-                resolution: "type-checker",
+                resolution: 'type-checker',
               };
               relationships.push(
                 this.createRelationship(
@@ -696,18 +675,18 @@ export class TypeRelationshipBuilder {
                   meta
                 )
               );
-              const scope = toId.startsWith("external:")
-                ? "external"
-                : toId.startsWith("file:")
-                ? "imported"
-                : "local";
+              const scope = toId.startsWith('external:')
+                ? 'external'
+                : toId.startsWith('file:')
+                ? 'imported'
+                : 'local';
               const depConfidence =
-                scope === "local" ? 0.9 : scope === "imported" ? 0.6 : 0.4;
+                scope === 'local' ? 0.9 : scope === 'imported' ? 0.6 : 0.4;
               const depMeta = {
                 inferred: true,
-                kind: "dependency",
+                kind: 'dependency',
                 scope,
-                resolution: "type-checker",
+                resolution: 'type-checker',
                 confidence: depConfidence,
                 param: pname,
               } as any;

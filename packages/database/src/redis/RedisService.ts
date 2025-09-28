@@ -1,5 +1,5 @@
 import { createClient as createRedisClient, RedisClientType } from 'redis';
-import { IRedisService } from './interfaces.js';
+import { IRedisService } from '../interfaces.js';
 
 export class RedisService implements IRedisService {
   private redisClient!: RedisClientType;

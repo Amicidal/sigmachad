@@ -4,9 +4,9 @@
  */
 
 import { EventEmitter } from 'events';
-import { Neo4jService } from './Neo4jService.js';
-import { Entity } from '@memento/core';
-import { embeddingService } from '../../utils/embedding.js';
+import { Neo4jService } from '../graph/Neo4jService.js';
+import { Entity } from '@memento/shared-types.js';
+import { embeddingService } from '@memento/core/utils/embedding.js';
 
 export interface EmbeddingOptions {
   indexName?: string;
@@ -83,7 +83,7 @@ export class EmbeddingService extends EventEmitter {
   constructor(private neo4j: Neo4jService) {
     super();
     this.cache = new EmbeddingCache();
-    this.initializeVectorIndex().catch(err =>
+    this.initializeVectorIndex().catch((err) =>
       console.warn('Failed to initialize vector index:', err)
     );
   }
@@ -91,9 +91,7 @@ export class EmbeddingService extends EventEmitter {
   /**
    * Initialize the default vector index
    */
-  async initializeVectorIndex(
-    options: EmbeddingOptions = {}
-  ): Promise<void> {
+  async initializeVectorIndex(options: EmbeddingOptions = {}): Promise<void> {
     const indexName = options.indexName || this.defaultIndexName;
     const dimensions = options.dimensions || this.defaultDimensions;
     const similarity = options.similarity || 'cosine';
@@ -127,7 +125,9 @@ export class EmbeddingService extends EventEmitter {
     return {
       entityId: entity.id,
       vector,
-      metadata: options.checkpointId ? { checkpointId: options.checkpointId } : undefined,
+      metadata: options.checkpointId
+        ? { checkpointId: options.checkpointId }
+        : undefined,
     };
   }
 
@@ -145,7 +145,7 @@ export class EmbeddingService extends EventEmitter {
       const batch = entities.slice(i, i + batchSize);
 
       const embeddings = await Promise.all(
-        batch.map(async entity => {
+        batch.map(async (entity) => {
           const content = this.extractEntityContent(entity);
           const vector = await this.generateEmbedding(content);
           return {
@@ -160,7 +160,7 @@ export class EmbeddingService extends EventEmitter {
 
       await this.neo4j.upsertVectors('Entity', embeddings);
 
-      embeddings.forEach(e => {
+      embeddings.forEach((e) => {
         this.cache.set(e.id, e.vector);
         results.push({
           entityId: e.id,
@@ -199,17 +199,13 @@ export class EmbeddingService extends EventEmitter {
   ): Promise<SearchResult[]> {
     const indexName = this.defaultIndexName;
 
-    const results = await this.neo4j.searchVectors(
-      indexName,
-      queryVector,
-      {
-        limit: options.limit || 10,
-        minScore: options.minScore || 0.5,
-        filter: options.filter,
-      }
-    );
+    const results = await this.neo4j.searchVectors(indexName, queryVector, {
+      limit: options.limit || 10,
+      minScore: options.minScore || 0.5,
+      filter: options.filter,
+    });
 
-    return results.map(result => ({
+    return results.map((result) => ({
       entity: this.parseEntity(result.node),
       score: result.score,
       metadata: options.includeMetadata
@@ -282,7 +278,8 @@ export class EmbeddingService extends EventEmitter {
       },
       {
         name: 'indexed',
-        query: 'MATCH (n:Entity) WHERE n.embedding IS NOT NULL RETURN count(n) as count',
+        query:
+          'MATCH (n:Entity) WHERE n.embedding IS NOT NULL RETURN count(n) as count',
       },
       {
         name: 'sample',
@@ -296,7 +293,7 @@ export class EmbeddingService extends EventEmitter {
     ];
 
     const [totalResult, indexedResult, sampleResult] = await Promise.all(
-      queries.map(q => this.neo4j.executeCypher(q.query))
+      queries.map((q) => this.neo4j.executeCypher(q.query))
     );
 
     const total = totalResult[0]?.count || 0;
@@ -307,17 +304,18 @@ export class EmbeddingService extends EventEmitter {
 
     if (sampleResult.length > 0) {
       const samples = sampleResult
-        .map(r => r.embedding)
-        .filter(e => Array.isArray(e));
+        .map((r) => r.embedding)
+        .filter((e) => Array.isArray(e));
 
       if (samples.length > 0) {
         dimensions = samples[0].length;
 
-        const magnitudes = samples.map(vector =>
+        const magnitudes = samples.map((vector) =>
           Math.sqrt(vector.reduce((sum: number, v: number) => sum + v * v, 0))
         );
 
-        avgMagnitude = magnitudes.reduce((a, b) => a + b, 0) / magnitudes.length;
+        avgMagnitude =
+          magnitudes.reduce((a, b) => a + b, 0) / magnitudes.length;
       }
     }
 
@@ -365,7 +363,7 @@ export class EmbeddingService extends EventEmitter {
     }
 
     // Exclude the source entity from results
-    const filter = { ...options.filter, 'id': { $ne: entityId } };
+    const filter = { ...options.filter, id: { $ne: entityId } };
 
     return this.searchByVector(vector, { ...options, filter });
   }
@@ -389,7 +387,7 @@ export class EmbeddingService extends EventEmitter {
         .fill(0)
         .map(() => Math.random() - 0.5);
       const magnitude = Math.sqrt(vector.reduce((sum, v) => sum + v * v, 0));
-      return vector.map(v => v / magnitude);
+      return vector.map((v) => v / magnitude);
     }
   }
 
@@ -410,11 +408,13 @@ export class EmbeddingService extends EventEmitter {
       properties.checkpointId = options.checkpointId;
     }
 
-    await this.neo4j.upsertVectors('Entity', [{
-      id: entityId,
-      vector,
-      properties,
-    }]);
+    await this.neo4j.upsertVectors('Entity', [
+      {
+        id: entityId,
+        vector,
+        properties,
+      },
+    ]);
   }
 
   /**

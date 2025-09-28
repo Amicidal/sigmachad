@@ -3,8 +3,8 @@
  * Extracts and creates symbol entities from TypeScript/JavaScript AST nodes
  */
 
-import { Node, SyntaxKind } from "ts-morph";
-import * as path from "path";
+import { Node, SyntaxKind } from 'ts-morph';
+import * as path from 'path';
 import {
   Entity,
   File,
@@ -13,14 +13,14 @@ import {
   InterfaceSymbol,
   TypeAliasSymbol,
   Symbol as SymbolEntity,
-} from '@memento/core';
+} from '@memento/shared-types.js';
 import {
   createHash,
   createShortHash,
   detectLanguage,
   extractDependencies,
   calculateComplexity,
-} from "./utils.js";
+} from './utils.js';
 
 /**
  * Handles symbol extraction from AST nodes
@@ -33,10 +33,7 @@ export class SymbolExtractor {
    * @param fileEntity - The file entity containing this symbol
    * @returns Symbol entity or null if extraction fails
    */
-  createSymbolEntity(
-    node: Node,
-    fileEntity: File
-  ): SymbolEntity | null {
+  createSymbolEntity(node: Node, fileEntity: File): SymbolEntity | null {
     const name = this.getSymbolName(node);
     const signature = this.getSymbolSignature(node);
 
@@ -48,7 +45,7 @@ export class SymbolExtractor {
 
     const baseSymbol = {
       id,
-      type: "symbol" as const,
+      type: 'symbol' as const,
       path: `${fileEntity.path}:${name}`,
       hash: createHash(signature),
       language: fileEntity.language,
@@ -67,8 +64,8 @@ export class SymbolExtractor {
     if (Node.isFunctionDeclaration(node) || Node.isMethodDeclaration(node)) {
       return {
         ...baseSymbol,
-        type: "symbol",
-        kind: "function",
+        type: 'symbol',
+        kind: 'function',
         parameters: this.getFunctionParameters(node),
         returnType: this.getFunctionReturnType(node),
         isAsync: this.isFunctionAsync(node),
@@ -81,8 +78,8 @@ export class SymbolExtractor {
     if (Node.isClassDeclaration(node)) {
       return {
         ...baseSymbol,
-        type: "symbol",
-        kind: "class",
+        type: 'symbol',
+        kind: 'class',
         extends: this.getClassExtends(node),
         implements: this.getClassImplements(node),
         methods: [],
@@ -94,8 +91,8 @@ export class SymbolExtractor {
     if (Node.isInterfaceDeclaration(node)) {
       return {
         ...baseSymbol,
-        type: "symbol",
-        kind: "interface",
+        type: 'symbol',
+        kind: 'interface',
         extends: this.getInterfaceExtends(node),
         methods: [],
         properties: [],
@@ -105,8 +102,8 @@ export class SymbolExtractor {
     if (Node.isTypeAliasDeclaration(node)) {
       return {
         ...baseSymbol,
-        type: "symbol",
-        kind: "typeAlias",
+        type: 'symbol',
+        kind: 'typeAlias',
         aliasedType: this.getTypeAliasType(node),
         isUnion: this.isTypeUnion(node),
         isIntersection: this.isTypeIntersection(node),
@@ -132,22 +129,22 @@ export class SymbolExtractor {
 
     return {
       id: crypto.randomUUID(),
-      type: "symbol",
+      type: 'symbol',
       path: `${fileEntity.path}:${name}`,
       hash: createHash(name),
-      language: "javascript",
+      language: 'javascript',
       lastModified: fileEntity.lastModified,
       created: fileEntity.created,
       metadata: {},
       name,
-      kind: "function" as any,
+      kind: 'function' as any,
       signature: `function ${name}()`,
-      docstring: "",
-      visibility: "public",
+      docstring: '',
+      visibility: 'public',
       isExported: false,
       isDeprecated: false,
       parameters: [],
-      returnType: "any",
+      returnType: 'any',
       isAsync: false,
       isGenerator: false,
       complexity: 1,
@@ -161,27 +158,24 @@ export class SymbolExtractor {
    * @param fileEntity - The file entity containing this class
    * @returns ClassSymbol or null if extraction fails
    */
-  createJavaScriptClassEntity(
-    node: any,
-    fileEntity: File
-  ): ClassSymbol | null {
+  createJavaScriptClassEntity(node: any, fileEntity: File): ClassSymbol | null {
     const name = this.getJavaScriptSymbolName(node);
     if (!name) return null;
 
     return {
       id: crypto.randomUUID(),
-      type: "symbol",
+      type: 'symbol',
       path: `${fileEntity.path}:${name}`,
       hash: createHash(name),
-      language: "javascript",
+      language: 'javascript',
       lastModified: fileEntity.lastModified,
       created: fileEntity.created,
       metadata: {},
       name,
-      kind: "class" as any,
+      kind: 'class' as any,
       signature: `class ${name}`,
-      docstring: "",
-      visibility: "public",
+      docstring: '',
+      visibility: 'public',
       isExported: false,
       isDeprecated: false,
       extends: [],
@@ -215,7 +209,7 @@ export class SymbolExtractor {
    */
   getJavaScriptSymbolName(node: any): string | undefined {
     for (const child of node.children || []) {
-      if (child.type === "identifier") {
+      if (child.type === 'identifier') {
         return child.text;
       }
     }
@@ -241,14 +235,14 @@ export class SymbolExtractor {
    * @returns Symbol kind as a string
    */
   getSymbolKind(node: Node): string {
-    if (Node.isClassDeclaration(node)) return "class";
+    if (Node.isClassDeclaration(node)) return 'class';
     if (Node.isFunctionDeclaration(node) || Node.isMethodDeclaration(node))
-      return "function";
-    if (Node.isInterfaceDeclaration(node)) return "interface";
-    if (Node.isTypeAliasDeclaration(node)) return "typeAlias";
-    if (Node.isPropertyDeclaration(node)) return "property";
-    if (Node.isVariableDeclaration(node)) return "variable";
-    return "symbol";
+      return 'function';
+    if (Node.isInterfaceDeclaration(node)) return 'interface';
+    if (Node.isTypeAliasDeclaration(node)) return 'typeAlias';
+    if (Node.isPropertyDeclaration(node)) return 'property';
+    if (Node.isVariableDeclaration(node)) return 'variable';
+    return 'symbol';
   }
 
   /**
@@ -258,7 +252,7 @@ export class SymbolExtractor {
    */
   getSymbolDocstring(node: Node): string {
     const comments = node.getLeadingCommentRanges();
-    return comments.map((comment) => comment.getText()).join("\n");
+    return comments.map((comment) => comment.getText()).join('\n');
   }
 
   /**
@@ -266,17 +260,17 @@ export class SymbolExtractor {
    * @param node - The AST node
    * @returns Visibility level
    */
-  getSymbolVisibility(node: Node): "public" | "private" | "protected" {
-    if ("getModifiers" in node && typeof node.getModifiers === "function") {
+  getSymbolVisibility(node: Node): 'public' | 'private' | 'protected' {
+    if ('getModifiers' in node && typeof node.getModifiers === 'function') {
       const modifiers = node.getModifiers();
       if (modifiers.some((mod: any) => mod.kind === SyntaxKind.PrivateKeyword))
-        return "private";
+        return 'private';
       if (
         modifiers.some((mod: any) => mod.kind === SyntaxKind.ProtectedKeyword)
       )
-        return "protected";
+        return 'protected';
     }
-    return "public";
+    return 'public';
   }
 
   /**
@@ -287,21 +281,21 @@ export class SymbolExtractor {
   isSymbolExported(node: Node): boolean {
     try {
       const anyNode: any = node as any;
-      if (typeof anyNode.isExported === "function" && anyNode.isExported())
+      if (typeof anyNode.isExported === 'function' && anyNode.isExported())
         return true;
       if (
-        typeof anyNode.isDefaultExport === "function" &&
+        typeof anyNode.isDefaultExport === 'function' &&
         anyNode.isDefaultExport()
       )
         return true;
       if (
-        typeof anyNode.hasExportKeyword === "function" &&
+        typeof anyNode.hasExportKeyword === 'function' &&
         anyNode.hasExportKeyword()
       )
         return true;
       if (
-        "getModifiers" in node &&
-        typeof (node as any).getModifiers === "function"
+        'getModifiers' in node &&
+        typeof (node as any).getModifiers === 'function'
       ) {
         return (node as any)
           .getModifiers()
@@ -350,7 +344,7 @@ export class SymbolExtractor {
       const returnType = node.getReturnType();
       return returnType.getText();
     }
-    return "void";
+    return 'void';
   }
 
   /**
@@ -359,7 +353,7 @@ export class SymbolExtractor {
    * @returns True if async
    */
   isFunctionAsync(node: Node): boolean {
-    if ("getModifiers" in node && typeof node.getModifiers === "function") {
+    if ('getModifiers' in node && typeof node.getModifiers === 'function') {
       return node
         .getModifiers()
         .some((mod: any) => mod.kind === SyntaxKind.AsyncKeyword);
@@ -410,7 +404,7 @@ export class SymbolExtractor {
    * @returns True if abstract
    */
   isClassAbstract(node: Node): boolean {
-    if ("getModifiers" in node && typeof node.getModifiers === "function") {
+    if ('getModifiers' in node && typeof node.getModifiers === 'function') {
       return node
         .getModifiers()
         .some((mod: any) => mod.kind === SyntaxKind.AbstractKeyword);
@@ -440,7 +434,7 @@ export class SymbolExtractor {
     if (Node.isTypeAliasDeclaration(node)) {
       return node.getType().getText();
     }
-    return "";
+    return '';
   }
 
   /**
@@ -450,7 +444,7 @@ export class SymbolExtractor {
    */
   isTypeUnion(node: Node): boolean {
     if (Node.isTypeAliasDeclaration(node)) {
-      return node.getType().getText().includes("|");
+      return node.getType().getText().includes('|');
     }
     return false;
   }
@@ -462,7 +456,7 @@ export class SymbolExtractor {
    */
   isTypeIntersection(node: Node): boolean {
     if (Node.isTypeAliasDeclaration(node)) {
-      return node.getType().getText().includes("&");
+      return node.getType().getText().includes('&');
     }
     return false;
   }
@@ -487,7 +481,7 @@ export class SymbolExtractor {
 
     return {
       id: `file:${fileRelPath}`,
-      type: "file",
+      type: 'file',
       path: fileRelPath,
       extension: path.extname(filePath),
       hash: fileHash,
@@ -495,10 +489,11 @@ export class SymbolExtractor {
       lastModified: new Date(),
       created: new Date(),
       dependencies,
-      lines: content.split("\n").length,
-      size: Buffer.byteLength(content, "utf8"),
+      lines: content.split('\n').length,
+      size: Buffer.byteLength(content, 'utf8'),
       isTest: filePath.includes('.test.') || filePath.includes('.spec.'),
-      isConfig: path.basename(filePath).startsWith('.') || filePath.includes('config'),
+      isConfig:
+        path.basename(filePath).startsWith('.') || filePath.includes('config'),
     };
   }
 }

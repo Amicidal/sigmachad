@@ -3,67 +3,18 @@
  * Handles conflicts during graph synchronization operations
  */
 
-import crypto from "crypto";
-import { Entity } from "@memento/graph";
-import { GraphRelationship } from "@memento/graph";
-import { KnowledgeGraphService } from "@memento/knowledge";
-
-export interface Conflict {
-  id: string;
-  type:
-    | "entity_version"
-    | "entity_deletion"
-    | "relationship_conflict"
-    | "concurrent_modification";
-  entityId?: string;
-  relationshipId?: string;
-  description: string;
-  conflictingValues: {
-    current: any;
-    incoming: any;
-  };
-  diff?: Record<string, { current: any; incoming: any }>;
-  signature?: string;
-  timestamp: Date;
-  resolved: boolean;
-  resolution?: ConflictResolutionResult;
-  resolutionStrategy?: "overwrite" | "merge" | "skip" | "manual";
-}
-
-export interface ConflictResolution {
-  strategy: "overwrite" | "merge" | "skip" | "manual";
-  resolvedValue?: any;
-  manualResolution?: string;
-  timestamp: Date;
-  resolvedBy: string;
-}
-
-export interface MergeStrategy {
-  name: string;
-  priority: number;
-  canHandle: (conflict: Conflict) => boolean;
-  resolve: (conflict: Conflict) => Promise<ConflictResolutionResult>;
-}
-
-export interface ConflictResolutionResult {
-  strategy: "overwrite" | "merge" | "skip" | "manual";
-  resolvedValue?: any;
-  manualResolution?: string;
-  timestamp: Date;
-  resolvedBy: string;
-}
-
-interface ManualOverrideRecord {
-  signature: string;
-  conflictType: Conflict["type"];
-  targetId: string;
-  resolvedValue?: any;
-  manualResolution?: string;
-  resolvedBy: string;
-  timestamp: Date;
-}
-
-type DiffMap = Record<string, { current: any; incoming: any }>;
+import crypto from 'crypto';
+import { Entity } from '@memento/graph';
+import { GraphRelationship } from '@memento/graph';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import {
+  Conflict,
+  ConflictResolution,
+  ConflictResolutionResult,
+  MergeStrategy,
+  ManualOverrideRecord,
+  DiffMap,
+} from '@memento/shared-types';
 
 export class ConflictResolution {
   private conflicts = new Map<string, Conflict>();
@@ -72,24 +23,24 @@ export class ConflictResolution {
   private manualOverrides = new Map<string, ManualOverrideRecord>();
 
   private static readonly ENTITY_DIFF_IGNORES = new Set([
-    "created",
-    "firstSeenAt",
-    "lastSeenAt",
-    "lastIndexed",
-    "lastAnalyzed",
-    "lastValidated",
-    "snapshotCreated",
-    "snapshotTakenAt",
-    "timestamp",
+    'created',
+    'firstSeenAt',
+    'lastSeenAt',
+    'lastIndexed',
+    'lastAnalyzed',
+    'lastValidated',
+    'snapshotCreated',
+    'snapshotTakenAt',
+    'timestamp',
   ]);
 
   private static readonly RELATIONSHIP_DIFF_IGNORES = new Set([
-    "created",
-    "firstSeenAt",
-    "lastSeenAt",
-    "version",
-    "occurrencesScan",
-    "occurrencesTotal",
+    'created',
+    'firstSeenAt',
+    'lastSeenAt',
+    'version',
+    'occurrencesScan',
+    'occurrencesTotal',
   ]);
 
   constructor(private kgService: KnowledgeGraphService) {
@@ -99,25 +50,31 @@ export class ConflictResolution {
   private initializeDefaultStrategies(): void {
     // Strategy 1: Last Write Wins (highest priority)
     this.addMergeStrategy({
-      name: "last_write_wins",
+      name: 'last_write_wins',
       priority: 100,
       canHandle: () => true,
       resolve: async (conflict) => ({
-        strategy: "overwrite",
+        strategy: 'overwrite',
         resolvedValue: conflict.conflictingValues.incoming,
         timestamp: new Date(),
-        resolvedBy: "system",
+        resolvedBy: 'system',
       }),
     });
 
     // Strategy 2: Merge properties (for entity conflicts)
     this.addMergeStrategy({
-      name: "property_merge",
+      name: 'property_merge',
       priority: 50,
-      canHandle: (conflict) => conflict.type === "entity_version",
+      canHandle: (conflict) => conflict.type === 'entity_version',
       resolve: async (conflict) => {
-        const current = conflict.conflictingValues.current as Record<string, any>;
-        const incoming = conflict.conflictingValues.incoming as Record<string, any>;
+        const current = conflict.conflictingValues.current as Record<
+          string,
+          any
+        >;
+        const incoming = conflict.conflictingValues.incoming as Record<
+          string,
+          any
+        >;
 
         const merged = { ...current };
 
@@ -142,23 +99,23 @@ export class ConflictResolution {
         }
 
         return {
-          strategy: "merge",
+          strategy: 'merge',
           resolvedValue: merged,
           timestamp: new Date(),
-          resolvedBy: "system",
+          resolvedBy: 'system',
         };
       },
     });
 
     // Strategy 3: Skip on deletion conflicts
     this.addMergeStrategy({
-      name: "skip_deletions",
+      name: 'skip_deletions',
       priority: 25,
-      canHandle: (conflict) => conflict.type === "entity_deletion",
+      canHandle: (conflict) => conflict.type === 'entity_deletion',
       resolve: async () => ({
-        strategy: "skip",
+        strategy: 'skip',
         timestamp: new Date(),
-        resolvedBy: "system",
+        resolvedBy: 'system',
       }),
     });
   }
@@ -190,16 +147,16 @@ export class ConflictResolution {
       }
 
       const conflictId = this.generateConflictId(
-        "entity_version",
+        'entity_version',
         incomingEntity.id,
         diffResult.signature
       );
 
       const conflict = this.upsertConflict(conflictId, {
-        type: "entity_version",
+        type: 'entity_version',
         entityId: incomingEntity.id,
         description: this.describeDiff(
-          "Entity",
+          'Entity',
           incomingEntity.id,
           diffResult.diff
         ),
@@ -215,7 +172,8 @@ export class ConflictResolution {
     }
 
     for (const rawRelationship of incomingRelationships) {
-      const normalizedIncoming = this.normalizeRelationshipInput(rawRelationship);
+      const normalizedIncoming =
+        this.normalizeRelationshipInput(rawRelationship);
       if (!normalizedIncoming.id) {
         continue;
       }
@@ -242,16 +200,16 @@ export class ConflictResolution {
       }
 
       const conflictId = this.generateConflictId(
-        "relationship_conflict",
+        'relationship_conflict',
         normalizedIncoming.id,
         diffResult.signature
       );
 
       const conflict = this.upsertConflict(conflictId, {
-        type: "relationship_conflict",
+        type: 'relationship_conflict',
         relationshipId: normalizedIncoming.id,
         description: this.describeDiff(
-          "Relationship",
+          'Relationship',
           normalizedIncoming.id,
           diffResult.diff
         ),
@@ -295,7 +253,7 @@ export class ConflictResolution {
     conflict.resolution = resolutionResult;
     conflict.resolutionStrategy = resolutionResult.strategy;
 
-    if (resolutionResult.strategy === "manual" && conflict.signature) {
+    if (resolutionResult.strategy === 'manual' && conflict.signature) {
       this.recordManualOverride(conflict, resolutionResult);
     }
 
@@ -376,7 +334,7 @@ export class ConflictResolution {
       try {
         listener(conflict);
       } catch (error) {
-        console.error("Error in conflict listener:", error);
+        console.error('Error in conflict listener:', error);
       }
     }
   }
@@ -431,7 +389,7 @@ export class ConflictResolution {
     }
 
     const signature = this.generateSignature(
-      "entity_version",
+      'entity_version',
       incoming.id,
       diff
     );
@@ -458,8 +416,8 @@ export class ConflictResolution {
     }
 
     const signature = this.generateSignature(
-      "relationship_conflict",
-      incoming.id || current.id || "",
+      'relationship_conflict',
+      incoming.id || current.id || '',
       diff
     );
 
@@ -473,7 +431,7 @@ export class ConflictResolution {
     const prepared: Record<string, any> = {};
 
     for (const [key, value] of Object.entries(source || {})) {
-      if (ignoreKeys.has(key) || typeof value === "function") {
+      if (ignoreKeys.has(key) || typeof value === 'function') {
         continue;
       }
       if (value === undefined) {
@@ -502,7 +460,7 @@ export class ConflictResolution {
       }
       return obj;
     }
-    if (typeof value === "object") {
+    if (typeof value === 'object') {
       const entries = Object.entries(value)
         .filter(([k]) => !ignoreKeys.has(k))
         .sort(([a], [b]) => a.localeCompare(b));
@@ -512,7 +470,7 @@ export class ConflictResolution {
       }
       return obj;
     }
-    if (typeof value === "number" && Number.isNaN(value)) {
+    if (typeof value === 'number' && Number.isNaN(value)) {
       return null;
     }
     return value;
@@ -541,8 +499,8 @@ export class ConflictResolution {
       if (
         currentValue &&
         incomingValue &&
-        typeof currentValue === "object" &&
-        typeof incomingValue === "object" &&
+        typeof currentValue === 'object' &&
+        typeof incomingValue === 'object' &&
         !Array.isArray(currentValue) &&
         !Array.isArray(incomingValue)
       ) {
@@ -555,7 +513,7 @@ export class ConflictResolution {
           )
         );
       } else {
-        diff[currentPath.join(".")] = {
+        diff[currentPath.join('.')] = {
           current: currentValue,
           incoming: incomingValue,
         };
@@ -569,43 +527,43 @@ export class ConflictResolution {
     if (a === b) {
       return true;
     }
-    if (typeof a === "object" && typeof b === "object") {
+    if (typeof a === 'object' && typeof b === 'object') {
       return JSON.stringify(a) === JSON.stringify(b);
     }
     return false;
   }
 
   private generateSignature(
-    type: Conflict["type"],
+    type: Conflict['type'],
     targetId: string,
     diff: DiffMap
   ): string {
     const serializedDiff = Object.keys(diff)
       .sort()
       .map((key) => `${key}:${JSON.stringify(diff[key])}`)
-      .join("|");
+      .join('|');
 
     return crypto
-      .createHash("sha256")
+      .createHash('sha256')
       .update(`${type}|${targetId}|${serializedDiff}`)
-      .digest("hex");
+      .digest('hex');
   }
 
   private generateConflictId(
-    type: Conflict["type"],
+    type: Conflict['type'],
     targetId: string,
     signature: string
   ): string {
     const hash = crypto
-      .createHash("sha1")
+      .createHash('sha1')
       .update(`${type}|${targetId}|${signature}`)
-      .digest("hex");
+      .digest('hex');
     return `conflict_${type}_${hash}`;
   }
 
   private upsertConflict(
     conflictId: string,
-    data: Omit<Conflict, "id" | "timestamp" | "resolved"> & {
+    data: Omit<Conflict, 'id' | 'timestamp' | 'resolved'> & {
       diff?: DiffMap;
       signature?: string;
     }
@@ -672,12 +630,12 @@ export class ConflictResolution {
   }
 
   private describeDiff(
-    prefix: "Entity" | "Relationship",
+    prefix: 'Entity' | 'Relationship',
     identifier: string,
     diff: DiffMap
   ): string {
-    const fields = Object.keys(diff).join(", ");
-    return `${prefix} ${identifier} has divergence in: ${fields || "values"}`;
+    const fields = Object.keys(diff).join(', ');
+    return `${prefix} ${identifier} has divergence in: ${fields || 'values'}`;
   }
 
   private async applyResolution(
@@ -686,8 +644,8 @@ export class ConflictResolution {
   ): Promise<boolean> {
     try {
       switch (resolution.strategy) {
-        case "overwrite":
-        case "merge": {
+        case 'overwrite':
+        case 'merge': {
           if (conflict.entityId) {
             const payload =
               resolution.resolvedValue ?? conflict.conflictingValues.incoming;
@@ -712,10 +670,10 @@ export class ConflictResolution {
           }
           break;
         }
-        case "skip":
+        case 'skip':
           // Intentionally skip applying the incoming change
           break;
-        case "manual": {
+        case 'manual': {
           if (resolution.resolvedValue) {
             if (conflict.entityId) {
               await this.kgService.updateEntity(
@@ -756,7 +714,8 @@ export class ConflictResolution {
       return;
     }
 
-    const targetId = conflict.entityId || conflict.relationshipId || conflict.id;
+    const targetId =
+      conflict.entityId || conflict.relationshipId || conflict.id;
     this.manualOverrides.set(conflict.signature, {
       signature: conflict.signature,
       conflictType: conflict.type,

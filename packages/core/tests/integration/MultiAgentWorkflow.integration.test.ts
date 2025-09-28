@@ -24,7 +24,7 @@ describe('Multi-Agent Workflow Integration Tests', () => {
   let sessionManager1: SessionManager;
   let sessionManager2: SessionManager;
   let sessionManager3: SessionManager;
-  let testDbIndex = 12;
+  const testDbIndex = 12;
 
   const baseConfig: SessionManagerConfig = {
     redis: {

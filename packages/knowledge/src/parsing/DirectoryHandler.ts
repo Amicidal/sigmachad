@@ -3,9 +3,19 @@
  * Handles directory hierarchy creation and path normalization
  */
 
-import { Entity } from '@memento/core';
-import { GraphRelationship, RelationshipType, StructuralRelationship } from '@memento/core';
-import { createHash, normalizeRelPath, parseFilePath, getPathDepth, isParentPath } from "./utils.js";
+import { Entity } from '@memento/shared-types.js';
+import {
+  GraphRelationship,
+  RelationshipType,
+  StructuralRelationship,
+} from '@memento/shared-types.js';
+import {
+  createHash,
+  normalizeRelPath,
+  parseFilePath,
+  getPathDepth,
+  isParentPath,
+} from './utils.js';
 
 /**
  * Handles directory-related operations for the AST Parser
@@ -28,16 +38,16 @@ export class DirectoryHandler {
     const dirRelationships: GraphRelationship[] = [];
 
     const rel = normalizeRelPath(fileRelPath);
-    if (!rel || rel.indexOf("/") < 0) {
+    if (!rel || rel.indexOf('/') < 0) {
       return { dirEntities, dirRelationships }; // no directory
     }
 
-    const parts = rel.split("/");
+    const parts = rel.split('/');
     parts.pop(); // remove file name
 
     const segments: string[] = [];
     for (let i = 0; i < parts.length; i++) {
-      segments.push(parts.slice(0, i + 1).join("/"));
+      segments.push(parts.slice(0, i + 1).join('/'));
     }
 
     // Create directory entities with stable ids based on path
@@ -49,10 +59,10 @@ export class DirectoryHandler {
       dirIds.push(id);
       dirEntities.push({
         id,
-        type: "directory",
+        type: 'directory',
         path: dpath,
         hash: createHash(`dir:${dpath}`),
-        language: "unknown",
+        language: 'unknown',
         lastModified: new Date(),
         created: new Date(),
         children: [],
@@ -90,7 +100,7 @@ export class DirectoryHandler {
    * @returns True if running in integration test environment
    */
   shouldIncludeDirectoryEntities(): boolean {
-    return process.env.RUN_INTEGRATION === "1";
+    return process.env.RUN_INTEGRATION === '1';
   }
 
   /**
@@ -104,12 +114,16 @@ export class DirectoryHandler {
   private createRelationship(
     fromId: string,
     toId: string,
-    type: RelationshipType.CONTAINS | RelationshipType.DEFINES | RelationshipType.EXPORTS | RelationshipType.IMPORTS,
+    type:
+      | RelationshipType.CONTAINS
+      | RelationshipType.DEFINES
+      | RelationshipType.EXPORTS
+      | RelationshipType.IMPORTS,
     metadata?: any
   ): StructuralRelationship {
     const baseRel: StructuralRelationship = {
       id: `${fromId}-${type}-${toId}`,
-      type: type,
+      type,
       fromEntityId: fromId,
       toEntityId: toId,
       created: new Date(),
@@ -137,7 +151,7 @@ export class DirectoryHandler {
     const normalizedFrom = normalizeRelPath(fromPath);
     const normalizedTo = normalizeRelPath(toPath);
 
-    if (normalizedTo.startsWith(normalizedFrom + "/")) {
+    if (normalizedTo.startsWith(normalizedFrom + '/')) {
       return normalizedTo.substring(normalizedFrom.length + 1);
     }
 

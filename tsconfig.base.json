@@ -33,8 +33,10 @@
       "@memento/testing/*": ["packages/testing/src/*"],
       "@memento/shared-types": ["packages/shared-types/src"],
       "@memento/shared-types/*": ["packages/shared-types/src/*"],
-      "@shared-types": ["packages/shared-types/src"],
-      "@shared-types/*": ["packages/shared-types/src/*"]
+      "@shared-types": ["packages/shared-types"],
+      "@shared-types/*": ["packages/shared-types/*"],
+      "@memento/utils": ["packages/utils/src"],
+      "@memento/utils/*": ["packages/utils/src/*"]
     }
   },
   "exclude": ["node_modules", "dist", "coverage"]

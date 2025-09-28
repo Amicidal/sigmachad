@@ -1,5 +1,23 @@
 # Source Control Management Blueprint
 
+## Metadata
+
+- Scope: scm
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: scm).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
+## Desired Capabilities
+
+- [ ] Define required capabilities and acceptance criteria.
+- [ ] Note API/Graph impacts.
+
 ## 1. Overview
 The SCM surface automates commit creation, pull-request scaffolding, branch management, and diff/log retrieval so AI-driven workflows can land code safely. The Fastify router exposes `/api/v1/scm/*` endpoints which now orchestrate real git operations through `GitService`, persist commit metadata, and publish provenance into the knowledge graph.
 

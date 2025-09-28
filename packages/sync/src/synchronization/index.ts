@@ -1,2 +1,2 @@
-export { default as SynchronizationCoordinator } from './SynchronizationCoordinator.js';
-export { default as SynchronizationMonitoring } from './SynchronizationMonitoring.js';
+export { SynchronizationCoordinator } from './SynchronizationCoordinator.js';
+export { SynchronizationMonitoring } from './SynchronizationMonitoring.js';

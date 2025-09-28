@@ -5,9 +5,9 @@
  */
 
 import { EventEmitter } from 'events';
-import { Entity } from '@memento/core';
-import { GraphRelationship } from '@memento/core';
-import {
+import { Entity } from '@memento/shared-types.js';
+import { GraphRelationship } from '@memento/shared-types.js';
+import type {
   PipelineConfig,
   PipelineMetrics,
   PipelineState,
@@ -17,20 +17,44 @@ import {
   IngestionTelemetry,
   AlertConfig,
   IngestionError,
-  IngestionEvents,
   EnrichmentTask,
-  EnrichmentResult
+  EnrichmentResult,
 } from './types.js';
+// Event definitions
+export interface IngestionEvents {
+  'pipeline:started': () => void;
+  'pipeline:stopped': () => void;
+  'pipeline:error': (error: Error) => void;
+  'event:received': (event: ChangeEvent) => void;
+  'event:processed': (event: ChangeEvent, duration: number) => void;
+  'batch:created': (batch: BatchMetadata) => void;
+  'batch:completed': (result: BatchResult) => void;
+  'batch:failed': (error: BatchProcessingError) => void;
+  'worker:started': (workerId: string) => void;
+  'worker:stopped': (workerId: string) => void;
+  'worker:error': (error: WorkerError) => void;
+  'queue:overflow': (error: QueueOverflowError) => void;
+  'metrics:updated': (metrics: PipelineMetrics) => void;
+  'alert:triggered': (alert: AlertConfig, value: number) => void;
+  'parse:error': (error: { filePath: string; error: string }) => void;
+  'embedding:error': (error: { entityId: string; error: string }) => void;
+}
 
 import { QueueManager, QueueManagerConfig } from './queue-manager.js';
 import { WorkerPool, WorkerPoolConfig } from './worker-pool.js';
-import { HighThroughputBatchProcessor, BatchProcessorConfig } from './batch-processor.js';
+import {
+  HighThroughputBatchProcessor,
+  BatchProcessorConfig,
+} from './batch-processor.js';
 import { ASTParser, ParseResult } from '../parsing/ASTParser.js';
 import { EmbeddingService } from '../embeddings/EmbeddingService.js';
 
 export interface KnowledgeGraphServiceIntegration {
   createEntitiesBulk(entities: Entity[], options?: any): Promise<any>;
-  createRelationshipsBulk(relationships: GraphRelationship[], options?: any): Promise<any>;
+  createRelationshipsBulk(
+    relationships: GraphRelationship[],
+    options?: any
+  ): Promise<any>;
   createEmbeddingsBatch(entities: Entity[], options?: any): Promise<any>;
 }
 
@@ -62,7 +86,11 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
 
   // Error tracking
   private errorTypes = new Map<string, number>();
-  private recentErrors: Array<{ type: string; message: string; timestamp: Date }> = [];
+  private recentErrors: Array<{
+    type: string;
+    message: string;
+    timestamp: Date;
+  }> = [];
 
   // Enrichment queue for async processing
   private enrichmentQueue: EnrichmentTask[] = [];
@@ -83,7 +111,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       status: 'stopped',
       processedEvents: 0,
       errorCount: 0,
-      currentLoad: 0
+      currentLoad: 0,
     };
 
     this.metrics = {
@@ -96,14 +124,14 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
         oldestEventAge: 0,
         partitionLag: {},
         throughputPerSecond: 0,
-        errorRate: 0
+        errorRate: 0,
       },
       workerMetrics: [],
       batchMetrics: {
         activeBatches: 0,
         completedBatches: 0,
-        failedBatches: 0
-      }
+        failedBatches: 0,
+      },
     };
 
     this.initializeComponents();
@@ -115,11 +143,16 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    */
   async start(): Promise<void> {
     if (this.state.status !== 'stopped') {
-      throw new IngestionError('Pipeline already running or in transition', 'INVALID_STATE');
+      throw new IngestionError(
+        'Pipeline already running or in transition',
+        'INVALID_STATE'
+      );
     }
 
     this.state.status = 'starting';
-    console.log('[IngestionPipeline] Starting high-throughput ingestion pipeline...');
+    console.log(
+      '[IngestionPipeline] Starting high-throughput ingestion pipeline...'
+    );
 
     try {
       // Start core components
@@ -138,7 +171,6 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
 
       this.emit('pipeline:started');
       console.log('[IngestionPipeline] Pipeline started successfully');
-
     } catch (error) {
       this.state.status = 'error';
       this.emit('pipeline:error', error as Error);
@@ -169,7 +201,6 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       this.state.status = 'stopped';
       this.emit('pipeline:stopped');
       console.log('[IngestionPipeline] Pipeline stopped successfully');
-
     } catch (error) {
       this.state.status = 'error';
       this.emit('pipeline:error', error as Error);
@@ -223,11 +254,11 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
         metadata: {
           namespace: event.namespace,
           module: event.module,
-          eventType: event.eventType
+          eventType: event.eventType,
         },
         retryCount: 0,
         maxRetries: 3,
-        createdAt: new Date()
+        createdAt: new Date(),
       };
 
       // Queue for processing
@@ -242,11 +273,13 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       this.recordLatency(latency);
 
       this.emit('event:received', event);
-
     } catch (error) {
       this.errorCount++;
       this.state.errorCount++;
-      this.trackError('INGESTION_ERROR', error instanceof Error ? error.message : 'Unknown error');
+      this.trackError(
+        'INGESTION_ERROR',
+        error instanceof Error ? error.message : 'Unknown error'
+      );
       this.emit('pipeline:error', error as Error);
       throw error;
     }
@@ -256,7 +289,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    * Ingest multiple change events in batch
    */
   async ingestChangeEvents(events: ChangeEvent[]): Promise<void> {
-    const promises = events.map(event => this.ingestChangeEvent(event));
+    const promises = events.map((event) => this.ingestChangeEvent(event));
     await Promise.allSettled(promises);
   }
 
@@ -270,13 +303,16 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
 
     try {
       // Process through batch processor
-      const results = await this.batchProcessor.processChangeFragments(fragments);
+      const results = await this.batchProcessor.processChangeFragments(
+        fragments
+      );
 
       // Update metrics
       this.metrics.batchMetrics.completedBatches += results.length;
 
-      console.log(`[IngestionPipeline] Processed ${fragments.length} change fragments in ${results.length} batches`);
-
+      console.log(
+        `[IngestionPipeline] Processed ${fragments.length} change fragments in ${results.length} batches`
+      );
     } catch (error) {
       this.metrics.batchMetrics.failedBatches++;
       this.emit('pipeline:error', error as Error);
@@ -299,7 +335,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       metadata: { enrichmentType: task.type },
       retryCount: 0,
       maxRetries: 2,
-      createdAt: new Date()
+      createdAt: new Date(),
     };
 
     await this.queueManager.enqueue(enrichmentTaskPayload);
@@ -331,14 +367,14 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       errors: {
         count: this.errorCount,
         types: this.getErrorTypeBreakdown(),
-        samples: this.getRecentErrorSamples()
+        samples: this.getRecentErrorSamples(),
       },
       performance: {
         cpu: this.getCpuUsage(),
         memory: process.memoryUsage().heapUsed,
         diskIO: 0, // Not tracking disk I/O in this version
-        networkIO: 0 // Not tracking network I/O in this version
-      }
+        networkIO: 0, // Not tracking network I/O in this version
+      },
     };
   }
 
@@ -359,14 +395,17 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       enableBackpressure: true,
       backpressureThreshold: this.config.monitoring.alertThresholds.queueDepth,
       partitionStrategy: 'hash',
-      metricsInterval: this.config.monitoring.metricsInterval
+      metricsInterval: this.config.monitoring.metricsInterval,
     };
     this.queueManager = new QueueManager(queueConfig);
 
     // Initialize worker pool
     const workerConfig: WorkerPoolConfig = {
-      maxWorkers: this.config.workers.parsers + this.config.workers.entityWorkers +
-                  this.config.workers.relationshipWorkers + this.config.workers.embeddingWorkers,
+      maxWorkers:
+        this.config.workers.parsers +
+        this.config.workers.entityWorkers +
+        this.config.workers.relationshipWorkers +
+        this.config.workers.embeddingWorkers,
       minWorkers: Math.ceil(this.config.workers.parsers / 2),
       workerTimeout: 30000,
       healthCheckInterval: this.config.monitoring.healthCheckInterval,
@@ -374,10 +413,11 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       autoScale: true,
       scalingRules: {
         scaleUpThreshold: this.config.monitoring.alertThresholds.queueDepth / 2,
-        scaleDownThreshold: this.config.monitoring.alertThresholds.queueDepth / 4,
+        scaleDownThreshold:
+          this.config.monitoring.alertThresholds.queueDepth / 4,
         scaleUpCooldown: 30000,
-        scaleDownCooldown: 60000
-      }
+        scaleDownCooldown: 60000,
+      },
     };
     this.workerPool = new WorkerPool(workerConfig);
 
@@ -391,14 +431,17 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
         retryPolicy: {
           maxAttempts: 3,
           backoffMultiplier: 2,
-          maxBackoffMs: 10000
-        }
+          maxBackoffMs: 10000,
+        },
       },
       enableDAG: true,
       epochTTL: 3600000, // 1 hour
-      dependencyTimeout: 30000
+      dependencyTimeout: 30000,
     };
-    this.batchProcessor = new HighThroughputBatchProcessor(batchConfig, this.knowledgeGraphService);
+    this.batchProcessor = new HighThroughputBatchProcessor(
+      batchConfig,
+      this.knowledgeGraphService
+    );
 
     // Initialize AST parser
     this.astParser = new ASTParser();
@@ -447,16 +490,22 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     });
 
     // Entity upsert handler
-    this.workerPool.registerHandler('entity_upsert', async (task: TaskPayload) => {
-      const entities = task.data as Entity[];
-      return this.handleEntityUpsert(entities);
-    });
+    this.workerPool.registerHandler(
+      'entity_upsert',
+      async (task: TaskPayload) => {
+        const entities = task.data as Entity[];
+        return this.handleEntityUpsert(entities);
+      }
+    );
 
     // Relationship upsert handler
-    this.workerPool.registerHandler('relationship_upsert', async (task: TaskPayload) => {
-      const relationships = task.data as GraphRelationship[];
-      return this.handleRelationshipUpsert(relationships);
-    });
+    this.workerPool.registerHandler(
+      'relationship_upsert',
+      async (task: TaskPayload) => {
+        const relationships = task.data as GraphRelationship[];
+        return this.handleRelationshipUpsert(relationships);
+      }
+    );
 
     // Embedding handler
     this.workerPool.registerHandler('embedding', async (task: TaskPayload) => {
@@ -473,7 +522,9 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       console.log(`[IngestionPipeline] Parsing file: ${event.filePath}`);
 
       // Use the real AST parser to parse the file
-      const parseResult: ParseResult = await this.astParser.parseFile(event.filePath);
+      const parseResult: ParseResult = await this.astParser.parseFile(
+        event.filePath
+      );
 
       const fragments: ChangeFragment[] = [];
 
@@ -491,11 +542,11 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
               source: 'ingestion-pipeline',
               parseTimestamp: new Date(),
               namespace: event.namespace,
-              module: event.module
-            }
+              module: event.module,
+            },
           } as Entity,
           dependencyHints: [],
-          confidence: 0.9
+          confidence: 0.9,
         };
         fragments.push(fragment);
 
@@ -508,11 +559,11 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
           metadata: {
             fragmentId: fragment.id,
             filePath: event.filePath,
-            entityType: entity.type || entity.entityType
+            entityType: entity.type || entity.entityType,
           },
           retryCount: 0,
           maxRetries: 3,
-          createdAt: new Date()
+          createdAt: new Date(),
         };
 
         await this.queueManager.enqueue(entityTask);
@@ -521,7 +572,9 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       // Convert relationships to change fragments
       for (const relationship of parseResult.relationships) {
         const fragment: ChangeFragment = {
-          id: `fragment-${event.id}-relationship-${relationship.id || this.generateRelationshipId(relationship)}`,
+          id: `fragment-${event.id}-relationship-${
+            relationship.id || this.generateRelationshipId(relationship)
+          }`,
           eventId: event.id,
           changeType: 'relationship',
           operation: 'add',
@@ -532,14 +585,14 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
               source: 'ingestion-pipeline',
               parseTimestamp: new Date(),
               namespace: event.namespace,
-              module: event.module
-            }
+              module: event.module,
+            },
           } as GraphRelationship,
           dependencyHints: [
             relationship.fromEntityId || (relationship.from as any)?.id,
-            relationship.toEntityId || (relationship.to as any)?.id
+            relationship.toEntityId || (relationship.to as any)?.id,
           ].filter(Boolean),
-          confidence: relationship.confidence || 0.8
+          confidence: relationship.confidence || 0.8,
         };
         fragments.push(fragment);
 
@@ -552,11 +605,11 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
           metadata: {
             fragmentId: fragment.id,
             filePath: event.filePath,
-            relationshipType: relationship.type
+            relationshipType: relationship.type,
           },
           retryCount: 0,
           maxRetries: 3,
-          createdAt: new Date()
+          createdAt: new Date(),
         };
 
         await this.queueManager.enqueue(relationshipTask);
@@ -564,7 +617,10 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
 
       // Log parsing errors if any
       if (parseResult.errors && parseResult.errors.length > 0) {
-        console.warn(`[IngestionPipeline] Parse errors for ${event.filePath}:`, parseResult.errors);
+        console.warn(
+          `[IngestionPipeline] Parse errors for ${event.filePath}:`,
+          parseResult.errors
+        );
 
         // Emit error events for monitoring
         for (const error of parseResult.errors) {
@@ -573,22 +629,26 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
             error: error.message,
             line: error.line,
             column: error.column,
-            severity: error.severity
+            severity: error.severity,
           });
         }
       }
 
-      console.log(`[IngestionPipeline] Successfully parsed ${event.filePath}: ${parseResult.entities.length} entities, ${parseResult.relationships.length} relationships`);
+      console.log(
+        `[IngestionPipeline] Successfully parsed ${event.filePath}: ${parseResult.entities.length} entities, ${parseResult.relationships.length} relationships`
+      );
 
       return fragments;
-
     } catch (error) {
-      console.error(`[IngestionPipeline] Failed to parse file ${event.filePath}:`, error);
+      console.error(
+        `[IngestionPipeline] Failed to parse file ${event.filePath}:`,
+        error
+      );
 
       // Emit error event
       this.emit('parse:error', {
         filePath: event.filePath,
-        error: error instanceof Error ? error.message : 'Unknown parsing error'
+        error: error instanceof Error ? error.message : 'Unknown parsing error',
       });
 
       // Return empty fragments array instead of failing completely
@@ -600,8 +660,10 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    * Generate a relationship ID for relationships that don't have one
    */
   private generateRelationshipId(relationship: GraphRelationship): string {
-    const fromId = relationship.fromEntityId || (relationship.from as any)?.id || 'unknown';
-    const toId = relationship.toEntityId || (relationship.to as any)?.id || 'unknown';
+    const fromId =
+      relationship.fromEntityId || (relationship.from as any)?.id || 'unknown';
+    const toId =
+      relationship.toEntityId || (relationship.to as any)?.id || 'unknown';
     const type = relationship.type || 'unknown';
     return `${fromId}-${type}-${toId}`;
   }
@@ -614,26 +676,34 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       return this.knowledgeGraphService.createEntitiesBulk(entities);
     }
 
-    console.log(`[IngestionPipeline] Mock: Upserted ${entities.length} entities`);
+    console.log(
+      `[IngestionPipeline] Mock: Upserted ${entities.length} entities`
+    );
     return { success: true, count: entities.length };
   }
 
   /**
    * Handle relationship upsert task
    */
-  private async handleRelationshipUpsert(relationships: GraphRelationship[]): Promise<any> {
+  private async handleRelationshipUpsert(
+    relationships: GraphRelationship[]
+  ): Promise<any> {
     if (this.knowledgeGraphService) {
       return this.knowledgeGraphService.createRelationshipsBulk(relationships);
     }
 
-    console.log(`[IngestionPipeline] Mock: Upserted ${relationships.length} relationships`);
+    console.log(
+      `[IngestionPipeline] Mock: Upserted ${relationships.length} relationships`
+    );
     return { success: true, count: relationships.length };
   }
 
   /**
    * Handle enrichment task (embeddings, analysis, etc.)
    */
-  private async handleEnrichmentTask(task: EnrichmentTask): Promise<EnrichmentResult> {
+  private async handleEnrichmentTask(
+    task: EnrichmentTask
+  ): Promise<EnrichmentResult> {
     const startTime = Date.now();
 
     try {
@@ -663,9 +733,8 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
         success: true,
         result,
         duration: Date.now() - startTime,
-        metadata: {}
+        metadata: {},
       };
-
     } catch (error) {
       return {
         taskId: task.id,
@@ -674,7 +743,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
         success: false,
         error: error as Error,
         duration: Date.now() - startTime,
-        metadata: {}
+        metadata: {},
       };
     }
   }
@@ -684,50 +753,65 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    */
   private async handleEmbeddingTask(task: EnrichmentTask): Promise<any> {
     if (!this.embeddingService) {
-      console.log(`[IngestionPipeline] No EmbeddingService available, skipping embedding for entity ${task.entityId}`);
+      console.log(
+        `[IngestionPipeline] No EmbeddingService available, skipping embedding for entity ${task.entityId}`
+      );
       return { embedding: null, skipped: true };
     }
 
     try {
-      console.log(`[IngestionPipeline] Generating embedding for entity ${task.entityId}`);
+      console.log(
+        `[IngestionPipeline] Generating embedding for entity ${task.entityId}`
+      );
 
       // Get the entity from the task data
       const entity = task.data as Entity;
 
       if (!entity) {
-        console.warn(`[IngestionPipeline] No entity data found for embedding task ${task.entityId}`);
+        console.warn(
+          `[IngestionPipeline] No entity data found for embedding task ${task.entityId}`
+        );
         return { embedding: null, error: 'No entity data' };
       }
 
       // Generate and store the embedding using the real service
-      const embeddingResult = await this.embeddingService.generateAndStore(entity, {
-        indexName: 'entity_vectors',
-        checkpointId: task.metadata?.checkpointId
-      });
+      const embeddingResult = await this.embeddingService.generateAndStore(
+        entity,
+        {
+          indexName: 'entity_vectors',
+          checkpointId: task.metadata?.checkpointId,
+        }
+      );
 
-      console.log(`[IngestionPipeline] Successfully generated embedding for entity ${task.entityId}, dimensions: ${embeddingResult.vector.length}`);
+      console.log(
+        `[IngestionPipeline] Successfully generated embedding for entity ${task.entityId}, dimensions: ${embeddingResult.vector.length}`
+      );
 
       return {
         entityId: embeddingResult.entityId,
         embedding: embeddingResult.vector,
         metadata: embeddingResult.metadata,
-        success: true
+        success: true,
       };
-
     } catch (error) {
-      console.error(`[IngestionPipeline] Failed to generate embedding for entity ${task.entityId}:`, error);
+      console.error(
+        `[IngestionPipeline] Failed to generate embedding for entity ${task.entityId}:`,
+        error
+      );
 
       // Emit error event for monitoring
       this.emit('embedding:error', {
         entityId: task.entityId,
-        error: error instanceof Error ? error.message : 'Unknown embedding error'
+        error:
+          error instanceof Error ? error.message : 'Unknown embedding error',
       });
 
       return {
         entityId: task.entityId,
         embedding: null,
-        error: error instanceof Error ? error.message : 'Unknown embedding error',
-        success: false
+        error:
+          error instanceof Error ? error.message : 'Unknown embedding error',
+        success: false,
       };
     }
   }
@@ -736,7 +820,9 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    * Handle impact analysis task
    */
   private async handleImpactAnalysisTask(task: EnrichmentTask): Promise<any> {
-    console.log(`[IngestionPipeline] Mock: Analyzed impact for entity ${task.entityId}`);
+    console.log(
+      `[IngestionPipeline] Mock: Analyzed impact for entity ${task.entityId}`
+    );
     return { impactScore: Math.random(), affectedEntities: [] };
   }
 
@@ -744,7 +830,9 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    * Handle documentation analysis task
    */
   private async handleDocumentationTask(task: EnrichmentTask): Promise<any> {
-    console.log(`[IngestionPipeline] Mock: Analyzed documentation for entity ${task.entityId}`);
+    console.log(
+      `[IngestionPipeline] Mock: Analyzed documentation for entity ${task.entityId}`
+    );
     return { documentationScore: Math.random(), topics: [] };
   }
 
@@ -752,7 +840,9 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    * Handle security scanning task
    */
   private async handleSecurityTask(task: EnrichmentTask): Promise<any> {
-    console.log(`[IngestionPipeline] Mock: Security scan for entity ${task.entityId}`);
+    console.log(
+      `[IngestionPipeline] Mock: Security scan for entity ${task.entityId}`
+    );
     return { vulnerabilities: [], riskScore: Math.random() };
   }
 
@@ -792,7 +882,8 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     }
 
     // Update metrics
-    this.metrics.averageLatency = this.latencyBuffer.reduce((a, b) => a + b, 0) / this.latencyBuffer.length;
+    this.metrics.averageLatency =
+      this.latencyBuffer.reduce((a, b) => a + b, 0) / this.latencyBuffer.length;
 
     // Calculate P95
     const sorted = [...this.latencyBuffer].sort((a, b) => a - b);
@@ -840,13 +931,17 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     const now = Date.now();
     this.throughputBuffer.push(this.processedEventCount);
 
-    if (this.throughputBuffer.length > 60) { // Last 60 seconds
+    if (this.throughputBuffer.length > 60) {
+      // Last 60 seconds
       this.throughputBuffer.shift();
     }
 
-    this.metrics.eventsPerSecond = this.throughputBuffer.length > 1
-      ? (this.throughputBuffer[this.throughputBuffer.length - 1] - this.throughputBuffer[0]) / this.throughputBuffer.length
-      : 0;
+    this.metrics.eventsPerSecond =
+      this.throughputBuffer.length > 1
+        ? (this.throughputBuffer[this.throughputBuffer.length - 1] -
+            this.throughputBuffer[0]) /
+          this.throughputBuffer.length
+        : 0;
 
     // Update worker metrics
     this.metrics.workerMetrics = this.workerPool.getMetrics().workers;
@@ -856,7 +951,9 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     this.metrics.batchMetrics.activeBatches = batchMetrics.activeBatches;
 
     // Update current load
-    this.state.currentLoad = this.metrics.queueMetrics.queueDepth / this.config.monitoring.alertThresholds.queueDepth;
+    this.state.currentLoad =
+      this.metrics.queueMetrics.queueDepth /
+      this.config.monitoring.alertThresholds.queueDepth;
     this.state.lastActivity = new Date();
   }
 
@@ -894,8 +991,13 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     const workerMetrics = this.workerPool.getMetrics();
 
     // Alert if queue is backing up
-    if (queueMetrics.queueDepth > this.config.monitoring.alertThresholds.queueDepth) {
-      console.warn(`[IngestionPipeline] Queue depth warning: ${queueMetrics.queueDepth}`);
+    if (
+      queueMetrics.queueDepth >
+      this.config.monitoring.alertThresholds.queueDepth
+    ) {
+      console.warn(
+        `[IngestionPipeline] Queue depth warning: ${queueMetrics.queueDepth}`
+      );
     }
 
     // Alert if workers are all busy
@@ -904,8 +1006,13 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     }
 
     // Alert if error rate is high
-    if (this.metrics.queueMetrics.errorRate > this.config.monitoring.alertThresholds.errorRate) {
-      console.warn(`[IngestionPipeline] High error rate: ${this.metrics.queueMetrics.errorRate}`);
+    if (
+      this.metrics.queueMetrics.errorRate >
+      this.config.monitoring.alertThresholds.errorRate
+    ) {
+      console.warn(
+        `[IngestionPipeline] High error rate: ${this.metrics.queueMetrics.errorRate}`
+      );
     }
   }
 
@@ -928,8 +1035,8 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       size: stats.size,
       diffHash: `hash-${Math.random()}`,
       metadata: {
-        singleFile: true
-      }
+        singleFile: true,
+      },
     };
 
     await this.ingestChangeEvent(event);
@@ -951,7 +1058,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       }
 
       // Wait a bit before checking again
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
     throw new Error(`Pipeline did not complete within ${timeoutMs}ms timeout`);
@@ -965,7 +1072,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     const parts = filePath.split(path.sep).filter(Boolean);
 
     // Find 'src' directory and use path from there
-    const srcIndex = parts.findIndex(part => part === 'src');
+    const srcIndex = parts.findIndex((part) => part === 'src');
     if (srcIndex >= 0 && srcIndex < parts.length - 1) {
       return parts.slice(srcIndex + 1, -1).join('/') || 'root';
     }
@@ -988,7 +1095,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     this.recentErrors.push({
       type,
       message,
-      timestamp: new Date()
+      timestamp: new Date(),
     });
 
     if (this.recentErrors.length > 100) {
@@ -1011,7 +1118,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    * Get recent error samples
    */
   private getRecentErrorSamples(): Error[] {
-    return this.recentErrors.slice(-10).map(error => {
+    return this.recentErrors.slice(-10).map((error) => {
       const err = new Error(error.message);
       err.name = error.type;
       return err;
@@ -1028,9 +1135,12 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
 
     // Base CPU usage on current load and active workers
     const baseUsage = state.currentLoad * 0.3; // 30% max for queue load
-    const workerUsage = metrics.workerMetrics.length > 0
-      ? metrics.workerMetrics.filter(w => w.status === 'busy').length / metrics.workerMetrics.length * 0.4
-      : 0;
+    const workerUsage =
+      metrics.workerMetrics.length > 0
+        ? (metrics.workerMetrics.filter((w) => w.status === 'busy').length /
+            metrics.workerMetrics.length) *
+          0.4
+        : 0;
 
     return Math.min(baseUsage + workerUsage, 1.0);
   }

@@ -20,7 +20,9 @@ function diffLines(oldStr: string, newStr: string): Change[] {
   // Simple line-by-line comparison
   const maxLines = Math.max(oldLines.length, newLines.length);
   for (let i = 0; i < maxLines; i++) {
+    // eslint-disable-next-line security/detect-object-injection
     const oldLine = oldLines[i];
+    // eslint-disable-next-line security/detect-object-injection
     const newLine = newLines[i];
 
     if (oldLine === undefined) {
@@ -46,7 +48,9 @@ function diffWords(oldStr: string, newStr: string): Change[] {
   // Simple word-by-word comparison
   const maxWords = Math.max(oldWords.length, newWords.length);
   for (let i = 0; i < maxWords; i++) {
+    // eslint-disable-next-line security/detect-object-injection
     const oldWord = oldWords[i];
+    // eslint-disable-next-line security/detect-object-injection
     const newWord = newWords[i];
 
     if (oldWord === undefined) {
@@ -69,7 +73,9 @@ function diffChars(oldStr: string, newStr: string): Change[] {
   const maxLen = Math.max(oldStr.length, newStr.length);
 
   for (let i = 0; i < maxLen; i++) {
+    // eslint-disable-next-line security/detect-object-injection
     const oldChar = oldStr[i];
+    // eslint-disable-next-line security/detect-object-injection
     const newChar = newStr[i];
 
     if (oldChar === undefined) {
@@ -91,9 +97,7 @@ import {
   ConflictType,
   ConflictStrategy,
   ConflictResolution,
-  DiffEntry,
-  RollbackLogEntry,
-  RollbackError
+  RollbackError,
 } from './RollbackTypes.js';
 
 /**
@@ -192,7 +196,7 @@ export class ConflictResolutionEngine extends EventEmitter {
     preserveStructure: true,
     allowPartialMerge: true,
     maxComplexity: 1000,
-    semanticAnalysis: true
+    semanticAnalysis: true,
   };
 
   constructor(config?: Partial<SmartMergeConfig>) {
@@ -206,11 +210,16 @@ export class ConflictResolutionEngine extends EventEmitter {
    * Generate visual diff for a conflict
    */
   async generateVisualDiff(conflict: RollbackConflict): Promise<VisualDiff> {
-    const diffId = `diff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const diffId = `diff_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
 
     try {
       // Determine the best diff type based on content
-      const diffType = this.determineDiffType(conflict.currentValue, conflict.rollbackValue);
+      const diffType = this.determineDiffType(
+        conflict.currentValue,
+        conflict.rollbackValue
+      );
 
       // Generate the appropriate diff
       const changes = await this.generateDiff(
@@ -231,16 +240,15 @@ export class ConflictResolutionEngine extends EventEmitter {
         conflict,
         changes,
         summary,
-        metadata
+        metadata,
       };
-
     } catch (error) {
       throw new RollbackError(
         'Failed to generate visual diff',
         'VISUAL_DIFF_FAILED',
         {
           conflictPath: conflict.path,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         }
       );
     }
@@ -263,7 +271,11 @@ export class ConflictResolutionEngine extends EventEmitter {
           strategy: ConflictStrategy.ASK_USER,
           confidence: 0,
           warnings: ['Conflict too complex for automatic merge'],
-          appliedChanges: { kept: [], discarded: [], merged: [] }
+          appliedChanges: {
+            kept: [] as string[],
+            discarded: [] as string[],
+            merged: [] as string[],
+          },
         };
       }
 
@@ -288,18 +300,29 @@ export class ConflictResolutionEngine extends EventEmitter {
             strategy: ConflictStrategy.ASK_USER,
             confidence: 0,
             warnings: ['Strategy not supported for smart merge'],
-            appliedChanges: { kept: [], discarded: [], merged: [] }
+            appliedChanges: {
+              kept: [] as string[],
+              discarded: [] as string[],
+              merged: [] as string[],
+            },
           };
       }
-
     } catch (error) {
       return {
         success: false,
         mergedValue: null,
         strategy: ConflictStrategy.ABORT,
         confidence: 0,
-        warnings: [`Merge failed: ${error instanceof Error ? error.message : String(error)}`],
-        appliedChanges: { kept: [], discarded: [], merged: [] }
+        warnings: [
+          `Merge failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ],
+        appliedChanges: {
+          kept: [] as string[],
+          discarded: [] as string[],
+          merged: [] as string[],
+        },
       };
     }
   }
@@ -326,8 +349,8 @@ export class ConflictResolutionEngine extends EventEmitter {
       options,
       recommendations: {
         primary: sortedOptions[0],
-        alternatives: sortedOptions.slice(1)
-      }
+        alternatives: sortedOptions.slice(1),
+      },
     };
   }
 
@@ -347,7 +370,11 @@ export class ConflictResolutionEngine extends EventEmitter {
     for (const group of conflictGroups) {
       // Process each group independently
       for (const conflict of group) {
-        const result = await this.resolveConflict(conflict, resolution, context);
+        const result = await this.resolveConflict(
+          conflict,
+          resolution,
+          context
+        );
         results.set(conflict.path, result);
       }
     }
@@ -365,36 +392,61 @@ export class ConflictResolutionEngine extends EventEmitter {
   ): Promise<MergeResult> {
     try {
       // Try primary strategy first
-      const primaryResult = await this.applyResolutionStrategy(conflict, resolution.strategy, context);
+      const primaryResult = await this.applyResolutionStrategy(
+        conflict,
+        resolution.strategy,
+        context
+      );
 
       if (primaryResult.success && primaryResult.confidence >= 70) {
         return primaryResult;
       }
 
       // If primary strategy fails or low confidence, try smart merge
+      let smartMergeResult: MergeResult | undefined;
       if (resolution.strategy !== ConflictStrategy.MERGE) {
-        const smartMergeResult = await this.smartMerge(conflict, context);
-        if (smartMergeResult.success && smartMergeResult.confidence > primaryResult.confidence) {
+        smartMergeResult = await this.smartMerge(conflict, context);
+        if (
+          smartMergeResult.success &&
+          smartMergeResult.confidence > primaryResult.confidence
+        ) {
           return smartMergeResult;
         }
       }
 
-      // Return best result
-      return primaryResult.confidence >= smartMergeResult.confidence ? primaryResult : smartMergeResult;
-
+      // Return best result - prefer primary if smart merge wasn't attempted or has lower confidence
+      if (
+        smartMergeResult &&
+        smartMergeResult.success &&
+        smartMergeResult.confidence > primaryResult.confidence
+      ) {
+        return smartMergeResult;
+      }
+      return primaryResult;
     } catch (error) {
       return {
         success: false,
         mergedValue: null,
         strategy: ConflictStrategy.ABORT,
         confidence: 0,
-        warnings: [`Resolution failed: ${error instanceof Error ? error.message : String(error)}`],
-        appliedChanges: { kept: [], discarded: [], merged: [] }
+        warnings: [
+          `Resolution failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ],
+        appliedChanges: {
+          kept: [] as string[],
+          discarded: [] as string[],
+          merged: [] as string[],
+        },
       };
     }
   }
 
-  private determineDiffType(currentValue: any, rollbackValue: any): 'line' | 'word' | 'char' | 'json' | 'semantic' {
+  private determineDiffType(
+    currentValue: any,
+    rollbackValue: any
+  ): 'line' | 'word' | 'char' | 'json' | 'semantic' {
     // Handle null/undefined cases
     if (!currentValue || !rollbackValue) {
       return 'semantic';
@@ -456,12 +508,15 @@ export class ConflictResolutionEngine extends EventEmitter {
     return this.convertToDiffLines(changes, diffType);
   }
 
-  private async generateJsonDiff(rollbackValue: any, currentValue: any): Promise<Change[]> {
+  private async generateJsonDiff(
+    rollbackValue: any,
+    currentValue: any
+  ): Promise<Change[]> {
     try {
       const rollbackJson = JSON.stringify(rollbackValue, null, 2);
       const currentJson = JSON.stringify(currentValue, null, 2);
       return diffLines(rollbackJson, currentJson);
-    } catch (error) {
+    } catch (_error) {
       // Fallback to string comparison
       const rollbackStr = this.valueToString(rollbackValue);
       const currentStr = this.valueToString(currentValue);
@@ -469,31 +524,38 @@ export class ConflictResolutionEngine extends EventEmitter {
     }
   }
 
-  private async generateSemanticDiff(rollbackValue: any, currentValue: any): Promise<Change[]> {
+  private async generateSemanticDiff(
+    rollbackValue: any,
+    currentValue: any
+  ): Promise<Change[]> {
     // For semantic diff, we'll create custom changes based on structural differences
     const changes: Change[] = [];
 
     if (typeof rollbackValue !== typeof currentValue) {
       changes.push({
         removed: true,
-        value: `Type: ${typeof rollbackValue} (${this.valueToString(rollbackValue)})`
+        value: `Type: ${typeof rollbackValue} (${this.valueToString(
+          rollbackValue
+        )})`,
       });
       changes.push({
         added: true,
-        value: `Type: ${typeof currentValue} (${this.valueToString(currentValue)})`
+        value: `Type: ${typeof currentValue} (${this.valueToString(
+          currentValue
+        )})`,
       });
     } else if (rollbackValue !== currentValue) {
       changes.push({
         removed: true,
-        value: this.valueToString(rollbackValue)
+        value: this.valueToString(rollbackValue),
       });
       changes.push({
         added: true,
-        value: this.valueToString(currentValue)
+        value: this.valueToString(currentValue),
       });
     } else {
       changes.push({
-        value: this.valueToString(currentValue)
+        value: this.valueToString(currentValue),
       });
     }
 
@@ -509,6 +571,7 @@ export class ConflictResolutionEngine extends EventEmitter {
       const contentLines = content.split('\n');
 
       for (let i = 0; i < contentLines.length; i++) {
+        // eslint-disable-next-line security/detect-object-injection
         const line = contentLines[i];
         if (i === contentLines.length - 1 && line === '') continue; // Skip empty last line
 
@@ -521,7 +584,10 @@ export class ConflictResolutionEngine extends EventEmitter {
           type,
           content: line,
           confidence: 95, // High confidence for standard diff
-          tokens: diffType === 'word' || diffType === 'char' ? this.tokenizeLine(line, change) : undefined
+          tokens:
+            diffType === 'word' || diffType === 'char'
+              ? this.tokenizeLine(line, change)
+              : undefined,
         });
       }
     }
@@ -530,11 +596,13 @@ export class ConflictResolutionEngine extends EventEmitter {
   }
 
   private tokenizeLine(line: string, change: Change): DiffToken[] {
-    return [{
-      text: line,
-      type: change.added ? 'added' : change.removed ? 'removed' : 'unchanged',
-      position: { start: 0, end: line.length }
-    }];
+    return [
+      {
+        text: line,
+        type: change.added ? 'added' : change.removed ? 'removed' : 'unchanged',
+        position: { start: 0, end: line.length },
+      },
+    ];
   }
 
   private valueToString(value: any): string {
@@ -572,7 +640,8 @@ export class ConflictResolutionEngine extends EventEmitter {
     }
 
     // Calculate similarity (simple heuristic)
-    const unchangedLines = totalLines - addedLines - removedLines - modifiedLines;
+    const unchangedLines =
+      totalLines - addedLines - removedLines - modifiedLines;
     const similarity = totalLines > 0 ? (unchangedLines / totalLines) * 100 : 0;
 
     return {
@@ -580,7 +649,7 @@ export class ConflictResolutionEngine extends EventEmitter {
       addedLines,
       removedLines,
       modifiedLines,
-      similarity
+      similarity,
     };
   }
 
@@ -625,8 +694,8 @@ export class ConflictResolutionEngine extends EventEmitter {
       impact: {
         entities: this.extractAffectedEntities(conflict),
         relationships: this.extractAffectedRelationships(conflict),
-        dependencies: this.extractAffectedDependencies(conflict)
-      }
+        dependencies: this.extractAffectedDependencies(conflict),
+      },
     };
   }
 
@@ -672,7 +741,9 @@ export class ConflictResolutionEngine extends EventEmitter {
     }
 
     if (conflict.context?.relationships) {
-      conflict.context.relationships.forEach((r: string) => relationships.add(r));
+      conflict.context.relationships.forEach((r: string) =>
+        relationships.add(r)
+      );
     }
 
     return Array.from(relationships);
@@ -710,7 +781,10 @@ export class ConflictResolutionEngine extends EventEmitter {
     complexity += Math.max(currentSize, rollbackSize) / 100;
 
     // Add complexity for nested objects
-    if (typeof conflict.currentValue === 'object' && conflict.currentValue !== null) {
+    if (
+      typeof conflict.currentValue === 'object' &&
+      conflict.currentValue !== null
+    ) {
       complexity += Object.keys(conflict.currentValue).length * 5;
     }
 
@@ -719,12 +793,12 @@ export class ConflictResolutionEngine extends EventEmitter {
 
   private async determineBestStrategy(
     conflict: RollbackConflict,
-    context?: ConflictContext
+    _context?: ConflictContext
   ): Promise<ConflictStrategy> {
     // Consider context priority
-    if (context?.priority !== undefined) {
-      if (context.priority > 8) return ConflictStrategy.OVERWRITE;
-      if (context.priority < 3) return ConflictStrategy.SKIP;
+    if (_context?.priority !== undefined) {
+      if (_context.priority > 8) return ConflictStrategy.OVERWRITE;
+      if (_context.priority < 3) return ConflictStrategy.SKIP;
     }
 
     // Consider conflict type
@@ -734,7 +808,9 @@ export class ConflictResolutionEngine extends EventEmitter {
       case ConflictType.PERMISSION_DENIED:
         return ConflictStrategy.ASK_USER;
       case ConflictType.TYPE_MISMATCH:
-        return this.mergeConfig.preserveStructure ? ConflictStrategy.ASK_USER : ConflictStrategy.OVERWRITE;
+        return this.mergeConfig.preserveStructure
+          ? ConflictStrategy.ASK_USER
+          : ConflictStrategy.OVERWRITE;
       default:
         return ConflictStrategy.MERGE;
     }
@@ -742,23 +818,39 @@ export class ConflictResolutionEngine extends EventEmitter {
 
   private async performIntelligentMerge(
     conflict: RollbackConflict,
-    context?: ConflictContext
+    _context?: ConflictContext
   ): Promise<MergeResult> {
     try {
       let mergedValue: any;
       let confidence = 0;
       const warnings: string[] = [];
-      const appliedChanges = { kept: [], discarded: [], merged: [] };
+      const appliedChanges = {
+        kept: [] as string[],
+        discarded: [] as string[],
+        merged: [] as string[],
+      };
 
       // Handle different value types
-      if (typeof conflict.currentValue === 'object' && typeof conflict.rollbackValue === 'object') {
-        const objectMerge = await this.mergeObjects(conflict.currentValue, conflict.rollbackValue);
+      if (
+        typeof conflict.currentValue === 'object' &&
+        typeof conflict.rollbackValue === 'object'
+      ) {
+        const objectMerge = await this.mergeObjects(
+          conflict.currentValue,
+          conflict.rollbackValue
+        );
         mergedValue = objectMerge.result;
         confidence = objectMerge.confidence;
         warnings.push(...objectMerge.warnings);
         appliedChanges.merged.push(...objectMerge.mergedKeys);
-      } else if (typeof conflict.currentValue === 'string' && typeof conflict.rollbackValue === 'string') {
-        const stringMerge = await this.mergeStrings(conflict.currentValue, conflict.rollbackValue);
+      } else if (
+        typeof conflict.currentValue === 'string' &&
+        typeof conflict.rollbackValue === 'string'
+      ) {
+        const stringMerge = await this.mergeStrings(
+          conflict.currentValue,
+          conflict.rollbackValue
+        );
         mergedValue = stringMerge.result;
         confidence = stringMerge.confidence;
         warnings.push(...stringMerge.warnings);
@@ -782,22 +874,32 @@ export class ConflictResolutionEngine extends EventEmitter {
         strategy: ConflictStrategy.MERGE,
         confidence,
         warnings,
-        appliedChanges
+        appliedChanges,
       };
-
     } catch (error) {
       return {
         success: false,
         mergedValue: null,
         strategy: ConflictStrategy.MERGE,
         confidence: 0,
-        warnings: [`Intelligent merge failed: ${error instanceof Error ? error.message : String(error)}`],
-        appliedChanges: { kept: [], discarded: [], merged: [] }
+        warnings: [
+          `Intelligent merge failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ],
+        appliedChanges: {
+          kept: [] as string[],
+          discarded: [] as string[],
+          merged: [] as string[],
+        },
       };
     }
   }
 
-  private async mergeObjects(current: any, rollback: any): Promise<{
+  private async mergeObjects(
+    current: any,
+    rollback: any
+  ): Promise<{
     result: any;
     confidence: number;
     warnings: string[];
@@ -813,16 +915,21 @@ export class ConflictResolutionEngine extends EventEmitter {
     for (const [key, value] of Object.entries(rollback)) {
       if (!(key in current)) {
         // Key doesn't exist in current, add it
+        // eslint-disable-next-line security/detect-object-injection
         result[key] = value;
         mergedKeys.push(`+${key}`);
         resolutions++;
+        // eslint-disable-next-line security/detect-object-injection
       } else if (current[key] !== value) {
         // Key exists but values differ
         conflicts++;
 
+        // eslint-disable-next-line security/detect-object-injection
         if (typeof current[key] === typeof value && typeof value === 'object') {
           // Both are objects, try recursive merge
+          // eslint-disable-next-line security/detect-object-injection
           const nestedMerge = await this.mergeObjects(current[key], value);
+          // eslint-disable-next-line security/detect-object-injection
           result[key] = nestedMerge.result;
           mergedKeys.push(`~${key}`);
           warnings.push(...nestedMerge.warnings);
@@ -834,6 +941,7 @@ export class ConflictResolutionEngine extends EventEmitter {
             mergedKeys.push(`=${key}(current)`);
           } else {
             // Use rollback
+            // eslint-disable-next-line security/detect-object-injection
             result[key] = value;
             mergedKeys.push(`=${key}(rollback)`);
           }
@@ -843,16 +951,22 @@ export class ConflictResolutionEngine extends EventEmitter {
     }
 
     // Calculate confidence based on resolution success rate
-    const confidence = conflicts > 0 ? Math.round((resolutions / conflicts) * 100) : 95;
+    const confidence =
+      conflicts > 0 ? Math.round((resolutions / conflicts) * 100) : 95;
 
     if (conflicts > resolutions / 2) {
-      warnings.push(`High conflict rate: ${conflicts} conflicts, ${resolutions} resolutions`);
+      warnings.push(
+        `High conflict rate: ${conflicts} conflicts, ${resolutions} resolutions`
+      );
     }
 
     return { result, confidence, warnings, mergedKeys };
   }
 
-  private async mergeStrings(current: string, rollback: string): Promise<{
+  private async mergeStrings(
+    current: string,
+    rollback: string
+  ): Promise<{
     result: string;
     confidence: number;
     warnings: string[];
@@ -872,18 +986,18 @@ export class ConflictResolutionEngine extends EventEmitter {
       if (change.added) {
         // Line was added in current
         if (this.mergeConfig.preferNewer) {
-          mergedLines.push(...change.value.split('\n').filter(l => l !== ''));
+          mergedLines.push(...change.value.split('\n').filter((l) => l !== ''));
         }
       } else if (change.removed) {
         // Line was removed in current (exists in rollback)
         if (!this.mergeConfig.preferNewer) {
-          mergedLines.push(...change.value.split('\n').filter(l => l !== ''));
+          mergedLines.push(...change.value.split('\n').filter((l) => l !== ''));
         } else {
           confidence -= 5; // Reduce confidence when discarding rollback content
         }
       } else {
         // Unchanged line
-        mergedLines.push(...change.value.split('\n').filter(l => l !== ''));
+        mergedLines.push(...change.value.split('\n').filter((l) => l !== ''));
       }
     }
 
@@ -895,12 +1009,18 @@ export class ConflictResolutionEngine extends EventEmitter {
     return {
       result: mergedLines.join('\n'),
       confidence: Math.max(0, confidence),
-      warnings
+      warnings,
     };
   }
 
-  private performOverwrite(conflict: RollbackConflict, preference: 'current' | 'rollback'): MergeResult {
-    const mergedValue = preference === 'rollback' ? conflict.rollbackValue : conflict.currentValue;
+  private performOverwrite(
+    conflict: RollbackConflict,
+    preference: 'current' | 'rollback'
+  ): MergeResult {
+    const mergedValue =
+      preference === 'rollback'
+        ? conflict.rollbackValue
+        : conflict.currentValue;
     const discarded = preference === 'rollback' ? 'current' : 'rollback';
 
     return {
@@ -912,8 +1032,8 @@ export class ConflictResolutionEngine extends EventEmitter {
       appliedChanges: {
         kept: [preference],
         discarded: [discarded],
-        merged: []
-      }
+        merged: [],
+      },
     };
   }
 
@@ -927,12 +1047,14 @@ export class ConflictResolutionEngine extends EventEmitter {
       appliedChanges: {
         kept: ['current'],
         discarded: ['rollback'],
-        merged: []
-      }
+        merged: [],
+      },
     };
   }
 
-  private async generateResolutionOptions(conflict: RollbackConflict): Promise<ConflictResolutionOption[]> {
+  private async generateResolutionOptions(
+    conflict: RollbackConflict
+  ): Promise<ConflictResolutionOption[]> {
     const options: ConflictResolutionOption[] = [];
 
     // Always provide basic options
@@ -942,7 +1064,7 @@ export class ConflictResolutionEngine extends EventEmitter {
       description: 'Preserve the current state and ignore rollback value',
       strategy: ConflictStrategy.SKIP,
       confidence: 80,
-      preview: this.valueToString(conflict.currentValue)
+      preview: this.valueToString(conflict.currentValue),
     });
 
     options.push({
@@ -951,7 +1073,7 @@ export class ConflictResolutionEngine extends EventEmitter {
       description: 'Replace current value with rollback value',
       strategy: ConflictStrategy.OVERWRITE,
       confidence: 85,
-      preview: this.valueToString(conflict.rollbackValue)
+      preview: this.valueToString(conflict.rollbackValue),
     });
 
     // Add merge option if values are compatible
@@ -963,7 +1085,7 @@ export class ConflictResolutionEngine extends EventEmitter {
         description: 'Intelligently combine both values',
         strategy: ConflictStrategy.MERGE,
         confidence: mergePreview.confidence,
-        preview: this.valueToString(mergePreview.mergedValue)
+        preview: this.valueToString(mergePreview.mergedValue),
       });
     }
 
@@ -978,7 +1100,9 @@ export class ConflictResolutionEngine extends EventEmitter {
     );
   }
 
-  private groupRelatedConflicts(conflicts: RollbackConflict[]): RollbackConflict[][] {
+  private groupRelatedConflicts(
+    conflicts: RollbackConflict[]
+  ): RollbackConflict[][] {
     // Simple grouping by path prefix for now
     const groups = new Map<string, RollbackConflict[]>();
 
@@ -1014,7 +1138,11 @@ export class ConflictResolutionEngine extends EventEmitter {
           strategy,
           confidence: 0,
           warnings: [`Strategy ${strategy} not implemented`],
-          appliedChanges: { kept: [], discarded: [], merged: [] }
+          appliedChanges: {
+            kept: [] as string[],
+            discarded: [] as string[],
+            merged: [] as string[],
+          },
         };
     }
   }
@@ -1038,5 +1166,5 @@ export type {
   MergeResult,
   SmartMergeConfig,
   ConflictContext,
-  ConflictResolutionOption
+  ConflictResolutionOption,
 };

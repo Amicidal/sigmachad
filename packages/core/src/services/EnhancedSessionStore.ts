@@ -17,45 +17,17 @@ import {
   ISessionStore,
   RedisSessionData,
   SessionStats,
-} from './SessionTypes.js';
+  EnhancedSessionConfig,
+  BatchOperation,
+  CacheEntry,
+  SessionStorePerformanceMetrics as PerformanceMetrics,
+} from '@memento/shared-types';
 import { RedisConnectionPool, PoolConfig } from './RedisConnectionPool.js';
 
-export interface EnhancedSessionConfig {
-  redis: RedisConfig;
-  pool: Partial<PoolConfig>;
-  enablePipelining: boolean;
-  enableLazyLoading: boolean;
-  enableCompression: boolean;
-  enableLocalCache: boolean;
-  localCacheSize: number;
-  localCacheTTL: number; // milliseconds
-  batchSize: number;
-  pipelineTimeout: number; // milliseconds
-}
-
-export interface BatchOperation {
-  type: 'create' | 'update' | 'delete' | 'addEvent';
-  sessionId: string;
-  data?: any;
-  timestamp: number;
-}
-
-export interface CacheEntry {
-  data: SessionDocument;
-  timestamp: number;
-  ttl: number;
-}
-
-export interface PerformanceMetrics {
-  totalOperations: number;
-  averageLatency: number;
-  cacheHitRate: number;
-  pipelineOperations: number;
-  compressionRatio: number;
-  connectionPoolStats: any;
-}
-
-export class EnhancedSessionStore extends EventEmitter implements ISessionStore {
+export class EnhancedSessionStore
+  extends EventEmitter
+  implements ISessionStore
+{
   private connectionPool: RedisConnectionPool;
   private config: EnhancedSessionConfig;
   private localCache = new Map<string, CacheEntry>();
@@ -67,16 +39,18 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   constructor(config: EnhancedSessionConfig) {
     super();
     this.config = {
-      enablePipelining: true,
-      enableLazyLoading: true,
-      enableCompression: false,
-      enableLocalCache: true,
-      localCacheSize: 1000,
-      localCacheTTL: 30000, // 30 seconds
-      batchSize: 50,
-      pipelineTimeout: 100, // 100ms
       ...config,
     };
+    // Set defaults for properties not provided in config
+    this.config.enableLazyLoading ??= true;
+    this.config.enableCompression ??= false;
+    this.config.enableLocalCache ??= true;
+    this.config.localCacheSize ??= 1000;
+    this.config.localCacheTTL ??= 30000; // 30 seconds
+    this.config.batchSize ??= 50;
+    this.config.pipelineTimeout ??= 100; // 100ms
+    // Force enable pipelining for performance
+    this.config.enablePipelining = true;
 
     this.connectionPool = new RedisConnectionPool(config.redis, config.pool);
     this.metrics = {
@@ -157,7 +131,10 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   /**
    * Update session with batching
    */
-  async updateSession(sessionId: string, updates: Partial<SessionDocument>): Promise<void> {
+  async updateSession(
+    sessionId: string,
+    updates: Partial<SessionDocument>
+  ): Promise<void> {
     const startTime = Date.now();
 
     try {
@@ -252,7 +229,11 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   /**
    * Get events with lazy loading
    */
-  async getEvents(sessionId: string, fromSeq?: number, toSeq?: number): Promise<SessionEvent[]> {
+  async getEvents(
+    sessionId: string,
+    fromSeq?: number,
+    toSeq?: number
+  ): Promise<SessionEvent[]> {
     const startTime = Date.now();
 
     try {
@@ -271,8 +252,8 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
         }
 
         return eventData
-          .filter(event => event !== 'INIT')
-          .map(eventStr => this.deserializeData(eventStr))
+          .filter((event) => event !== 'INIT')
+          .map((eventStr) => this.deserializeData(eventStr))
           .sort((a, b) => a.seq - b.seq);
       }, 'read');
 
@@ -287,7 +268,10 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   /**
    * Get recent events with optimized loading
    */
-  async getRecentEvents(sessionId: string, limit: number = 20): Promise<SessionEvent[]> {
+  async getRecentEvents(
+    sessionId: string,
+    limit: number = 20
+  ): Promise<SessionEvent[]> {
     const startTime = Date.now();
 
     try {
@@ -296,8 +280,8 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
         const eventData = await client.zRange(eventsKey, -limit, -1);
 
         return eventData
-          .filter(event => event !== 'INIT')
-          .map(eventStr => this.deserializeData(eventStr))
+          .filter((event) => event !== 'INIT')
+          .map((eventStr) => this.deserializeData(eventStr))
           .sort((a, b) => a.seq - b.seq);
       }, 'read');
 
@@ -327,7 +311,11 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
         const agents = new Set(JSON.parse(sessionData.agentIds));
         agents.add(agentId);
 
-        await client.hSet(sessionKey, 'agentIds', JSON.stringify(Array.from(agents)));
+        await client.hSet(
+          sessionKey,
+          'agentIds',
+          JSON.stringify(Array.from(agents))
+        );
       }, 'write');
 
       // Invalidate cache
@@ -364,7 +352,11 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
         if (agents.size === 0) {
           await this.setTTL(sessionId, 300); // 5 minutes grace period
         } else {
-          await client.hSet(sessionKey, 'agentIds', JSON.stringify(Array.from(agents)));
+          await client.hSet(
+            sessionKey,
+            'agentIds',
+            JSON.stringify(Array.from(agents))
+          );
         }
       }, 'write');
 
@@ -489,7 +481,9 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
         agentIds: JSON.stringify([agentId]),
         state: 'working',
         events: '0',
-        metadata: options.metadata ? this.serializeData(options.metadata) : undefined,
+        metadata: options.metadata
+          ? this.serializeData(options.metadata)
+          : undefined,
       };
 
       const redisData: Record<string, string | number> = {};
@@ -524,7 +518,10 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   /**
    * Update session directly (non-batched)
    */
-  private async updateSessionDirect(sessionId: string, updates: Partial<SessionDocument>): Promise<void> {
+  private async updateSessionDirect(
+    sessionId: string,
+    updates: Partial<SessionDocument>
+  ): Promise<void> {
     await this.connectionPool.execute(async (client) => {
       const sessionKey = this.getSessionKey(sessionId);
       const exists = await client.exists(sessionKey);
@@ -559,17 +556,17 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
       const sessionKey = this.getSessionKey(sessionId);
       const eventsKey = this.getEventsKey(sessionId);
 
-      await Promise.all([
-        client.del(sessionKey),
-        client.del(eventsKey),
-      ]);
+      await Promise.all([client.del(sessionKey), client.del(eventsKey)]);
     }, 'write');
   }
 
   /**
    * Add event directly (non-batched)
    */
-  private async addEventDirect(sessionId: string, event: SessionEvent): Promise<void> {
+  private async addEventDirect(
+    sessionId: string,
+    event: SessionEvent
+  ): Promise<void> {
     await this.connectionPool.execute(async (client) => {
       const eventsKey = this.getEventsKey(sessionId);
       const sessionKey = this.getSessionKey(sessionId);
@@ -591,7 +588,9 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   /**
    * Load session from Redis
    */
-  private async loadSessionFromRedis(sessionId: string): Promise<SessionDocument | null> {
+  private async loadSessionFromRedis(
+    sessionId: string
+  ): Promise<SessionDocument | null> {
     return await this.connectionPool.execute(async (client) => {
       const sessionKey = this.getSessionKey(sessionId);
       const exists = await client.exists(sessionKey);
@@ -613,7 +612,9 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
         agentIds: JSON.parse(sessionData.agentIds || '[]'),
         state: sessionData.state as any,
         events,
-        metadata: sessionData.metadata ? this.deserializeData(sessionData.metadata) : undefined,
+        metadata: sessionData.metadata
+          ? this.deserializeData(sessionData.metadata)
+          : undefined,
       };
     }, 'read');
   }
@@ -649,7 +650,9 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   /**
    * Group operations by type
    */
-  private groupOperationsByType(operations: BatchOperation[]): Map<string, BatchOperation[]> {
+  private groupOperationsByType(
+    operations: BatchOperation[]
+  ): Map<string, BatchOperation[]> {
     const grouped = new Map<string, BatchOperation[]>();
 
     for (const op of operations) {
@@ -673,7 +676,11 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
     switch (type) {
       case 'create':
         for (const op of operations) {
-          await this.createSessionDirect(op.sessionId, op.data.agentId, op.data.options);
+          await this.createSessionDirect(
+            op.sessionId,
+            op.data.agentId,
+            op.data.options
+          );
         }
         break;
 
@@ -684,10 +691,12 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
         break;
 
       case 'delete':
-        const deletePromises = operations.map(op => Promise.all([
-          client.del(this.getSessionKey(op.sessionId)),
-          client.del(this.getEventsKey(op.sessionId)),
-        ]));
+        const deletePromises = operations.map((op) =>
+          Promise.all([
+            client.del(this.getSessionKey(op.sessionId)),
+            client.del(this.getEventsKey(op.sessionId)),
+          ])
+        );
         await Promise.all(deletePromises);
         break;
 
@@ -718,7 +727,9 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
     if (this.localCache.size >= this.config.localCacheSize) {
       // Remove oldest entry
       const oldestKey = this.localCache.keys().next().value;
-      this.localCache.delete(oldestKey);
+      if (oldestKey) {
+        this.localCache.delete(oldestKey);
+      }
     }
 
     this.localCache.set(sessionId, {
@@ -754,13 +765,22 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   /**
    * Metrics management
    */
-  private updateMetrics(operation: string, latency: number, cacheHit: boolean = false): void {
+  private updateMetrics(
+    operation: string,
+    latency: number,
+    cacheHit: boolean = false
+  ): void {
     this.metrics.totalOperations++;
-    this.metrics.averageLatency = (this.metrics.averageLatency * (this.metrics.totalOperations - 1) + latency) / this.metrics.totalOperations;
+    this.metrics.averageLatency =
+      (this.metrics.averageLatency * (this.metrics.totalOperations - 1) +
+        latency) /
+      this.metrics.totalOperations;
 
     if (operation === 'get') {
-      const currentCacheHits = this.metrics.cacheHitRate * (this.metrics.totalOperations - 1);
-      this.metrics.cacheHitRate = (currentCacheHits + (cacheHit ? 1 : 0)) / this.metrics.totalOperations;
+      const currentCacheHits =
+        this.metrics.cacheHitRate * (this.metrics.totalOperations - 1);
+      this.metrics.cacheHitRate =
+        (currentCacheHits + (cacheHit ? 1 : 0)) / this.metrics.totalOperations;
     }
   }
 
@@ -781,7 +801,7 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
   private initializeTimers(): void {
     if (this.config.enablePipelining) {
       this.pipelineTimer = setInterval(() => {
-        this.processBatch().catch(error => {
+        this.processBatch().catch((error) => {
           this.emit('error', error);
         });
       }, this.config.pipelineTimeout);
@@ -837,7 +857,10 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
     }
   }
 
-  async subscribeToSession(sessionId: string, callback: (message: any) => void): Promise<void> {
+  async subscribeToSession(
+    sessionId: string,
+    callback: (message: any) => void
+  ): Promise<void> {
     // Implementation would depend on having a dedicated subscription client
     // This is a placeholder for the interface
     this.emit('subscription:not-implemented', { sessionId });
@@ -849,11 +872,15 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
     return {
       activeSessions: 0, // Would need to be calculated
       totalEvents: 0, // Would need to be calculated
+      totalRelationships: 0, // Would need to be calculated
+      totalChanges: 0, // Would need to be calculated
       averageEventsPerSession: 0,
       checkpointsCreated: 0,
       failureSnapshots: 0,
       agentsActive: 0,
       redisMemoryUsage: 0,
+      byType: {},
+      bySeverity: {},
     };
   }
 
@@ -861,7 +888,7 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
     try {
       return await this.connectionPool.execute(async (client) => {
         const keys = await client.keys('session:*');
-        return keys.map(key => key.replace('session:', ''));
+        return keys.map((key) => key.replace('session:', ''));
       }, 'read');
     } catch (error) {
       this.emit('error', error);
@@ -874,7 +901,11 @@ export class EnhancedSessionStore extends EventEmitter implements ISessionStore 
     this.emit('cleanup:completed', { sessions: 0 });
   }
 
-  async healthCheck(): Promise<{ healthy: boolean; latency: number; error?: string }> {
+  async healthCheck(): Promise<{
+    healthy: boolean;
+    latency: number;
+    error?: string;
+  }> {
     const start = Date.now();
     try {
       const poolStatus = this.connectionPool.getStatus();

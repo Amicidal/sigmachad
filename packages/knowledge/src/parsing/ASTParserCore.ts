@@ -8,12 +8,12 @@
  * Extracted from the original 5,197-line ASTParser.ts as part of modular refactoring.
  */
 
-import { Project, Node, SourceFile, SyntaxKind } from "ts-morph";
-import * as ts from "typescript";
-import * as path from "path";
-import * as fs from "fs/promises";
-import * as fsSync from "fs";
-import * as crypto from "crypto";
+import { Project, Node, SourceFile, SyntaxKind } from 'ts-morph';
+import * as ts from 'typescript';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
+import * as crypto from 'crypto';
 import {
   Entity,
   File,
@@ -22,18 +22,18 @@ import {
   InterfaceSymbol,
   TypeAliasSymbol,
   Symbol as SymbolEntity,
-} from '@memento/core';
+} from '@memento/shared-types.js';
 import {
   GraphRelationship,
   RelationshipType,
   StructuralRelationship,
-} from '@memento/core';
+} from '@memento/shared-types.js';
 import {
   normalizeCodeEdge,
   canonicalRelationshipId,
-} from "../../utils/codeEdges.js";
-import { noiseConfig } from "../../config/noise.js";
-import { scoreInferredEdge } from "../../utils/confidence.js";
+} from '../../utils/codeEdges.js';
+import { noiseConfig } from '../../config/noise.js';
+import { scoreInferredEdge } from '../../utils/confidence.js';
 
 // Import shared utilities and types
 import {
@@ -41,22 +41,25 @@ import {
   normalizeRelPath,
   detectLanguage,
   extractDependencies,
-} from "./utils.js";
+} from './utils.js';
 import {
   ParseResult,
   ParseError,
   IncrementalParseResult,
   PartialUpdate,
   ChangeRange,
-} from "./types.js";
+} from './types.js';
 
 // Import the extracted modules
-import { CacheManager, CachedFileInfo } from "./CacheManager.js";
-import { DirectoryHandler } from "./DirectoryHandler.js";
-import { TypeCheckerBudget } from "./TypeCheckerBudget.js";
-import { SymbolExtractor } from "./SymbolExtractor.js";
-import { ModuleResolver, ModuleResolverOptions } from "./ModuleResolver.js";
-import { RelationshipBuilder, RelationshipBuilderOptions } from "./RelationshipBuilder.js";
+import { CacheManager, CachedFileInfo } from './CacheManager.js';
+import { DirectoryHandler } from './DirectoryHandler.js';
+import { TypeCheckerBudget } from './TypeCheckerBudget.js';
+import { SymbolExtractor } from './SymbolExtractor.js';
+import { ModuleResolver, ModuleResolverOptions } from './ModuleResolver.js';
+import {
+  RelationshipBuilder,
+  RelationshipBuilderOptions,
+} from './RelationshipBuilder.js';
 
 // Re-export types for backward compatibility
 export type {
@@ -65,7 +68,7 @@ export type {
   IncrementalParseResult,
   PartialUpdate,
   ChangeRange,
-} from "./types.js";
+} from './types.js';
 
 /**
  * Main AST Parser facade that orchestrates specialized parsing modules
@@ -83,35 +86,35 @@ export class ASTParserCore {
   // Common globals and test helpers to ignore when inferring edges
   private readonly stopNames = new Set<string>(
     [
-      "console",
-      "log",
-      "warn",
-      "error",
-      "info",
-      "debug",
-      "require",
-      "module",
-      "exports",
-      "__dirname",
-      "__filename",
-      "process",
-      "buffer",
-      "settimeout",
-      "setinterval",
-      "cleartimeout",
-      "clearinterval",
-      "math",
-      "json",
-      "date",
+      'console',
+      'log',
+      'warn',
+      'error',
+      'info',
+      'debug',
+      'require',
+      'module',
+      'exports',
+      '__dirname',
+      '__filename',
+      'process',
+      'buffer',
+      'settimeout',
+      'setinterval',
+      'cleartimeout',
+      'clearinterval',
+      'math',
+      'json',
+      'date',
       // test frameworks
-      "describe",
-      "it",
-      "test",
-      "expect",
-      "beforeeach",
-      "aftereach",
-      "beforeall",
-      "afterall",
+      'describe',
+      'it',
+      'test',
+      'expect',
+      'beforeeach',
+      'aftereach',
+      'beforeall',
+      'afterall',
     ].concat(Array.from(noiseConfig.AST_STOPLIST_EXTRA))
   );
 
@@ -139,7 +142,7 @@ export class ASTParserCore {
         allowJs: true,
         declaration: true,
         emitDeclarationOnly: false,
-        outDir: "./dist",
+        outDir: './dist',
         target: ts.ScriptTarget.ES2018,
         module: ts.ModuleKind.CommonJS as any,
         moduleResolution: ts.ModuleResolutionKind.NodeJs,
@@ -172,12 +175,18 @@ export class ASTParserCore {
       stopNames: this.stopNames,
       fileCache: new Map(), // Will be managed by cache manager
       shouldUseTypeChecker: this.shouldUseTypeChecker.bind(this),
-      takeTcBudget: this.typeCheckerBudget.takeBudget.bind(this.typeCheckerBudget),
+      takeTcBudget: this.typeCheckerBudget.takeBudget.bind(
+        this.typeCheckerBudget
+      ),
       resolveWithTypeChecker: this.resolveWithTypeChecker.bind(this),
-      resolveCallTargetWithChecker: this.resolveCallTargetWithChecker.bind(this),
-      resolveImportedMemberToFileAndName: this.resolveImportedMemberToFileAndName.bind(this),
-      getModuleExportMap: this.moduleResolver.getModuleExportMap.bind(this.moduleResolver),
-      normalizeRelPath: normalizeRelPath,
+      resolveCallTargetWithChecker:
+        this.resolveCallTargetWithChecker.bind(this),
+      resolveImportedMemberToFileAndName:
+        this.resolveImportedMemberToFileAndName.bind(this),
+      getModuleExportMap: this.moduleResolver.getModuleExportMap.bind(
+        this.moduleResolver
+      ),
+      normalizeRelPath,
     });
   }
 
@@ -187,9 +196,9 @@ export class ASTParserCore {
    */
   async initialize(): Promise<void> {
     try {
-      const tsconfigPath = path.resolve("tsconfig.json");
+      const tsconfigPath = path.resolve('tsconfig.json');
       if (fsSync.existsSync(tsconfigPath)) {
-        const raw = await fs.readFile(tsconfigPath, "utf-8");
+        const raw = await fs.readFile(tsconfigPath, 'utf-8');
         const json = JSON.parse(raw) as { compilerOptions?: any };
         const co = json?.compilerOptions || {};
         const baseUrl = co.baseUrl
@@ -210,7 +219,10 @@ export class ASTParserCore {
         });
       }
     } catch (e) {
-      console.warn("Failed to load tsconfig.json, proceeding without path mapping:", e);
+      console.warn(
+        'Failed to load tsconfig.json, proceeding without path mapping:',
+        e
+      );
     }
   }
 
@@ -222,38 +234,44 @@ export class ASTParserCore {
   async parseFile(filePath: string): Promise<ParseResult> {
     try {
       const absolutePath = path.resolve(filePath);
-      const content = await fs.readFile(absolutePath, "utf-8");
+      const content = await fs.readFile(absolutePath, 'utf-8');
       const extension = path.extname(filePath).toLowerCase();
 
       // Determine parser based on file extension
       // Unify JS/TS handling via ts-morph for better consistency and stability
-      if ([".ts", ".tsx", ".js", ".jsx"].includes(extension)) {
+      if (['.ts', '.tsx', '.js', '.jsx'].includes(extension)) {
         return this.parseTypeScriptFile(filePath, content);
       } else {
         // Unsupported file type
         return {
           entities: [],
           relationships: [],
-          errors: [{
-            file: filePath,
-            line: 0,
-            column: 0,
-            message: `Unsupported file extension: ${extension}`,
-            severity: "warning"
-          }],
+          errors: [
+            {
+              file: filePath,
+              line: 0,
+              column: 0,
+              message: `Unsupported file extension: ${extension}`,
+              severity: 'warning',
+            },
+          ],
         };
       }
     } catch (error) {
       return {
         entities: [],
         relationships: [],
-        errors: [{
-          file: filePath,
-          line: 0,
-          column: 0,
-          message: `Failed to parse file: ${error instanceof Error ? error.message : String(error)}`,
-          severity: "error"
-        }],
+        errors: [
+          {
+            file: filePath,
+            line: 0,
+            column: 0,
+            message: `Failed to parse file: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            severity: 'error',
+          },
+        ],
       };
     }
   }
@@ -269,20 +287,22 @@ export class ASTParserCore {
     const settled = await Promise.allSettled(promises);
 
     for (const r of settled) {
-      if (r.status === "fulfilled") {
+      if (r.status === 'fulfilled') {
         perFileResults.push(r.value);
       } else {
-        console.error("Parse error:", r.reason);
+        console.error('Parse error:', r.reason);
         perFileResults.push({
           entities: [],
           relationships: [],
-          errors: [{
-            file: "unknown",
-            line: 0,
-            column: 0,
-            message: `Parse failure: ${r.reason}`,
-            severity: "error"
-          }],
+          errors: [
+            {
+              file: 'unknown',
+              line: 0,
+              column: 0,
+              message: `Parse failure: ${r.reason}`,
+              severity: 'error',
+            },
+          ],
         });
       }
     }
@@ -325,16 +345,18 @@ export class ASTParserCore {
    * @param filePath - Path to the changed file
    * @returns Incremental parse result with change tracking
    */
-  async parseFileIncremental(filePath: string): Promise<IncrementalParseResult> {
+  async parseFileIncremental(
+    filePath: string
+  ): Promise<IncrementalParseResult> {
     const absolutePath = path.resolve(filePath);
     const cachedInfo = this.cacheManager.getCachedFile(absolutePath);
 
     try {
-      const content = await fs.readFile(absolutePath, "utf-8");
+      const content = await fs.readFile(absolutePath, 'utf-8');
       const currentHash = crypto
-        .createHash("sha256")
+        .createHash('sha256')
         .update(content)
-        .digest("hex");
+        .digest('hex');
 
       // If no changes, return cached result
       if (cachedInfo && cachedInfo.hash === currentHash) {
@@ -357,23 +379,31 @@ export class ASTParserCore {
       // Calculate differences if we have cached data
       let addedEntities: Entity[] = [];
       let removedEntities: Entity[] = [];
-      let updatedEntities: Entity[] = [];
+      const updatedEntities: Entity[] = [];
       let addedRelationships: GraphRelationship[] = [];
       let removedRelationships: GraphRelationship[] = [];
 
       if (cachedInfo) {
         // Simple diff - in a real implementation, this would be more sophisticated
-        const oldEntityIds = new Set(cachedInfo.entities.map(e => e.id));
-        const newEntityIds = new Set(parseResult.entities.map(e => e.id));
+        const oldEntityIds = new Set(cachedInfo.entities.map((e) => e.id));
+        const newEntityIds = new Set(parseResult.entities.map((e) => e.id));
 
-        addedEntities = parseResult.entities.filter(e => !oldEntityIds.has(e.id));
-        removedEntities = cachedInfo.entities.filter(e => !newEntityIds.has(e.id));
+        addedEntities = parseResult.entities.filter(
+          (e) => !oldEntityIds.has(e.id)
+        );
+        removedEntities = cachedInfo.entities.filter(
+          (e) => !newEntityIds.has(e.id)
+        );
 
-        const oldRelIds = new Set(cachedInfo.relationships.map(r => r.id));
-        const newRelIds = new Set(parseResult.relationships.map(r => r.id));
+        const oldRelIds = new Set(cachedInfo.relationships.map((r) => r.id));
+        const newRelIds = new Set(parseResult.relationships.map((r) => r.id));
 
-        addedRelationships = parseResult.relationships.filter(r => !oldRelIds.has(r.id));
-        removedRelationships = cachedInfo.relationships.filter(r => !newRelIds.has(r.id));
+        addedRelationships = parseResult.relationships.filter(
+          (r) => !oldRelIds.has(r.id)
+        );
+        removedRelationships = cachedInfo.relationships.filter(
+          (r) => !newRelIds.has(r.id)
+        );
       } else {
         addedEntities = parseResult.entities;
         addedRelationships = parseResult.relationships;
@@ -392,13 +422,17 @@ export class ASTParserCore {
       return {
         entities: [],
         relationships: [],
-        errors: [{
-          file: filePath,
-          line: 0,
-          column: 0,
-          message: `Incremental parse failed: ${error instanceof Error ? error.message : String(error)}`,
-          severity: "error"
-        }],
+        errors: [
+          {
+            file: filePath,
+            line: 0,
+            column: 0,
+            message: `Incremental parse failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            severity: 'error',
+          },
+        ],
         isIncremental: false,
         addedEntities: [],
         removedEntities: [],
@@ -463,25 +497,31 @@ export class ASTParserCore {
       }
 
       // Create or update source file in ts-morph project
-      const sourceFile = this.tsProject.createSourceFile(absolutePath, content, {
-        overwrite: true,
-      });
+      const sourceFile = this.tsProject.createSourceFile(
+        absolutePath,
+        content,
+        {
+          overwrite: true,
+        }
+      );
 
       // Create file entity
       const fileEntity: File = {
         id: `file:${fileRelPath}`,
-        type: "file",
+        type: 'file',
         path: fileRelPath,
         extension: path.extname(filePath),
         size: content.length,
         lines: content.split('\n').length,
         isTest: filePath.includes('.test.') || filePath.includes('.spec.'),
-        isConfig: path.basename(filePath).startsWith('.') || filePath.includes('config'),
+        isConfig:
+          path.basename(filePath).startsWith('.') ||
+          filePath.includes('config'),
         language: detectLanguage(filePath),
         dependencies: extractDependencies(content),
         lastModified: new Date(),
         created: new Date(),
-        hash: createHash(content)
+        hash: createHash(content),
       };
 
       entities.push(fileEntity);
@@ -489,18 +529,26 @@ export class ASTParserCore {
       // Create directory entities if configured
       if (this.shouldIncludeDirectoryEntities()) {
         const { dirEntities, dirRelationships } =
-          this.directoryHandler.createDirectoryHierarchy(fileRelPath, fileEntity.id);
+          this.directoryHandler.createDirectoryHierarchy(
+            fileRelPath,
+            fileEntity.id
+          );
         entities.push(...dirEntities);
         relationships.push(...dirRelationships);
       }
 
       // Extract symbols using SymbolExtractor
-      this.extractSymbolsFromSourceFile(sourceFile, fileEntity, entities, relationships);
+      this.extractSymbolsFromSourceFile(
+        sourceFile,
+        fileEntity,
+        entities,
+        relationships
+      );
 
       // Build relationships using RelationshipBuilder
       // Extract relationships for each symbol entity
       for (const entity of entities) {
-        if (entity.type === "symbol") {
+        if (entity.type === 'symbol') {
           const symbolEntity = entity as SymbolEntity;
           // Find the corresponding AST node for this symbol
           const symbolRelationships = this.extractRelationshipsForSymbol(
@@ -522,7 +570,9 @@ export class ASTParserCore {
       });
 
       // Update global symbol indexes
-      const symbols = entities.filter(e => e.type === "symbol") as SymbolEntity[];
+      const symbols = entities.filter(
+        (e) => e.type === 'symbol'
+      ) as SymbolEntity[];
       this.cacheManager.addSymbolsToIndexes(fileRelPath, symbols);
 
       return { entities, relationships, errors };
@@ -532,8 +582,10 @@ export class ASTParserCore {
         file: filePath,
         line: 0,
         column: 0,
-        message: `Parse error: ${error instanceof Error ? error.message : String(error)}`,
-        severity: "error",
+        message: `Parse error: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        severity: 'error',
       });
       return { entities, relationships, errors };
     }
@@ -575,7 +627,7 @@ export class ASTParserCore {
     const symbolMap = new Map<string, SymbolEntity>();
 
     entities.forEach((entity) => {
-      if (entity.type === "symbol") {
+      if (entity.type === 'symbol') {
         symbolMap.set(entity.id, entity as SymbolEntity);
       }
     });
@@ -587,7 +639,7 @@ export class ASTParserCore {
    * Heuristic policy for using the TS type checker
    */
   private shouldUseTypeChecker(opts: {
-    context: "call" | "heritage" | "decorator";
+    context: 'call' | 'heritage' | 'decorator';
     imported?: boolean;
     ambiguous?: boolean;
     nameLength?: number;
@@ -595,7 +647,7 @@ export class ASTParserCore {
     try {
       const imported = !!opts.imported;
       const ambiguous = !!opts.ambiguous;
-      const len = typeof opts.nameLength === "number" ? opts.nameLength : 0;
+      const len = typeof opts.nameLength === 'number' ? opts.nameLength : 0;
       const usefulName = len >= noiseConfig.AST_MIN_NAME_LENGTH;
       const want = imported || ambiguous || usefulName;
       if (!want) return false;
@@ -622,7 +674,10 @@ export class ASTParserCore {
     return null;
   }
 
-  private resolveCallTargetWithChecker(call: Node, sourceFile: SourceFile): any {
+  private resolveCallTargetWithChecker(
+    call: Node,
+    sourceFile: SourceFile
+  ): any {
     // Placeholder - would implement call target resolution with type checker
     return null;
   }
@@ -649,9 +704,14 @@ export class ASTParserCore {
    */
   private getSymbolName(node: Node): string | undefined {
     try {
-      if (Node.isFunctionDeclaration(node) || Node.isClassDeclaration(node) ||
-          Node.isInterfaceDeclaration(node) || Node.isTypeAliasDeclaration(node) ||
-          Node.isVariableDeclaration(node) || Node.isMethodDeclaration(node)) {
+      if (
+        Node.isFunctionDeclaration(node) ||
+        Node.isClassDeclaration(node) ||
+        Node.isInterfaceDeclaration(node) ||
+        Node.isTypeAliasDeclaration(node) ||
+        Node.isVariableDeclaration(node) ||
+        Node.isMethodDeclaration(node)
+      ) {
         const nameNode = (node as any).getNameNode?.();
         return nameNode?.getText?.() || (node as any).getName?.();
       }
@@ -672,7 +732,7 @@ export class ASTParserCore {
       // Find the AST node corresponding to this symbol
       // This is a simplified approach - in practice, we'd need to map symbols to nodes more precisely
       const allNodes = sourceFile.getDescendants();
-      const symbolNode = allNodes.find(node => {
+      const symbolNode = allNodes.find((node) => {
         const name = this.getSymbolName(node);
         return name === symbolEntity.name;
       });
@@ -688,7 +748,10 @@ export class ASTParserCore {
         sourceFile
       );
     } catch (error) {
-      console.warn(`Failed to extract relationships for symbol ${symbolEntity.id}:`, error);
+      console.warn(
+        `Failed to extract relationships for symbol ${symbolEntity.id}:`,
+        error
+      );
       return [];
     }
   }

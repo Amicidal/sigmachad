@@ -6,7 +6,7 @@ import {
   AgentType,
   AgentStatus,
   RegistryConfig,
-  AgentEventTypes
+  AgentEventTypes,
 } from './types.js';
 
 /**
@@ -28,7 +28,7 @@ export class AgentRegistry extends EventEmitter {
       maxAgents: config.maxAgents ?? 100,
       heartbeatInterval: config.heartbeatInterval ?? 30000, // 30 seconds
       cleanupInterval: config.cleanupInterval ?? 60000, // 1 minute
-      staleTimeout: config.staleTimeout ?? 120000 // 2 minutes
+      staleTimeout: config.staleTimeout ?? 120000, // 2 minutes
     };
 
     this.startHeartbeatMonitoring();
@@ -48,7 +48,9 @@ export class AgentRegistry extends EventEmitter {
 
     // Check max agents limit
     if (this.agents.size >= this.config.maxAgents) {
-      throw new Error(`Maximum number of agents (${this.config.maxAgents}) reached`);
+      throw new Error(
+        `Maximum number of agents (${this.config.maxAgents}) reached`
+      );
     }
 
     // Validate agent metadata
@@ -60,7 +62,7 @@ export class AgentRegistry extends EventEmitter {
       instance: agent,
       registeredAt: new Date(),
       lastHeartbeat: new Date(),
-      isActive: true
+      isActive: true,
     };
 
     // Store registration
@@ -83,7 +85,7 @@ export class AgentRegistry extends EventEmitter {
     this.emit(AgentEventTypes.AGENT_REGISTERED, {
       agentId: id,
       metadata: agent.metadata,
-      timestamp: new Date()
+      timestamp: new Date(),
     });
 
     this.log('info', `Agent registered: ${id} (${type})`);
@@ -120,7 +122,7 @@ export class AgentRegistry extends EventEmitter {
     this.emit(AgentEventTypes.AGENT_UNREGISTERED, {
       agentId,
       metadata: registration.metadata,
-      timestamp: new Date()
+      timestamp: new Date(),
     });
 
     this.log('info', `Agent unregistered: ${agentId}`);
@@ -150,7 +152,7 @@ export class AgentRegistry extends EventEmitter {
     }
 
     return Array.from(agentIds)
-      .map(id => this.agents.get(id)?.instance)
+      .map((id) => this.agents.get(id)?.instance)
       .filter((agent): agent is IAgent => agent !== undefined);
   }
 
@@ -159,8 +161,8 @@ export class AgentRegistry extends EventEmitter {
    */
   getActiveAgents(): IAgent[] {
     return Array.from(this.agents.values())
-      .filter(reg => reg.isActive)
-      .map(reg => reg.instance);
+      .filter((reg) => reg.isActive)
+      .map((reg) => reg.instance);
   }
 
   /**
@@ -175,7 +177,7 @@ export class AgentRegistry extends EventEmitter {
    */
   findAvailableAgents(type: AgentType, count: number = 1): IAgent[] {
     const agents = this.getAgentsByType(type);
-    const available = agents.filter(agent => agent.status === 'idle');
+    const available = agents.filter((agent) => agent.status === 'idle');
     return available.slice(0, count);
   }
 
@@ -197,7 +199,9 @@ export class AgentRegistry extends EventEmitter {
       const { type } = registration.metadata;
       const status = registration.instance.status;
 
+      // eslint-disable-next-line security/detect-object-injection
       agentsByType[type] = (agentsByType[type] || 0) + 1;
+      // eslint-disable-next-line security/detect-object-injection
       agentsByStatus[status] = (agentsByStatus[status] || 0) + 1;
 
       if (registration.isActive) {
@@ -209,7 +213,7 @@ export class AgentRegistry extends EventEmitter {
       totalAgents: this.agents.size,
       activeAgents: activeCount,
       agentsByType: agentsByType as Record<AgentType, number>,
-      agentsByStatus: agentsByStatus as Record<AgentStatus, number>
+      agentsByStatus: agentsByStatus as Record<AgentStatus, number>,
     };
   }
 
@@ -251,13 +255,19 @@ export class AgentRegistry extends EventEmitter {
     }
 
     // Stop all agents
-    const stopPromises = Array.from(this.agents.values()).map(async (registration) => {
-      try {
-        await registration.instance.stop();
-      } catch (error) {
-        this.log('warn', `Error stopping agent ${registration.metadata.id}:`, error);
+    const stopPromises = Array.from(this.agents.values()).map(
+      async (registration) => {
+        try {
+          await registration.instance.stop();
+        } catch (error) {
+          this.log(
+            'warn',
+            `Error stopping agent ${registration.metadata.id}:`,
+            error
+          );
+        }
       }
-    });
+    );
 
     await Promise.all(stopPromises);
 
@@ -307,7 +317,7 @@ export class AgentRegistry extends EventEmitter {
         this.emit(eventName, {
           ...data,
           source: 'agent',
-          agentId: agent.metadata.id
+          agentId: agent.metadata.id,
         });
       });
     };
@@ -355,13 +365,19 @@ export class AgentRegistry extends EventEmitter {
         if (registration.isActive) {
           registration.isActive = false;
           staleCount++;
-          this.log('warn', `Agent ${agentId} marked as stale (no heartbeat for ${timeSinceHeartbeat}ms)`);
+          this.log(
+            'warn',
+            `Agent ${agentId} marked as stale (no heartbeat for ${timeSinceHeartbeat}ms)`
+          );
         }
       }
     }
 
     if (staleCount > 0) {
-      this.emit('stale-agents-detected', { count: staleCount, timestamp: new Date() });
+      this.emit('stale-agents-detected', {
+        count: staleCount,
+        timestamp: new Date(),
+      });
     }
   }
 
@@ -376,7 +392,10 @@ export class AgentRegistry extends EventEmitter {
       const timeSinceHeartbeat = now - registration.lastHeartbeat.getTime();
 
       // Remove agents that have been stale for twice the stale timeout
-      if (!registration.isActive && timeSinceHeartbeat > this.config.staleTimeout * 2) {
+      if (
+        !registration.isActive &&
+        timeSinceHeartbeat > this.config.staleTimeout * 2
+      ) {
         agentsToRemove.push(agentId);
       }
     }
@@ -394,13 +413,17 @@ export class AgentRegistry extends EventEmitter {
   /**
    * Log a message with registry context
    */
-  private log(level: 'info' | 'warn' | 'error', message: string, data?: any): void {
+  private log(
+    level: 'info' | 'warn' | 'error',
+    message: string,
+    data?: any
+  ): void {
     const logData = {
       timestamp: new Date().toISOString(),
       component: 'AgentRegistry',
       level,
       message,
-      data
+      data,
     };
 
     console.log(JSON.stringify(logData));

@@ -1,0 +1,90 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": [
+        "src/*"
+      ],
+      "@/api/*": [
+        "src/api/*"
+      ],
+      "@/models/*": [
+        "src/models/*"
+      ],
+      "@/services/*": [
+        "src/services/*"
+      ],
+      "@/utils/*": [
+        "src/utils/*"
+      ],
+      "@memento/api": [
+        "packages/api/src"
+      ],
+      "@memento/api/*": [
+        "packages/api/src/*"
+      ],
+      "@memento/core": [
+        "packages/core/dist"
+      ],
+      "@memento/sync": [
+        "packages/sync/src"
+      ],
+      "@memento/sync/*": [
+        "packages/sync/src/*"
+      ],
+      "@memento/backup": [
+        "packages/backup/src"
+      ],
+      "@memento/backup/*": [
+        "packages/backup/src/*"
+      ],
+      "@memento/core/*": [
+        "packages/core/dist/*",
+        "packages/core/dist/src/*",
+        "packages/core/dist/src/*"
+      ],
+      "@memento/database": [
+        "packages/database/dist"
+      ],
+      "@memento/database/*": [
+        "packages/database/dist/*",
+        "packages/database/dist/src/*",
+        "packages/database/dist/src/*"
+      ],
+      "@memento/knowledge": [
+        "packages/knowledge/src"
+      ],
+      "@memento/knowledge/*": [
+        "packages/knowledge/src/*"
+      ],
+      "@memento/testing": [
+        "packages/testing/src"
+      ],
+      "@memento/testing/*": [
+        "packages/testing/src/*"
+      ],
+      "@memento/shared-types": [
+        "dist/packages/shared-types"
+      ],
+      "@memento/shared-types/*": [
+        "dist/packages/shared-types/*",
+        "dist/packages/shared-types/src/*",
+        "dist/packages/shared-types/src/*"
+      ],
+      "@shared-types": [
+        "packages/shared-types"
+      ],
+      "@shared-types/*": [
+        "packages/shared-types/*"
+      ],
+      "@memento/utils": [
+        "packages/utils/dist"
+      ],
+      "@memento/utils/*": [
+        "packages/utils/dist/*",
+        "packages/utils/dist/src/*",
+        "packages/utils/dist/src/*"
+      ]
+    }
+  },
+  "extends": "../../../../packages/knowledge/tsconfig.json"
+}

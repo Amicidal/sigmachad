@@ -80,7 +80,11 @@ class DepthValidator {
   private getAllSourceFiles(): string[] {
     const patterns = ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'];
 
-    const ignorePatterns = this.options.ignorePaths.map((p) => `${p}/**`);
+    // Create ignore patterns for all ignore paths at any level
+    const ignorePatterns = this.options.ignorePaths.flatMap((p) => [
+      `${p}/**`, // Root level
+      `**/${p}/**`, // Any level
+    ]);
 
     const files: string[] = [];
     for (const pattern of patterns) {
@@ -103,7 +107,9 @@ class DepthValidator {
     );
 
     // Allow a slightly higher threshold for test-only paths to avoid blocking velocity
-    const isTestPath = /(^|\/)tests(\/|$)|(__tests__)/.test(filePath) || /\.(test|spec)\.[jt]sx?$/.test(filePath);
+    const isTestPath =
+      /(^|\/)tests(\/|$)|(__tests__)/.test(filePath) ||
+      /\.(test|spec)\.[jt]sx?$/.test(filePath);
     const targetDepth = this.options.targetDepth + (isTestPath ? 1 : 0);
     const warnDepth = this.options.warnDepth + (isTestPath ? 1 : 0);
     const maxDepth = this.options.maxDepth + (isTestPath ? 1 : 0);
@@ -154,7 +160,10 @@ class DepthValidator {
    * - For app paths (apps/<app>/...), measure depth from the app root (after <app>).
    * - Otherwise measure from repository root (existing behavior).
    */
-  private computeEffectiveDepth(filePath: string): { effectiveDepth: number; classification: 'packages' | 'apps' | 'root' } {
+  private computeEffectiveDepth(filePath: string): {
+    effectiveDepth: number;
+    classification: 'packages' | 'apps' | 'root';
+  } {
     const segments = filePath.split(path.sep);
     // Depth is number of directories (exclude filename)
     const absoluteDepth = segments.length - 1;
@@ -162,13 +171,19 @@ class DepthValidator {
     if (segments[0] === 'packages' && segments.length >= 3) {
       // Treat packages/<pkg> as the local root
       const effectiveDepth = absoluteDepth - 2; // subtract 'packages' + '<pkg>'
-      return { effectiveDepth: Math.max(0, effectiveDepth), classification: 'packages' };
+      return {
+        effectiveDepth: Math.max(0, effectiveDepth),
+        classification: 'packages',
+      };
     }
 
     if (segments[0] === 'apps' && segments.length >= 3) {
       // Treat apps/<app> as the local root
       const effectiveDepth = absoluteDepth - 2;
-      return { effectiveDepth: Math.max(0, effectiveDepth), classification: 'apps' };
+      return {
+        effectiveDepth: Math.max(0, effectiveDepth),
+        classification: 'apps',
+      };
     }
 
     // Default: measure from repo root

@@ -1,5 +1,23 @@
 # Session Management Implementation Blueprint
 
+## Metadata
+
+- Scope: sessions
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: sessions).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
+## Desired Capabilities
+
+- [ ] Define required capabilities and acceptance criteria.
+- [ ] Note API/Graph impacts.
+
 ## 1. Overview
 This document details the ephemeral Redis-based session management for multi-agent coordination in Memento. Sessions capture live events (changes, state transitions like pass→break, impacts) in Redis cache with TTL (15-60 min or tied to checkpoint discard), ensuring zero long-term growth. The KG holds sparse anchors (metadata refs on entities/clusters for summaries/outcomes/checkpoints) for structural awareness. A bridge service (`SessionQueryService`) unifies queries (Redis depth + KG traversals), enabling fast isolation (e.g., "session impacts on spec") and handoffs. Opt-in Postgres snapshots for rare failures (<5%). Focus: Velocity for 100+ agents (5k sessions/day), real-time pub-sub, no bloat—aligns with agent swarms and KG core (relationships/clusters/benchmarks).
 

@@ -1,5 +1,18 @@
 # Test Result Parser Blueprint
 
+## Metadata
+
+- Scope: testing
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: testing).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 The TestResultParser service normalizes results emitted by common harnesses (JUnit, Jest, Mocha, Vitest, Cypress, Playwright) into `TestSuiteResult` payloads consumed by `TestEngine`. Recent fixes introduced an explicit `errorTests` counter alongside classic failure metrics and ensured malformed or empty JUnit payloads return a zeroed suite rather than throwing, keeping downstream ingestion resilient across flaky CI artifacts.
 

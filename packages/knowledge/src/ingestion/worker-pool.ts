@@ -8,6 +8,7 @@ import { EventEmitter } from 'events';
 import { Worker } from 'worker_threads';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createWorkerTaskMessage, isWorkerTaskResult } from '@memento/utils';
 import {
   TaskPayload,
   WorkerConfig,
@@ -15,7 +16,7 @@ import {
   WorkerResult,
   WorkerError,
   IngestionError,
-  IngestionEvents
+  IngestionEvents,
 } from './types.js';
 
 export interface WorkerPoolConfig {
@@ -25,11 +26,13 @@ export interface WorkerPoolConfig {
   healthCheckInterval: number;
   restartThreshold: number;
   autoScale: boolean;
+  apiBaseUrl?: string;
+  apiKey?: string;
   scalingRules: {
-    scaleUpThreshold: number;   // Queue depth to scale up
+    scaleUpThreshold: number; // Queue depth to scale up
     scaleDownThreshold: number; // Queue depth to scale down
-    scaleUpCooldown: number;    // ms between scale up operations
-    scaleDownCooldown: number;  // ms between scale down operations
+    scaleUpCooldown: number; // ms between scale up operations
+    scaleDownCooldown: number; // ms between scale down operations
   };
 }
 
@@ -68,7 +71,10 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
    */
   async start(): Promise<void> {
     if (this.running) {
-      throw new IngestionError('Worker pool already running', 'ALREADY_RUNNING');
+      throw new IngestionError(
+        'Worker pool already running',
+        'ALREADY_RUNNING'
+      );
     }
 
     this.running = true;
@@ -156,7 +162,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       }
     }
 
-    return Promise.allSettled(promises).then(results =>
+    return Promise.allSettled(promises).then((results) =>
       results.map((result, index) => {
         if (result.status === 'fulfilled') {
           return result.value;
@@ -168,7 +174,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
             success: false,
             error: result.reason,
             duration: 0,
-            metadata: {}
+            metadata: {},
           };
         }
       })
@@ -186,14 +192,14 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
     workers: WorkerMetrics[];
   } {
     const workers = Array.from(this.workers.values());
-    const metrics = workers.map(w => w.metrics);
+    const metrics = workers.map((w) => w.metrics);
 
     return {
       totalWorkers: workers.length,
-      activeWorkers: workers.filter(w => w.status === 'busy').length,
-      idleWorkers: workers.filter(w => w.status === 'idle').length,
-      errorWorkers: workers.filter(w => w.status === 'error').length,
-      workers: metrics
+      activeWorkers: workers.filter((w) => w.status === 'busy').length,
+      idleWorkers: workers.filter((w) => w.status === 'idle').length,
+      errorWorkers: workers.filter((w) => w.status === 'error').length,
+      workers: metrics,
     };
   }
 
@@ -205,11 +211,17 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
 
     if (targetCount > currentCount) {
       // Scale up
-      const toAdd = Math.min(targetCount - currentCount, this.config.maxWorkers - currentCount);
+      const toAdd = Math.min(
+        targetCount - currentCount,
+        this.config.maxWorkers - currentCount
+      );
       await this.addWorkers(toAdd);
     } else if (targetCount < currentCount) {
       // Scale down
-      const toRemove = Math.min(currentCount - targetCount, currentCount - this.config.minWorkers);
+      const toRemove = Math.min(
+        currentCount - targetCount,
+        currentCount - this.config.minWorkers
+      );
       await this.removeWorkers(toRemove);
     }
   }
@@ -217,7 +229,9 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
   /**
    * Get an available worker for a specific task type
    */
-  private async getAvailableWorker(taskType: string): Promise<WorkerInstance | null> {
+  private async getAvailableWorker(
+    taskType: string
+  ): Promise<WorkerInstance | null> {
     // First try to find an idle worker of the right type
     for (const worker of this.workers.values()) {
       if (worker.status === 'idle' && worker.config.type === taskType) {
@@ -264,7 +278,10 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       } else {
         const handler = this.handlers.get(task.type);
         if (!handler) {
-          throw new IngestionError(`No handler for task type: ${task.type}`, 'NO_HANDLER');
+          throw new IngestionError(
+            `No handler for task type: ${task.type}`,
+            'NO_HANDLER'
+          );
         }
         result = await handler(task);
       }
@@ -279,8 +296,8 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
         duration,
         metadata: {
           workerType: worker.config.type,
-          taskType: task.type
-        }
+          taskType: task.type,
+        },
       };
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -298,27 +315,51 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
   /**
    * Execute task in worker thread
    */
-  private async executeTaskInWorkerThread(worker: Worker, task: TaskPayload): Promise<any> {
+  private async executeTaskInWorkerThread(
+    worker: Worker,
+    task: TaskPayload
+  ): Promise<any> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error(`Worker timeout after ${this.config.workerTimeout}ms`));
+        reject(
+          new Error(`Worker timeout after ${this.config.workerTimeout}ms`)
+        );
       }, this.config.workerTimeout);
 
-      worker.once('message', (result) => {
+      const handleMessage = (message: unknown) => {
         clearTimeout(timeout);
-        if (result.success) {
-          resolve(result.data);
+        if (isWorkerTaskResult(message)) {
+          if (message.success) {
+            resolve(message.result);
+          } else {
+            reject(new Error(message.error ?? 'Worker task failed'));
+          }
+        } else if (
+          message &&
+          typeof message === 'object' &&
+          (message as { type?: string }).type === 'error'
+        ) {
+          reject(
+            new Error(
+              (message as { error?: string }).error ??
+                'Worker reported an unknown error'
+            )
+          );
         } else {
-          reject(new Error(result.error));
+          reject(new Error('Received unexpected message from worker'));
         }
-      });
+      };
+
+      worker.once('message', handleMessage);
 
       worker.once('error', (error) => {
         clearTimeout(timeout);
         reject(error);
       });
 
-      worker.postMessage(task);
+      worker.postMessage(
+        createWorkerTaskMessage(task.id, task, task.metadata || {})
+      );
     });
   }
 
@@ -340,10 +381,10 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
    */
   private async removeWorkers(count: number): Promise<void> {
     const idleWorkers = Array.from(this.workers.values())
-      .filter(w => w.status === 'idle')
+      .filter((w) => w.status === 'idle')
       .slice(0, count);
 
-    const promises = idleWorkers.map(worker => this.stopWorker(worker.id));
+    const promises = idleWorkers.map((worker) => this.stopWorker(worker.id));
     await Promise.all(promises);
   }
 
@@ -351,7 +392,9 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
    * Create a new worker instance
    */
   private async createWorker(): Promise<void> {
-    const workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const workerId = `worker-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
 
     const config: WorkerConfig = {
       id: workerId,
@@ -359,7 +402,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       concurrency: 1,
       batchSize: 1,
       timeout: this.config.workerTimeout,
-      healthCheck: true
+      healthCheck: true,
     };
 
     const worker: WorkerInstance = {
@@ -372,18 +415,23 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
         tasksProcessed: 0,
         averageLatency: 0,
         errorCount: 0,
-        lastActivity: new Date()
+        lastActivity: new Date(),
       },
       lastHealthCheck: new Date(),
       errorCount: 0,
-      startedAt: new Date()
+      startedAt: new Date(),
     };
 
     // Create actual worker thread for true parallelism
     try {
       const workerScript = this.getWorkerScriptPath();
       const workerThread = new Worker(workerScript, {
-        workerData: { workerId }
+        workerData: {
+          workerId,
+          apiBaseUrl:
+            this.config.apiBaseUrl || process.env.INGESTION_API_BASE_URL,
+          apiKey: this.config.apiKey || process.env.INGESTION_API_KEY,
+        },
       });
 
       // Set up worker message handling
@@ -397,8 +445,13 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
 
       workerThread.on('exit', (code) => {
         if (code !== 0) {
-          console.error(`[WorkerPool] Worker ${workerId} exited with code ${code}`);
-          this.handleWorkerError(worker, new Error(`Worker exited with code ${code}`));
+          console.error(
+            `[WorkerPool] Worker ${workerId} exited with code ${code}`
+          );
+          this.handleWorkerError(
+            worker,
+            new Error(`Worker exited with code ${code}`)
+          );
         }
       });
 
@@ -406,12 +459,16 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       worker.status = 'idle';
 
       console.log(`[WorkerPool] Created worker thread ${workerId}`);
-
     } catch (error) {
-      console.error(`[WorkerPool] Failed to create worker thread ${workerId}:`, error);
+      console.error(
+        `[WorkerPool] Failed to create worker thread ${workerId}:`,
+        error
+      );
 
       // Fallback to in-process mode
-      console.log(`[WorkerPool] Falling back to in-process mode for worker ${workerId}`);
+      console.log(
+        `[WorkerPool] Falling back to in-process mode for worker ${workerId}`
+      );
       worker.status = 'idle';
     }
 
@@ -430,7 +487,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
     const __dirname = path.dirname(__filename);
 
     // Path to the worker script
-    return path.join(__dirname, 'workers', 'task-worker.js'); // .js because it will be compiled
+    return path.join(__dirname, '..', 'ingestion-workers', 'task-worker.js'); // .js because it will be compiled
   }
 
   /**
@@ -439,7 +496,9 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
   private handleWorkerMessage(workerId: string, message: any): void {
     const worker = this.workers.get(workerId);
     if (!worker) {
-      console.warn(`[WorkerPool] Received message from unknown worker ${workerId}`);
+      console.warn(
+        `[WorkerPool] Received message from unknown worker ${workerId}`
+      );
       return;
     }
 
@@ -454,7 +513,10 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
         break;
 
       case 'error':
-        console.error(`[WorkerPool] Worker ${workerId} reported error:`, message.error);
+        console.error(
+          `[WorkerPool] Worker ${workerId} reported error:`,
+          message.error
+        );
         this.handleWorkerError(worker, new Error(message.error));
         break;
 
@@ -464,7 +526,10 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
         break;
 
       default:
-        console.warn(`[WorkerPool] Unknown message type from worker ${workerId}:`, message.type);
+        console.warn(
+          `[WorkerPool] Unknown message type from worker ${workerId}:`,
+          message.type
+        );
     }
   }
 
@@ -474,7 +539,11 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
   private handleTaskResult(workerId: string, message: any): void {
     // This would be called when a task completes
     // For now, just log the result
-    console.log(`[WorkerPool] Task ${message.taskId} completed by worker ${workerId}: ${message.success ? 'success' : 'failed'}`);
+    console.log(
+      `[WorkerPool] Task ${message.taskId} completed by worker ${workerId}: ${
+        message.success ? 'success' : 'failed'
+      }`
+    );
 
     const worker = this.workers.get(workerId);
     if (worker) {
@@ -486,7 +555,8 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
         // Update average latency
         const currentAvg = worker.metrics.averageLatency;
         const taskCount = worker.metrics.tasksProcessed;
-        worker.metrics.averageLatency = ((currentAvg * (taskCount - 1)) + message.duration) / taskCount;
+        worker.metrics.averageLatency =
+          (currentAvg * (taskCount - 1) + message.duration) / taskCount;
       }
 
       if (!message.success) {
@@ -499,10 +569,17 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
   /**
    * Execute a task in a worker thread
    */
-  private async executeTaskInWorkerThread(worker: Worker, task: TaskPayload): Promise<any> {
+  private async executeTaskInWorkerThread(
+    worker: Worker,
+    task: TaskPayload
+  ): Promise<any> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error(`Task ${task.id} timed out after ${this.config.workerTimeout}ms`));
+        reject(
+          new Error(
+            `Task ${task.id} timed out after ${this.config.workerTimeout}ms`
+          )
+        );
       }, this.config.workerTimeout);
 
       // Set up one-time message listener for this task
@@ -522,13 +599,9 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       worker.on('message', messageHandler);
 
       // Send task to worker
-      worker.postMessage({
-        type: 'task',
-        taskId: task.id,
-        taskType: task.type,
-        data: task.data,
-        metadata: task.metadata
-      });
+      worker.postMessage(
+        createWorkerTaskMessage(task.id, task, task.metadata || {})
+      );
     });
   }
 
@@ -549,7 +622,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
         worker.worker.postMessage({ type: 'shutdown' });
 
         // Wait a bit for graceful shutdown
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
         // Terminate the worker
         await worker.worker.terminate();
@@ -573,21 +646,27 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
    * Stop all workers
    */
   private async stopAllWorkers(): Promise<void> {
-    const promises = Array.from(this.workers.keys()).map(id => this.stopWorker(id));
+    const promises = Array.from(this.workers.keys()).map((id) =>
+      this.stopWorker(id)
+    );
     await Promise.all(promises);
   }
 
   /**
    * Update worker metrics after task completion
    */
-  private updateWorkerMetrics(worker: WorkerInstance, result: WorkerResult): void {
+  private updateWorkerMetrics(
+    worker: WorkerInstance,
+    result: WorkerResult
+  ): void {
     const metrics = worker.metrics;
 
     metrics.tasksProcessed++;
     metrics.lastActivity = new Date();
 
     // Update average latency
-    const totalLatency = metrics.averageLatency * (metrics.tasksProcessed - 1) + result.duration;
+    const totalLatency =
+      metrics.averageLatency * (metrics.tasksProcessed - 1) + result.duration;
     metrics.averageLatency = totalLatency / metrics.tasksProcessed;
 
     if (!result.success) {
@@ -601,7 +680,11 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
   /**
    * Handle worker errors
    */
-  private handleWorkerError(worker: WorkerInstance, error: Error, task?: TaskPayload): void {
+  private handleWorkerError(
+    worker: WorkerInstance,
+    error: Error,
+    task?: TaskPayload
+  ): void {
     worker.status = 'error';
     worker.errorCount++;
     worker.metrics.errorCount++;
@@ -616,7 +699,9 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
 
     // Restart worker if error threshold exceeded
     if (worker.errorCount >= this.config.restartThreshold) {
-      console.warn(`[WorkerPool] Restarting worker ${worker.id} due to excessive errors`);
+      console.warn(
+        `[WorkerPool] Restarting worker ${worker.id} due to excessive errors`
+      );
       this.restartWorker(worker.id);
     }
   }
@@ -676,7 +761,9 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       if (worker.status === 'busy' && worker.currentTask) {
         const taskAge = now.getTime() - worker.currentTask.createdAt.getTime();
         if (taskAge > this.config.workerTimeout * 2) {
-          console.warn(`[WorkerPool] Worker ${worker.id} appears stuck, restarting`);
+          console.warn(
+            `[WorkerPool] Worker ${worker.id} appears stuck, restarting`
+          );
           this.restartWorker(worker.id);
         }
       }
@@ -714,10 +801,15 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
     if (
       queueDepth > this.config.scalingRules.scaleUpThreshold &&
       metrics.totalWorkers < this.config.maxWorkers &&
-      (now - this.lastScaleUp) > this.config.scalingRules.scaleUpCooldown
+      now - this.lastScaleUp > this.config.scalingRules.scaleUpCooldown
     ) {
-      const scaleUpBy = Math.min(2, this.config.maxWorkers - metrics.totalWorkers);
-      console.log(`[WorkerPool] Auto-scaling up by ${scaleUpBy} workers (queue depth: ${queueDepth})`);
+      const scaleUpBy = Math.min(
+        2,
+        this.config.maxWorkers - metrics.totalWorkers
+      );
+      console.log(
+        `[WorkerPool] Auto-scaling up by ${scaleUpBy} workers (queue depth: ${queueDepth})`
+      );
       this.addWorkers(scaleUpBy);
       this.lastScaleUp = now;
     }
@@ -727,10 +819,15 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       queueDepth < this.config.scalingRules.scaleDownThreshold &&
       metrics.totalWorkers > this.config.minWorkers &&
       metrics.idleWorkers > 2 &&
-      (now - this.lastScaleDown) > this.config.scalingRules.scaleDownCooldown
+      now - this.lastScaleDown > this.config.scalingRules.scaleDownCooldown
     ) {
-      const scaleDownBy = Math.min(metrics.idleWorkers - 1, metrics.totalWorkers - this.config.minWorkers);
-      console.log(`[WorkerPool] Auto-scaling down by ${scaleDownBy} workers (queue depth: ${queueDepth})`);
+      const scaleDownBy = Math.min(
+        metrics.idleWorkers - 1,
+        metrics.totalWorkers - this.config.minWorkers
+      );
+      console.log(
+        `[WorkerPool] Auto-scaling down by ${scaleDownBy} workers (queue depth: ${queueDepth})`
+      );
       this.removeWorkers(scaleDownBy);
       this.lastScaleDown = now;
     }
@@ -751,7 +848,8 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
     }
 
     // If most workers are busy, assume moderate queue depth
-    const utilizationRatio = (metrics.totalWorkers - metrics.idleWorkers) / metrics.totalWorkers;
+    const utilizationRatio =
+      (metrics.totalWorkers - metrics.idleWorkers) / metrics.totalWorkers;
     if (utilizationRatio > 0.8) {
       return Math.floor(this.config.scalingRules.scaleUpThreshold * 0.7);
     }

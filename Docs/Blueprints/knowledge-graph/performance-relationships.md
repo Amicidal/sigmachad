@@ -1,5 +1,18 @@
 # Performance Relationship Blueprint
 
+## Metadata
+
+- Scope: knowledge-graph
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: knowledge-graph).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Performance relationships (`PERFORMANCE_IMPACT`, `PERFORMANCE_REGRESSION`) capture how code changes affect benchmarks, latency budgets, and resource usage. They serve incident analysis, regression prevention, and optimization prioritization.
 

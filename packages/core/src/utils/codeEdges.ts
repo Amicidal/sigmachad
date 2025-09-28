@@ -1,4 +1,4 @@
-import * as crypto from "crypto";
+import * as crypto from 'crypto';
 import {
   GraphRelationship,
   RelationshipType,
@@ -11,8 +11,9 @@ import {
   isPerformanceRelationshipType,
   isSessionRelationshipType,
   isStructuralRelationshipType,
-} from "../models/relationships.js";
-import { sanitizeEnvironment } from "./environment.js";
+} from '../models/relationships.js';
+import { sanitizeEnvironment } from './environment.js';
+import { canonicalRelationshipId } from '@memento/shared-types';
 
 const CODE_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
   CODE_RELATIONSHIP_TYPES
@@ -29,22 +30,22 @@ export function mergeEdgeEvidence(
     ...(Array.isArray(b) ? b : []),
   ].filter(Boolean) as EdgeEvidence[];
   const key = (e: EdgeEvidence) =>
-    `${e.source || ""}|${e.location?.path || ""}|${e.location?.line || ""}|${
-      e.location?.column || ""
+    `${e.source || ''}|${e.location?.path || ''}|${e.location?.line || ''}|${
+      e.location?.column || ''
     }`;
   const rankSrc = (e: EdgeEvidence) =>
-    e.source === "type-checker" ? 3 : e.source === "ast" ? 2 : 1;
+    e.source === 'type-checker' ? 3 : e.source === 'ast' ? 2 : 1;
   const seen = new Set<string>();
   const out: EdgeEvidence[] = [];
   for (const e of arr.sort((x, y) => {
     const rs = rankSrc(y) - rankSrc(x);
     if (rs !== 0) return rs;
     const lx =
-      typeof x.location?.line === "number"
+      typeof x.location?.line === 'number'
         ? x.location!.line!
         : Number.MAX_SAFE_INTEGER;
     const ly =
-      typeof y.location?.line === "number"
+      typeof y.location?.line === 'number'
         ? y.location!.line!
         : Number.MAX_SAFE_INTEGER;
     return lx - ly;
@@ -69,7 +70,7 @@ export function mergeEdgeLocations(
     ...(Array.isArray(b) ? b : []),
   ].filter(Boolean) as Array<{ path?: string; line?: number; column?: number }>;
   const key = (l: { path?: string; line?: number; column?: number }) =>
-    `${l.path || ""}|${l.line || ""}|${l.column || ""}`;
+    `${l.path || ''}|${l.line || ''}|${l.column || ''}`;
   const seen = new Set<string>();
   const out: Array<{ path?: string; line?: number; column?: number }> = [];
   for (const l of arr) {
@@ -85,7 +86,7 @@ export function mergeEdgeLocations(
 
 export function isCodeRelationship(type: RelationshipType): boolean {
   // Handle legacy USES type by converting to equivalent type
-  if ((type as string) === "USES") return true;
+  if ((type as string) === 'USES') return true;
   return CODE_RELATIONSHIP_TYPE_SET.has(type);
 }
 
@@ -93,40 +94,40 @@ export function normalizeSource(s?: string): CodeEdgeSource | undefined {
   if (!s) return undefined;
   const v = String(s).toLowerCase();
   if (
-    v === "call-typecheck" ||
-    v === "ts" ||
-    v === "checker" ||
-    v === "tc" ||
-    v === "type-checker"
+    v === 'call-typecheck' ||
+    v === 'ts' ||
+    v === 'checker' ||
+    v === 'tc' ||
+    v === 'type-checker'
   )
-    return "type-checker";
-  if (v === "ts-ast" || v === "ast" || v === "parser") return "ast";
-  if (v === "heuristic" || v === "inferred") return "heuristic";
-  if (v === "index" || v === "indexer") return "index";
-  if (v === "runtime" || v === "instrumentation") return "runtime";
-  if (v === "lsp" || v === "language-server") return "lsp";
+    return 'type-checker';
+  if (v === 'ts-ast' || v === 'ast' || v === 'parser') return 'ast';
+  if (v === 'heuristic' || v === 'inferred') return 'heuristic';
+  if (v === 'index' || v === 'indexer') return 'index';
+  if (v === 'runtime' || v === 'instrumentation') return 'runtime';
+  if (v === 'lsp' || v === 'language-server') return 'lsp';
   // Default to heuristic if unknown string was provided
-  return "heuristic";
+  return 'heuristic';
 }
 
 // Compute a canonical target key for code edges to keep relationship IDs stable as resolution improves
 export function canonicalTargetKeyFor(rel: GraphRelationship): string {
   const anyRel: any = rel as any;
-  const t = String(rel.toEntityId || "");
+  const t = String(rel.toEntityId || '');
   const toRef = anyRel.toRef;
 
   // Prefer structured toRef
-  if (toRef && typeof toRef === "object") {
-    if (toRef.kind === "entity" && toRef.id) return `ENT:${toRef.id}`;
+  if (toRef && typeof toRef === 'object') {
+    if (toRef.kind === 'entity' && toRef.id) return `ENT:${toRef.id}`;
     if (
-      toRef.kind === "fileSymbol" &&
+      toRef.kind === 'fileSymbol' &&
       (toRef.file || toRef.symbol || toRef.name)
     ) {
-      const file = toRef.file || "";
-      const sym = (toRef.symbol || toRef.name || "") as string;
+      const file = toRef.file || '';
+      const sym = (toRef.symbol || toRef.name || '') as string;
       return `FS:${file}:${sym}`;
     }
-    if (toRef.kind === "external" && toRef.name) return `EXT:${toRef.name}`;
+    if (toRef.kind === 'external' && toRef.name) return `EXT:${toRef.name}`;
   }
 
   // Fallback to parsing toEntityId
@@ -162,9 +163,9 @@ const PATH_MAX = 4096;
 
 function clampConfidenceValue(value: unknown): number | undefined {
   const num =
-    typeof value === "number"
+    typeof value === 'number'
       ? value
-      : typeof value === "string" && value.trim() !== ""
+      : typeof value === 'string' && value.trim() !== ''
       ? Number(value)
       : NaN;
   if (!Number.isFinite(num)) return undefined;
@@ -176,7 +177,7 @@ function sanitizeStringValue(
   value: unknown,
   maxLength: number
 ): string | undefined {
-  if (typeof value !== "string") return undefined;
+  if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
@@ -185,7 +186,7 @@ function sanitizeStringValue(
 function sanitizeLocationEntry(
   value: any
 ): { path?: string; line?: number; column?: number } | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== 'object') return null;
   const out: { path?: string; line?: number; column?: number } = {};
   const path = sanitizeStringValue((value as any).path, PATH_MAX);
   if (path) out.path = path;
@@ -230,7 +231,7 @@ function sanitizeEvidenceList(
   const arr = Array.isArray(value) ? value : [];
   const out: EdgeEvidence[] = [];
   for (const entry of arr) {
-    if (!entry || typeof entry !== "object") continue;
+    if (!entry || typeof entry !== 'object') continue;
     const srcNormalized =
       normalizeSource((entry as any).source) || fallbackSource;
     const ev: EdgeEvidence = { source: srcNormalized };
@@ -256,9 +257,9 @@ function coerceNonNegative(
   { integer = false }: { integer?: boolean } = {}
 ): number | undefined {
   const parsed =
-    typeof value === "number"
+    typeof value === 'number'
       ? value
-      : typeof value === "string" && value.trim() !== ""
+      : typeof value === 'string' && value.trim() !== ''
       ? Number(value)
       : NaN;
   if (!Number.isFinite(parsed)) return undefined;
@@ -269,7 +270,7 @@ function coerceNonNegative(
 export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
   const rel: any = { ...(relIn as any) };
   // Backwards compatibility: old ingesters emitted USES instead of TYPE_USES
-  if (rel.type === "USES") rel.type = RelationshipType.TYPE_USES;
+  if (rel.type === 'USES') rel.type = RelationshipType.TYPE_USES;
   if (!isCodeRelationship(rel.type)) return rel as T;
 
   const md = (rel.metadata || {}) as any;
@@ -280,37 +281,37 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
     if (rel[key] == null && md[k] != null) rel[key] = md[k];
   };
   [
-    "kind",
-    "resolution",
-    "scope",
-    "arity",
-    "awaited",
-    "operator",
-    "importDepth",
-    "usedTypeChecker",
-    "isExported",
-    "accessPath",
-    "dataFlowId",
-    "confidence",
-    "inferred",
-    "resolved",
-    "source",
-    "callee",
-    "paramName",
-    "importAlias",
-    "receiverType",
-    "dynamicDispatch",
-    "overloadIndex",
-    "genericArguments",
-    "ambiguous",
-    "candidateCount",
-    "isMethod",
-    "occurrencesScan",
-    "occurrencesTotal",
-    "occurrencesRecent",
+    'kind',
+    'resolution',
+    'scope',
+    'arity',
+    'awaited',
+    'operator',
+    'importDepth',
+    'usedTypeChecker',
+    'isExported',
+    'accessPath',
+    'dataFlowId',
+    'confidence',
+    'inferred',
+    'resolved',
+    'source',
+    'callee',
+    'paramName',
+    'importAlias',
+    'receiverType',
+    'dynamicDispatch',
+    'overloadIndex',
+    'genericArguments',
+    'ambiguous',
+    'candidateCount',
+    'isMethod',
+    'occurrencesScan',
+    'occurrencesTotal',
+    'occurrencesRecent',
   ].forEach((k) => hoist(k));
   // For PARAM_TYPE legacy param -> paramName
-  hoist("param", "paramName");
+  hoist('param', 'paramName');
 
   const occScan = coerceNonNegative(rel.occurrencesScan, { integer: true });
   if (occScan !== undefined) rel.occurrencesScan = occScan;
@@ -327,8 +328,8 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
   rel.source = normalizeSource(rel.source || md.source);
   // Consolidate: confidence is canonical; map legacy strength inputs when present
   if (
-    typeof rel.confidence !== "number" &&
-    typeof (rel as any).strength === "number"
+    typeof rel.confidence !== 'number' &&
+    typeof (rel as any).strength === 'number'
   ) {
     rel.confidence = Math.max(0, Math.min(1, (rel as any).strength as number));
   }
@@ -337,22 +338,22 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
   }
 
   // Default active=true when seen
-  if (typeof rel.active !== "boolean") rel.active = true;
+  if (typeof rel.active !== 'boolean') rel.active = true;
 
   // Compose context/location
   const path = rel.location?.path || md.path;
   const line = rel.location?.line ?? md.line;
   const column = rel.location?.column ?? md.column;
-  if (!rel.context && typeof path === "string" && typeof line === "number")
+  if (!rel.context && typeof path === 'string' && typeof line === 'number')
     rel.context = `${path}:${line}`;
   if (
     !rel.location &&
-    (path || typeof line === "number" || typeof column === "number")
+    (path || typeof line === 'number' || typeof column === 'number')
   ) {
     rel.location = {
       ...(path ? { path } : {}),
-      ...(typeof line === "number" ? { line } : {}),
-      ...(typeof column === "number" ? { column } : {}),
+      ...(typeof line === 'number' ? { line } : {}),
+      ...(typeof column === 'number' ? { column } : {}),
     };
   }
 
@@ -365,14 +366,14 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
     !rel.siteId &&
     rel.location &&
     rel.location.path &&
-    typeof rel.location.line === "number"
+    typeof rel.location.line === 'number'
   ) {
     const base = `${rel.location.path}|${rel.location.line}|${
-      rel.location.column ?? ""
-    }|${rel.accessPath ?? ""}`;
+      rel.location.column ?? ''
+    }|${rel.accessPath ?? ''}`;
     rel.siteId =
-      "site_" +
-      crypto.createHash("sha1").update(base).digest("hex").slice(0, 12);
+      'site_' +
+      crypto.createHash('sha1').update(base).digest('hex').slice(0, 12);
   }
   // Stable-ish site hash using richer context to survive small shifts
   if (!rel.siteHash) {
@@ -387,8 +388,8 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
       f: rel.fromEntityId,
     });
     rel.siteHash =
-      "sh_" +
-      crypto.createHash("sha1").update(payload).digest("hex").slice(0, 16);
+      'sh_' +
+      crypto.createHash('sha1').update(payload).digest('hex').slice(0, 16);
   }
   if (Array.isArray(rel.sites)) {
     rel.sites = Array.from(
@@ -405,22 +406,22 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
   if (out.length > 0) rel.evidence = out;
   else {
     const def: EdgeEvidence = {
-      source: (rel.source as CodeEdgeSource) || "ast",
+      source: (rel.source as CodeEdgeSource) || 'ast',
       confidence:
-        typeof (rel as any).confidence === "number"
+        typeof (rel as any).confidence === 'number'
           ? (rel as any).confidence
           : undefined,
       location: rel.location,
-      note: typeof md.note === "string" ? md.note : undefined,
+      note: typeof md.note === 'string' ? md.note : undefined,
       extractorVersion:
-        typeof md.extractorVersion === "string"
+        typeof md.extractorVersion === 'string'
           ? md.extractorVersion
           : undefined,
     };
     rel.evidence = [def];
   }
 
-  const fallbackSource = (rel.source as CodeEdgeSource) || "ast";
+  const fallbackSource = (rel.source as CodeEdgeSource) || 'ast';
   let sanitizedEvidence = sanitizeEvidenceList(
     rel.evidence as any,
     fallbackSource
@@ -432,9 +433,9 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
           source: fallbackSource,
           confidence: clampConfidenceValue(rel.confidence),
           location: rel.location,
-          note: typeof md.note === "string" ? md.note : undefined,
+          note: typeof md.note === 'string' ? md.note : undefined,
           extractorVersion:
-            typeof md.extractorVersion === "string"
+            typeof md.extractorVersion === 'string'
               ? md.extractorVersion
               : undefined,
         },
@@ -464,7 +465,7 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
 
   // Promote toRef scalars for querying
   try {
-    const t = String(rel.toEntityId || "");
+    const t = String(rel.toEntityId || '');
     const toRef = rel.toRef || mdNew.toRef;
     const parseSym = (
       symId: string
@@ -477,24 +478,24 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
       return { file, symbol, name: symbol };
     };
     const setFileSym = (file: string, sym: string) => {
-      rel.to_ref_kind = "fileSymbol";
+      rel.to_ref_kind = 'fileSymbol';
       rel.to_ref_file = file;
       rel.to_ref_symbol = sym;
       rel.to_ref_name = rel.to_ref_name || sym;
     };
-    if (toRef && typeof toRef === "object") {
-      if (toRef.kind === "entity") {
-        rel.to_ref_kind = "entity";
+    if (toRef && typeof toRef === 'object') {
+      if (toRef.kind === 'entity') {
+        rel.to_ref_kind = 'entity';
         rel.to_ref_name = toRef.name || rel.to_ref_name;
-      } else if (toRef.kind === "fileSymbol") {
-        setFileSym(toRef.file || "", toRef.symbol || toRef.name || "");
-      } else if (toRef.kind === "external") {
-        rel.to_ref_kind = "external";
+      } else if (toRef.kind === 'fileSymbol') {
+        setFileSym(toRef.file || '', toRef.symbol || toRef.name || '');
+      } else if (toRef.kind === 'external') {
+        rel.to_ref_kind = 'external';
         rel.to_ref_name = toRef.name || rel.to_ref_name;
       }
     } else {
       // sym: concrete symbol ids
-      if (t.startsWith("sym:")) {
+      if (t.startsWith('sym:')) {
         const parsed = parseSym(t);
         if (parsed) setFileSym(parsed.file, parsed.symbol);
       }
@@ -502,18 +503,18 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
       if (mFile) setFileSym(mFile[1], mFile[2]);
       const mExt = t.match(/^external:(.+)$/);
       if (mExt) {
-        rel.to_ref_kind = "external";
+        rel.to_ref_kind = 'external';
         rel.to_ref_name = mExt[1];
       }
       if (/^(sym:|file:)/.test(t)) {
-        rel.to_ref_kind = rel.to_ref_kind || "entity";
+        rel.to_ref_kind = rel.to_ref_kind || 'entity';
       }
     }
   } catch {}
 
   // Promote fromRef scalars for querying (mirror of to_ref_*)
   try {
-    const f = String(rel.fromEntityId || "");
+    const f = String(rel.fromEntityId || '');
     const fromRef = (rel as any).fromRef || mdNew.fromRef;
     const parseSymFrom = (
       symId: string
@@ -525,26 +526,26 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
       return { file, symbol, name: symbol };
     };
     const setFromFileSym = (file: string, sym: string) => {
-      (rel as any).from_ref_kind = "fileSymbol";
+      (rel as any).from_ref_kind = 'fileSymbol';
       (rel as any).from_ref_file = file;
       (rel as any).from_ref_symbol = sym;
       (rel as any).from_ref_name = (rel as any).from_ref_name || sym;
     };
-    if (fromRef && typeof fromRef === "object") {
-      if (fromRef.kind === "entity") {
-        (rel as any).from_ref_kind = "entity";
+    if (fromRef && typeof fromRef === 'object') {
+      if (fromRef.kind === 'entity') {
+        (rel as any).from_ref_kind = 'entity';
         (rel as any).from_ref_name = fromRef.name || (rel as any).from_ref_name;
-      } else if (fromRef.kind === "fileSymbol") {
+      } else if (fromRef.kind === 'fileSymbol') {
         setFromFileSym(
-          fromRef.file || "",
-          fromRef.symbol || fromRef.name || ""
+          fromRef.file || '',
+          fromRef.symbol || fromRef.name || ''
         );
-      } else if (fromRef.kind === "external") {
-        (rel as any).from_ref_kind = "external";
+      } else if (fromRef.kind === 'external') {
+        (rel as any).from_ref_kind = 'external';
         (rel as any).from_ref_name = fromRef.name || (rel as any).from_ref_name;
       }
     } else {
-      if (f.startsWith("sym:")) {
+      if (f.startsWith('sym:')) {
         const parsed = parseSymFrom(f);
         if (parsed) setFromFileSym(parsed.file, parsed.symbol);
       }
@@ -552,11 +553,11 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
       if (mFile) setFromFileSym(mFile[1], mFile[2]);
       const mExt = f.match(/^external:(.+)$/);
       if (mExt) {
-        (rel as any).from_ref_kind = "external";
+        (rel as any).from_ref_kind = 'external';
         (rel as any).from_ref_name = mExt[1];
       }
       if (/^(sym:|file:)/.test(f)) {
-        (rel as any).from_ref_kind = (rel as any).from_ref_kind || "entity";
+        (rel as any).from_ref_kind = (rel as any).from_ref_kind || 'entity';
       }
     }
   } catch {}
@@ -566,38 +567,38 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
     if (!rel.kind) {
       switch (rel.type) {
         case RelationshipType.CALLS:
-          (rel as any).kind = "call";
+          (rel as any).kind = 'call';
           break;
         case RelationshipType.REFERENCES:
-          (rel as any).kind = "identifier";
+          (rel as any).kind = 'identifier';
           break;
         case RelationshipType.OVERRIDES:
-          (rel as any).kind = "override";
+          (rel as any).kind = 'override';
           break;
         case RelationshipType.EXTENDS:
         case RelationshipType.IMPLEMENTS:
-          (rel as any).kind = "inheritance";
+          (rel as any).kind = 'inheritance';
           break;
         case RelationshipType.READS:
-          (rel as any).kind = "read";
+          (rel as any).kind = 'read';
           break;
         case RelationshipType.WRITES:
-          (rel as any).kind = "write";
+          (rel as any).kind = 'write';
           break;
         case RelationshipType.DEPENDS_ON:
-          (rel as any).kind = "dependency";
+          (rel as any).kind = 'dependency';
           break;
         case RelationshipType.THROWS:
-          (rel as any).kind = "throw";
+          (rel as any).kind = 'throw';
           break;
         case RelationshipType.TYPE_USES:
-          (rel as any).kind = "type";
+          (rel as any).kind = 'type';
           break;
         case RelationshipType.RETURNS_TYPE:
-          (rel as any).kind = "return";
+          (rel as any).kind = 'return';
           break;
         case RelationshipType.PARAM_TYPE:
-          (rel as any).kind = "param";
+          (rel as any).kind = 'param';
           break;
       }
     }
@@ -606,68 +607,7 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
   return rel as T;
 }
 
-// Compute canonical relationship id for code edges using the canonical target key
-export function canonicalRelationshipId(
-  fromId: string,
-  rel: GraphRelationship
-): string {
-  if (isStructuralRelationshipType(rel.type)) {
-    const baseTarget = canonicalTargetKeyFor(rel);
-    const base = `${fromId}|${baseTarget}|${rel.type}`;
-    return "time-rel_" + crypto.createHash("sha1").update(base).digest("hex");
-  }
-
-  if (isSessionRelationshipType(rel.type)) {
-    const anyRel: any = rel as any;
-    const sessionIdSource =
-      anyRel.sessionId ??
-      anyRel.metadata?.sessionId ??
-      (typeof rel.fromEntityId === "string" && rel.fromEntityId
-        ? rel.fromEntityId
-        : "");
-    const sessionId = String(sessionIdSource || "")
-      .trim()
-      .toLowerCase();
-    const sequenceSource =
-      anyRel.sequenceNumber ?? anyRel.metadata?.sequenceNumber ?? 0;
-    const sequenceNumber = Number.isFinite(Number(sequenceSource))
-      ? Math.max(0, Math.floor(Number(sequenceSource)))
-      : 0;
-    const base = `${sessionId}|${sequenceNumber}|${rel.type}`;
-    return (
-      "rel_session_" +
-      crypto.createHash("sha1").update(base).digest("hex")
-    );
-  }
-
-  if (isPerformanceRelationshipType(rel.type)) {
-    const anyRel: any = rel as any;
-    const md =
-      anyRel.metadata && typeof anyRel.metadata === "object"
-        ? anyRel.metadata
-        : {};
-    const metricId = normalizeMetricIdForId(
-      anyRel.metricId ?? md.metricId ?? rel.toEntityId ?? "unknown"
-    );
-    const environment = sanitizeEnvironment(
-      anyRel.environment ?? md.environment ?? "unknown"
-    );
-    const scenario = normalizeScenarioForId(anyRel.scenario ?? md.scenario);
-    const target = String(rel.toEntityId || "");
-    const base = `${fromId}|${target}|${rel.type}|${metricId}|${environment}|${scenario}`;
-    return (
-      "rel_perf_" + crypto.createHash("sha1").update(base).digest("hex")
-    );
-  }
-
-  const baseTarget = isCodeRelationship(rel.type)
-    ? canonicalTargetKeyFor(rel)
-    : isDocumentationRelationshipType(rel.type)
-    ? canonicalDocumentationTargetKey(rel)
-    : String(rel.toEntityId || "");
-  const base = `${fromId}|${baseTarget}|${rel.type}`;
-  return "rel_" + crypto.createHash("sha1").update(base).digest("hex");
-}
+// canonicalRelationshipId is now imported from @memento/shared-types
 
 // Produce the legacy structural relationship id (rel_*) for migration purposes
 export function legacyStructuralRelationshipId(
@@ -675,35 +615,37 @@ export function legacyStructuralRelationshipId(
   rel: GraphRelationship
 ): string | null {
   if (!isStructuralRelationshipType(rel.type)) return null;
-  if (canonicalId.startsWith("time-rel_")) {
-    return "rel_" + canonicalId.slice("time-rel_".length);
+  if (canonicalId.startsWith('time-rel_')) {
+    return 'rel_' + canonicalId.slice('time-rel_'.length);
   }
-  if (canonicalId.startsWith("rel_")) return canonicalId;
+  if (canonicalId.startsWith('rel_')) return canonicalId;
   return null;
 }
 
 export function normalizeMetricIdForId(value: any): string {
-  if (!value) return "unknown";
-  return String(value)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9/_\-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/\/+$/g, "")
-    .replace(/^\/+/, "")
-    .slice(0, 256) || "unknown";
+  if (!value) return 'unknown';
+  return (
+    String(value)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9/_\-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/\/+/g, '/')
+      .replace(/\/+$/g, '')
+      .replace(/^\/+/, '')
+      .slice(0, 256) || 'unknown'
+  );
 }
 
 function normalizeScenarioForId(value: any): string {
-  if (!value) return "";
+  if (!value) return '';
   return normalizeStringForId(value).toLowerCase();
 }
 
 function canonicalDocumentationTargetKey(rel: GraphRelationship): string {
   const anyRel: any = rel as any;
   const md =
-    anyRel.metadata && typeof anyRel.metadata === "object"
+    anyRel.metadata && typeof anyRel.metadata === 'object'
       ? anyRel.metadata
       : {};
   const source = normalizeDocSourceForId(anyRel.source ?? md.source);
@@ -765,70 +707,70 @@ function canonicalDocumentationTargetKey(rel: GraphRelationship): string {
       return `${rel.toEntityId}|${sectionAnchor}|${docIntent}`;
     }
     default:
-      return String(rel.toEntityId || "");
+      return String(rel.toEntityId || '');
   }
 }
 
 function normalizeAnchorForId(anchor: any): string {
-  if (!anchor) return "_root";
+  if (!anchor) return '_root';
   const normalized = String(anchor)
     .trim()
-    .replace(/^#+/, "")
+    .replace(/^#+/, '')
     .toLowerCase()
-    .replace(/[^a-z0-9\-_/\s]+/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-/g, "")
-    .replace(/-$/g, "");
-  return normalized.length > 0 ? normalized.slice(0, 128) : "_root";
+    .replace(/[^a-z0-9\-_/\s]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-/g, '')
+    .replace(/-$/g, '');
+  return normalized.length > 0 ? normalized.slice(0, 128) : '_root';
 }
 
 function normalizeDomainPathForId(value: any): string {
-  if (!value) return "";
+  if (!value) return '';
   return String(value)
     .trim()
     .toLowerCase()
-    .replace(/>+/g, "/")
-    .replace(/\s+/g, "/")
-    .replace(/[^a-z0-9/_-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/\/+/, "/")
-    .replace(/^\/+|\/+$/g, "");
+    .replace(/>+/g, '/')
+    .replace(/\s+/g, '/')
+    .replace(/[^a-z0-9/_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/\/+/, '/')
+    .replace(/^\/+|\/+$/g, '');
 }
 
 function normalizeStringForId(value: any): string {
-  if (typeof value !== "string") return "";
+  if (typeof value !== 'string') return '';
   return value.trim();
 }
 
 function normalizeDocSourceForId(value: any): string {
-  if (!value) return "";
+  if (!value) return '';
   const normalized = String(value).toLowerCase();
   switch (normalized) {
-    case "parser":
-    case "manual":
-    case "llm":
-    case "imported":
-    case "sync":
-    case "other":
+    case 'parser':
+    case 'manual':
+    case 'llm':
+    case 'imported':
+    case 'sync':
+    case 'other':
       return normalized;
     default:
-      return "other";
+      return 'other';
   }
 }
 
 function normalizeDocIntentForId(value: any, type: RelationshipType): string {
   if (value === null || value === undefined) {
-    if (type === RelationshipType.GOVERNED_BY) return "governance";
-    return "ai-context";
+    if (type === RelationshipType.GOVERNED_BY) return 'governance';
+    return 'ai-context';
   }
   const normalized = String(value).toLowerCase();
   if (
-    normalized === "ai-context" ||
-    normalized === "governance" ||
-    normalized === "mixed"
+    normalized === 'ai-context' ||
+    normalized === 'governance' ||
+    normalized === 'mixed'
   ) {
     return normalized;
   }
-  return type === RelationshipType.GOVERNED_BY ? "governance" : "ai-context";
+  return type === RelationshipType.GOVERNED_BY ? 'governance' : 'ai-context';
 }

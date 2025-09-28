@@ -3,9 +3,9 @@
  * Handles database initialization, index creation, and setup operations
  */
 
-import { EventEmitter } from "events";
-import { Neo4jService } from "../Neo4jService.js";
-import { EmbeddingService } from "../EmbeddingService.js";
+import { EventEmitter } from 'events';
+import { Neo4jService } from './Neo4jService';
+import { EmbeddingService } from '../embeddings/EmbeddingService';
 
 export class GraphInitializer extends EventEmitter {
   constructor(
@@ -24,15 +24,15 @@ export class GraphInitializer extends EventEmitter {
       await this.embeddings.initializeVectorIndex();
 
       // OGM models should handle their own indexes
-      console.log("[GraphInitializer] OGM database setup completed");
+      console.log('[GraphInitializer] OGM database setup completed');
 
-      this.emit("database:initialized");
+      this.emit('database:initialized');
     } catch (error) {
       console.error(
-        "[GraphInitializer] Database initialization failed:",
+        '[GraphInitializer] Database initialization failed:',
         error
       );
-      this.emit("database:error", error);
+      this.emit('database:error', error);
       throw error;
     }
   }

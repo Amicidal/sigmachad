@@ -16,15 +16,12 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { DatabaseService, createDatabaseConfig } from '../../../src/services/core/DatabaseService.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { FileWatcher } from '../../../src/services/core/FileWatcher.js';
-import { ASTParser } from '../../../src/services/knowledge/ASTParser.js';
-import { DocumentationParser } from '../../../src/services/knowledge/DocumentationParser.js';
-import { SecurityScanner } from '../../../src/services/testing/SecurityScanner.js';
-import { SynchronizationCoordinator } from '../../../src/services/synchronization/SynchronizationCoordinator.js';
-import { ConflictResolution } from '../../../src/services/scm/ConflictResolution.js';
-import { RollbackCapabilities } from '../../../src/services/scm/RollbackCapabilities.js';
+import { DatabaseService, createDatabaseConfig } from '@memento/database';
+import { KnowledgeGraphService, ASTParser, DocumentationParser } from '@memento/knowledge';
+import { FileWatcher } from '@memento/core';
+import { SecurityScanner } from '@memento/testing';
+import { SynchronizationCoordinator } from '@memento/sync/synchronization';
+import { ConflictResolution, RollbackCapabilities } from '@memento/sync/scm';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -232,7 +229,8 @@ async function main() {
 
     // Handle tool calls
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
+      const { name, arguments: rawArgs } = request.params;
+      const args = (rawArgs ?? {}) as Record<string, any>;
 
       try {
         switch (name) {

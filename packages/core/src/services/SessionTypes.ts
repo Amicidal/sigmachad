@@ -1,305 +1,87 @@
 /**
- * Session Management Type Definitions
+ * Core Session Management Type Definitions
  *
- * Type definitions for Redis-based session coordination system
- * Supporting multi-agent workflows with ephemeral session storage
+ * Additional types specific to the core package session management
+ * Most common session types have been moved to @memento/shared-types
  */
 
-// ========== Core Session Types ==========
+import {
+  SessionState,
+  EventType,
+  ElementType,
+  Operation,
+  Severity,
+  Outcome,
+  VerifiedBy,
+  SessionChangeInfo,
+  SessionStateTransition,
+  SessionImpact,
+  SessionEvent,
+  SessionCheckpoint,
+  SessionDocument,
+  SessionAnchor,
+  SessionQuery,
+  TransitionResult,
+  SessionCreationOptions,
+  SessionEventOptions,
+  CheckpointOptions,
+  HandoffContext,
+  IsolationResult,
+  RedisSessionData,
+  RedisEventData,
+  SessionPubSubMessage,
+  RedisConfig,
+  SessionManagerConfig,
+  SessionError,
+  SessionNotFoundError,
+  SessionExpiredError,
+  ISessionStore,
+  ISessionManager,
+  ISessionBridge,
+  SessionStats,
+  SessionMetrics,
+} from '@memento/shared-types';
 
-export type SessionState = 'working' | 'broken' | 'coordinating' | 'completed';
-export type EventType = 'modified' | 'broke' | 'checkpoint' | 'handoff' | 'test_pass' | 'start';
-export type ElementType = 'function' | 'cluster' | 'spec' | 'benchmark' | 'session';
-export type Operation = 'added' | 'modified' | 'deleted' | 'renamed' | 'init';
-export type Severity = 'low' | 'medium' | 'high' | 'critical';
-export type Outcome = 'working' | 'broken' | 'coordinated' | 'completed';
-export type VerifiedBy = 'test' | 'build' | 'manual' | 'agent';
-
-// ========== Session Event Structure ==========
-
-export interface SessionChangeInfo {
-  elementType: ElementType;
-  entityIds: string[];  // KG refs
-  operation: Operation;
-  affectedLines?: number;
-  semanticHash?: string;
-}
-
-export interface SessionStateTransition {
-  from: SessionState;
-  to: SessionState;
-  verifiedBy: VerifiedBy;
-  confidence: number; // 0-1
-}
-
-export interface SessionImpact {
-  severity: Severity;
-  testsFailed?: string[]; // KG testIds
-  perfDelta?: number;     // ms regression/improvement
-  externalRef?: string;   // Postgres ID for failure details
-}
-
-export interface SessionEvent {
-  seq: number;
-  type: EventType;
-  timestamp: string; // ISODate
-  changeInfo: SessionChangeInfo;
-  stateTransition?: SessionStateTransition;
-  impact?: SessionImpact;
-  actor: string; // e.g., 'agent20'
-}
-
-// ========== Session Checkpoint ==========
-
-export interface SessionCheckpoint {
-  id: string;
-  refEntities: string[]; // KG IDs for anchors
-  summary: {
-    outcome: Outcome;
-    keyImpacts: string[];
-    perfDelta?: number;
-  };
-}
-
-// ========== Session Document Structure ==========
-
-export interface SessionDocument {
-  sessionId: string;
-  agentIds: string[];
-  state: SessionState;
-  events: SessionEvent[];
-  currentCheckpoint?: SessionCheckpoint;
-  metadata?: Record<string, any>;
-}
-
-// ========== KG Anchor Types ==========
-
-export interface SessionAnchor {
-  sessionId: string;
-  outcome: Outcome;
-  checkpointId: string;
-  keyImpacts: string[];
-  perfDelta?: number;
-  actors: string[];
-  timestamp: string; // ISODate
-  externalRef?: string; // Postgres ID for failure snapshot
-}
-
-// ========== Session Query Types ==========
-
-export interface SessionQuery {
-  sessionId?: string;
-  agentId?: string;
-  entityId?: string;
-  state?: SessionState;
-  outcome?: Outcome;
-  fromSeq?: number;
-  toSeq?: number;
-  limit?: number;
-  includeEvents?: boolean;
-  includeKGContext?: boolean;
-}
-
-export interface TransitionResult {
-  fromSeq: number;
-  toSeq: number;
-  changeInfo: SessionChangeInfo;
-  impact?: SessionImpact;
-  kgContext?: {
-    specTitle?: string;
-    clusterName?: string;
-    benchmarkDelta?: number;
-  };
-}
-
-// ========== Session Management Options ==========
-
-export interface SessionCreationOptions {
-  initialEntityIds?: string[];
-  ttl?: number; // seconds
-  metadata?: Record<string, any>;
-}
-
-export interface SessionEventOptions {
-  resetTTL?: boolean;
-  autoCheckpoint?: boolean;
-  publishUpdate?: boolean;
-}
-
-export interface CheckpointOptions {
-  forceSnapshot?: boolean;
-  graceTTL?: number; // seconds before cleanup
-  includeFailureSnapshot?: boolean;
-}
-
-// ========== Bridge Query Types ==========
-
-export interface HandoffContext {
-  sessionId: string;
-  recentChanges: SessionEvent[];
-  kgContext: Array<{
-    entityId: string;
-    related: any[];
-    lastAnchor?: SessionAnchor;
-  }>;
-  joiningAdvice: string;
-}
-
-export interface IsolationResult {
-  events: SessionEvent[];
-  impacts: Array<{
-    entityId: string;
-    anchors: SessionAnchor[];
-    count: number;
-  }>;
-  totalPerfDelta: number;
-  agentId: string;
-}
-
-// ========== Redis Data Structures ==========
-
-export interface RedisSessionData {
-  agentIds: string; // JSON array
-  state: SessionState;
-  events: string;   // ZSET reference or count
-  metadata?: string; // JSON object
-}
-
-export interface RedisEventData {
-  score: number;    // sequence number
-  member: string;   // JSON serialized SessionEvent
-}
-
-// ========== Pub/Sub Message Types ==========
-
-export interface SessionPubSubMessage {
-  type: 'new' | 'modified' | 'checkpoint_complete' | 'handoff';
-  sessionId: string;
-  seq?: number;
-  actor?: string;
-  initiator?: string;
-  checkpointId?: string;
-  outcome?: Outcome;
-  summary?: {
-    entityIds?: string[];
-    impact?: SessionImpact;
-  };
-}
-
-// ========== Configuration Types ==========
-
-export interface RedisConfig {
-  url?: string;
-  host?: string;
-  port?: number;
-  password?: string;
-  db?: number;
-  maxRetriesPerRequest?: number;
-  retryDelayOnFailover?: number;
-  lazyConnect?: boolean;
-}
-
-export interface SessionManagerConfig {
-  redis: RedisConfig;
-  defaultTTL?: number;        // default session TTL in seconds
-  checkpointInterval?: number; // auto-checkpoint every N events
-  maxEventsPerSession?: number;
-  graceTTL?: number;          // cleanup grace period
-  enableFailureSnapshots?: boolean;
-  pubSubChannels?: {
-    global?: string;
-    session?: string;
-  };
-}
-
-// ========== Error Types ==========
-
-export class SessionError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public sessionId?: string,
-    public context?: Record<string, any>
-  ) {
-    super(message);
-    this.name = 'SessionError';
-  }
-}
-
-export class SessionNotFoundError extends SessionError {
-  constructor(sessionId: string) {
-    super(`Session not found: ${sessionId}`, 'SESSION_NOT_FOUND', sessionId);
-    this.name = 'SessionNotFoundError';
-  }
-}
-
-export class SessionExpiredError extends SessionError {
-  constructor(sessionId: string) {
-    super(`Session expired: ${sessionId}`, 'SESSION_EXPIRED', sessionId);
-    this.name = 'SessionExpiredError';
-  }
-}
-
-// ========== Service Interface Types ==========
-
-export interface ISessionStore {
-  createSession(sessionId: string, agentId: string, options?: SessionCreationOptions): Promise<void>;
-  getSession(sessionId: string): Promise<SessionDocument | null>;
-  updateSession(sessionId: string, updates: Partial<SessionDocument>): Promise<void>;
-  deleteSession(sessionId: string): Promise<void>;
-  addEvent(sessionId: string, event: SessionEvent): Promise<void>;
-  getEvents(sessionId: string, fromSeq?: number, toSeq?: number): Promise<SessionEvent[]>;
-  getRecentEvents(sessionId: string, limit?: number): Promise<SessionEvent[]>;
-  addAgent(sessionId: string, agentId: string): Promise<void>;
-  removeAgent(sessionId: string, agentId: string): Promise<void>;
-  setTTL(sessionId: string, ttl: number): Promise<void>;
-  exists(sessionId: string): Promise<boolean>;
-}
-
-export interface ISessionManager {
-  createSession(agentId: string, options?: SessionCreationOptions): Promise<string>;
-  joinSession(sessionId: string, agentId: string): Promise<void>;
-  leaveSession(sessionId: string, agentId: string): Promise<void>;
-  emitEvent(sessionId: string, event: Omit<SessionEvent, 'seq' | 'timestamp'>, actor: string): Promise<void>;
-  getSession(sessionId: string): Promise<SessionDocument | null>;
-  checkpoint(sessionId: string, options?: CheckpointOptions): Promise<string>;
-  cleanup(sessionId: string): Promise<void>;
-  listActiveSessions(): Promise<string[]>;
-  getSessionsByAgent(agentId: string): Promise<string[]>;
-}
-
-export interface ISessionBridge {
-  getTransitions(sessionId: string, entityId?: string): Promise<TransitionResult[]>;
-  isolateSession(sessionId: string, agentId: string): Promise<IsolationResult>;
-  getHandoffContext(sessionId: string, joiningAgent: string): Promise<HandoffContext>;
-  querySessionsByEntity(entityId: string, options?: SessionQuery): Promise<SessionDocument[]>;
-  getSessionAggregates(entityIds: string[], options?: SessionQuery): Promise<any>;
-}
-
-// ========== Statistics and Monitoring ==========
-
-export interface SessionStats {
-  activeSessions: number;
-  totalEvents: number;
-  averageEventsPerSession: number;
-  checkpointsCreated: number;
-  failureSnapshots: number;
-  agentsActive: number;
-  redisMemoryUsage: number;
-}
-
-export interface SessionMetrics {
-  sessionDuration: number;
-  eventCount: number;
-  transitionCount: number;
-  performanceImpact: number;
-  agentCollaboration: number;
-}
-
-// ========== Export all types ==========
-
+// Re-export shared session types for convenience
 export type {
-  // Re-export key types for convenience
+  SessionState,
+  EventType,
+  ElementType,
+  Operation,
+  Severity,
+  Outcome,
+  VerifiedBy,
+  SessionChangeInfo,
+  SessionStateTransition,
+  SessionImpact,
+  SessionEvent,
+  SessionCheckpoint,
+  SessionDocument,
+  SessionAnchor,
+  SessionQuery,
+  TransitionResult,
+  SessionCreationOptions,
+  SessionEventOptions,
+  CheckpointOptions,
+  HandoffContext,
+  IsolationResult,
+  RedisSessionData,
+  RedisEventData,
+  SessionPubSubMessage,
+  RedisConfig,
+  SessionManagerConfig,
+  ISessionStore,
+  ISessionManager,
+  ISessionBridge,
+  SessionStats,
+  SessionMetrics,
+};
+
+// Export error classes as values for instantiation
+export { SessionError, SessionNotFoundError, SessionExpiredError };
+
+// Re-export as legacy aliases for backward compatibility
+export type {
   SessionDocument as RedisSession,
   SessionEvent as RedisEvent,
   SessionAnchor as RedisAnchor,

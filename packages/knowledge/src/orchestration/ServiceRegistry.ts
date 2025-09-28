@@ -3,14 +3,14 @@
  * Manages dependency injection and service wiring for the Knowledge Graph
  */
 
-import { Neo4jService, Neo4jConfig } from "../Neo4jService.js";
-import { NeogmaService } from "../ogm/NeogmaService.js";
-import { EntityServiceOGM } from "../ogm/EntityServiceOGM.js";
-import { RelationshipServiceOGM } from "../ogm/RelationshipServiceOGM.js";
-import { SearchServiceOGM } from "../ogm/SearchServiceOGM.js";
-import { EmbeddingService } from "../EmbeddingService.js";
-import { HistoryService } from "../HistoryService.js";
-import { AnalysisService } from "../AnalysisService.js";
+import { Neo4jService, Neo4jConfig } from '../graph/Neo4jService';
+import { NeogmaService } from '../graph/NeogmaService';
+import { EntityServiceOGM } from '../graph/EntityServiceOGM';
+import { RelationshipServiceOGM } from '../graph/RelationshipServiceOGM';
+import { SearchServiceOGM } from '../graph/SearchServiceOGM';
+import { EmbeddingService } from '../embeddings/EmbeddingService';
+import { HistoryService } from '../graph/HistoryService';
+import { AnalysisService } from '../analysis/AnalysisService';
 
 interface KnowledgeGraphDependencies {
   neo4j?: Neo4jService;
@@ -45,10 +45,10 @@ export class ServiceRegistry {
     overrides: KnowledgeGraphDependencies = {}
   ): void {
     const neo4jConfig: Neo4jConfig = {
-      uri: config?.uri || process.env.NEO4J_URI || "bolt://localhost:7687",
-      username: config?.username || process.env.NEO4J_USERNAME || "neo4j",
-      password: config?.password || process.env.NEO4J_PASSWORD || "password",
-      database: config?.database || process.env.NEO4J_DATABASE || "neo4j",
+      uri: config?.uri || process.env.NEO4J_URI || 'bolt://localhost:7687',
+      username: config?.username || process.env.NEO4J_USERNAME || 'neo4j',
+      password: config?.password || process.env.NEO4J_PASSWORD || 'password',
+      database: config?.database || process.env.NEO4J_DATABASE || 'neo4j',
       maxConnectionPoolSize: config?.maxConnectionPoolSize,
     };
 
@@ -68,7 +68,7 @@ export class ServiceRegistry {
     this.analysis =
       overrides.analysisService ?? new AnalysisService(this.neo4j);
 
-    console.log("[ServiceRegistry] Initialized with OGM services only");
+    console.log('[ServiceRegistry] Initialized with OGM services only');
   }
 
   // Getters for all services
@@ -109,7 +109,7 @@ export class ServiceRegistry {
    */
   async close(): Promise<void> {
     await this.neo4j.close();
-    if (typeof this.neogma.close === "function") {
+    if (typeof this.neogma.close === 'function') {
       await this.neogma.close();
     }
   }

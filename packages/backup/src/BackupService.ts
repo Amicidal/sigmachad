@@ -3,184 +3,39 @@
  * Handles system backup and restore operations across all databases
  */
 
-import { DatabaseService } from "@memento/core";
+import { DatabaseService } from '@memento/core';
 import type {
   DatabaseConfig,
   BackupConfiguration,
   BackupProviderDefinition,
   BackupRetentionPolicyConfig,
-} from "@memento/database";
-import * as path from "path";
-import * as fs from "fs/promises";
-import * as crypto from "crypto";
-import archiver from "archiver";
-import type { LoggingService } from "@memento/core";
+} from '@memento/database';
+import {
+  BackupOptions,
+  BackupMetadata,
+  RestorePreviewToken,
+  RestorePreviewResult,
+  RestoreApprovalPolicy,
+  BackupServiceOptions,
+  RestoreOptions,
+  RestoreApprovalRequest,
+} from '@memento/shared-types';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import * as crypto from 'crypto';
+import archiver from 'archiver';
+import type { LoggingService } from '@memento/core';
 import {
   BackupStorageProvider,
   BackupStorageRegistry,
   DefaultBackupStorageRegistry,
-} from "./BackupStorageProvider.js";
-import { LocalFilesystemStorageProvider } from "./LocalFilesystemStorageProvider.js";
-import { S3StorageProvider } from "./S3StorageProvider.js";
+} from './BackupStorageProvider.js';
+import { LocalFilesystemStorageProvider } from './LocalFilesystemStorageProvider.js';
+import { S3StorageProvider } from './S3StorageProvider.js';
 // import { GCSStorageProvider } from "./GCSStorageProvider.js"; // TODO: Implement GCS provider
-import { MaintenanceMetrics } from "@memento/testing";
+import { MaintenanceMetrics } from '@memento/testing';
 
-export interface BackupOptions {
-  type: "full" | "incremental";
-  includeData: boolean;
-  includeConfig: boolean;
-  compression: boolean;
-  destination?: string;
-  storageProviderId?: string;
-  labels?: string[];
-}
-
-export interface BackupMetadata {
-  id: string;
-  type: "full" | "incremental";
-  timestamp: Date;
-  size: number;
-  checksum: string;
-  components: {
-    falkordb: boolean;
-    qdrant: boolean;
-    postgres: boolean;
-    config: boolean;
-  };
-  status: "completed" | "failed" | "in_progress";
-}
-
-interface RestoreErrorDetails {
-  message: string;
-  code?: string;
-  cause?: unknown;
-}
-
-interface BackupIntegrityMetadata {
-  missingFiles?: string[];
-  checksum?: {
-    expected: string;
-    actual: string;
-  };
-  cause?: unknown;
-  storageProvider?: string;
-}
-
-interface BackupIntegrityResult {
-  passed: boolean;
-  isValid?: boolean;
-  details: string;
-  metadata?: BackupIntegrityMetadata;
-}
-
-type RestoreIntegrityCheck = Omit<BackupIntegrityResult, "details" | "metadata"> & {
-  details: {
-    message: string;
-    metadata?: BackupIntegrityMetadata;
-  };
-};
-
-interface RestoreResult {
-  backupId: string;
-  status:
-    | "in_progress"
-    | "completed"
-    | "failed"
-    | "dry_run_completed";
-  success: boolean;
-  changes: ComponentValidation[];
-  estimatedDuration: string;
-  integrityCheck?: RestoreIntegrityCheck;
-  error?: RestoreErrorDetails;
-  token?: string;
-  tokenExpiresAt?: Date;
-  requiresApproval?: boolean;
-}
-
-interface ComponentValidation {
-  component: string;
-  action: "validate" | "restored";
-  status: "valid" | "warning" | "invalid" | "missing" | "completed";
-  details: string;
-  metadata?: Record<string, unknown>;
-}
-
-interface PostgresColumnDefinition {
-  name: string;
-  dataType: string;
-  udtName?: string | null;
-  isNullable: boolean;
-  columnDefault?: string | null;
-  characterMaximumLength?: number | null;
-  numericPrecision?: number | null;
-  numericScale?: number | null;
-}
-
-interface PostgresTableDump {
-  name: string;
-  columns: PostgresColumnDefinition[];
-  primaryKey: string[];
-  createStatement: string;
-  rows: Array<Record<string, any>>;
-}
-
-interface PostgresBackupArtifact {
-  version: number;
-  createdAt: string;
-  tables: PostgresTableDump[];
-}
-
-export interface RestorePreviewToken {
-  token: string;
-  backupId: string;
-  issuedAt: Date;
-  expiresAt: Date;
-  requestedBy?: string;
-  requiresApproval: boolean;
-  approvedAt?: Date;
-  approvedBy?: string;
-  metadata: Record<string, unknown>;
-}
-
-export interface RestorePreviewResult {
-  backupId: string;
-  token: string;
-  success: boolean;
-  status: "in_progress" | "completed" | "failed" | "dry_run_completed";
-  expiresAt: Date;
-  tokenExpiresAt?: Date;
-  changes: ComponentValidation[];
-  estimatedDuration: string;
-  integrityCheck?: RestoreIntegrityCheck;
-  error?: RestoreErrorDetails;
-}
-
-export interface RestoreApprovalPolicy {
-  requireSecondApproval: boolean;
-  tokenTtlMs: number;
-}
-
-export interface BackupServiceOptions {
-  storageProvider?: BackupStorageProvider;
-  storageRegistry?: BackupStorageRegistry;
-  loggingService?: LoggingService;
-  restorePolicy?: Partial<RestoreApprovalPolicy>;
-}
-
-export interface RestoreOptions {
-  dryRun?: boolean;
-  destination?: string;
-  validateIntegrity?: boolean;
-  storageProviderId?: string;
-  requestedBy?: string;
-  restoreToken?: string;
-}
-
-export interface RestoreApprovalRequest {
-  token: string;
-  approvedBy: string;
-  reason?: string;
-}
+// Types are now imported from @memento/shared-types
 
 export class MaintenanceOperationError extends Error {
   readonly code: string;
@@ -200,7 +55,7 @@ export class MaintenanceOperationError extends Error {
     }
   ) {
     super(message);
-    this.name = "MaintenanceOperationError";
+    this.name = 'MaintenanceOperationError';
     this.code = options.code;
     this.statusCode = options.statusCode ?? 500;
     this.component = options.component;
@@ -210,7 +65,7 @@ export class MaintenanceOperationError extends Error {
 }
 
 export class BackupService {
-  private backupDir: string = "./backups";
+  private backupDir: string = './backups';
   private storageRegistry: BackupStorageRegistry;
   private storageProvider: BackupStorageProvider;
   private loggingService?: LoggingService;
@@ -230,10 +85,8 @@ export class BackupService {
       this.backupDir = backupConfig.local.basePath;
     }
 
-    const { registry, defaultProvider, retention } = this.initializeStorageProviders(
-      options,
-      backupConfig
-    );
+    const { registry, defaultProvider, retention } =
+      this.initializeStorageProviders(options, backupConfig);
     this.storageRegistry = registry;
     this.storageProvider = defaultProvider;
     this.retentionPolicy = retention;
@@ -245,11 +98,19 @@ export class BackupService {
     };
   }
 
-  private logInfo(component: string, message: string, data?: Record<string, unknown>) {
+  private logInfo(
+    component: string,
+    message: string,
+    data?: Record<string, unknown>
+  ) {
     this.loggingService?.info(component, message, data);
   }
 
-  private logError(component: string, message: string, data?: Record<string, unknown>) {
+  private logError(
+    component: string,
+    message: string,
+    data?: Record<string, unknown>
+  ) {
     this.loggingService?.error(component, message, data);
   }
 
@@ -274,17 +135,17 @@ export class BackupService {
       type: options.type,
       timestamp: new Date(),
       size: 0,
-      checksum: "",
+      checksum: '',
       components: {
         falkordb: false,
         qdrant: false,
         postgres: false,
         config: false,
       },
-      status: "in_progress",
+      status: 'in_progress',
     };
 
-    this.logInfo("backup", "Backup started", {
+    this.logInfo('backup', 'Backup started', {
       backupId,
       type: options.type,
       storageProvider: this.storageProvider.id,
@@ -296,7 +157,7 @@ export class BackupService {
           await this.backupFalkorDB(backupId, { silent: false });
           metadata.components.falkordb = true;
         } catch (error) {
-          this.logError("backup", "FalkorDB backup failed", {
+          this.logError('backup', 'FalkorDB backup failed', {
             backupId,
             error: error instanceof Error ? error.message : error,
           });
@@ -308,7 +169,7 @@ export class BackupService {
           await this.backupQdrant(backupId, { silent: false });
           metadata.components.qdrant = true;
         } catch (error) {
-          this.logError("backup", "Qdrant backup failed", {
+          this.logError('backup', 'Qdrant backup failed', {
             backupId,
             error: error instanceof Error ? error.message : error,
           });
@@ -320,7 +181,7 @@ export class BackupService {
           await this.backupPostgreSQL(backupId);
           metadata.components.postgres = true;
         } catch (error) {
-          this.logError("backup", "PostgreSQL backup failed", {
+          this.logError('backup', 'PostgreSQL backup failed', {
             backupId,
             error: error instanceof Error ? error.message : error,
           });
@@ -332,7 +193,7 @@ export class BackupService {
           await this.backupConfig(backupId);
           metadata.components.config = true;
         } catch (error) {
-          this.logError("backup", "Configuration backup failed", {
+          this.logError('backup', 'Configuration backup failed', {
             backupId,
             error: error instanceof Error ? error.message : error,
           });
@@ -346,7 +207,7 @@ export class BackupService {
 
       metadata.size = await this.calculateBackupSize(backupId);
       metadata.checksum = await this.calculateChecksum(backupId);
-      metadata.status = "completed";
+      metadata.status = 'completed';
 
       await this.storeBackupMetadata(metadata, {
         storageProviderId: this.storageProvider.id,
@@ -354,14 +215,14 @@ export class BackupService {
         labels: options.labels ?? [],
       });
 
-      this.logInfo("backup", "Backup completed", {
+      this.logInfo('backup', 'Backup completed', {
         backupId,
         size: metadata.size,
         checksum: metadata.checksum,
       });
 
       metrics.recordBackup({
-        status: "success",
+        status: 'success',
         durationMs: Date.now() - startedAt,
         type: options.type,
         storageProviderId,
@@ -372,7 +233,7 @@ export class BackupService {
 
       return metadata;
     } catch (error) {
-      metadata.status = "failed";
+      metadata.status = 'failed';
       await this.storeBackupMetadata(metadata, {
         storageProviderId: this.storageProvider.id,
         destination: options.destination ?? this.backupDir,
@@ -381,7 +242,7 @@ export class BackupService {
       });
 
       metrics.recordBackup({
-        status: "failure",
+        status: 'failure',
         durationMs: Date.now() - startedAt,
         type: options.type,
         storageProviderId,
@@ -391,16 +252,16 @@ export class BackupService {
         error instanceof MaintenanceOperationError
           ? error
           : new MaintenanceOperationError(
-              error instanceof Error ? error.message : "Backup failed",
+              error instanceof Error ? error.message : 'Backup failed',
               {
-                code: "BACKUP_FAILED",
-                component: "backup",
-                stage: "orchestrator",
+                code: 'BACKUP_FAILED',
+                component: 'backup',
+                stage: 'orchestrator',
                 cause: error,
               }
             );
 
-      this.logError("backup", "Backup failed", {
+      this.logError('backup', 'Backup failed', {
         backupId,
         error: failure.message,
         code: failure.code,
@@ -416,13 +277,13 @@ export class BackupService {
   ): Promise<RestoreResult> {
     const metrics = MaintenanceMetrics.getInstance();
     const startedAt = Date.now();
-    const requestedMode: "preview" | "apply" =
-      options.dryRun ?? !options.restoreToken ? "preview" : "apply";
+    const requestedMode: 'preview' | 'apply' =
+      options.dryRun ?? !options.restoreToken ? 'preview' : 'apply';
     const record = await this.getBackupRecord(backupId);
     if (!record) {
       metrics.recordRestore({
         mode: requestedMode,
-        status: "failure",
+        status: 'failure',
         durationMs: Date.now() - startedAt,
         requiresApproval: this.restorePolicy.requireSecondApproval,
         storageProviderId: this.storageProvider.id,
@@ -430,20 +291,22 @@ export class BackupService {
       });
       return {
         backupId,
-        status: "failed",
+        status: 'failed',
         success: false,
         changes: [],
-        estimatedDuration: "0 minutes",
+        estimatedDuration: '0 minutes',
         error: {
           message: `Backup ${backupId} not found`,
-          code: "NOT_FOUND",
+          code: 'NOT_FOUND',
         },
       };
     }
 
     const storageProviderId =
-      options.storageProviderId ?? record.storageProviderId ?? this.storageProvider.id;
-    const destination = options.destination ?? (record.destination ?? undefined);
+      options.storageProviderId ??
+      record.storageProviderId ??
+      this.storageProvider.id;
+    const destination = options.destination ?? record.destination ?? undefined;
     const dryRun = options.dryRun ?? !options.restoreToken;
 
     await this.prepareStorageContext({
@@ -469,7 +332,7 @@ export class BackupService {
       try {
         const changes = await this.validateBackup(backupId);
         const hasBlockingIssues = changes.some((item) =>
-          ["invalid", "missing"].includes(item.status)
+          ['invalid', 'missing'].includes(item.status)
         );
         let integrityCheck: RestoreIntegrityCheck | undefined;
 
@@ -490,7 +353,9 @@ export class BackupService {
 
         const canProceed =
           !hasBlockingIssues &&
-          (integrityCheck ? integrityCheck.passed && integrityCheck.isValid !== false : true);
+          (integrityCheck
+            ? integrityCheck.passed && integrityCheck.isValid !== false
+            : true);
 
         const tokenRecord = this.issueRestoreToken({
           backupId,
@@ -507,10 +372,10 @@ export class BackupService {
 
         const result: RestorePreviewResult & { requiresApproval?: boolean } = {
           backupId,
-          status: canProceed ? "dry_run_completed" : "failed",
+          status: canProceed ? 'dry_run_completed' : 'failed',
           success: canProceed,
           changes,
-          estimatedDuration: "0 minutes",
+          estimatedDuration: '0 minutes',
           integrityCheck,
           token: tokenRecord.token,
           expiresAt: tokenRecord.expiresAt,
@@ -519,14 +384,14 @@ export class BackupService {
           error: canProceed
             ? undefined
             : {
-                message: "Validation detected blocking issues",
-                code: "RESTORE_VALIDATION_FAILED",
+                message: 'Validation detected blocking issues',
+                code: 'RESTORE_VALIDATION_FAILED',
               },
         };
 
         metrics.recordRestore({
-          mode: "preview",
-          status: result.success ? "success" : "failure",
+          mode: 'preview',
+          status: result.success ? 'success' : 'failure',
           durationMs: Date.now() - startedAt,
           requiresApproval: Boolean(result.requiresApproval),
           storageProviderId,
@@ -537,25 +402,25 @@ export class BackupService {
       } catch (error) {
         const failureResult: RestoreResult = {
           backupId,
-          status: "failed",
+          status: 'failed',
           success: false,
           changes: [],
-          estimatedDuration: "0 minutes",
+          estimatedDuration: '0 minutes',
           error: {
             message:
               error instanceof MaintenanceOperationError
                 ? error.message
                 : error instanceof Error
                 ? error.message
-              : "Failed to validate backup metadata",
-            code: "DRY_RUN_VALIDATION_FAILED",
+                : 'Failed to validate backup metadata',
+            code: 'DRY_RUN_VALIDATION_FAILED',
             cause: error,
           },
         };
 
         metrics.recordRestore({
-          mode: "preview",
-          status: "failure",
+          mode: 'preview',
+          status: 'failure',
           durationMs: Date.now() - startedAt,
           requiresApproval: this.restorePolicy.requireSecondApproval,
           storageProviderId,
@@ -568,29 +433,32 @@ export class BackupService {
 
     const restoreToken = options.restoreToken;
     if (!restoreToken) {
-      throw new MaintenanceOperationError("Restore token is required", {
-        code: "RESTORE_TOKEN_REQUIRED",
+      throw new MaintenanceOperationError('Restore token is required', {
+        code: 'RESTORE_TOKEN_REQUIRED',
         statusCode: 400,
-        component: "restore",
+        component: 'restore',
       });
     }
 
     this.purgeExpiredRestoreTokens();
     const tokenRecord = this.restoreTokens.get(restoreToken);
     if (!tokenRecord || tokenRecord.backupId !== backupId) {
-      throw new MaintenanceOperationError("Restore token is invalid or expired", {
-        code: "RESTORE_TOKEN_INVALID",
-        statusCode: 410,
-        component: "restore",
-      });
+      throw new MaintenanceOperationError(
+        'Restore token is invalid or expired',
+        {
+          code: 'RESTORE_TOKEN_INVALID',
+          statusCode: 410,
+          component: 'restore',
+        }
+      );
     }
 
     if (tokenRecord.expiresAt.getTime() <= Date.now()) {
       this.restoreTokens.delete(restoreToken);
-      throw new MaintenanceOperationError("Restore token has expired", {
-        code: "RESTORE_TOKEN_EXPIRED",
+      throw new MaintenanceOperationError('Restore token has expired', {
+        code: 'RESTORE_TOKEN_EXPIRED',
         statusCode: 410,
-        component: "restore",
+        component: 'restore',
       });
     }
 
@@ -598,32 +466,32 @@ export class BackupService {
     const isApproved = Boolean(tokenRecord.approvedAt);
     if (!canProceed && !isApproved) {
       throw new MaintenanceOperationError(
-        "Restore cannot proceed until blocking issues are resolved",
+        'Restore cannot proceed until blocking issues are resolved',
         {
-          code: "RESTORE_VALIDATION_FAILED",
+          code: 'RESTORE_VALIDATION_FAILED',
           statusCode: 409,
-          component: "restore",
+          component: 'restore',
         }
       );
     }
 
     if (tokenRecord.requiresApproval && !tokenRecord.approvedAt) {
       throw new MaintenanceOperationError(
-        "Restore requires secondary approval before execution",
+        'Restore requires secondary approval before execution',
         {
-          code: "RESTORE_APPROVAL_REQUIRED",
+          code: 'RESTORE_APPROVAL_REQUIRED',
           statusCode: 403,
-          component: "restore",
+          component: 'restore',
         }
       );
     }
 
     const restoreResult: RestoreResult = {
       backupId,
-      status: "in_progress",
+      status: 'in_progress',
       success: false,
       changes: [],
-      estimatedDuration: "10-15 minutes",
+      estimatedDuration: '10-15 minutes',
     };
 
     if (options.validateIntegrity) {
@@ -641,10 +509,10 @@ export class BackupService {
       };
 
       if (!integrityResult.isValid) {
-        throw new MaintenanceOperationError("Backup integrity check failed", {
-          code: "RESTORE_INTEGRITY_FAILED",
+        throw new MaintenanceOperationError('Backup integrity check failed', {
+          code: 'RESTORE_INTEGRITY_FAILED',
           statusCode: 412,
-          component: "restore",
+          component: 'restore',
         });
       }
     }
@@ -655,50 +523,50 @@ export class BackupService {
       if (metadata.components.falkordb) {
         await this.restoreFalkorDB(backupId);
         restoreResult.changes.push({
-          component: "falkordb",
-          action: "restored",
-          status: "completed",
-          details: "FalkorDB restored successfully",
+          component: 'falkordb',
+          action: 'restored',
+          status: 'completed',
+          details: 'FalkorDB restored successfully',
         });
       }
 
       if (metadata.components.qdrant) {
         await this.restoreQdrant(backupId);
         restoreResult.changes.push({
-          component: "qdrant",
-          action: "restored",
-          status: "completed",
-          details: "Qdrant restored successfully",
+          component: 'qdrant',
+          action: 'restored',
+          status: 'completed',
+          details: 'Qdrant restored successfully',
         });
       }
 
       if (metadata.components.postgres) {
         await this.restorePostgreSQL(backupId);
         restoreResult.changes.push({
-          component: "postgres",
-          action: "restored",
-          status: "completed",
-          details: "PostgreSQL restored successfully",
+          component: 'postgres',
+          action: 'restored',
+          status: 'completed',
+          details: 'PostgreSQL restored successfully',
         });
       }
 
       if (metadata.components.config) {
         await this.restoreConfig(backupId);
         restoreResult.changes.push({
-          component: "config",
-          action: "restored",
-          status: "completed",
-          details: "Configuration restored successfully",
+          component: 'config',
+          action: 'restored',
+          status: 'completed',
+          details: 'Configuration restored successfully',
         });
       }
 
-      restoreResult.status = "completed";
+      restoreResult.status = 'completed';
       restoreResult.success = true;
       this.restoreTokens.delete(restoreToken);
       restoreResult.requiresApproval = tokenRecord.requiresApproval;
       metrics.recordRestore({
-        mode: "apply",
-        status: "success",
+        mode: 'apply',
+        status: 'success',
         durationMs: Date.now() - startedAt,
         requiresApproval: Boolean(tokenRecord.requiresApproval),
         storageProviderId,
@@ -706,32 +574,35 @@ export class BackupService {
       });
       return restoreResult;
     } catch (error) {
-      this.logError("restore", "Restore execution failed", {
+      this.logError('restore', 'Restore execution failed', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
       metrics.recordRestore({
-        mode: dryRun ? "preview" : "apply",
-        status: "failure",
+        mode: dryRun ? 'preview' : 'apply',
+        status: 'failure',
         durationMs: Date.now() - startedAt,
         requiresApproval: dryRun
           ? this.restorePolicy.requireSecondApproval
-          : Boolean(tokenRecord?.requiresApproval ?? this.restorePolicy.requireSecondApproval),
+          : Boolean(
+              tokenRecord?.requiresApproval ??
+                this.restorePolicy.requireSecondApproval
+            ),
         storageProviderId,
         backupId,
       });
 
-      throw (error instanceof MaintenanceOperationError
+      throw error instanceof MaintenanceOperationError
         ? error
         : new MaintenanceOperationError(
-            error instanceof Error ? error.message : "Restore failed",
+            error instanceof Error ? error.message : 'Restore failed',
             {
-              code: "RESTORE_FAILED",
-              component: "restore",
-              stage: "apply",
+              code: 'RESTORE_FAILED',
+              component: 'restore',
+              stage: 'apply',
               cause: error,
             }
-          ));
+          );
     }
   }
 
@@ -740,10 +611,10 @@ export class BackupService {
     this.purgeExpiredRestoreTokens();
     const tokenRecord = this.restoreTokens.get(request.token);
     if (!tokenRecord) {
-      throw new MaintenanceOperationError("Restore token not found", {
-        code: "RESTORE_TOKEN_INVALID",
+      throw new MaintenanceOperationError('Restore token not found', {
+        code: 'RESTORE_TOKEN_INVALID',
         statusCode: 404,
-        component: "restore",
+        component: 'restore',
       });
     }
 
@@ -755,7 +626,7 @@ export class BackupService {
     };
 
     this.restoreTokens.set(request.token, tokenRecord);
-    metrics.recordRestoreApproval({ status: "approved" });
+    metrics.recordRestoreApproval({ status: 'approved' });
     return tokenRecord;
   }
 
@@ -799,9 +670,13 @@ export class BackupService {
       if (configuredDefault) {
         defaultProvider = configuredDefault;
       } else {
-        this.logError("backup", "Configured default storage provider not found", {
-          providerId: backupConfig.defaultProvider,
-        });
+        this.logError(
+          'backup',
+          'Configured default storage provider not found',
+          {
+            providerId: backupConfig.defaultProvider,
+          }
+        );
       }
     }
 
@@ -821,12 +696,18 @@ export class BackupService {
       return;
     }
 
-    for (const [providerId, definition] of Object.entries(configuredProviders)) {
+    for (const [providerId, definition] of Object.entries(
+      configuredProviders
+    )) {
       try {
-        const provider = this.instantiateConfiguredProvider(providerId, definition, backupConfig);
+        const provider = this.instantiateConfiguredProvider(
+          providerId,
+          definition,
+          backupConfig
+        );
         registry.register(providerId, provider);
       } catch (error) {
-        this.logError("backup", "Failed to register backup storage provider", {
+        this.logError('backup', 'Failed to register backup storage provider', {
           providerId,
           error: error instanceof Error ? error.message : error,
         });
@@ -839,23 +720,23 @@ export class BackupService {
     definition: BackupProviderDefinition,
     backupConfig?: BackupConfiguration
   ): BackupStorageProvider {
-    const type = (definition.type ?? "local").toLowerCase();
+    const type = (definition.type ?? 'local').toLowerCase();
     const options = (definition.options ?? {}) as Record<string, unknown>;
 
     switch (type) {
-      case "local": {
+      case 'local': {
         const basePath =
-          this.getStringOption(options, "basePath") ??
+          this.getStringOption(options, 'basePath') ??
           backupConfig?.local?.basePath ??
           this.backupDir;
-        const allowCreate = this.getBooleanOption(options, "allowCreate");
+        const allowCreate = this.getBooleanOption(options, 'allowCreate');
         return new LocalFilesystemStorageProvider({
           basePath,
           allowCreate: allowCreate ?? backupConfig?.local?.allowCreate ?? true,
         });
       }
-      case "s3": {
-        const bucket = this.getStringOption(options, "bucket");
+      case 's3': {
+        const bucket = this.getStringOption(options, 'bucket');
         if (!bucket) {
           throw new Error(
             `S3 storage provider "${providerId}" requires a bucket name`
@@ -867,20 +748,26 @@ export class BackupService {
         return new S3StorageProvider({
           id: providerId,
           bucket,
-          region: this.getStringOption(options, "region"),
-          prefix: this.getStringOption(options, "prefix"),
-          endpoint: this.getStringOption(options, "endpoint"),
-          forcePathStyle: this.getBooleanOption(options, "forcePathStyle") ?? undefined,
-          autoCreate: this.getBooleanOption(options, "autoCreate") ?? undefined,
-          kmsKeyId: this.getStringOption(options, "kmsKeyId"),
-          serverSideEncryption: this.getStringOption(options, "serverSideEncryption"),
-          uploadConcurrency: this.getNumberOption(options, "uploadConcurrency") ?? undefined,
-          uploadPartSizeBytes: this.getNumberOption(options, "uploadPartSizeBytes") ?? undefined,
+          region: this.getStringOption(options, 'region'),
+          prefix: this.getStringOption(options, 'prefix'),
+          endpoint: this.getStringOption(options, 'endpoint'),
+          forcePathStyle:
+            this.getBooleanOption(options, 'forcePathStyle') ?? undefined,
+          autoCreate: this.getBooleanOption(options, 'autoCreate') ?? undefined,
+          kmsKeyId: this.getStringOption(options, 'kmsKeyId'),
+          serverSideEncryption: this.getStringOption(
+            options,
+            'serverSideEncryption'
+          ),
+          uploadConcurrency:
+            this.getNumberOption(options, 'uploadConcurrency') ?? undefined,
+          uploadPartSizeBytes:
+            this.getNumberOption(options, 'uploadPartSizeBytes') ?? undefined,
           credentials,
         });
       }
-      case "gcs": {
-        const bucket = this.getStringOption(options, "bucket");
+      case 'gcs': {
+        const bucket = this.getStringOption(options, 'bucket');
         if (!bucket) {
           throw new Error(
             `GCS storage provider "${providerId}" requires a bucket name`
@@ -893,14 +780,15 @@ export class BackupService {
         return new S3StorageProvider({
           id: providerId,
           bucket,
-          prefix: this.getStringOption(options, "prefix"),
-          region: this.getStringOption(options, "region"),
-          endpoint: this.getStringOption(options, "endpoint"),
-          autoCreate: this.getBooleanOption(options, "autoCreate") ?? undefined,
+          prefix: this.getStringOption(options, 'prefix'),
+          region: this.getStringOption(options, 'region'),
+          endpoint: this.getStringOption(options, 'endpoint'),
+          autoCreate: this.getBooleanOption(options, 'autoCreate') ?? undefined,
           credentials: {
-            accessKeyId: this.getStringOption(options, "accessKeyId") || "",
-            secretAccessKey: this.getStringOption(options, "secretAccessKey") || "",
-            sessionToken: this.getStringOption(options, "sessionToken"),
+            accessKeyId: this.getStringOption(options, 'accessKeyId') || '',
+            secretAccessKey:
+              this.getStringOption(options, 'secretAccessKey') || '',
+            sessionToken: this.getStringOption(options, 'sessionToken'),
           },
         });
       }
@@ -912,12 +800,12 @@ export class BackupService {
   }
 
   private buildS3Credentials(options: Record<string, unknown>) {
-    const accessKeyId = this.getStringOption(options, "accessKeyId");
-    const secretAccessKey = this.getStringOption(options, "secretAccessKey");
-    const sessionToken = this.getStringOption(options, "sessionToken");
+    const accessKeyId = this.getStringOption(options, 'accessKeyId');
+    const secretAccessKey = this.getStringOption(options, 'secretAccessKey');
+    const sessionToken = this.getStringOption(options, 'sessionToken');
 
     const nested = options.credentials;
-    if (!accessKeyId && typeof nested === "object" && nested) {
+    if (!accessKeyId && typeof nested === 'object' && nested) {
       const nestedCreds = nested as Record<string, unknown>;
       return this.buildS3Credentials(nestedCreds);
     }
@@ -934,11 +822,11 @@ export class BackupService {
   }
 
   private buildGcsCredentials(options: Record<string, unknown>) {
-    const clientEmail = this.getStringOption(options, "clientEmail");
-    const privateKey = this.getStringOption(options, "privateKey");
+    const clientEmail = this.getStringOption(options, 'clientEmail');
+    const privateKey = this.getStringOption(options, 'privateKey');
 
     const nested = options.credentials;
-    if (!clientEmail && typeof nested === "object" && nested) {
+    if (!clientEmail && typeof nested === 'object' && nested) {
       const nestedCreds = nested as Record<string, unknown>;
       return this.buildGcsCredentials(nestedCreds);
     }
@@ -953,29 +841,38 @@ export class BackupService {
     return undefined;
   }
 
-  private getStringOption(source: Record<string, unknown>, key: string): string | undefined {
+  private getStringOption(
+    source: Record<string, unknown>,
+    key: string
+  ): string | undefined {
     const value = source[key];
-    return typeof value === "string" && value.length > 0 ? value : undefined;
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 
-  private getBooleanOption(source: Record<string, unknown>, key: string): boolean | undefined {
+  private getBooleanOption(
+    source: Record<string, unknown>,
+    key: string
+  ): boolean | undefined {
     const value = source[key];
-    if (typeof value === "boolean") {
+    if (typeof value === 'boolean') {
       return value;
     }
-    if (typeof value === "string") {
-      if (value.toLowerCase() === "true") return true;
-      if (value.toLowerCase() === "false") return false;
+    if (typeof value === 'string') {
+      if (value.toLowerCase() === 'true') return true;
+      if (value.toLowerCase() === 'false') return false;
     }
     return undefined;
   }
 
-  private getNumberOption(source: Record<string, unknown>, key: string): number | undefined {
+  private getNumberOption(
+    source: Record<string, unknown>,
+    key: string
+  ): number | undefined {
     const value = source[key];
-    if (typeof value === "number" && Number.isFinite(value)) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
     }
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : undefined;
     }
@@ -989,13 +886,13 @@ export class BackupService {
   }): Promise<void> {
     if (
       !this.dbService ||
-      typeof this.dbService.isInitialized !== "function" ||
+      typeof this.dbService.isInitialized !== 'function' ||
       !this.dbService.isInitialized()
     ) {
-      throw new MaintenanceOperationError("Database service unavailable", {
-        code: "DEPENDENCY_UNAVAILABLE",
+      throw new MaintenanceOperationError('Database service unavailable', {
+        code: 'DEPENDENCY_UNAVAILABLE',
         statusCode: 503,
-        component: "database",
+        component: 'database',
       });
     }
 
@@ -1005,7 +902,7 @@ export class BackupService {
       checks.push(
         this.ensureSpecificServiceReady(
           () => this.dbService.getFalkorDBService(),
-          "falkordb"
+          'falkordb'
         )
       );
     }
@@ -1014,7 +911,7 @@ export class BackupService {
       checks.push(
         this.ensureSpecificServiceReady(
           () => this.dbService.getQdrantService(),
-          "qdrant"
+          'qdrant'
         )
       );
     }
@@ -1023,7 +920,7 @@ export class BackupService {
       checks.push(
         this.ensureSpecificServiceReady(
           () => this.dbService.getPostgreSQLService(),
-          "postgres"
+          'postgres'
         )
       );
     }
@@ -1037,7 +934,7 @@ export class BackupService {
   ): Promise<void> {
     try {
       const service = getService();
-      if (service && typeof service.healthCheck === "function") {
+      if (service && typeof service.healthCheck === 'function') {
         const healthy = await service.healthCheck();
         if (!healthy) {
           throw new Error(`${component} health check reported unavailable`);
@@ -1045,7 +942,7 @@ export class BackupService {
       }
     } catch (error) {
       throw new MaintenanceOperationError(`${component} service unavailable`, {
-        code: "DEPENDENCY_UNAVAILABLE",
+        code: 'DEPENDENCY_UNAVAILABLE',
         statusCode: 503,
         component,
         cause: error,
@@ -1087,7 +984,11 @@ export class BackupService {
 
       if (policy.maxEntries && policy.maxEntries > 0) {
         const eligible = rows.filter((row) => !idsToDelete.has(row.id));
-        for (let index = policy.maxEntries; index < eligible.length; index += 1) {
+        for (
+          let index = policy.maxEntries;
+          index < eligible.length;
+          index += 1
+        ) {
           idsToDelete.add(eligible[index].id);
         }
       }
@@ -1123,11 +1024,11 @@ export class BackupService {
         [Array.from(idsToDelete)]
       );
 
-      this.logInfo("backup", "Retention pruning completed", {
+      this.logInfo('backup', 'Retention pruning completed', {
         removedBackups: idsToDelete.size,
       });
     } catch (error) {
-      this.logError("backup", "Retention enforcement failed", {
+      this.logError('backup', 'Retention enforcement failed', {
         error: error instanceof Error ? error.message : error,
       });
     }
@@ -1144,7 +1045,7 @@ export class BackupService {
       }
 
       if (!provider) {
-        this.logError("backup", "Retention pruning skipped unknown provider", {
+        this.logError('backup', 'Retention pruning skipped unknown provider', {
           backupId,
           providerId,
         });
@@ -1158,7 +1059,7 @@ export class BackupService {
           try {
             await provider.removeFile(artifact);
           } catch (error) {
-            this.logError("backup", "Failed to delete backup artifact", {
+            this.logError('backup', 'Failed to delete backup artifact', {
               backupId,
               providerId,
               artifact,
@@ -1168,7 +1069,7 @@ export class BackupService {
         }
       }
     } catch (error) {
-      this.logError("backup", "Retention artifact cleanup failed", {
+      this.logError('backup', 'Retention artifact cleanup failed', {
         backupId,
         providerId,
         error: error instanceof Error ? error.message : error,
@@ -1176,7 +1077,10 @@ export class BackupService {
     }
   }
 
-  private async exportQdrantCollectionPoints(client: any, collectionName: string): Promise<any[]> {
+  private async exportQdrantCollectionPoints(
+    client: any,
+    collectionName: string
+  ): Promise<any[]> {
     const points: any[] = [];
     let nextOffset: unknown = undefined;
     const batchSize = 256;
@@ -1216,7 +1120,9 @@ export class BackupService {
     return points;
   }
 
-  private async collectQdrantPointArtifacts(backupId: string): Promise<string[]> {
+  private async collectQdrantPointArtifacts(
+    backupId: string
+  ): Promise<string[]> {
     const manifestArtifact = `${backupId}_qdrant_collections.json`;
     const exists = await this.artifactExists(backupId, manifestArtifact);
     if (!exists) {
@@ -1224,7 +1130,7 @@ export class BackupService {
     }
 
     const manifest = JSON.parse(
-      (await this.readArtifact(backupId, manifestArtifact)).toString("utf-8")
+      (await this.readArtifact(backupId, manifestArtifact)).toString('utf-8')
     );
 
     const collectionEntries = Array.isArray(manifest?.collections)
@@ -1233,7 +1139,9 @@ export class BackupService {
 
     return collectionEntries
       .map((entry: any) => entry?.pointsArtifact)
-      .filter((artifact: unknown): artifact is string => typeof artifact === "string");
+      .filter(
+        (artifact: unknown): artifact is string => typeof artifact === 'string'
+      );
   }
 
   private async loadQdrantPoints(
@@ -1254,7 +1162,9 @@ export class BackupService {
     }
 
     const raw = JSON.parse(
-      (await this.readArtifact(backupId, entry.pointsArtifact)).toString("utf-8")
+      (await this.readArtifact(backupId, entry.pointsArtifact)).toString(
+        'utf-8'
+      )
     );
 
     if (Array.isArray(raw)) {
@@ -1319,7 +1229,7 @@ export class BackupService {
           wait: true,
         });
       } catch (error) {
-        this.logError("restore", "Failed to recreate Qdrant payload index", {
+        this.logError('restore', 'Failed to recreate Qdrant payload index', {
           collection: name,
           field: fieldName,
           error: error instanceof Error ? error.message : error,
@@ -1357,8 +1267,8 @@ export class BackupService {
       return true;
     }
     const message = (error as any)?.message;
-    if (typeof message === "string") {
-      return message.toLowerCase().includes("not found");
+    if (typeof message === 'string') {
+      return message.toLowerCase().includes('not found');
     }
     return false;
   }
@@ -1372,7 +1282,7 @@ export class BackupService {
         throw new MaintenanceOperationError(
           `Unknown storage provider: ${options.storageProviderId}`,
           {
-            code: "STORAGE_PROVIDER_UNKNOWN",
+            code: 'STORAGE_PROVIDER_UNKNOWN',
             statusCode: 400,
           }
         );
@@ -1394,7 +1304,7 @@ export class BackupService {
 
   private buildArtifactPath(backupId: string, fileName: string): string {
     if (fileName.startsWith(backupId)) {
-      return fileName.replace(/\\/g, "/");
+      return fileName.replace(/\\/g, '/');
     }
     return path.posix.join(backupId, fileName);
   }
@@ -1429,7 +1339,7 @@ export class BackupService {
   }
 
   private computeBufferChecksum(buffer: Buffer): string {
-    return crypto.createHash("sha256").update(buffer).digest("hex");
+    return crypto.createHash('sha256').update(buffer).digest('hex');
   }
 
   private purgeExpiredRestoreTokens(): void {
@@ -1453,7 +1363,9 @@ export class BackupService {
 
     const token = crypto.randomUUID();
     const issuedAt = new Date();
-    const expiresAt = new Date(issuedAt.getTime() + this.restorePolicy.tokenTtlMs);
+    const expiresAt = new Date(
+      issuedAt.getTime() + this.restorePolicy.tokenTtlMs
+    );
 
     const record: RestorePreviewToken = {
       token,
@@ -1473,16 +1385,17 @@ export class BackupService {
     return record;
   }
 
-  private async fetchFalkorCounts(): Promise<
-    { nodes: number; relationships: number } | null
-  > {
+  private async fetchFalkorCounts(): Promise<{
+    nodes: number;
+    relationships: number;
+  } | null> {
     try {
       const falkorService = this.dbService.getFalkorDBService();
       const nodesResult = await falkorService.query(
-        "MATCH (n) RETURN count(n) AS count"
+        'MATCH (n) RETURN count(n) AS count'
       );
       const relationshipsResult = await falkorService.query(
-        "MATCH ()-[r]->() RETURN count(r) AS count"
+        'MATCH ()-[r]->() RETURN count(r) AS count'
       );
 
       const extractCount = (result: any): number => {
@@ -1490,12 +1403,12 @@ export class BackupService {
         if (Array.isArray(result)) {
           const first = result[0];
           if (!first) return 0;
-          if (typeof first.count === "number") return first.count;
+          if (typeof first.count === 'number') return first.count;
           if (Array.isArray(first)) return Number(first[0]) || 0;
         }
         if (result?.data && Array.isArray(result.data)) {
           const first = result.data[0];
-          if (first && typeof first.count === "number") return first.count;
+          if (first && typeof first.count === 'number') return first.count;
         }
         return Number(result?.count ?? 0) || 0;
       };
@@ -1516,7 +1429,9 @@ export class BackupService {
       if (!collections?.collections) {
         return [];
       }
-      return collections.collections.map((item: any) => item.name).filter(Boolean);
+      return collections.collections
+        .map((item: any) => item.name)
+        .filter(Boolean);
     } catch {
       return null;
     }
@@ -1530,7 +1445,9 @@ export class BackupService {
       );
       const rows = result.rows || result;
       if (!rows) return [];
-      return rows.map((row: any) => row.tablename || row.table_name).filter(Boolean);
+      return rows
+        .map((row: any) => row.tablename || row.table_name)
+        .filter(Boolean);
     } catch {
       return null;
     }
@@ -1543,16 +1460,16 @@ export class BackupService {
     const exists = await this.artifactExists(backupId, artifact);
     if (!exists) {
       return {
-        component: "falkordb",
-        action: "validate",
-        status: "missing",
-        details: "Graph snapshot artifact not found",
+        component: 'falkordb',
+        action: 'validate',
+        status: 'missing',
+        details: 'Graph snapshot artifact not found',
       };
     }
 
     try {
       const buffer = await this.readArtifact(backupId, artifact);
-      const parsed = JSON.parse(buffer.toString("utf-8"));
+      const parsed = JSON.parse(buffer.toString('utf-8'));
       const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes.length : 0;
       const relationships = Array.isArray(parsed?.relationships)
         ? parsed.relationships.length
@@ -1560,17 +1477,17 @@ export class BackupService {
       const liveCounts = await this.fetchFalkorCounts();
       const checksum = this.computeBufferChecksum(buffer);
 
-      const status: ComponentValidation["status"] =
-        nodes === 0 || relationships === 0 ? "warning" : "valid";
+      const status: ComponentValidation['status'] =
+        nodes === 0 || relationships === 0 ? 'warning' : 'valid';
 
       return {
-        component: "falkordb",
-        action: "validate",
+        component: 'falkordb',
+        action: 'validate',
         status,
         details:
-          status === "valid"
-            ? "Graph snapshot parsed successfully"
-            : "Graph snapshot parsed but contains no nodes or relationships",
+          status === 'valid'
+            ? 'Graph snapshot parsed successfully'
+            : 'Graph snapshot parsed but contains no nodes or relationships',
         metadata: {
           nodes,
           relationships,
@@ -1581,10 +1498,10 @@ export class BackupService {
       };
     } catch (error) {
       return {
-        component: "falkordb",
-        action: "validate",
-        status: "invalid",
-        details: "Failed to parse Falkor snapshot",
+        component: 'falkordb',
+        action: 'validate',
+        status: 'invalid',
+        details: 'Failed to parse Falkor snapshot',
         metadata: {
           error: error instanceof Error ? error.message : String(error),
         },
@@ -1599,25 +1516,27 @@ export class BackupService {
     const exists = await this.artifactExists(backupId, metadataArtifact);
     if (!exists) {
       return {
-        component: "qdrant",
-        action: "validate",
-        status: "missing",
-        details: "Qdrant collections manifest not found",
+        component: 'qdrant',
+        action: 'validate',
+        status: 'missing',
+        details: 'Qdrant collections manifest not found',
       };
     }
 
     try {
       const manifest = JSON.parse(
-        (await this.readArtifact(backupId, metadataArtifact)).toString("utf-8")
+        (await this.readArtifact(backupId, metadataArtifact)).toString('utf-8')
       );
       const collectionEntries = Array.isArray(manifest?.collections)
-        ? manifest.collections.filter((item: any) => typeof item?.name === "string")
+        ? manifest.collections.filter(
+            (item: any) => typeof item?.name === 'string'
+          )
         : [];
 
       const missingArtifacts: string[] = [];
       for (const entry of collectionEntries) {
         const artifact = entry?.pointsArtifact;
-        if (typeof artifact !== "string") {
+        if (typeof artifact !== 'string') {
           missingArtifacts.push(entry.name);
           continue;
         }
@@ -1630,16 +1549,16 @@ export class BackupService {
 
       const liveCollections = await this.fetchQdrantCollectionNames();
 
-      const status: ComponentValidation["status"] =
-        missingArtifacts.length > 0 ? "warning" : "valid";
+      const status: ComponentValidation['status'] =
+        missingArtifacts.length > 0 ? 'warning' : 'valid';
 
       return {
-        component: "qdrant",
-        action: "validate",
+        component: 'qdrant',
+        action: 'validate',
         status,
         details:
-          status === "valid"
-            ? "Qdrant collection data captured"
+          status === 'valid'
+            ? 'Qdrant collection data captured'
             : `${missingArtifacts.length} collection backups missing point data artifacts`,
         metadata: {
           collections: collectionEntries.map((entry: any) => ({
@@ -1654,10 +1573,10 @@ export class BackupService {
       };
     } catch (error) {
       return {
-        component: "qdrant",
-        action: "validate",
-        status: "invalid",
-        details: "Failed to parse Qdrant collections manifest",
+        component: 'qdrant',
+        action: 'validate',
+        status: 'invalid',
+        details: 'Failed to parse Qdrant collections manifest',
         metadata: {
           error: error instanceof Error ? error.message : String(error),
         },
@@ -1676,29 +1595,29 @@ export class BackupService {
 
     if (!jsonExists && !sqlExists) {
       return {
-        component: "postgres",
-        action: "validate",
-        status: "missing",
-        details: "PostgreSQL artifacts not found",
+        component: 'postgres',
+        action: 'validate',
+        status: 'missing',
+        details: 'PostgreSQL artifacts not found',
       };
     }
 
     if (jsonExists) {
       try {
-        const artifact = (await this.readArtifact(backupId, jsonArtifact)).toString(
-          "utf-8"
-        );
+        const artifact = (
+          await this.readArtifact(backupId, jsonArtifact)
+        ).toString('utf-8');
         const payload = JSON.parse(artifact) as PostgresBackupArtifact;
         const liveTables = await this.fetchPostgresTableNames();
 
         return {
-          component: "postgres",
-          action: "validate",
-          status: payload.tables.length === 0 ? "warning" : "valid",
+          component: 'postgres',
+          action: 'validate',
+          status: payload.tables.length === 0 ? 'warning' : 'valid',
           details:
             payload.tables.length > 0
-              ? "Structured PostgreSQL backup artifact parsed successfully"
-              : "Structured artifact parsed but contains no tables",
+              ? 'Structured PostgreSQL backup artifact parsed successfully'
+              : 'Structured artifact parsed but contains no tables',
           metadata: {
             tables: payload.tables.map((table) => ({
               name: table.name,
@@ -1710,10 +1629,10 @@ export class BackupService {
         };
       } catch (error) {
         return {
-          component: "postgres",
-          action: "validate",
-          status: "invalid",
-          details: "Failed to parse structured PostgreSQL artifact",
+          component: 'postgres',
+          action: 'validate',
+          status: 'invalid',
+          details: 'Failed to parse structured PostgreSQL artifact',
           metadata: {
             error: error instanceof Error ? error.message : String(error),
           },
@@ -1723,23 +1642,25 @@ export class BackupService {
 
     try {
       const dump = (await this.readArtifact(backupId, sqlArtifact)).toString(
-        "utf-8"
+        'utf-8'
       );
-      const tableMatches = dump.match(/CREATE TABLE IF NOT EXISTS\s+([a-zA-Z0-9_"\.]+)/g);
+      const tableMatches = dump.match(
+        /CREATE TABLE IF NOT EXISTS\s+([a-zA-Z0-9_"\.]+)/g
+      );
       const backupTables = tableMatches ? tableMatches.length : 0;
       const liveTables = await this.fetchPostgresTableNames();
 
-      const status: ComponentValidation["status"] =
-        backupTables === 0 ? "warning" : "valid";
+      const status: ComponentValidation['status'] =
+        backupTables === 0 ? 'warning' : 'valid';
 
       return {
-        component: "postgres",
-        action: "validate",
+        component: 'postgres',
+        action: 'validate',
         status,
         details:
-          status === "valid"
-            ? "Legacy PostgreSQL dump contains table definitions"
-            : "Legacy PostgreSQL dump parsed but no table definitions found",
+          status === 'valid'
+            ? 'Legacy PostgreSQL dump contains table definitions'
+            : 'Legacy PostgreSQL dump parsed but no table definitions found',
         metadata: {
           backupTables,
           liveTables,
@@ -1748,10 +1669,10 @@ export class BackupService {
       };
     } catch (error) {
       return {
-        component: "postgres",
-        action: "validate",
-        status: "invalid",
-        details: "Failed to parse PostgreSQL dump",
+        component: 'postgres',
+        action: 'validate',
+        status: 'invalid',
+        details: 'Failed to parse PostgreSQL dump',
         metadata: {
           error: error instanceof Error ? error.message : String(error),
         },
@@ -1766,38 +1687,39 @@ export class BackupService {
     const exists = await this.artifactExists(backupId, artifact);
     if (!exists) {
       return {
-        component: "config",
-        action: "validate",
-        status: "missing",
-        details: "Configuration snapshot not found",
+        component: 'config',
+        action: 'validate',
+        status: 'missing',
+        details: 'Configuration snapshot not found',
       };
     }
 
     try {
       const parsed = JSON.parse(
-        (await this.readArtifact(backupId, artifact)).toString("utf-8")
+        (await this.readArtifact(backupId, artifact)).toString('utf-8')
       );
       const keys = Object.keys(parsed ?? {});
-      const status: ComponentValidation["status"] = keys.length === 0 ? "warning" : "valid";
+      const status: ComponentValidation['status'] =
+        keys.length === 0 ? 'warning' : 'valid';
 
       return {
-        component: "config",
-        action: "validate",
+        component: 'config',
+        action: 'validate',
         status,
         details:
-          status === "valid"
-            ? "Configuration snapshot parsed successfully"
-            : "Configuration snapshot parsed but contains no entries",
+          status === 'valid'
+            ? 'Configuration snapshot parsed successfully'
+            : 'Configuration snapshot parsed but contains no entries',
         metadata: {
           keys,
         },
       };
     } catch (error) {
       return {
-        component: "config",
-        action: "validate",
-        status: "invalid",
-        details: "Failed to parse configuration snapshot",
+        component: 'config',
+        action: 'validate',
+        status: 'invalid',
+        details: 'Failed to parse configuration snapshot',
         metadata: {
           error: error instanceof Error ? error.message : String(error),
         },
@@ -1841,22 +1763,22 @@ export class BackupService {
         JSON.stringify(backupData, null, 2)
       );
 
-      this.logInfo("backup", "FalkorDB backup created", {
+      this.logInfo('backup', 'FalkorDB backup created', {
         backupId,
         artifact: artifactName,
       });
     } catch (error) {
-      this.logError("backup", "FalkorDB backup failed", {
+      this.logError('backup', 'FalkorDB backup failed', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
       if (!silent) {
         throw new MaintenanceOperationError(
-          error instanceof Error ? error.message : "FalkorDB backup failed",
+          error instanceof Error ? error.message : 'FalkorDB backup failed',
           {
-            code: "BACKUP_FALKORDB_FAILED",
-            component: "falkordb",
-            stage: "backup",
+            code: 'BACKUP_FALKORDB_FAILED',
+            component: 'falkordb',
+            stage: 'backup',
             cause: error,
           }
         );
@@ -1893,7 +1815,7 @@ export class BackupService {
 
       for (const collection of collections) {
         const name = collection?.name;
-        if (typeof name !== "string" || name.length === 0) {
+        if (typeof name !== 'string' || name.length === 0) {
           continue;
         }
 
@@ -1909,10 +1831,16 @@ export class BackupService {
           const info = await qdrantClient.getCollection(name);
           entry.info = info ? JSON.parse(JSON.stringify(info)) : undefined;
 
-          const points = await this.exportQdrantCollectionPoints(qdrantClient, name);
+          const points = await this.exportQdrantCollectionPoints(
+            qdrantClient,
+            name
+          );
           entry.pointCount = points.length;
 
-          const pointsArtifact = path.posix.join("qdrant", `${name}_points.json`);
+          const pointsArtifact = path.posix.join(
+            'qdrant',
+            `${name}_points.json`
+          );
           entry.pointsArtifact = pointsArtifact;
           await this.writeArtifact(
             backupId,
@@ -1921,7 +1849,7 @@ export class BackupService {
           );
         } catch (error) {
           entry.error = error instanceof Error ? error.message : String(error);
-          this.logError("backup", "Qdrant collection backup failed", {
+          this.logError('backup', 'Qdrant collection backup failed', {
             backupId,
             collection: name,
             error: entry.error,
@@ -1941,22 +1869,22 @@ export class BackupService {
         JSON.stringify(manifest, null, 2)
       );
 
-      this.logInfo("backup", "Qdrant backup completed", {
+      this.logInfo('backup', 'Qdrant backup completed', {
         backupId,
         collections: manifest.collections.length,
       });
     } catch (error) {
-      this.logError("backup", "Qdrant backup failed", {
+      this.logError('backup', 'Qdrant backup failed', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
       if (!silent) {
         throw new MaintenanceOperationError(
-          error instanceof Error ? error.message : "Qdrant backup failed",
+          error instanceof Error ? error.message : 'Qdrant backup failed',
           {
-            code: "BACKUP_QDRANT_FAILED",
-            component: "qdrant",
-            stage: "backup",
+            code: 'BACKUP_QDRANT_FAILED',
+            component: 'qdrant',
+            stage: 'backup',
             cause: error,
           }
         );
@@ -1978,7 +1906,7 @@ export class BackupService {
 
       const tablesResult = await postgresService.query(tablesQuery);
       const tables = tablesResult.rows || tablesResult;
-      this.logInfo("backup", "PostgreSQL tables enumerated", {
+      this.logInfo('backup', 'PostgreSQL tables enumerated', {
         backupId,
         tableCount: tables.length,
       });
@@ -2031,7 +1959,7 @@ export class BackupService {
             name: col.column_name,
             dataType: col.data_type,
             udtName: col.udt_name,
-            isNullable: col.is_nullable !== "NO",
+            isNullable: col.is_nullable !== 'NO',
             columnDefault: col.column_default,
             characterMaximumLength: col.character_maximum_length,
             numericPrecision: col.numeric_precision,
@@ -2049,9 +1977,7 @@ export class BackupService {
         schemaContent += `${createStatement}\n\n`;
         schemaContent += `-- Data for table: ${tableName} captured in ${jsonArtifactName}\n\n`;
 
-        const dataQuery = `SELECT * FROM ${this.quoteIdentifier(
-          tableName
-        )};`;
+        const dataQuery = `SELECT * FROM ${this.quoteIdentifier(tableName)};`;
         const dataResult = await postgresService.query(dataQuery);
         const data = dataResult.rows || dataResult;
 
@@ -2081,21 +2007,21 @@ export class BackupService {
         JSON.stringify(artifactPayload, null, 2)
       );
 
-      this.logInfo("backup", "PostgreSQL backup created", {
+      this.logInfo('backup', 'PostgreSQL backup created', {
         backupId,
         tables: tableDumps.length,
       });
     } catch (error) {
-      this.logError("backup", "PostgreSQL backup failed", {
+      this.logError('backup', 'PostgreSQL backup failed', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
       throw new MaintenanceOperationError(
-        error instanceof Error ? error.message : "PostgreSQL backup failed",
+        error instanceof Error ? error.message : 'PostgreSQL backup failed',
         {
-          code: "BACKUP_POSTGRES_FAILED",
-          component: "postgres",
-          stage: "backup",
+          code: 'BACKUP_POSTGRES_FAILED',
+          component: 'postgres',
+          stage: 'backup',
           cause: error,
         }
       );
@@ -2109,10 +2035,12 @@ export class BackupService {
       // Sanitize config to remove sensitive data
       const sanitizedConfig = {
         ...this.config,
-        qdrant: this.config.qdrant ? {
-          ...this.config.qdrant,
-          apiKey: this.config.qdrant.apiKey ? "[REDACTED]" : undefined,
-        } : undefined,
+        qdrant: this.config.qdrant
+          ? {
+              ...this.config.qdrant,
+              apiKey: this.config.qdrant.apiKey ? '[REDACTED]' : undefined,
+            }
+          : undefined,
       };
 
       await this.writeArtifact(
@@ -2120,20 +2048,20 @@ export class BackupService {
         configArtifact,
         JSON.stringify(sanitizedConfig, null, 2)
       );
-      this.logInfo("backup", "Configuration backup created", {
+      this.logInfo('backup', 'Configuration backup created', {
         backupId,
       });
     } catch (error) {
-      this.logError("backup", "Configuration backup failed", {
+      this.logError('backup', 'Configuration backup failed', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
       throw new MaintenanceOperationError(
-        error instanceof Error ? error.message : "Configuration backup failed",
+        error instanceof Error ? error.message : 'Configuration backup failed',
         {
-          code: "BACKUP_CONFIG_FAILED",
-          component: "config",
-          stage: "backup",
+          code: 'BACKUP_CONFIG_FAILED',
+          component: 'config',
+          stage: 'backup',
           cause: error,
         }
       );
@@ -2146,7 +2074,7 @@ export class BackupService {
       !this.storageProvider.createReadStream ||
       !this.storageProvider.createWriteStream
     ) {
-      this.logInfo("backup", "Skipping compression for storage provider", {
+      this.logInfo('backup', 'Skipping compression for storage provider', {
         backupId,
         storageProvider: this.storageProvider.id,
       });
@@ -2159,10 +2087,10 @@ export class BackupService {
     try {
       const files = await this.storageProvider.list();
       const backupFiles = files.filter(
-        (file) => file.startsWith(backupId) && !file.endsWith(".tar.gz")
+        (file) => file.startsWith(backupId) && !file.endsWith('.tar.gz')
       );
 
-      const archive = archiver("tar", { gzip: true });
+      const archive = archiver('tar', { gzip: true });
       const output = this.storageProvider.createWriteStream(archivePath);
       archive.pipe(output);
 
@@ -2172,21 +2100,21 @@ export class BackupService {
       }
 
       await archive.finalize();
-      this.logInfo("backup", "Backup compressed", {
+      this.logInfo('backup', 'Backup compressed', {
         backupId,
         archive: archiveName,
       });
     } catch (error) {
-      this.logError("backup", "Backup compression failed", {
+      this.logError('backup', 'Backup compression failed', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
       throw new MaintenanceOperationError(
-        error instanceof Error ? error.message : "Backup compression failed",
+        error instanceof Error ? error.message : 'Backup compression failed',
         {
-          code: "BACKUP_COMPRESSION_FAILED",
-          component: "backup",
-          stage: "compression",
+          code: 'BACKUP_COMPRESSION_FAILED',
+          component: 'backup',
+          stage: 'compression',
           cause: error,
         }
       );
@@ -2208,7 +2136,7 @@ export class BackupService {
 
       return totalSize;
     } catch (error) {
-      this.logError("backup", "Failed to calculate backup size", {
+      this.logError('backup', 'Failed to calculate backup size', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
@@ -2221,22 +2149,22 @@ export class BackupService {
       const files = await this.storageProvider.list();
       const backupFiles = files
         .filter((file) => file.startsWith(backupId))
-        .filter((file) => !file.endsWith(".tar.gz"));
+        .filter((file) => !file.endsWith('.tar.gz'));
 
-      const hash = crypto.createHash("sha256");
+      const hash = crypto.createHash('sha256');
 
       for (const file of backupFiles.sort()) {
         const content = await this.storageProvider.readFile(file);
         hash.update(content);
       }
 
-      return hash.digest("hex");
+      return hash.digest('hex');
     } catch (error) {
-      this.logError("backup", "Failed to calculate backup checksum", {
+      this.logError('backup', 'Failed to calculate backup checksum', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
-      return "";
+      return '';
     }
   }
 
@@ -2259,14 +2187,14 @@ export class BackupService {
 
     if (Buffer.isBuffer(value)) {
       return {
-        __backupType: "Buffer",
-        data: value.toString("base64"),
+        __backupType: 'Buffer',
+        data: value.toString('base64'),
       };
     }
 
     if (value instanceof Date) {
       return {
-        __backupType: "Date",
+        __backupType: 'Date',
         value: value.toISOString(),
       };
     }
@@ -2275,7 +2203,7 @@ export class BackupService {
       return value.map((item) => this.sanitizeValueForBackup(item));
     }
 
-    if (typeof value === "object") {
+    if (typeof value === 'object') {
       return value;
     }
 
@@ -2292,19 +2220,19 @@ export class BackupService {
     }
 
     if (
-      typeof value === "object" &&
+      typeof value === 'object' &&
       value !== null &&
-      value.__backupType === "Buffer" &&
-      typeof value.data === "string"
+      value.__backupType === 'Buffer' &&
+      typeof value.data === 'string'
     ) {
-      return Buffer.from(value.data, "base64");
+      return Buffer.from(value.data, 'base64');
     }
 
     if (
-      typeof value === "object" &&
+      typeof value === 'object' &&
       value !== null &&
-      value.__backupType === "Date" &&
-      typeof value.value === "string"
+      value.__backupType === 'Date' &&
+      typeof value.value === 'string'
     ) {
       return new Date(value.value);
     }
@@ -2314,30 +2242,30 @@ export class BackupService {
 
   private mapUdtNameToSqlType(udtName?: string | null): string {
     if (!udtName) {
-      return "text";
+      return 'text';
     }
 
-    const normalized = udtName.replace(/^_/, "");
+    const normalized = udtName.replace(/^_/, '');
     const mapping: Record<string, string> = {
-      int2: "smallint",
-      int4: "integer",
-      int8: "bigint",
-      float4: "real",
-      float8: "double precision",
-      numeric: "numeric",
-      varchar: "character varying",
-      text: "text",
-      bool: "boolean",
-      bytea: "bytea",
-      timestamp: "timestamp",
-      timestamptz: "timestamp with time zone",
-      date: "date",
-      time: "time",
-      timetz: "time with time zone",
-      uuid: "uuid",
-      json: "json",
-      jsonb: "jsonb",
-      citext: "citext",
+      int2: 'smallint',
+      int4: 'integer',
+      int8: 'bigint',
+      float4: 'real',
+      float8: 'double precision',
+      numeric: 'numeric',
+      varchar: 'character varying',
+      text: 'text',
+      bool: 'boolean',
+      bytea: 'bytea',
+      timestamp: 'timestamp',
+      timestamptz: 'timestamp with time zone',
+      date: 'date',
+      time: 'time',
+      timetz: 'time with time zone',
+      uuid: 'uuid',
+      json: 'json',
+      jsonb: 'jsonb',
+      citext: 'citext',
     };
 
     return mapping[normalized] ?? normalized;
@@ -2346,30 +2274,30 @@ export class BackupService {
   private resolveColumnType(column: PostgresColumnDefinition): string {
     const dataType = column.dataType.toLowerCase();
 
-    if (dataType === "array") {
+    if (dataType === 'array') {
       const elementType = this.mapUdtNameToSqlType(column.udtName);
       return `${elementType}[]`;
     }
 
-    if (dataType === "user-defined") {
+    if (dataType === 'user-defined') {
       return column.udtName ?? column.dataType;
     }
 
-    if (dataType === "character varying" || dataType === "varchar") {
+    if (dataType === 'character varying' || dataType === 'varchar') {
       if (column.characterMaximumLength) {
         return `character varying(${column.characterMaximumLength})`;
       }
-      return "character varying";
+      return 'character varying';
     }
 
-    if (dataType === "numeric" || dataType === "decimal") {
+    if (dataType === 'numeric' || dataType === 'decimal') {
       if (column.numericPrecision) {
         if (column.numericScale) {
           return `numeric(${column.numericPrecision}, ${column.numericScale})`;
         }
         return `numeric(${column.numericPrecision})`;
       }
-      return "numeric";
+      return 'numeric';
     }
 
     return column.dataType;
@@ -2382,7 +2310,9 @@ export class BackupService {
   ): string {
     const columnStatements = columns.map((column) => {
       const parts = [
-        `${this.quoteIdentifier(column.name)} ${this.resolveColumnType(column)}`,
+        `${this.quoteIdentifier(column.name)} ${this.resolveColumnType(
+          column
+        )}`,
       ];
 
       if (column.columnDefault) {
@@ -2390,20 +2320,20 @@ export class BackupService {
       }
 
       if (!column.isNullable) {
-        parts.push("NOT NULL");
+        parts.push('NOT NULL');
       }
 
-      return parts.join(" ");
+      return parts.join(' ');
     });
 
     let statement = `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(
       tableName
-    )} (\n  ${columnStatements.join(",\n  ")}`;
+    )} (\n  ${columnStatements.join(',\n  ')}`;
 
     if (primaryKey.length > 0) {
       statement += `,\n  PRIMARY KEY (${primaryKey
         .map((key) => this.quoteIdentifier(key))
-        .join(", ")})`;
+        .join(', ')})`;
     }
 
     statement += `\n);`;
@@ -2472,14 +2402,14 @@ export class BackupService {
           context.labels ?? [],
           JSON.stringify(serializableMetadata),
           context.error
-            ? typeof context.error === "string"
+            ? typeof context.error === 'string'
               ? context.error
               : JSON.stringify(context.error)
             : null,
         ]
       );
     } catch (error) {
-      this.logError("backup", "Failed to persist backup metadata", {
+      this.logError('backup', 'Failed to persist backup metadata', {
         backupId: metadata.id,
         error: error instanceof Error ? error.message : error,
       });
@@ -2493,18 +2423,13 @@ export class BackupService {
     return record?.metadata ?? null;
   }
 
-  private async getBackupRecord(
-    backupId: string
-  ): Promise<
-    | {
-        metadata: BackupMetadata;
-        storageProviderId: string;
-        destination?: string | null;
-        labels?: string[] | null;
-        status: string;
-      }
-    | null
-  > {
+  private async getBackupRecord(backupId: string): Promise<{
+    metadata: BackupMetadata;
+    storageProviderId: string;
+    destination?: string | null;
+    labels?: string[] | null;
+    status: string;
+  } | null> {
     try {
       const pg = this.dbService.getPostgreSQLService();
       const result = await pg.query(
@@ -2520,7 +2445,9 @@ export class BackupService {
       }
 
       const row = result.rows[0];
-      const parsed = this.deserializeBackupMetadata(row.metadata ?? row.metadata_json);
+      const parsed = this.deserializeBackupMetadata(
+        row.metadata ?? row.metadata_json
+      );
       if (!parsed) {
         return await this.loadLegacyBackupRecord(backupId);
       }
@@ -2533,7 +2460,7 @@ export class BackupService {
         status: row.status,
       };
     } catch (error) {
-      this.logError("backup", "Failed to load backup metadata", {
+      this.logError('backup', 'Failed to load backup metadata', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
@@ -2541,16 +2468,18 @@ export class BackupService {
     }
   }
 
-  private async validateBackup(backupId: string): Promise<ComponentValidation[]> {
+  private async validateBackup(
+    backupId: string
+  ): Promise<ComponentValidation[]> {
     const metadata = await this.getBackupMetadata(backupId);
     if (!metadata) {
       throw new MaintenanceOperationError(
         `Backup metadata not found for ${backupId}`,
         {
-          code: "BACKUP_METADATA_NOT_FOUND",
+          code: 'BACKUP_METADATA_NOT_FOUND',
           statusCode: 404,
-          component: "backup",
-          stage: "validation",
+          component: 'backup',
+          stage: 'validation',
         }
       );
     }
@@ -2578,12 +2507,12 @@ export class BackupService {
 
   private async restoreFalkorDB(backupId: string): Promise<void> {
     const artifact = `${backupId}_falkordb.dump`;
-    this.logInfo("restore", "Restoring FalkorDB", { backupId });
+    this.logInfo('restore', 'Restoring FalkorDB', { backupId });
 
     try {
       const exists = await this.artifactExists(backupId, artifact);
       if (!exists) {
-        this.logInfo("restore", "FalkorDB snapshot not found; skipping", {
+        this.logInfo('restore', 'FalkorDB snapshot not found; skipping', {
           backupId,
           artifact,
         });
@@ -2591,14 +2520,14 @@ export class BackupService {
       }
 
       const backupData = JSON.parse(
-        (await this.readArtifact(backupId, artifact)).toString("utf-8")
+        (await this.readArtifact(backupId, artifact)).toString('utf-8')
       );
 
       const falkorService = this.dbService.getFalkorDBService();
       await falkorService.query(`MATCH (n) DETACH DELETE n`);
 
       const sanitizeProperties = (props: any): any => {
-        if (!props || typeof props !== "object") return {};
+        if (!props || typeof props !== 'object') return {};
 
         const sanitized: any = {};
         for (const [key, value] of Object.entries(props)) {
@@ -2606,9 +2535,9 @@ export class BackupService {
             // Skip null/undefined values
             continue;
           } else if (
-            typeof value === "string" ||
-            typeof value === "number" ||
-            typeof value === "boolean"
+            typeof value === 'string' ||
+            typeof value === 'number' ||
+            typeof value === 'boolean'
           ) {
             // Primitive types are allowed
             sanitized[key] = value;
@@ -2617,14 +2546,14 @@ export class BackupService {
             const sanitizedArray = value.filter(
               (item) =>
                 item === null ||
-                typeof item === "string" ||
-                typeof item === "number" ||
-                typeof item === "boolean"
+                typeof item === 'string' ||
+                typeof item === 'number' ||
+                typeof item === 'boolean'
             );
             if (sanitizedArray.length > 0) {
               sanitized[key] = sanitizedArray;
             }
-          } else if (typeof value === "object") {
+          } else if (typeof value === 'object') {
             // Convert complex objects to JSON strings
             try {
               sanitized[key] = JSON.stringify(value);
@@ -2644,8 +2573,8 @@ export class BackupService {
         for (const node of backupData.nodes) {
           const labels =
             node.labels && node.labels.length > 0
-              ? `:${node.labels.join(":")}`
-              : "";
+              ? `:${node.labels.join(':')}`
+              : '';
           const sanitizedProps = sanitizeProperties(node.props);
           // Create node with labels, then merge all properties from map parameter
           await falkorService.query(
@@ -2669,9 +2598,9 @@ export class BackupService {
         }
       }
 
-      this.logInfo("restore", "FalkorDB restored", { backupId });
+      this.logInfo('restore', 'FalkorDB restored', { backupId });
     } catch (error) {
-      this.logError("restore", "FalkorDB restore encountered errors", {
+      this.logError('restore', 'FalkorDB restore encountered errors', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
@@ -2679,37 +2608,55 @@ export class BackupService {
   }
 
   private async restoreQdrant(backupId: string): Promise<void> {
-    this.logInfo("restore", "Restoring Qdrant", { backupId });
+    this.logInfo('restore', 'Restoring Qdrant', { backupId });
 
     try {
       const qdrantClient = this.dbService.getQdrantService().getClient();
       const manifestArtifact = `${backupId}_qdrant_collections.json`;
-      const manifestExists = await this.artifactExists(backupId, manifestArtifact);
+      const manifestExists = await this.artifactExists(
+        backupId,
+        manifestArtifact
+      );
 
       if (!manifestExists) {
-        this.logInfo("restore", "No Qdrant collections manifest found; skipping", {
-          backupId,
-        });
+        this.logInfo(
+          'restore',
+          'No Qdrant collections manifest found; skipping',
+          {
+            backupId,
+          }
+        );
         return;
       }
 
       const manifest = JSON.parse(
-        (await this.readArtifact(backupId, manifestArtifact)).toString("utf-8")
+        (await this.readArtifact(backupId, manifestArtifact)).toString('utf-8')
       );
 
-      const collectionEntries: Array<{ name: string; info?: Record<string, any>; pointsArtifact?: string; points?: any[]; error?: any }> =
-        Array.isArray(manifest?.collections)
-          ? manifest.collections.filter((item: any) => typeof item?.name === "string")
-          : [];
+      const collectionEntries: Array<{
+        name: string;
+        info?: Record<string, any>;
+        pointsArtifact?: string;
+        points?: any[];
+        error?: any;
+      }> = Array.isArray(manifest?.collections)
+        ? manifest.collections.filter(
+            (item: any) => typeof item?.name === 'string'
+          )
+        : [];
 
       for (const entry of collectionEntries) {
         const name = entry.name;
         if (entry?.error) {
-          this.logError("restore", "Skipping Qdrant collection due to backup error", {
-            backupId,
-            collection: name,
-            error: entry.error,
-          });
+          this.logError(
+            'restore',
+            'Skipping Qdrant collection due to backup error',
+            {
+              backupId,
+              collection: name,
+              error: entry.error,
+            }
+          );
           continue;
         }
         try {
@@ -2717,13 +2664,13 @@ export class BackupService {
           const points = await this.loadQdrantPoints(backupId, entry);
           await this.upsertQdrantPoints(qdrantClient, name, points);
 
-          this.logInfo("restore", "Qdrant collection restored", {
+          this.logInfo('restore', 'Qdrant collection restored', {
             backupId,
             collection: name,
             pointsRestored: points.length,
           });
         } catch (error) {
-          this.logError("restore", "Failed to restore Qdrant collection", {
+          this.logError('restore', 'Failed to restore Qdrant collection', {
             backupId,
             collection: name,
             error: error instanceof Error ? error.message : error,
@@ -2732,12 +2679,12 @@ export class BackupService {
         }
       }
 
-      this.logInfo("restore", "Qdrant restore completed", {
+      this.logInfo('restore', 'Qdrant restore completed', {
         backupId,
         collections: collectionEntries.length,
       });
     } catch (error) {
-      this.logError("restore", "Failed to restore Qdrant", {
+      this.logError('restore', 'Failed to restore Qdrant', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
@@ -2746,7 +2693,7 @@ export class BackupService {
   }
 
   private async restorePostgreSQL(backupId: string): Promise<void> {
-    this.logInfo("restore", "Restoring PostgreSQL", { backupId });
+    this.logInfo('restore', 'Restoring PostgreSQL', { backupId });
 
     try {
       const jsonArtifact = `${backupId}_postgres.json`;
@@ -2754,10 +2701,9 @@ export class BackupService {
       const postgresService = this.dbService.getPostgreSQLService();
 
       if (await this.artifactExists(backupId, jsonArtifact)) {
-        const artifactContent = (await this.readArtifact(
-          backupId,
-          jsonArtifact
-        )).toString("utf-8");
+        const artifactContent = (
+          await this.readArtifact(backupId, jsonArtifact)
+        ).toString('utf-8');
         const payload = JSON.parse(artifactContent) as PostgresBackupArtifact;
 
         for (const table of payload.tables) {
@@ -2775,8 +2721,8 @@ export class BackupService {
             try {
               await postgresService.query(createStatement);
             } catch (error: any) {
-              if (!error?.message?.includes("already exists")) {
-                this.logError("restore", "Failed to create table", {
+              if (!error?.message?.includes('already exists')) {
+                this.logError('restore', 'Failed to create table', {
                   backupId,
                   table: table.name,
                   error: error instanceof Error ? error.message : error,
@@ -2803,11 +2749,11 @@ export class BackupService {
           );
           const placeholders = columnNames
             .map((_, index) => `$${index + 1}`)
-            .join(", ");
+            .join(', ');
 
           const upsertClause = (() => {
             if (!primaryKeys.length) {
-              return "";
+              return '';
             }
             const nonPkColumns = columnNames.filter(
               (name) => !primaryKeys.includes(name)
@@ -2815,24 +2761,26 @@ export class BackupService {
             if (!nonPkColumns.length) {
               return ` ON CONFLICT (${primaryKeys
                 .map((key) => this.quoteIdentifier(key))
-                .join(", ")}) DO NOTHING`;
+                .join(', ')}) DO NOTHING`;
             }
             const updateAssignments = nonPkColumns
               .map(
                 (name) =>
-                  `${this.quoteIdentifier(name)} = EXCLUDED.${this.quoteIdentifier(
+                  `${this.quoteIdentifier(
                     name
-                  )}`
+                  )} = EXCLUDED.${this.quoteIdentifier(name)}`
               )
-              .join(", ");
+              .join(', ');
             return ` ON CONFLICT (${primaryKeys
               .map((key) => this.quoteIdentifier(key))
-              .join(", ")}) DO UPDATE SET ${updateAssignments}`;
+              .join(', ')}) DO UPDATE SET ${updateAssignments}`;
           })();
 
           const insertSql = `INSERT INTO ${this.quoteIdentifier(
             table.name
-          )} (${quotedColumns.join(", ")}) VALUES (${placeholders})${upsertClause}`;
+          )} (${quotedColumns.join(
+            ', '
+          )}) VALUES (${placeholders})${upsertClause}`;
 
           for (const row of table.rows) {
             const values = columnNames.map((name) =>
@@ -2842,35 +2790,39 @@ export class BackupService {
           }
         }
 
-        this.logInfo("restore", "PostgreSQL restored from structured artifact", {
-          backupId,
-          tablesRestored: payload.tables.length,
-        });
+        this.logInfo(
+          'restore',
+          'PostgreSQL restored from structured artifact',
+          {
+            backupId,
+            tablesRestored: payload.tables.length,
+          }
+        );
         return;
       }
 
       const sqlExists = await this.artifactExists(backupId, sqlArtifact);
       if (!sqlExists) {
-        this.logInfo("restore", "PostgreSQL artifacts not found; skipping", {
+        this.logInfo('restore', 'PostgreSQL artifacts not found; skipping', {
           backupId,
         });
         return;
       }
 
-      const dumpContent = (await this.readArtifact(backupId, sqlArtifact)).toString(
-        "utf-8"
-      );
+      const dumpContent = (
+        await this.readArtifact(backupId, sqlArtifact)
+      ).toString('utf-8');
 
       try {
         await postgresService.query(dumpContent);
-        this.logInfo("restore", "PostgreSQL restored using legacy dump", {
+        this.logInfo('restore', 'PostgreSQL restored using legacy dump', {
           backupId,
         });
         return;
       } catch (multiErr: any) {
         this.logError(
-          "restore",
-          "Legacy dump replay failed; attempting statement-by-statement recovery",
+          'restore',
+          'Legacy dump replay failed; attempting statement-by-statement recovery',
           {
             backupId,
             error: multiErr?.message ?? multiErr,
@@ -2879,38 +2831,38 @@ export class BackupService {
       }
 
       const statements: string[] = [];
-      let currentStatement = "";
+      let currentStatement = '';
       let inParentheses = 0;
       let inQuotes = false;
-      let quoteChar = "";
+      let quoteChar = '';
 
       for (let i = 0; i < dumpContent.length; i++) {
         const char = dumpContent[i];
-        const prevChar = i > 0 ? dumpContent[i - 1] : "";
+        const prevChar = i > 0 ? dumpContent[i - 1] : '';
 
-        if ((char === '"' || char === "'") && prevChar !== "\\") {
+        if ((char === '"' || char === "'") && prevChar !== '\\') {
           if (!inQuotes) {
             inQuotes = true;
             quoteChar = char;
           } else if (char === quoteChar) {
             inQuotes = false;
-            quoteChar = "";
+            quoteChar = '';
           }
         }
 
         if (!inQuotes) {
-          if (char === "(") inParentheses++;
-          else if (char === ")") inParentheses--;
+          if (char === '(') inParentheses++;
+          else if (char === ')') inParentheses--;
         }
 
         currentStatement += char;
 
-        if (char === ";" && !inQuotes && inParentheses === 0) {
+        if (char === ';' && !inQuotes && inParentheses === 0) {
           const trimmed = currentStatement.trim();
-          if (trimmed && !trimmed.startsWith("--")) {
+          if (trimmed && !trimmed.startsWith('--')) {
             statements.push(trimmed);
           }
-          currentStatement = "";
+          currentStatement = '';
         }
       }
 
@@ -2918,9 +2870,9 @@ export class BackupService {
       const insertStatements: string[] = [];
 
       for (const statement of statements) {
-        if (statement.toUpperCase().includes("CREATE TABLE")) {
+        if (statement.toUpperCase().includes('CREATE TABLE')) {
           createStatements.push(statement);
-        } else if (statement.toUpperCase().includes("INSERT INTO")) {
+        } else if (statement.toUpperCase().includes('INSERT INTO')) {
           insertStatements.push(statement);
         }
       }
@@ -2929,7 +2881,7 @@ export class BackupService {
         try {
           await postgresService.query(statement);
         } catch (error: any) {
-          if (!error?.message?.includes("already exists")) {
+          if (!error?.message?.includes('already exists')) {
             console.warn(
               `⚠️ Failed to create table: ${statement.substring(0, 50)}...`,
               error
@@ -2943,15 +2895,15 @@ export class BackupService {
           await postgresService.query(statement);
         } catch (error: any) {
           if (
-            error.code === "23505" &&
-            error.message?.includes("duplicate key")
+            error.code === '23505' &&
+            error.message?.includes('duplicate key')
           ) {
             try {
               const insertMatch = statement.match(
                 /INSERT INTO ([\w"]+) VALUES \((.+)\);/
               );
               if (insertMatch) {
-                const tableIdentifier = insertMatch[1].replace(/"/g, "");
+                const tableIdentifier = insertMatch[1].replace(/"/g, '');
                 const columnsQuery = `
                   SELECT column_name
                   FROM information_schema.columns
@@ -2970,7 +2922,7 @@ export class BackupService {
                       (col: any) =>
                         `${col.column_name} = EXCLUDED.${col.column_name}`
                     )
-                    .join(", ");
+                    .join(', ');
 
                   const conflictStatement = `${statement.slice(
                     0,
@@ -2997,11 +2949,11 @@ export class BackupService {
         }
       }
 
-      this.logInfo("restore", "PostgreSQL restored from legacy artifact", {
+      this.logInfo('restore', 'PostgreSQL restored from legacy artifact', {
         backupId,
       });
     } catch (error) {
-      this.logError("restore", "Failed to restore PostgreSQL", {
+      this.logError('restore', 'Failed to restore PostgreSQL', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
@@ -3010,29 +2962,29 @@ export class BackupService {
   }
 
   private async restoreConfig(backupId: string): Promise<void> {
-    this.logInfo("restore", "Restoring configuration", { backupId });
+    this.logInfo('restore', 'Restoring configuration', { backupId });
 
     try {
       const artifact = `${backupId}_config.json`;
       const exists = await this.artifactExists(backupId, artifact);
       if (!exists) {
-        this.logInfo("restore", "Configuration snapshot not found; skipping", {
+        this.logInfo('restore', 'Configuration snapshot not found; skipping', {
           backupId,
         });
         return;
       }
 
-      const configContent = (await this.readArtifact(backupId, artifact)).toString(
-        "utf-8"
-      );
+      const configContent = (
+        await this.readArtifact(backupId, artifact)
+      ).toString('utf-8');
       const restoredConfig = JSON.parse(configContent);
 
-      this.logInfo("restore", "Configuration snapshot loaded", {
+      this.logInfo('restore', 'Configuration snapshot loaded', {
         backupId,
         keys: Object.keys(restoredConfig ?? {}),
       });
     } catch (error) {
-      this.logError("restore", "Failed to restore configuration", {
+      this.logError('restore', 'Failed to restore configuration', {
         backupId,
         error: error instanceof Error ? error.message : error,
       });
@@ -3055,7 +3007,7 @@ export class BackupService {
       }
 
       await this.prepareStorageContext({
-        destination: options?.destination ?? (record.destination ?? undefined),
+        destination: options?.destination ?? record.destination ?? undefined,
         storageProviderId:
           options?.storageProviderId ?? record.storageProviderId ?? undefined,
       });
@@ -3068,7 +3020,7 @@ export class BackupService {
           passed: false,
           isValid: false,
           details:
-            "Checksum mismatch detected. This indicates the backup may be corrupt.",
+            'Checksum mismatch detected. This indicates the backup may be corrupt.',
           metadata: {
             checksum: {
               expected: metadata.checksum,
@@ -3086,7 +3038,9 @@ export class BackupService {
       }
       if (metadata.components.qdrant) {
         expectedArtifacts.push(`${backupId}_qdrant_collections.json`);
-        const qdrantArtifacts = await this.collectQdrantPointArtifacts(backupId);
+        const qdrantArtifacts = await this.collectQdrantPointArtifacts(
+          backupId
+        );
         expectedArtifacts.push(...qdrantArtifacts);
       }
       if (metadata.components.postgres) {
@@ -3120,7 +3074,7 @@ export class BackupService {
         return {
           passed: false,
           isValid: false,
-          details: "Missing or corrupt backup files detected.",
+          details: 'Missing or corrupt backup files detected.',
           metadata: {
             missingFiles,
           },
@@ -3130,7 +3084,7 @@ export class BackupService {
       return {
         passed: true,
         isValid: true,
-        details: "All backup files present and checksums match",
+        details: 'All backup files present and checksums match',
         metadata: {
           missingFiles: [],
           storageProvider: this.storageProvider.id,
@@ -3141,7 +3095,7 @@ export class BackupService {
         passed: false,
         isValid: false,
         details: `Verification failed: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`,
         metadata: {
           cause: error,
@@ -3156,11 +3110,11 @@ export class BackupService {
     try {
       const pg = this.dbService.getPostgreSQLService();
       const params: any[] = [];
-      let whereClause = "";
+      let whereClause = '';
 
       if (options?.destination) {
         params.push(options.destination);
-        whereClause = "WHERE destination = $1";
+        whereClause = 'WHERE destination = $1';
       }
 
       const result = await pg.query(
@@ -3170,7 +3124,9 @@ export class BackupService {
       const records = new Map<string, BackupMetadata>();
 
       for (const row of result.rows || []) {
-        const metadata = this.deserializeBackupMetadata(row.metadata ?? row.metadata_json);
+        const metadata = this.deserializeBackupMetadata(
+          row.metadata ?? row.metadata_json
+        );
         if (metadata) {
           records.set(metadata.id, metadata);
         }
@@ -3185,14 +3141,18 @@ export class BackupService {
         }
       }
 
-      return Array.from(records.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      return Array.from(records.values()).sort(
+        (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+      );
     } catch (error) {
-      this.logError("backup", "Failed to list backups", {
+      this.logError('backup', 'Failed to list backups', {
         error: error instanceof Error ? error.message : error,
       });
       const legacyBackups = await this.listLegacyBackupMetadata();
       if (legacyBackups.length > 0 && !options?.destination) {
-        return legacyBackups.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        return legacyBackups.sort(
+          (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+        );
       }
       return [];
     }
@@ -3204,7 +3164,7 @@ export class BackupService {
     }
 
     let value: any = raw;
-    if (typeof raw === "string") {
+    if (typeof raw === 'string') {
       try {
         value = JSON.parse(raw);
       } catch {
@@ -3212,7 +3172,7 @@ export class BackupService {
       }
     }
 
-    if (!value || typeof value !== "object") {
+    if (!value || typeof value !== 'object') {
       return null;
     }
 
@@ -3220,7 +3180,11 @@ export class BackupService {
     const timestamp =
       timestampInput instanceof Date
         ? timestampInput
-        : new Date(typeof timestampInput === "string" ? timestampInput : Number(timestampInput));
+        : new Date(
+            typeof timestampInput === 'string'
+              ? timestampInput
+              : Number(timestampInput)
+          );
 
     if (!timestamp || Number.isNaN(timestamp.getTime())) {
       return null;
@@ -3228,11 +3192,11 @@ export class BackupService {
 
     const id = (value as any).id;
     const type = (value as any).type;
-    if (typeof id !== "string" || !id) {
+    if (typeof id !== 'string' || !id) {
       return null;
     }
 
-    const normalizedType = type === "incremental" ? "incremental" : "full";
+    const normalizedType = type === 'incremental' ? 'incremental' : 'full';
 
     const sourceComponents = (value as any).components ?? {};
 
@@ -3241,7 +3205,10 @@ export class BackupService {
       type: normalizedType,
       timestamp,
       size: Number((value as any).size ?? (value as any).size_bytes ?? 0) || 0,
-      checksum: typeof (value as any).checksum === "string" ? (value as any).checksum : "",
+      checksum:
+        typeof (value as any).checksum === 'string'
+          ? (value as any).checksum
+          : '',
       components: {
         falkordb: Boolean(sourceComponents.falkordb),
         qdrant: Boolean(sourceComponents.qdrant),
@@ -3249,28 +3216,23 @@ export class BackupService {
         config: Boolean(sourceComponents.config),
       },
       status:
-        (value as any).status === "failed"
-          ? "failed"
-          : (value as any).status === "in_progress"
-          ? "in_progress"
-          : "completed",
+        (value as any).status === 'failed'
+          ? 'failed'
+          : (value as any).status === 'in_progress'
+          ? 'in_progress'
+          : 'completed',
     };
 
     return metadata;
   }
 
-  private async loadLegacyBackupRecord(
-    backupId: string
-  ): Promise<
-    | {
-        metadata: BackupMetadata;
-        storageProviderId: string;
-        destination?: string | null;
-        labels?: string[] | null;
-        status: string;
-      }
-    | null
-  > {
+  private async loadLegacyBackupRecord(backupId: string): Promise<{
+    metadata: BackupMetadata;
+    storageProviderId: string;
+    destination?: string | null;
+    labels?: string[] | null;
+    status: string;
+  } | null> {
     const metadata = await this.readLegacyBackupMetadata(backupId);
     if (!metadata) {
       return null;
@@ -3285,24 +3247,30 @@ export class BackupService {
     };
   }
 
-  private async readLegacyBackupMetadata(backupId: string): Promise<BackupMetadata | null> {
+  private async readLegacyBackupMetadata(
+    backupId: string
+  ): Promise<BackupMetadata | null> {
     const fileName = `${backupId}_metadata.json`;
 
-    const metadataFromProvider = await this.readLegacyMetadataFromProvider(fileName);
+    const metadataFromProvider = await this.readLegacyMetadataFromProvider(
+      fileName
+    );
     if (metadataFromProvider) {
       return metadataFromProvider;
     }
 
     try {
       const metadataPath = path.join(this.backupDir, fileName);
-      const content = await fs.readFile(metadataPath, "utf-8");
+      const content = await fs.readFile(metadataPath, 'utf-8');
       return this.deserializeBackupMetadata(content);
     } catch {
       return null;
     }
   }
 
-  private async readLegacyMetadataFromProvider(fileName: string): Promise<BackupMetadata | null> {
+  private async readLegacyMetadataFromProvider(
+    fileName: string
+  ): Promise<BackupMetadata | null> {
     try {
       await this.storageProvider.ensureReady();
       const exists = await this.storageProvider.exists(fileName);
@@ -3311,7 +3279,7 @@ export class BackupService {
       }
 
       const buffer = await this.storageProvider.readFile(fileName);
-      return this.deserializeBackupMetadata(buffer.toString("utf-8"));
+      return this.deserializeBackupMetadata(buffer.toString('utf-8'));
     } catch {
       return null;
     }
@@ -3319,7 +3287,7 @@ export class BackupService {
 
   private async listLegacyBackupMetadata(): Promise<BackupMetadata[]> {
     const results = new Map<string, BackupMetadata>();
-    const metadataSuffix = "_metadata.json";
+    const metadataSuffix = '_metadata.json';
 
     const providerEntries = await this.listLegacyMetadataFromProvider();
     for (const metadata of providerEntries) {
@@ -3332,11 +3300,14 @@ export class BackupService {
         if (!file.endsWith(metadataSuffix)) {
           continue;
         }
-        if (results.has(file.replace(metadataSuffix, ""))) {
+        if (results.has(file.replace(metadataSuffix, ''))) {
           continue;
         }
         try {
-          const content = await fs.readFile(path.join(this.backupDir, file), "utf-8");
+          const content = await fs.readFile(
+            path.join(this.backupDir, file),
+            'utf-8'
+          );
           const metadata = this.deserializeBackupMetadata(content);
           if (metadata) {
             results.set(metadata.id, metadata);
@@ -3356,12 +3327,16 @@ export class BackupService {
     try {
       await this.storageProvider.ensureReady();
       const files = await this.storageProvider.list();
-      const metadataFiles = files.filter((file) => file.endsWith("_metadata.json"));
+      const metadataFiles = files.filter((file) =>
+        file.endsWith('_metadata.json')
+      );
       const results: BackupMetadata[] = [];
       for (const file of metadataFiles) {
         try {
           const buffer = await this.storageProvider.readFile(file);
-          const metadata = this.deserializeBackupMetadata(buffer.toString("utf-8"));
+          const metadata = this.deserializeBackupMetadata(
+            buffer.toString('utf-8')
+          );
           if (metadata) {
             results.push(metadata);
           }

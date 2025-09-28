@@ -6,17 +6,13 @@
  */
 
 import 'dotenv/config';
-import { APIGateway } from '../../../src/api/APIGateway.js';
-import { DatabaseService, createDatabaseConfig } from '../../../src/services/core/DatabaseService.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { FileWatcher } from '../../../src/services/core/FileWatcher.js';
-import { ASTParser } from '../../../src/services/knowledge/ASTParser.js';
-import { DocumentationParser } from '../../../src/services/knowledge/DocumentationParser.js';
-import { SecurityScanner } from '../../../src/services/testing/SecurityScanner.js';
-import { SynchronizationCoordinator } from '../../../src/services/synchronization/SynchronizationCoordinator.js';
-import { ConflictResolution } from '../../../src/services/scm/ConflictResolution.js';
-import { SynchronizationMonitoring } from '../../../src/services/synchronization/SynchronizationMonitoring.js';
-import { RollbackCapabilities } from '../../../src/services/scm/RollbackCapabilities.js';
+import { APIGateway } from '@memento/api';
+import { DatabaseService, createDatabaseConfig } from '@memento/database';
+import { KnowledgeGraphService, ASTParser, DocumentationParser } from '@memento/knowledge';
+import { FileWatcher } from '@memento/core';
+import { SecurityScanner } from '@memento/testing';
+import { SynchronizationCoordinator, SynchronizationMonitoring } from '@memento/sync/synchronization';
+import { ConflictResolution, RollbackCapabilities } from '@memento/sync/scm';
 
 async function main() {
   console.log('🚀 Starting API Server for Memento...');

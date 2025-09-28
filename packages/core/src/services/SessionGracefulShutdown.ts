@@ -10,60 +10,17 @@
 
 import { EventEmitter } from 'events';
 import type { RedisClientType } from 'redis';
+import {
+  GracefulShutdownConfig,
+  ShutdownStatus,
+  ShutdownOptions,
+  RecoveryData,
+} from '@memento/shared-types';
 import { SessionManager } from './SessionManager.js';
 import { SessionStore } from './SessionStore.js';
 import { SessionReplay } from './SessionReplay.js';
 import { SessionMigration } from './SessionMigration.js';
 import { SessionHealthCheck } from './SessionHealthCheck.js';
-
-export interface GracefulShutdownConfig {
-  gracePeriod: number; // milliseconds to wait for graceful shutdown
-  forceCloseAfter: number; // milliseconds before forcing shutdown
-  checkpointActiveSessions: boolean;
-  preserveReplays: boolean;
-  enableRecoveryData: boolean;
-  shutdownSignals: string[];
-}
-
-export interface ShutdownStatus {
-  phase: 'initiated' | 'draining' | 'checkpointing' | 'cleanup' | 'complete' | 'forced';
-  startTime: string;
-  progress: {
-    sessionsCheckpointed: number;
-    totalSessions: number;
-    connectionsClosedf: number;
-    totalConnections: number;
-    componentsShutdown: number;
-    totalComponents: number;
-  };
-  errors: Array<{
-    component: string;
-    error: string;
-    timestamp: string;
-  }>;
-  estimatedTimeRemaining?: number;
-}
-
-export interface ShutdownOptions {
-  reason: string;
-  graceful: boolean;
-  preserveData: boolean;
-  timeout?: number;
-}
-
-export interface RecoveryData {
-  timestamp: string;
-  activeSessions: Array<{
-    sessionId: string;
-    agentIds: string[];
-    state: string;
-    lastActivity: string;
-    eventCount: number;
-  }>;
-  configuration: any;
-  statistics: any;
-  errors: any[];
-}
 
 export class SessionGracefulShutdown extends EventEmitter {
   private config: GracefulShutdownConfig;
@@ -88,7 +45,11 @@ export class SessionGracefulShutdown extends EventEmitter {
       checkpointActiveSessions: config.checkpointActiveSessions ?? true,
       preserveReplays: config.preserveReplays ?? true,
       enableRecoveryData: config.enableRecoveryData ?? true,
-      shutdownSignals: config.shutdownSignals || ['SIGTERM', 'SIGINT', 'SIGQUIT'],
+      shutdownSignals: config.shutdownSignals || [
+        'SIGTERM',
+        'SIGINT',
+        'SIGQUIT',
+      ],
     };
   }
 
@@ -136,7 +97,9 @@ export class SessionGracefulShutdown extends EventEmitter {
       timeout: options.timeout || this.config.gracePeriod,
     };
 
-    console.log(`[GracefulShutdown] Initiating shutdown: ${shutdownOptions.reason}`);
+    console.log(
+      `[GracefulShutdown] Initiating shutdown: ${shutdownOptions.reason}`
+    );
     this.isShuttingDown = true;
 
     this.shutdownStatus = {
@@ -153,7 +116,10 @@ export class SessionGracefulShutdown extends EventEmitter {
       errors: [],
     };
 
-    this.emit('shutdown:started', { options: shutdownOptions, status: this.shutdownStatus });
+    this.emit('shutdown:started', {
+      options: shutdownOptions,
+      status: this.shutdownStatus,
+    });
 
     try {
       if (shutdownOptions.graceful) {
@@ -184,7 +150,9 @@ export class SessionGracefulShutdown extends EventEmitter {
   /**
    * Perform graceful shutdown
    */
-  private async performGracefulShutdown(options: ShutdownOptions): Promise<void> {
+  private async performGracefulShutdown(
+    options: ShutdownOptions
+  ): Promise<void> {
     const startTime = Date.now();
 
     // Set force shutdown timer
@@ -212,7 +180,6 @@ export class SessionGracefulShutdown extends EventEmitter {
 
       // Phase 5: Complete shutdown
       this.completeShutdown();
-
     } catch (error) {
       this.recordError('graceful-shutdown', error);
       throw error;
@@ -243,7 +210,9 @@ export class SessionGracefulShutdown extends EventEmitter {
     }
 
     await Promise.allSettled(drainPromises);
-    this.updateProgress({ componentsShutdown: this.shutdownStatus!.progress.componentsShutdown + 1 });
+    this.updateProgress({
+      componentsShutdown: this.shutdownStatus!.progress.componentsShutdown + 1,
+    });
   }
 
   /**
@@ -257,7 +226,9 @@ export class SessionGracefulShutdown extends EventEmitter {
       const activeSessions = await this.sessionManager.listActiveSessions();
       this.updateProgress({ totalSessions: activeSessions.length });
 
-      console.log(`[GracefulShutdown] Found ${activeSessions.length} active sessions to drain`);
+      console.log(
+        `[GracefulShutdown] Found ${activeSessions.length} active sessions to drain`
+      );
 
       // Set short TTL on all sessions to prevent new events
       for (const sessionId of activeSessions) {
@@ -292,7 +263,8 @@ export class SessionGracefulShutdown extends EventEmitter {
             includeFailureSnapshot: true,
           });
           this.updateProgress({
-            sessionsCheckpointed: this.shutdownStatus!.progress.sessionsCheckpointed + 1,
+            sessionsCheckpointed:
+              this.shutdownStatus!.progress.sessionsCheckpointed + 1,
           });
           console.log(`[GracefulShutdown] Checkpointed session: ${sessionId}`);
         } catch (error) {
@@ -301,7 +273,9 @@ export class SessionGracefulShutdown extends EventEmitter {
       });
 
       await Promise.allSettled(checkpointPromises);
-      console.log(`[GracefulShutdown] Completed checkpointing ${activeSessions.length} sessions`);
+      console.log(
+        `[GracefulShutdown] Completed checkpointing ${activeSessions.length} sessions`
+      );
     } catch (error) {
       this.recordError('checkpoint-sessions', error);
     }
@@ -334,9 +308,10 @@ export class SessionGracefulShutdown extends EventEmitter {
                   sessionId,
                   agentIds: session.agentIds,
                   state: session.state,
-                  lastActivity: session.events.length > 0
-                    ? session.events[session.events.length - 1].timestamp
-                    : new Date().toISOString(),
+                  lastActivity:
+                    session.events.length > 0
+                      ? session.events[session.events.length - 1].timestamp
+                      : new Date().toISOString(),
                   eventCount: session.events.length,
                 });
               }
@@ -367,7 +342,6 @@ export class SessionGracefulShutdown extends EventEmitter {
         );
         console.log('[GracefulShutdown] Recovery data stored');
       }
-
     } catch (error) {
       this.recordError('create-recovery-data', error);
     }
@@ -380,7 +354,8 @@ export class SessionGracefulShutdown extends EventEmitter {
     this.updatePhase('cleanup');
     console.log('[GracefulShutdown] Cleaning up components...');
 
-    const cleanupPromises: Array<{ name: string; promise: Promise<void> }> = [];
+    const cleanupPromises: Array<{ name: string; promise: Promise<unknown> }> =
+      [];
 
     // Stop replay recording
     if (this.sessionReplay) {
@@ -428,7 +403,8 @@ export class SessionGracefulShutdown extends EventEmitter {
         await promise;
         console.log(`[GracefulShutdown] Cleaned up: ${name}`);
         this.updateProgress({
-          componentsShutdown: this.shutdownStatus!.progress.componentsShutdown + 1,
+          componentsShutdown:
+            this.shutdownStatus!.progress.componentsShutdown + 1,
         });
       } catch (error) {
         this.recordError(name, error);
@@ -444,17 +420,45 @@ export class SessionGracefulShutdown extends EventEmitter {
     this.updatePhase('forced');
 
     // Force close all connections
-    const forcePromises: Promise<void>[] = [];
+    const forcePromises: Promise<unknown>[] = [];
 
-    [this.sessionReplay, this.sessionMigration, this.sessionManager, this.sessionStore].forEach(service => {
-      if (service && typeof service.close === 'function') {
-        forcePromises.push(
-          service.close().catch((error: any) => {
-            console.error(`[GracefulShutdown] Force close error:`, error);
-          })
-        );
-      }
-    });
+    if (this.sessionReplay) {
+      forcePromises.push(
+        this.sessionReplay.shutdown().catch((error: any) => {
+          console.error(
+            '[GracefulShutdown] Force replay shutdown error:',
+            error
+          );
+        })
+      );
+    }
+
+    if (this.sessionMigration) {
+      forcePromises.push(
+        this.sessionMigration.shutdown().catch((error: any) => {
+          console.error(
+            '[GracefulShutdown] Force migration shutdown error:',
+            error
+          );
+        })
+      );
+    }
+
+    if (this.sessionManager) {
+      forcePromises.push(
+        this.sessionManager.close().catch((error: any) => {
+          console.error('[GracefulShutdown] Force manager close error:', error);
+        })
+      );
+    }
+
+    if (this.sessionStore) {
+      forcePromises.push(
+        this.sessionStore.close().catch((error: any) => {
+          console.error('[GracefulShutdown] Force store close error:', error);
+        })
+      );
+    }
 
     if (this.redis) {
       forcePromises.push(
@@ -467,7 +471,7 @@ export class SessionGracefulShutdown extends EventEmitter {
     // Wait a maximum of 5 seconds for force cleanup
     await Promise.race([
       Promise.all(forcePromises),
-      new Promise(resolve => setTimeout(resolve, 5000)),
+      new Promise((resolve) => setTimeout(resolve, 5000)),
     ]);
 
     this.completeShutdown();
@@ -497,9 +501,11 @@ export class SessionGracefulShutdown extends EventEmitter {
    * Setup signal handlers for graceful shutdown
    */
   private setupSignalHandlers(): void {
-    this.config.shutdownSignals.forEach(signal => {
+    this.config.shutdownSignals.forEach((signal) => {
       const handler = () => {
-        console.log(`[GracefulShutdown] Received ${signal}, initiating graceful shutdown`);
+        console.log(
+          `[GracefulShutdown] Received ${signal}, initiating graceful shutdown`
+        );
         this.shutdown({
           reason: `Process signal: ${signal}`,
           graceful: true,
@@ -566,7 +572,9 @@ export class SessionGracefulShutdown extends EventEmitter {
   private updateProgress(updates: Partial<ShutdownStatus['progress']>): void {
     if (this.shutdownStatus) {
       Object.assign(this.shutdownStatus.progress, updates);
-      this.emit('shutdown:progress', { progress: this.shutdownStatus.progress });
+      this.emit('shutdown:progress', {
+        progress: this.shutdownStatus.progress,
+      });
     }
   }
 
@@ -613,7 +621,10 @@ export class SessionGracefulShutdown extends EventEmitter {
         return JSON.parse(data);
       }
     } catch (error) {
-      console.error('[GracefulShutdown] Failed to retrieve recovery data:', error);
+      console.error(
+        '[GracefulShutdown] Failed to retrieve recovery data:',
+        error
+      );
     }
 
     return null;

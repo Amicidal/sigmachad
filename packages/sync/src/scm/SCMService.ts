@@ -1,6 +1,6 @@
-import { GitService } from "./GitService.js";
-import { KnowledgeGraphService } from "@memento/knowledge";
-import { DatabaseService } from "@memento/core";
+import { GitService } from './GitService.js';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/core';
 import type {
   CommitPRRequest,
   CommitPRResponse,
@@ -10,29 +10,24 @@ import type {
   SCMPushResult,
   SCMCommitLogEntry,
   ValidationResult,
-} from "@memento/core";
-import { RelationshipType } from "@memento/graph";
-import type { GraphRelationship } from "@memento/graph";
-import type { Change, Entity, Test, Spec } from "@memento/graph";
+  CommitValidation,
+} from '@memento/core';
+import { RelationshipType } from '@memento/graph';
+import type { GraphRelationship } from '@memento/graph';
+import type { Change, Entity, Test, Spec } from '@memento/graph';
 import {
   SCMProvider,
   SCMProviderResult,
   SCMProviderNotConfiguredError,
   SCMProviderPullRequestPayload,
-} from "./SCMProvider.js";
-
-type CommitValidation = {
-  title: string;
-  description: string;
-  changes: string[];
-};
+} from './SCMProvider.js';
 
 export class ValidationError extends Error {
   public readonly details: string[];
 
   constructor(details: string[]) {
-    super(details.join("; "));
-    this.name = "ValidationError";
+    super(details.join('; '));
+    this.name = 'ValidationError';
     this.details = details;
   }
 }
@@ -76,14 +71,14 @@ export class SCMService {
 
     return this.runWithGitLock(async () => {
       if (!(await this.git.isAvailable())) {
-        throw new Error("Git repository is not available");
+        throw new Error('Git repository is not available');
       }
 
       const startingBranch = await this.git.getCurrentBranch();
       const branch =
         (request.branchName && request.branchName.trim()) ||
         (await this.git.getCurrentBranch()) ||
-        "main";
+        'main';
 
       await this.git.ensureBranch(branch, startingBranch ?? undefined, {
         preservePaths: normalized.changes,
@@ -92,7 +87,7 @@ export class SCMService {
       const existingStaged = await this.git.getStagedFiles();
       if (existingStaged.length) {
         const normalizePath = (value: string): string =>
-          value.replace(/\\/g, "/").replace(/^\.\//, "");
+          value.replace(/\\/g, '/').replace(/^\.\//, '');
         const requestedChanges = new Set(
           normalized.changes.map((change) => normalizePath(change))
         );
@@ -104,10 +99,8 @@ export class SCMService {
           throw new ValidationError([
             conflicting.length === 1
               ? `Staged change '${conflicting[0]}' is not included in this request. Unstage it or add it to the changes array before retrying.`
-              : `Staged changes [${conflicting
-                  .slice(0, 5)
-                  .join(", ")}${
-                  conflicting.length > 5 ? ", …" : ""
+              : `Staged changes [${conflicting.slice(0, 5).join(', ')}${
+                  conflicting.length > 5 ? ', …' : ''
                 }] are not included in this request. Unstage them or add them to the changes array before retrying.`,
           ]);
         }
@@ -133,7 +126,7 @@ export class SCMService {
         if (!hasStagedChanges) {
           await this.git.unstageFiles(stagedFiles);
           throw new ValidationError([
-            "No staged changes detected. Ensure the specified files include modifications.",
+            'No staged changes detected. Ensure the specified files include modifications.',
           ]);
         }
 
@@ -146,9 +139,12 @@ export class SCMService {
           );
         } catch (error) {
           await this.git.unstageFiles(stagedFiles);
-          if (error instanceof Error && /nothing to commit/i.test(error.message)) {
+          if (
+            error instanceof Error &&
+            /nothing to commit/i.test(error.message)
+          ) {
             throw new ValidationError([
-              "No staged changes detected. Ensure the specified files include modifications.",
+              'No staged changes detected. Ensure the specified files include modifications.',
             ]);
           }
           throw error;
@@ -156,7 +152,9 @@ export class SCMService {
 
         const commitDetails = await this.git.getCommitDetails(commitHash);
         const committedFiles = await this.git.getFilesForCommit(commitHash);
-        const filesForRecord = committedFiles.length ? committedFiles : stagedFiles;
+        const filesForRecord = committedFiles.length
+          ? committedFiles
+          : stagedFiles;
         const commitAuthor = commitDetails?.author ?? author.name;
         const commitAuthorEmail = commitDetails?.email ?? author.email;
 
@@ -166,13 +164,13 @@ export class SCMService {
 
         const testResults = Array.isArray(request.testResults)
           ? request.testResults
-              .filter((id) => typeof id === "string" && id.trim())
+              .filter((id) => typeof id === 'string' && id.trim())
               .map((id) => id.trim())
           : [];
 
         const labels = Array.isArray(request.labels)
           ? request.labels
-              .filter((label) => typeof label === "string" && label.trim())
+              .filter((label) => typeof label === 'string' && label.trim())
               .map((label) => label.trim())
           : [];
 
@@ -187,7 +185,7 @@ export class SCMService {
           commitAuthorEmail,
         };
 
-        const providerName = this.provider?.name ?? "local";
+        const providerName = this.provider?.name ?? 'local';
         metadata.provider = providerName;
 
         const createdAt = commitDetails?.date
@@ -232,7 +230,7 @@ export class SCMService {
           if (providerError) {
             metadata.escalationRequired = true;
             metadata.escalationReason =
-              "SCM provider failed after retry attempts";
+              'SCM provider failed after retry attempts';
             metadata.providerFailure = this.serializeProviderError(
               providerError,
               providerAttempts
@@ -240,17 +238,17 @@ export class SCMService {
           }
         }
 
-        if (typeof metadata.providerAttempts === "undefined") {
+        if (typeof metadata.providerAttempts === 'undefined') {
           metadata.providerAttempts = providerAttempts;
         }
 
-        const status: SCMCommitRecord["status"] = providerError
-          ? "failed"
+        const status: SCMCommitRecord['status'] = providerError
+          ? 'failed'
           : shouldCreatePR
           ? providerResult?.pushed
-            ? "pending"
-            : "committed"
-          : "committed";
+            ? 'pending'
+            : 'committed'
+          : 'committed';
 
         const commitRecord: SCMCommitRecord = {
           commitHash,
@@ -263,8 +261,7 @@ export class SCMService {
           testResults,
           validationResults: validationResults ?? undefined,
           prUrl: providerResult?.prUrl,
-          provider:
-            providerResult?.provider ?? (this.provider?.name ?? "local"),
+          provider: providerResult?.provider ?? this.provider?.name ?? 'local',
           status,
           metadata,
           createdAt,
@@ -276,9 +273,9 @@ export class SCMService {
         const changeEntityId = `change:${commitHash}`;
         const changeEntity: Change = {
           id: changeEntityId,
-          type: "change",
-          changeType: "update",
-          entityType: "commit",
+          type: 'change',
+          changeType: 'update',
+          entityType: 'commit',
           entityId: commitHash,
           timestamp: createdAt,
           author: author.name,
@@ -301,7 +298,7 @@ export class SCMService {
         const testEntities: Test[] = [];
         for (const testId of testResults) {
           const entity = await this.safeGetEntity(testId);
-          if (entity && (entity as Test).type === "test") {
+          if (entity && (entity as Test).type === 'test') {
             testEntities.push(entity as Test);
           }
         }
@@ -315,7 +312,7 @@ export class SCMService {
             created: now,
             lastModified: now,
             version: 1,
-            changeType: "update",
+            changeType: 'update',
             commitHash,
             metadata: {
               branch,
@@ -332,7 +329,7 @@ export class SCMService {
             created: now,
             lastModified: now,
             version: 1,
-            changeType: "update",
+            changeType: 'update',
             commitHash,
             metadata: {
               branch,
@@ -349,7 +346,7 @@ export class SCMService {
           retryAttempts: providerAttempts,
           escalationRequired: Boolean(providerError),
           escalationMessage: providerError
-            ? "Automated PR creation failed; manual intervention required"
+            ? 'Automated PR creation failed; manual intervention required'
             : undefined,
           providerError: providerError
             ? this.serializeProviderError(providerError, providerAttempts)
@@ -375,7 +372,7 @@ export class SCMService {
             await this.git.ensureBranch(startingBranch);
           } catch (restoreError) {
             console.warn(
-              "SCMService: failed to restore original branch",
+              'SCMService: failed to restore original branch',
               restoreError
             );
           }
@@ -395,7 +392,7 @@ export class SCMService {
   async ensureBranch(name: string, from?: string): Promise<SCMBranchInfo> {
     const sanitized = name.trim();
     if (!sanitized) {
-      throw new ValidationError(["branch name is required"]);
+      throw new ValidationError(['branch name is required']);
     }
 
     await this.git.ensureBranch(sanitized, from);
@@ -415,22 +412,25 @@ export class SCMService {
     };
   }
 
-  async push(options: {
-    remote?: string;
-    branch?: string;
-    force?: boolean;
-  } = {}): Promise<SCMPushResult> {
+  async push(
+    options: {
+      remote?: string;
+      branch?: string;
+      force?: boolean;
+    } = {}
+  ): Promise<SCMPushResult> {
     const branchInput = options.branch ? options.branch.trim() : undefined;
-    const branch = branchInput && branchInput.length
-      ? branchInput
-      : await this.git.getCurrentBranch();
+    const branch =
+      branchInput && branchInput.length
+        ? branchInput
+        : await this.git.getCurrentBranch();
 
     if (!branch) {
-      throw new Error("Unable to determine branch to push");
+      throw new Error('Unable to determine branch to push');
     }
 
     const remoteInput = options.remote ? options.remote.trim() : undefined;
-    const remote = remoteInput && remoteInput.length ? remoteInput : "origin";
+    const remote = remoteInput && remoteInput.length ? remoteInput : 'origin';
 
     try {
       const result = await this.git.push(remote, branch, {
@@ -452,8 +452,8 @@ export class SCMService {
         forced: Boolean(options.force),
         pushed: true,
         commitHash: commitHash ?? undefined,
-        provider: "local",
-        message: result.output.trim() || "Push completed.",
+        provider: 'local',
+        message: result.output.trim() || 'Push completed.',
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
@@ -464,22 +464,26 @@ export class SCMService {
     }
   }
 
-  async getDiff(options: {
-    from?: string;
-    to?: string;
-    files?: string[];
-    context?: number;
-  } = {}): Promise<string | null> {
+  async getDiff(
+    options: {
+      from?: string;
+      to?: string;
+      files?: string[];
+      context?: number;
+    } = {}
+  ): Promise<string | null> {
     return this.git.getDiff(options);
   }
 
-  async getCommitLog(options: {
-    limit?: number;
-    author?: string;
-    path?: string;
-    since?: string;
-    until?: string;
-  } = {}): Promise<SCMCommitLogEntry[]> {
+  async getCommitLog(
+    options: {
+      limit?: number;
+      author?: string;
+      path?: string;
+      since?: string;
+      until?: string;
+    } = {}
+  ): Promise<SCMCommitLogEntry[]> {
     return this.git.getCommitLog(options);
   }
 
@@ -494,30 +498,26 @@ export class SCMService {
   private validateCommitRequest(request: CommitPRRequest): CommitValidation {
     const errors: string[] = [];
 
-    if (!request || typeof request !== "object") {
-      errors.push("request body must be an object");
+    if (!request || typeof request !== 'object') {
+      errors.push('request body must be an object');
       throw new ValidationError(errors);
     }
 
-    const title = typeof request.title === "string" ? request.title.trim() : "";
+    const title = typeof request.title === 'string' ? request.title.trim() : '';
     if (!title) {
-      errors.push("title is required");
+      errors.push('title is required');
     }
 
     const description =
-      typeof request.description === "string"
-        ? request.description.trim()
-        : "";
+      typeof request.description === 'string' ? request.description.trim() : '';
 
-    const changesInput = Array.isArray(request.changes)
-      ? request.changes
-      : [];
+    const changesInput = Array.isArray(request.changes) ? request.changes : [];
     const changes = changesInput
-      .filter((value) => typeof value === "string" && value.trim())
+      .filter((value) => typeof value === 'string' && value.trim())
       .map((value) => value.trim());
 
     if (!changes.length) {
-      errors.push("changes must include at least one file path");
+      errors.push('changes must include at least one file path');
     }
 
     if (errors.length) {
@@ -534,7 +534,7 @@ export class SCMService {
       return null;
     }
 
-    if (typeof raw === "string") {
+    if (typeof raw === 'string') {
       try {
         return JSON.parse(raw) as Record<string, unknown>;
       } catch {
@@ -542,7 +542,7 @@ export class SCMService {
       }
     }
 
-    if (typeof raw === "object") {
+    if (typeof raw === 'object') {
       return raw as Record<string, unknown>;
     }
 
@@ -554,7 +554,7 @@ export class SCMService {
       process.env.GIT_AUTHOR_NAME ||
       process.env.GITHUB_ACTOR ||
       process.env.USER ||
-      "memento-bot";
+      'memento-bot';
 
     const emailFromEnv =
       process.env.GIT_AUTHOR_EMAIL ||
@@ -562,9 +562,10 @@ export class SCMService {
         ? `${process.env.GITHUB_ACTOR}@users.noreply.github.com`
         : undefined);
 
-    const email = emailFromEnv && emailFromEnv.trim().length
-      ? emailFromEnv.trim()
-      : "memento-bot@example.com";
+    const email =
+      emailFromEnv && emailFromEnv.trim().length
+        ? emailFromEnv.trim()
+        : 'memento-bot@example.com';
 
     return { name, email };
   }
@@ -573,7 +574,7 @@ export class SCMService {
     try {
       return await this.kgService.getEntity(entityId);
     } catch (error) {
-      console.warn("SCMService: failed to fetch entity", entityId, error);
+      console.warn('SCMService: failed to fetch entity', entityId, error);
       return null;
     }
   }
@@ -582,7 +583,7 @@ export class SCMService {
     try {
       await this.kgService.createEntity(change as Entity);
     } catch (error) {
-      console.warn("SCMService: failed to record change entity", error);
+      console.warn('SCMService: failed to record change entity', error);
     }
   }
 
@@ -596,7 +597,7 @@ export class SCMService {
     try {
       await this.kgService.createRelationship(rel as GraphRelationship);
     } catch (error) {
-      console.warn("SCMService: failed to record relationship", error);
+      console.warn('SCMService: failed to record relationship', error);
     }
   }
 
@@ -631,7 +632,10 @@ export class SCMService {
     result: SCMProviderResult | null;
     error?: unknown;
     attempts: number;
-    errorHistory: Array<{ attempt: number; error: ReturnType<typeof this.serializeProviderError> }>;
+    errorHistory: Array<{
+      attempt: number;
+      error: ReturnType<typeof this.serializeProviderError>;
+    }>;
   }> {
     const maxAttempts = Math.max(1, this.getProviderRetryLimit());
     const delayMs = this.getProviderRetryDelay();
@@ -688,7 +692,7 @@ export class SCMService {
       };
     }
 
-    if (typeof error === "string") {
+    if (typeof error === 'string') {
       return {
         message: error,
         lastAttempt: attempt,
@@ -696,7 +700,7 @@ export class SCMService {
     }
 
     return {
-      message: "Unknown provider error",
+      message: 'Unknown provider error',
       lastAttempt: attempt,
     };
   }

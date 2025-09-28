@@ -5,17 +5,30 @@
 
 // Main pipeline orchestrator
 export { HighThroughputIngestionPipeline } from './pipeline.js';
-export type { KnowledgeGraphServiceIntegration } from './pipeline.js';
+export type {
+  KnowledgeGraphServiceIntegration,
+  IngestionEvents,
+} from './pipeline.js';
+
+// Knowledge Graph Adapter
+export { createKnowledgeGraphAdapter } from './knowledge-graph-adapter.js';
 
 // Core components
 export { QueueManager } from './queue-manager.js';
 export type { QueueManagerConfig } from './queue-manager.js';
 
 export { WorkerPool } from './worker-pool.js';
-export type { WorkerPoolConfig, WorkerInstance, WorkerHandler } from './worker-pool.js';
+export type {
+  WorkerPoolConfig,
+  WorkerInstance,
+  WorkerHandler,
+} from './worker-pool.js';
 
 export { HighThroughputBatchProcessor } from './batch-processor.js';
-export type { BatchProcessor, BatchProcessorConfig } from './batch-processor.js';
+export type {
+  BatchProcessor,
+  BatchProcessorConfig,
+} from './batch-processor.js';
 
 // Type definitions
 export type {
@@ -60,7 +73,7 @@ export type {
   AlertConfig,
 
   // Event Emitter Types
-  IngestionEvents
+  IngestionEvents,
 } from './types.js';
 
 // Error classes
@@ -68,7 +81,7 @@ export {
   IngestionError,
   BatchProcessingError,
   WorkerError,
-  QueueOverflowError
+  QueueOverflowError,
 } from './types.js';
 
 // Utility functions and constants
@@ -79,21 +92,21 @@ export const INGESTION_DEFAULTS = {
     BATCH_SIZE: 100,
     BATCH_TIMEOUT: 1000,
     RETRY_ATTEMPTS: 3,
-    RETRY_DELAY: 1000
+    RETRY_DELAY: 1000,
   },
   WORKERS: {
     MIN_WORKERS: 2,
     MAX_WORKERS: 16,
     WORKER_TIMEOUT: 30000,
     HEALTH_CHECK_INTERVAL: 5000,
-    RESTART_THRESHOLD: 5
+    RESTART_THRESHOLD: 5,
   },
   BATCHING: {
     ENTITY_BATCH_SIZE: 100,
     RELATIONSHIP_BATCH_SIZE: 200,
     EMBEDDING_BATCH_SIZE: 50,
     TIMEOUT_MS: 30000,
-    MAX_CONCURRENT_BATCHES: 4
+    MAX_CONCURRENT_BATCHES: 4,
   },
   MONITORING: {
     METRICS_INTERVAL: 5000,
@@ -101,9 +114,9 @@ export const INGESTION_DEFAULTS = {
     ALERT_THRESHOLDS: {
       QUEUE_DEPTH: 1000,
       LATENCY: 5000,
-      ERROR_RATE: 0.1
-    }
-  }
+      ERROR_RATE: 0.1,
+    },
+  },
 } as const;
 
 /**
@@ -113,20 +126,21 @@ export function createDefaultPipelineConfig(): PipelineConfig {
   return {
     eventBus: {
       type: 'memory',
-      partitions: INGESTION_DEFAULTS.QUEUE.PARTITION_COUNT
+      partitions: INGESTION_DEFAULTS.QUEUE.PARTITION_COUNT,
     },
     workers: {
       parsers: 4,
       entityWorkers: 4,
       relationshipWorkers: 4,
-      embeddingWorkers: 2
+      embeddingWorkers: 2,
     },
     batching: {
       entityBatchSize: INGESTION_DEFAULTS.BATCHING.ENTITY_BATCH_SIZE,
-      relationshipBatchSize: INGESTION_DEFAULTS.BATCHING.RELATIONSHIP_BATCH_SIZE,
+      relationshipBatchSize:
+        INGESTION_DEFAULTS.BATCHING.RELATIONSHIP_BATCH_SIZE,
       embeddingBatchSize: INGESTION_DEFAULTS.BATCHING.EMBEDDING_BATCH_SIZE,
       timeoutMs: INGESTION_DEFAULTS.BATCHING.TIMEOUT_MS,
-      maxConcurrentBatches: INGESTION_DEFAULTS.BATCHING.MAX_CONCURRENT_BATCHES
+      maxConcurrentBatches: INGESTION_DEFAULTS.BATCHING.MAX_CONCURRENT_BATCHES,
     },
     queues: {
       maxSize: INGESTION_DEFAULTS.QUEUE.MAX_SIZE,
@@ -134,7 +148,7 @@ export function createDefaultPipelineConfig(): PipelineConfig {
       batchSize: INGESTION_DEFAULTS.QUEUE.BATCH_SIZE,
       batchTimeout: INGESTION_DEFAULTS.QUEUE.BATCH_TIMEOUT,
       retryAttempts: INGESTION_DEFAULTS.QUEUE.RETRY_ATTEMPTS,
-      retryDelay: INGESTION_DEFAULTS.QUEUE.RETRY_DELAY
+      retryDelay: INGESTION_DEFAULTS.QUEUE.RETRY_DELAY,
     },
     monitoring: {
       metricsInterval: INGESTION_DEFAULTS.MONITORING.METRICS_INTERVAL,
@@ -142,9 +156,9 @@ export function createDefaultPipelineConfig(): PipelineConfig {
       alertThresholds: {
         queueDepth: INGESTION_DEFAULTS.MONITORING.ALERT_THRESHOLDS.QUEUE_DEPTH,
         latency: INGESTION_DEFAULTS.MONITORING.ALERT_THRESHOLDS.LATENCY,
-        errorRate: INGESTION_DEFAULTS.MONITORING.ALERT_THRESHOLDS.ERROR_RATE
-      }
-    }
+        errorRate: INGESTION_DEFAULTS.MONITORING.ALERT_THRESHOLDS.ERROR_RATE,
+      },
+    },
   };
 }
 
@@ -264,7 +278,9 @@ export function validatePipelineConfig(config: PipelineConfig): string[] {
 /**
  * Create a mock change event for testing
  */
-export function createMockChangeEvent(overrides: Partial<ChangeEvent> = {}): ChangeEvent {
+export function createMockChangeEvent(
+  overrides: Partial<ChangeEvent> = {}
+): ChangeEvent {
   return {
     id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     namespace: 'test',
@@ -275,14 +291,16 @@ export function createMockChangeEvent(overrides: Partial<ChangeEvent> = {}): Cha
     size: 1000,
     diffHash: 'abc123',
     metadata: {},
-    ...overrides
+    ...overrides,
   };
 }
 
 /**
  * Create a mock change fragment for testing
  */
-export function createMockChangeFragment(overrides: Partial<ChangeFragment> = {}): ChangeFragment {
+export function createMockChangeFragment(
+  overrides: Partial<ChangeFragment> = {}
+): ChangeFragment {
   return {
     id: `fragment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     eventId: 'test-event',
@@ -293,10 +311,10 @@ export function createMockChangeFragment(overrides: Partial<ChangeFragment> = {}
       type: 'function',
       name: 'testFunction',
       properties: {},
-      metadata: { createdAt: new Date() }
+      metadata: { createdAt: new Date() },
     },
     dependencyHints: [],
     confidence: 0.9,
-    ...overrides
+    ...overrides,
   };
 }

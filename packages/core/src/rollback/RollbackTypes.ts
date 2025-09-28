@@ -1,8 +1,89 @@
 /**
  * TypeScript interfaces and types for rollback capabilities
+ * Note: Core-specific rollback types have been moved to @memento/shared-types
+ * This file now primarily contains core-specific implementations and extensions
  */
 
-export interface RollbackPoint {
+import {
+  RollbackPoint as SharedRollbackPoint,
+  RollbackEntity as SharedRollbackEntity,
+  RollbackRelationship as SharedRollbackRelationship,
+  SessionCheckpointRecord as SharedSessionCheckpointRecord,
+  RollbackResult as SharedRollbackResult,
+  RollbackError as SharedRollbackError,
+  RollbackPointCore,
+  Snapshot,
+  DiffEntry,
+  RollbackDiff,
+  RollbackOperation,
+  RollbackLogEntry,
+  RollbackConfig,
+  ConflictResolution,
+  RollbackConflict,
+  RollbackMetrics,
+  RollbackEvents,
+  RollbackError as SharedRollbackErrorClass,
+  RollbackConflictError,
+  RollbackNotFoundError,
+  RollbackExpiredError,
+  DatabaseNotReadyError,
+} from '@memento/shared-types';
+
+// Import enum values for runtime usage
+import {
+  SnapshotType,
+  DiffOperation,
+  RollbackOperationType,
+  RollbackStatus,
+  RollbackStrategy,
+  ConflictStrategy,
+  ConflictType,
+} from '@memento/shared-types';
+
+// Re-export shared types for backward compatibility
+export type {
+  RollbackPoint,
+  RollbackEntity,
+  RollbackRelationship,
+  SessionCheckpointRecord,
+  RollbackResult,
+  RollbackError,
+} from '@memento/shared-types';
+
+// Re-export core-specific types
+export type {
+  RollbackPointCore,
+  Snapshot,
+  DiffEntry,
+  RollbackDiff,
+  RollbackOperation,
+  RollbackLogEntry,
+  RollbackConfig,
+  ConflictResolution,
+  RollbackConflict,
+  RollbackMetrics,
+  RollbackEvents,
+};
+
+// Re-export error classes and enum values
+export {
+  RollbackError,
+  RollbackConflictError,
+  RollbackNotFoundError,
+  RollbackExpiredError,
+  DatabaseNotReadyError,
+  // Re-export enum values
+  SnapshotType,
+  DiffOperation,
+  RollbackOperationType,
+  RollbackStatus,
+  RollbackStrategy,
+  ConflictStrategy,
+  ConflictType,
+};
+
+// Legacy interface for backward compatibility - maps to shared RollbackPoint
+export interface RollbackPointLegacy {
   /** Unique identifier for this rollback point */
   id: string;
   /** Human-readable name for this rollback point */
@@ -19,258 +100,3 @@ export interface RollbackPoint {
   expiresAt?: Date;
 }
 
-export interface Snapshot {
-  /** Unique identifier for this snapshot */
-  id: string;
-  /** Reference to the rollback point this snapshot belongs to */
-  rollbackPointId: string;
-  /** Type of data stored in this snapshot */
-  type: SnapshotType;
-  /** The actual snapshot data */
-  data: any;
-  /** Size of the snapshot data in bytes */
-  size: number;
-  /** Timestamp when snapshot was created */
-  createdAt: Date;
-  /** Checksum for data integrity verification */
-  checksum?: string;
-}
-
-export enum SnapshotType {
-  ENTITY = 'entity',
-  RELATIONSHIP = 'relationship',
-  FILE = 'file',
-  CONFIGURATION = 'configuration',
-  SESSION_STATE = 'session_state',
-  METADATA = 'metadata'
-}
-
-export interface DiffEntry {
-  /** Path or identifier of the changed item */
-  path: string;
-  /** Type of change */
-  operation: DiffOperation;
-  /** Previous value (null for additions) */
-  oldValue: any;
-  /** New value (null for deletions) */
-  newValue: any;
-  /** Metadata about the change */
-  metadata?: Record<string, any>;
-}
-
-export enum DiffOperation {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  MOVE = 'move'
-}
-
-export interface RollbackDiff {
-  /** Source rollback point */
-  from: string;
-  /** Target rollback point */
-  to: string;
-  /** List of changes between the two points */
-  changes: DiffEntry[];
-  /** Total number of changes */
-  changeCount: number;
-  /** Timestamp when diff was generated */
-  generatedAt: Date;
-}
-
-export interface RollbackOperation {
-  /** Unique identifier for this operation */
-  id: string;
-  /** Type of rollback operation */
-  type: RollbackOperationType;
-  /** Target rollback point to restore to */
-  targetRollbackPointId: string;
-  /** Current status of the operation */
-  status: RollbackStatus;
-  /** Progress percentage (0-100) */
-  progress: number;
-  /** Error message if operation failed */
-  error?: string;
-  /** Timestamp when operation started */
-  startedAt: Date;
-  /** Timestamp when operation completed */
-  completedAt?: Date;
-  /** Strategy used for this rollback */
-  strategy: RollbackStrategy;
-  /** Detailed log of actions taken */
-  log: RollbackLogEntry[];
-}
-
-export enum RollbackOperationType {
-  FULL = 'full',
-  PARTIAL = 'partial',
-  SELECTIVE = 'selective',
-  DRY_RUN = 'dry_run'
-}
-
-export enum RollbackStatus {
-  PENDING = 'pending',
-  IN_PROGRESS = 'in_progress',
-  COMPLETED = 'completed',
-  FAILED = 'failed',
-  CANCELLED = 'cancelled'
-}
-
-export enum RollbackStrategy {
-  IMMEDIATE = 'immediate',
-  GRADUAL = 'gradual',
-  SAFE = 'safe',
-  FORCE = 'force'
-}
-
-export interface RollbackLogEntry {
-  /** Timestamp of log entry */
-  timestamp: Date;
-  /** Log level */
-  level: 'info' | 'warn' | 'error' | 'debug';
-  /** Log message */
-  message: string;
-  /** Additional context data */
-  data?: Record<string, any>;
-}
-
-export interface RollbackConfig {
-  /** Maximum number of rollback points to keep in memory */
-  maxRollbackPoints: number;
-  /** Default TTL for rollback points in milliseconds */
-  defaultTTL: number;
-  /** Whether to enable automatic cleanup */
-  autoCleanup: boolean;
-  /** Cleanup interval in milliseconds */
-  cleanupInterval: number;
-  /** Maximum snapshot size in bytes */
-  maxSnapshotSize: number;
-  /** Whether to persist rollback data */
-  enablePersistence: boolean;
-  /** Persistence storage type */
-  persistenceType: 'memory' | 'redis' | 'postgresql';
-  /** Database service dependency check */
-  requireDatabaseReady: boolean;
-}
-
-export interface RollbackStoreOptions {
-  /** Maximum number of items to store */
-  maxItems: number;
-  /** TTL for stored items in milliseconds */
-  defaultTTL: number;
-  /** Whether to enable LRU eviction */
-  enableLRU: boolean;
-  /** Whether to persist to external storage */
-  enablePersistence: boolean;
-}
-
-export interface ConflictResolution {
-  /** Strategy for resolving conflicts */
-  strategy: ConflictStrategy;
-  /** Custom resolver function */
-  resolver?: (conflict: RollbackConflict) => Promise<ConflictResolution>;
-}
-
-export enum ConflictStrategy {
-  ABORT = 'abort',
-  SKIP = 'skip',
-  OVERWRITE = 'overwrite',
-  MERGE = 'merge',
-  ASK_USER = 'ask_user'
-}
-
-export interface RollbackConflict {
-  /** Path or identifier where conflict occurred */
-  path: string;
-  /** Type of conflict */
-  type: ConflictType;
-  /** Current value in system */
-  currentValue: any;
-  /** Value from rollback point */
-  rollbackValue: any;
-  /** Additional context about the conflict */
-  context?: Record<string, any>;
-}
-
-export enum ConflictType {
-  VALUE_MISMATCH = 'value_mismatch',
-  MISSING_TARGET = 'missing_target',
-  TYPE_MISMATCH = 'type_mismatch',
-  PERMISSION_DENIED = 'permission_denied',
-  DEPENDENCY_CONFLICT = 'dependency_conflict'
-}
-
-export interface RollbackMetrics {
-  /** Total number of rollback points created */
-  totalRollbackPoints: number;
-  /** Total number of successful rollbacks */
-  successfulRollbacks: number;
-  /** Total number of failed rollbacks */
-  failedRollbacks: number;
-  /** Average rollback time in milliseconds */
-  averageRollbackTime: number;
-  /** Current memory usage in bytes */
-  memoryUsage: number;
-  /** Last cleanup timestamp */
-  lastCleanup?: Date;
-}
-
-/**
- * Events emitted by rollback components
- */
-export interface RollbackEvents {
-  'rollback-point-created': { rollbackPoint: RollbackPoint };
-  'rollback-point-expired': { rollbackPointId: string };
-  'rollback-started': { operation: RollbackOperation };
-  'rollback-progress': { operationId: string; progress: number };
-  'rollback-completed': { operation: RollbackOperation };
-  'rollback-failed': { operation: RollbackOperation; error: Error };
-  'conflict-detected': { conflict: RollbackConflict };
-  'cleanup-started': {};
-  'cleanup-completed': { removedCount: number };
-}
-
-/**
- * Error types for rollback operations
- */
-export class RollbackError extends Error {
-  constructor(
-    message: string,
-    public readonly code: string,
-    public readonly context?: Record<string, any>
-  ) {
-    super(message);
-    this.name = 'RollbackError';
-  }
-}
-
-export class RollbackConflictError extends RollbackError {
-  constructor(
-    message: string,
-    public readonly conflicts: RollbackConflict[]
-  ) {
-    super(message, 'ROLLBACK_CONFLICT');
-    this.name = 'RollbackConflictError';
-  }
-}
-
-export class RollbackNotFoundError extends RollbackError {
-  constructor(rollbackPointId: string) {
-    super(`Rollback point not found: ${rollbackPointId}`, 'ROLLBACK_NOT_FOUND');
-    this.name = 'RollbackNotFoundError';
-  }
-}
-
-export class RollbackExpiredError extends RollbackError {
-  constructor(rollbackPointId: string) {
-    super(`Rollback point has expired: ${rollbackPointId}`, 'ROLLBACK_EXPIRED');
-    this.name = 'RollbackExpiredError';
-  }
-}
-
-export class DatabaseNotReadyError extends RollbackError {
-  constructor() {
-    super('Database service is not ready for rollback operations', 'DATABASE_NOT_READY');
-    this.name = 'DatabaseNotReadyError';
-  }
-}

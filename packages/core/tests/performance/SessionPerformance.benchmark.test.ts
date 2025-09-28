@@ -56,7 +56,7 @@ describe('Session Performance Benchmarks', () => {
   let sessionManager: SessionManager;
   let sessionStore: SessionStore;
   let sessionReplay: SessionReplay;
-  let testDbIndex = 13;
+  const testDbIndex = 13;
 
   const config: SessionManagerConfig = {
     redis: {

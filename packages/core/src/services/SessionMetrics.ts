@@ -405,7 +405,7 @@ export class SessionMetrics extends EventEmitter {
    */
   recordSessionCreated(sessionId: string, agentId: string): void {
     this.recordCounter('session_total', 1, { status: 'created' });
-    this.setGauge('session_active', this.getCurrentActiveSessions());
+    void this.updateGaugeFromPromise('session_active', this.getCurrentActiveSessions());
 
     const spanId = this.startSpan('session.create', undefined, {
       'session.id': sessionId,
@@ -456,7 +456,7 @@ export class SessionMetrics extends EventEmitter {
    */
   recordAgentMetrics(agentId: string, load: number, status: string): void {
     this.setGauge('agent_load', load, { agent_id: agentId });
-    this.setGauge('agent_total', this.getCurrentAgentCount(), { status });
+    void this.updateGaugeFromPromise('agent_total', this.getCurrentAgentCount(), { status });
   }
 
   /**
@@ -671,6 +671,22 @@ export class SessionMetrics extends EventEmitter {
   /**
    * Helper methods for collecting metrics
    */
+  private async updateGaugeFromPromise(
+    name: string,
+    valuePromise: Promise<number>,
+    labels: Record<string, string> = {}
+  ): Promise<void> {
+    try {
+      const value = await valuePromise;
+      this.setGauge(name, value, labels);
+    } catch (error) {
+      this.emit('metrics:error', {
+        error: `Failed to update gauge ${name}`,
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private async getCurrentActiveSessions(): Promise<number> {
     try {
       const keys = await this.redis.keys('session:*');

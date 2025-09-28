@@ -1,5 +1,21 @@
 # Temporal Tracking System - User Guide
 
+## Metadata
+
+- Scope: testing
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Prerequisites
+
+- Access, roles, and environment assumptions.
+
+## Steps
+
+- Step 1
+- Step 2
+- Step 3
+
 ## Overview
 
 The Temporal Tracking System provides comprehensive temporal analysis and tracking capabilities for test relationships, evolution monitoring, and predictive analytics. This guide covers all aspects of using the system in development, staging, and production environments.

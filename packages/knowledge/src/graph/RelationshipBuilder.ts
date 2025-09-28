@@ -6,32 +6,30 @@
  * ImportExportBuilder, and ReferenceRelationshipBuilder.
  */
 
-import { Project, Node, SourceFile } from "ts-morph";
-import * as path from "path";
-import { Entity, File, Symbol as SymbolEntity } from '@memento/core';
+import { Project, Node, SourceFile } from 'ts-morph';
+import * as path from 'path';
+import {
+  Entity,
+  File,
+  Symbol as SymbolEntity,
+} from '@memento/shared-types.js';
 import {
   GraphRelationship,
   RelationshipType,
-} from '@memento/core';
-import { normalizeCodeEdge } from "../../../utils/codeEdges.js";
-import { noiseConfig } from "../../../config/noise.js";
+} from '@memento/shared-types.js';
+import { normalizeCodeEdge } from '@memento/core/utils/codeEdges.js';
+import { noiseConfig } from '@memento/core/config/noise.js';
 
 import {
   CallRelationshipBuilder,
   RelationshipBuilderOptions as CallBuilderOptions,
-} from "../../../builders/parser/CallRelationshipBuilder.js";
-import {
   TypeRelationshipBuilder,
   TypeRelationshipBuilderOptions,
-} from "../../../builders/parser/TypeRelationshipBuilder.js";
-import {
   ImportExportBuilder,
   ImportExportBuilderOptions,
-} from "../../../builders/parser/ImportExportBuilder.js";
-import {
   ReferenceRelationshipBuilder,
   ReferenceRelationshipBuilderOptions,
-} from "../../../builders/parser/ReferenceRelationshipBuilder.js";
+} from '@memento/parser/builders';
 
 export interface RelationshipBuilderOptions {
   tsProject: Project;
@@ -232,9 +230,9 @@ export class RelationshipBuilder {
     try {
       if (metadata && (metadata as any).source == null) {
         const md: any = metadata as any;
-        if (md.usedTypeChecker === true || md.resolution === "type-checker")
-          md.source = "type-checker";
-        else md.source = "ast";
+        if (md.usedTypeChecker === true || md.resolution === 'type-checker')
+          md.source = 'type-checker';
+        else md.source = 'ast';
       }
     } catch {}
     // Deterministic relationship id using canonical target key for stable identity across resolutions
@@ -256,39 +254,39 @@ export class RelationshipBuilder {
     // Attach a structured toRef for placeholders to aid later resolution
     try {
       if (!(rel as any).toRef) {
-        const t = String(toId || "");
+        const t = String(toId || '');
         // file:<relPath>:<name> -> fileSymbol
         const mFile = t.match(/^file:(.+?):(.+)$/);
         if (mFile) {
           (rel as any).toRef = {
-            kind: "fileSymbol",
+            kind: 'fileSymbol',
             file: mFile[1],
             symbol: mFile[2],
             name: mFile[2],
           };
-        } else if (t.startsWith("external:")) {
+        } else if (t.startsWith('external:')) {
           // external:<name> -> external
           (rel as any).toRef = {
-            kind: "external",
-            name: t.slice("external:".length),
+            kind: 'external',
+            name: t.slice('external:'.length),
           };
         } else if (/^(class|interface|function|typeAlias):/.test(t)) {
           // kind-qualified placeholder without file: treat as external-like symbolic ref
-          const parts = t.split(":");
+          const parts = t.split(':');
           (rel as any).toRef = {
-            kind: "external",
-            name: parts.slice(1).join(":"),
+            kind: 'external',
+            name: parts.slice(1).join(':'),
           };
         }
         // For sym:/file: IDs, check if they can be parsed as file symbols
         else if (/^(sym:|file:)/.test(t)) {
           // Check if sym: can be parsed
           const isParsableSym =
-            t.startsWith("sym:") && /^sym:(.+?)#(.+?)(?:@.+)?$/.test(t);
+            t.startsWith('sym:') && /^sym:(.+?)#(.+?)(?:@.+)?$/.test(t);
           const isParsableFile =
-            t.startsWith("file:") && /^file:(.+?):(.+)$/.test(t);
+            t.startsWith('file:') && /^file:(.+?):(.+)$/.test(t);
           if (!isParsableSym && !isParsableFile) {
-            (rel as any).toRef = { kind: "entity", id: t };
+            (rel as any).toRef = { kind: 'entity', id: t };
           }
         }
       }
@@ -298,7 +296,7 @@ export class RelationshipBuilder {
     try {
       if (!(rel as any).fromRef) {
         // We don't attempt to decode file/symbol here; coordinator can fetch entity by id
-        (rel as any).fromRef = { kind: "entity", id: fromId };
+        (rel as any).fromRef = { kind: 'entity', id: fromId };
       }
     } catch {}
 
@@ -312,7 +310,7 @@ export class RelationshipBuilder {
   private buildLocalIndex(sourceFile: SourceFile): Map<string, string> {
     const localIndex = new Map<string, string>();
     try {
-      const sfPath = (sourceFile.getFilePath && sourceFile.getFilePath()) || "";
+      const sfPath = (sourceFile.getFilePath && sourceFile.getFilePath()) || '';
       const relPath = path.relative(process.cwd(), sfPath);
 
       const cached = this.fileCache.get(path.resolve(relPath));
@@ -322,7 +320,7 @@ export class RelationshipBuilder {
           // Original key format in cache: `${symbolEntity.path}:${symbolEntity.name}`
           localIndex.set(k, valId);
           // Also index by simplified key `${fileRelPath}:${name}` to match lookups below
-          const parts = String(k).split(":");
+          const parts = String(k).split(':');
           if (parts.length >= 2) {
             const name = parts[parts.length - 1];
             // symbolEntity.path may itself be `${fileRelPath}:${name}`; rebuild simplified key

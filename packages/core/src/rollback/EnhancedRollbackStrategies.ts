@@ -16,7 +16,7 @@ import {
   RollbackLogEntry,
   RollbackError,
   RollbackConflictError,
-  DiffOperation
+  DiffOperation,
 } from './RollbackTypes.js';
 
 /**
@@ -103,13 +103,19 @@ export class PartialRollbackStrategy extends EventEmitter {
     }
 
     // Validate that selected items exist in the diff
-    const availableItems = new Set(context.diff.map(d => d.path));
+    const availableItems = new Set(context.diff.map((d) => d.path));
     for (const selection of context.partialSelections) {
-      const matchingItems = selection.identifiers.filter(id => availableItems.has(id));
+      const matchingItems = selection.identifiers.filter((id) =>
+        availableItems.has(id)
+      );
       if (matchingItems.length === 0) {
-        this.log('warn', `No items found for selection type: ${selection.type}`, {
-          identifiers: selection.identifiers
-        });
+        this.log(
+          'warn',
+          `No items found for selection type: ${selection.type}`,
+          {
+            identifiers: selection.identifiers,
+          }
+        );
       }
     }
 
@@ -120,24 +126,30 @@ export class PartialRollbackStrategy extends EventEmitter {
     const selectedChanges = await this.getSelectedChanges(context);
     const baseTime = 1000; // 1 second base
     const timePerChange = 75; // 75ms per change (slightly more due to filtering overhead)
-    return baseTime + (selectedChanges.length * timePerChange);
+    return baseTime + selectedChanges.length * timePerChange;
   }
 
   async execute(context: EnhancedRollbackContext): Promise<void> {
     this.context = context;
     this.log('info', 'Starting partial rollback strategy', {
       totalAvailableChanges: context.diff.length,
-      selectionCriteria: context.partialSelections?.length || 0
+      selectionCriteria: context.partialSelections?.length || 0,
     });
 
     try {
       // Step 1: Filter changes based on selections
       const selectedChanges = await this.getSelectedChanges(context);
-      this.log('info', `Selected ${selectedChanges.length} changes for rollback`);
+      this.log(
+        'info',
+        `Selected ${selectedChanges.length} changes for rollback`
+      );
       this.updateProgress(10);
 
       // Step 2: Build dependency order if available
-      const orderedChanges = await this.orderChangesByDependencies(selectedChanges, context.dependencyGraph);
+      const orderedChanges = await this.orderChangesByDependencies(
+        selectedChanges,
+        context.dependencyGraph
+      );
       this.updateProgress(20);
 
       // Step 3: Detect conflicts for selected changes only
@@ -150,18 +162,19 @@ export class PartialRollbackStrategy extends EventEmitter {
 
       this.log('info', 'Partial rollback completed successfully', {
         appliedChanges: orderedChanges.length,
-        totalAvailableChanges: context.diff.length
+        totalAvailableChanges: context.diff.length,
       });
-
     } catch (error) {
       this.log('error', 'Partial rollback failed', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
   }
 
-  async generatePreview(context: EnhancedRollbackContext): Promise<RollbackPreview> {
+  async generatePreview(
+    context: EnhancedRollbackContext
+  ): Promise<RollbackPreview> {
     const selectedChanges = await this.getSelectedChanges(context);
     const conflicts = await this.detectConflicts(selectedChanges);
 
@@ -185,7 +198,10 @@ export class PartialRollbackStrategy extends EventEmitter {
     }
 
     // Analyze dependencies
-    const dependencyAnalysis = await this.analyzeDependencies(selectedChanges, context.dependencyGraph);
+    const dependencyAnalysis = await this.analyzeDependencies(
+      selectedChanges,
+      context.dependencyGraph
+    );
 
     return {
       totalChanges: selectedChanges.length,
@@ -195,20 +211,24 @@ export class PartialRollbackStrategy extends EventEmitter {
       affectedItems: {
         entities: Array.from(affectedEntities),
         relationships: Array.from(affectedRelationships),
-        files: Array.from(affectedFiles)
+        files: Array.from(affectedFiles),
       },
-      dependencies: dependencyAnalysis
+      dependencies: dependencyAnalysis,
     };
   }
 
-  private async getSelectedChanges(context: EnhancedRollbackContext): Promise<DiffEntry[]> {
+  private async getSelectedChanges(
+    context: EnhancedRollbackContext
+  ): Promise<DiffEntry[]> {
     if (!context.partialSelections) return [];
 
     const selectedChanges: DiffEntry[] = [];
     const processed = new Set<string>();
 
     // Sort selections by priority
-    const sortedSelections = [...context.partialSelections].sort((a, b) => (b.priority || 0) - (a.priority || 0));
+    const sortedSelections = [...context.partialSelections].sort(
+      (a, b) => (b.priority || 0) - (a.priority || 0)
+    );
 
     for (const selection of sortedSelections) {
       for (const change of context.diff) {
@@ -224,43 +244,59 @@ export class PartialRollbackStrategy extends EventEmitter {
     return selectedChanges;
   }
 
-  private async matchesSelection(change: DiffEntry, selection: PartialRollbackSelection): Promise<boolean> {
+  private async matchesSelection(
+    change: DiffEntry,
+    selection: PartialRollbackSelection
+  ): Promise<boolean> {
     // Check direct identifier match
     if (selection.identifiers.includes(change.path)) {
       return true;
     }
 
     // Check include pattern
-    if (selection.includePattern && !selection.includePattern.test(change.path)) {
+    if (
+      selection.includePattern &&
+      !selection.includePattern.test(change.path)
+    ) {
       return false;
     }
 
     // Check exclude pattern
-    if (selection.excludePattern && selection.excludePattern.test(change.path)) {
+    if (
+      selection.excludePattern &&
+      selection.excludePattern.test(change.path)
+    ) {
       return false;
     }
 
     // Type-specific matching
     switch (selection.type) {
       case 'entity':
-        return change.path.startsWith('entity:') &&
-               selection.identifiers.some(id => change.path.includes(id));
+        return (
+          change.path.startsWith('entity:') &&
+          selection.identifiers.some((id) => change.path.includes(id))
+        );
 
       case 'relationship':
-        return change.path.startsWith('relationship:') &&
-               selection.identifiers.some(id => change.path.includes(id));
+        return (
+          change.path.startsWith('relationship:') &&
+          selection.identifiers.some((id) => change.path.includes(id))
+        );
 
       case 'file':
-        return selection.identifiers.some(id => change.path.includes(id) || change.path.endsWith(id));
+        return selection.identifiers.some(
+          (id) => change.path.includes(id) || change.path.endsWith(id)
+        );
 
       case 'namespace':
-        return selection.identifiers.some(id => change.path.startsWith(id));
+        return selection.identifiers.some((id) => change.path.startsWith(id));
 
       case 'component':
-        return selection.identifiers.some(id =>
-          change.path.includes(`/${id}/`) ||
-          change.path.includes(`/${id}.`) ||
-          change.path.endsWith(`/${id}`)
+        return selection.identifiers.some(
+          (id) =>
+            change.path.includes(`/${id}/`) ||
+            change.path.includes(`/${id}.`) ||
+            change.path.endsWith(`/${id}`)
         );
 
       default:
@@ -268,7 +304,10 @@ export class PartialRollbackStrategy extends EventEmitter {
     }
   }
 
-  private async orderChangesByDependencies(changes: DiffEntry[], dependencyGraph?: DependencyMap): Promise<DiffEntry[]> {
+  private async orderChangesByDependencies(
+    changes: DiffEntry[],
+    dependencyGraph?: DependencyMap
+  ): Promise<DiffEntry[]> {
     if (!dependencyGraph) {
       return changes; // Return original order if no dependency info
     }
@@ -276,7 +315,7 @@ export class PartialRollbackStrategy extends EventEmitter {
     const ordered: DiffEntry[] = [];
     const processing = new Set<string>();
     const processed = new Set<string>();
-    const changeMap = new Map(changes.map(c => [c.path, c]));
+    const changeMap = new Map(changes.map((c) => [c.path, c]));
 
     const processChange = (path: string): void => {
       if (processed.has(path) || processing.has(path)) return;
@@ -307,12 +346,15 @@ export class PartialRollbackStrategy extends EventEmitter {
     return ordered;
   }
 
-  private async analyzeDependencies(changes: DiffEntry[], dependencyGraph?: DependencyMap) {
+  private async analyzeDependencies(
+    changes: DiffEntry[],
+    dependencyGraph?: DependencyMap
+  ) {
     if (!dependencyGraph) {
       return { required: [], affected: [], circular: [] };
     }
 
-    const changePaths = new Set(changes.map(c => c.path));
+    const changePaths = new Set(changes.map((c) => c.path));
     const required = new Set<string>();
     const affected = new Set<string>();
     const visited = new Set<string>();
@@ -355,7 +397,7 @@ export class PartialRollbackStrategy extends EventEmitter {
     return {
       required: Array.from(required),
       affected: Array.from(affected),
-      circular
+      circular,
     };
   }
 
@@ -367,12 +409,14 @@ export class PartialRollbackStrategy extends EventEmitter {
       await this.applyChange(change);
       processedChanges++;
 
-      const progress = 30 + ((processedChanges / totalChanges) * 70);
+      const progress = 30 + (processedChanges / totalChanges) * 70;
       this.updateProgress(progress);
     }
   }
 
-  private async detectConflicts(changes: DiffEntry[]): Promise<RollbackConflict[]> {
+  private async detectConflicts(
+    changes: DiffEntry[]
+  ): Promise<RollbackConflict[]> {
     // Simplified conflict detection for partial changes
     const conflicts: RollbackConflict[] = [];
 
@@ -389,7 +433,7 @@ export class PartialRollbackStrategy extends EventEmitter {
           type: ConflictType.VALUE_MISMATCH,
           currentValue: 'multiple_changes',
           rollbackValue: 'conflicted_state',
-          context: { multipleChanges: true }
+          context: { multipleChanges: true },
         });
       }
     }
@@ -400,11 +444,17 @@ export class PartialRollbackStrategy extends EventEmitter {
   private async handleConflicts(conflicts: RollbackConflict[]): Promise<void> {
     if (conflicts.length === 0) return;
 
-    this.log('warn', `Detected ${conflicts.length} conflicts in partial rollback`);
+    this.log(
+      'warn',
+      `Detected ${conflicts.length} conflicts in partial rollback`
+    );
 
     switch (this.context.conflictResolution.strategy) {
       case ConflictStrategy.ABORT:
-        throw new RollbackConflictError('Partial rollback aborted due to conflicts', conflicts);
+        throw new RollbackConflictError(
+          'Partial rollback aborted due to conflicts',
+          conflicts
+        );
 
       case ConflictStrategy.SKIP:
         this.log('info', 'Skipping conflicted changes in partial rollback');
@@ -419,16 +469,23 @@ export class PartialRollbackStrategy extends EventEmitter {
   }
 
   private async applyChange(change: DiffEntry): Promise<void> {
-    this.log('debug', `Applying partial change: ${change.operation} at ${change.path}`);
-    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate work
+    this.log(
+      'debug',
+      `Applying partial change: ${change.operation} at ${change.path}`
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50)); // Simulate work
   }
 
-  private log(level: 'info' | 'warn' | 'error' | 'debug', message: string, data?: Record<string, any>): void {
+  private log(
+    level: 'info' | 'warn' | 'error' | 'debug',
+    message: string,
+    data?: Record<string, any>
+  ): void {
     const entry: RollbackLogEntry = {
       timestamp: new Date(),
       level,
       message,
-      data
+      data,
     };
 
     if (this.context.onLog) {
@@ -461,8 +518,15 @@ export class TimebasedRollbackStrategy extends EventEmitter {
     }
 
     const filter = context.timebasedFilter;
-    if (!filter.rollbackToTimestamp && !filter.includeChangesAfter && !filter.maxChangeAge) {
-      this.log('error', 'Time-based rollback requires at least one time criteria');
+    if (
+      !filter.rollbackToTimestamp &&
+      !filter.includeChangesAfter &&
+      !filter.maxChangeAge
+    ) {
+      this.log(
+        'error',
+        'Time-based rollback requires at least one time criteria'
+      );
       return false;
     }
 
@@ -473,28 +537,36 @@ export class TimebasedRollbackStrategy extends EventEmitter {
     const timeFilteredChanges = await this.getTimeFilteredChanges(context);
     const baseTime = 1000; // 1 second base
     const timePerChange = 60; // 60ms per change
-    return baseTime + (timeFilteredChanges.length * timePerChange);
+    return baseTime + timeFilteredChanges.length * timePerChange;
   }
 
   async execute(context: EnhancedRollbackContext): Promise<void> {
     this.context = context;
     this.log('info', 'Starting time-based rollback strategy', {
       totalAvailableChanges: context.diff.length,
-      timeFilter: context.timebasedFilter
+      timeFilter: context.timebasedFilter,
     });
 
     try {
       // Step 1: Filter changes based on time criteria
       const timeFilteredChanges = await this.getTimeFilteredChanges(context);
-      this.log('info', `Selected ${timeFilteredChanges.length} changes based on time criteria`);
+      this.log(
+        'info',
+        `Selected ${timeFilteredChanges.length} changes based on time criteria`
+      );
       this.updateProgress(15);
 
       // Step 2: Sort changes chronologically for proper rollback order
-      const chronologicalChanges = await this.sortChangesChronologically(timeFilteredChanges, context.timebasedFilter!);
+      const chronologicalChanges = await this.sortChangesChronologically(
+        timeFilteredChanges,
+        context.timebasedFilter!
+      );
       this.updateProgress(25);
 
       // Step 3: Detect temporal conflicts
-      const conflicts = await this.detectTemporalConflicts(chronologicalChanges);
+      const conflicts = await this.detectTemporalConflicts(
+        chronologicalChanges
+      );
       await this.handleConflicts(conflicts);
       this.updateProgress(35);
 
@@ -503,18 +575,19 @@ export class TimebasedRollbackStrategy extends EventEmitter {
 
       this.log('info', 'Time-based rollback completed successfully', {
         appliedChanges: chronologicalChanges.length,
-        totalAvailableChanges: context.diff.length
+        totalAvailableChanges: context.diff.length,
       });
-
     } catch (error) {
       this.log('error', 'Time-based rollback failed', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
   }
 
-  private async getTimeFilteredChanges(context: EnhancedRollbackContext): Promise<DiffEntry[]> {
+  private async getTimeFilteredChanges(
+    context: EnhancedRollbackContext
+  ): Promise<DiffEntry[]> {
     const filter = context.timebasedFilter!;
     const filtered: DiffEntry[] = [];
 
@@ -527,7 +600,10 @@ export class TimebasedRollbackStrategy extends EventEmitter {
     return filtered;
   }
 
-  private async matchesTimeFilter(change: DiffEntry, filter: TimebasedFilter): Promise<boolean> {
+  private async matchesTimeFilter(
+    change: DiffEntry,
+    filter: TimebasedFilter
+  ): Promise<boolean> {
     // Extract timestamp from change metadata or path
     const changeTimestamp = this.extractChangeTimestamp(change);
     if (!changeTimestamp) {
@@ -536,17 +612,26 @@ export class TimebasedRollbackStrategy extends EventEmitter {
     }
 
     // Check rollbackToTimestamp (rollback changes after this time)
-    if (filter.rollbackToTimestamp && changeTimestamp <= filter.rollbackToTimestamp) {
+    if (
+      filter.rollbackToTimestamp &&
+      changeTimestamp <= filter.rollbackToTimestamp
+    ) {
       return false;
     }
 
     // Check includeChangesAfter
-    if (filter.includeChangesAfter && changeTimestamp <= filter.includeChangesAfter) {
+    if (
+      filter.includeChangesAfter &&
+      changeTimestamp <= filter.includeChangesAfter
+    ) {
       return false;
     }
 
     // Check excludeChangesAfter
-    if (filter.excludeChangesAfter && changeTimestamp > filter.excludeChangesAfter) {
+    if (
+      filter.excludeChangesAfter &&
+      changeTimestamp > filter.excludeChangesAfter
+    ) {
       return false;
     }
 
@@ -568,24 +653,37 @@ export class TimebasedRollbackStrategy extends EventEmitter {
     }
 
     // Try to extract from path (if contains timestamp)
-    const timestampMatch = change.path.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
+    const timestampMatch = change.path.match(
+      /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/
+    );
     if (timestampMatch) {
       return new Date(timestampMatch[1]);
     }
 
     // Try to extract from oldValue or newValue if they have timestamps
-    if (change.oldValue && typeof change.oldValue === 'object' && change.oldValue.timestamp) {
+    if (
+      change.oldValue &&
+      typeof change.oldValue === 'object' &&
+      change.oldValue.timestamp
+    ) {
       return new Date(change.oldValue.timestamp);
     }
 
-    if (change.newValue && typeof change.newValue === 'object' && change.newValue.timestamp) {
+    if (
+      change.newValue &&
+      typeof change.newValue === 'object' &&
+      change.newValue.timestamp
+    ) {
       return new Date(change.newValue.timestamp);
     }
 
     return null;
   }
 
-  private async sortChangesChronologically(changes: DiffEntry[], filter: TimebasedFilter): Promise<DiffEntry[]> {
+  private async sortChangesChronologically(
+    changes: DiffEntry[],
+    filter: TimebasedFilter
+  ): Promise<DiffEntry[]> {
     return changes.sort((a, b) => {
       const timestampA = this.extractChangeTimestamp(a);
       const timestampB = this.extractChangeTimestamp(b);
@@ -600,7 +698,9 @@ export class TimebasedRollbackStrategy extends EventEmitter {
     });
   }
 
-  private async detectTemporalConflicts(changes: DiffEntry[]): Promise<RollbackConflict[]> {
+  private async detectTemporalConflicts(
+    changes: DiffEntry[]
+  ): Promise<RollbackConflict[]> {
     const conflicts: RollbackConflict[] = [];
     const pathTimestamps = new Map<string, Date[]>();
 
@@ -619,20 +719,26 @@ export class TimebasedRollbackStrategy extends EventEmitter {
     for (const [path, timestamps] of pathTimestamps) {
       if (timestamps.length > 1) {
         // Sort timestamps to detect gaps or overlaps
-        const sortedTimestamps = timestamps.sort((a, b) => a.getTime() - b.getTime());
+        const sortedTimestamps = timestamps.sort(
+          (a, b) => a.getTime() - b.getTime()
+        );
 
         for (let i = 1; i < sortedTimestamps.length; i++) {
-          const gap = sortedTimestamps[i].getTime() - sortedTimestamps[i-1].getTime();
-          if (gap < 60000) { // Changes within 1 minute might conflict
+          const gap =
+            sortedTimestamps[i].getTime() - sortedTimestamps[i - 1].getTime();
+          if (gap < 60000) {
+            // Changes within 1 minute might conflict
             conflicts.push({
               path,
               type: ConflictType.VALUE_MISMATCH,
-              currentValue: `change_at_${sortedTimestamps[i-1].toISOString()}`,
+              currentValue: `change_at_${sortedTimestamps[
+                i - 1
+              ].toISOString()}`,
               rollbackValue: `change_at_${sortedTimestamps[i].toISOString()}`,
               context: {
                 temporalConflict: true,
-                timestamps: sortedTimestamps
-              }
+                timestamps: sortedTimestamps,
+              },
             });
           }
         }
@@ -651,13 +757,13 @@ export class TimebasedRollbackStrategy extends EventEmitter {
       this.log('debug', 'Applying time-based change', {
         path: change.path,
         operation: change.operation,
-        timestamp: changeTimestamp?.toISOString()
+        timestamp: changeTimestamp?.toISOString(),
       });
 
       await this.applyChange(change);
       processedChanges++;
 
-      const progress = 35 + ((processedChanges / totalChanges) * 65);
+      const progress = 35 + (processedChanges / totalChanges) * 65;
       this.updateProgress(progress);
     }
   }
@@ -669,7 +775,10 @@ export class TimebasedRollbackStrategy extends EventEmitter {
 
     switch (this.context.conflictResolution.strategy) {
       case ConflictStrategy.ABORT:
-        throw new RollbackConflictError('Time-based rollback aborted due to temporal conflicts', conflicts);
+        throw new RollbackConflictError(
+          'Time-based rollback aborted due to temporal conflicts',
+          conflicts
+        );
 
       case ConflictStrategy.SKIP:
         this.log('info', 'Skipping temporally conflicted changes');
@@ -684,15 +793,19 @@ export class TimebasedRollbackStrategy extends EventEmitter {
   }
 
   private async applyChange(change: DiffEntry): Promise<void> {
-    await new Promise(resolve => setTimeout(resolve, 40)); // Simulate work
+    await new Promise((resolve) => setTimeout(resolve, 40)); // Simulate work
   }
 
-  private log(level: 'info' | 'warn' | 'error' | 'debug', message: string, data?: Record<string, any>): void {
+  private log(
+    level: 'info' | 'warn' | 'error' | 'debug',
+    message: string,
+    data?: Record<string, any>
+  ): void {
     const entry: RollbackLogEntry = {
       timestamp: new Date(),
       level,
       message,
-      data
+      data,
     };
 
     if (this.context.onLog) {
@@ -725,7 +838,7 @@ export class DryRunRollbackStrategy extends EventEmitter {
     // Dry run is fast since it doesn't apply changes
     const baseTime = 500; // 0.5 seconds base
     const timePerChange = 10; // 10ms per change analysis
-    return baseTime + (context.diff.length * timePerChange);
+    return baseTime + context.diff.length * timePerChange;
   }
 
   async execute(context: EnhancedRollbackContext): Promise<RollbackPreview> {
@@ -739,20 +852,21 @@ export class DryRunRollbackStrategy extends EventEmitter {
       this.log('info', 'Dry-run rollback analysis completed', {
         totalChanges: preview.totalChanges,
         potentialConflicts: preview.potentialConflicts.length,
-        estimatedDuration: preview.estimatedDuration
+        estimatedDuration: preview.estimatedDuration,
       });
 
       return preview;
-
     } catch (error) {
       this.log('error', 'Dry-run rollback analysis failed', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
   }
 
-  private async generateRollbackPreview(context: EnhancedRollbackContext): Promise<RollbackPreview> {
+  private async generateRollbackPreview(
+    context: EnhancedRollbackContext
+  ): Promise<RollbackPreview> {
     this.updateProgress(10);
 
     // Analyze change types
@@ -782,9 +896,16 @@ export class DryRunRollbackStrategy extends EventEmitter {
     this.updateProgress(70);
 
     // Analyze dependencies
-    let dependencyAnalysis = { required: [], affected: [], circular: [] };
+    let dependencyAnalysis: {
+      required: string[];
+      affected: string[];
+      circular: string[][];
+    } = { required: [], affected: [], circular: [] };
     if (context.dependencyGraph) {
-      dependencyAnalysis = await this.analyzeDependencies(context.diff, context.dependencyGraph);
+      dependencyAnalysis = await this.analyzeDependencies(
+        context.diff,
+        context.dependencyGraph
+      );
     }
 
     this.updateProgress(100);
@@ -797,13 +918,15 @@ export class DryRunRollbackStrategy extends EventEmitter {
       affectedItems: {
         entities: Array.from(affectedEntities),
         relationships: Array.from(affectedRelationships),
-        files: Array.from(affectedFiles)
+        files: Array.from(affectedFiles),
       },
-      dependencies: dependencyAnalysis
+      dependencies: dependencyAnalysis,
     };
   }
 
-  private async analyzeAllConflicts(changes: DiffEntry[]): Promise<RollbackConflict[]> {
+  private async analyzeAllConflicts(
+    changes: DiffEntry[]
+  ): Promise<RollbackConflict[]> {
     const conflicts: RollbackConflict[] = [];
     const pathGroups = new Map<string, DiffEntry[]>();
 
@@ -824,9 +947,9 @@ export class DryRunRollbackStrategy extends EventEmitter {
           currentValue: 'multiple_operations',
           rollbackValue: 'conflicted_state',
           context: {
-            operations: pathChanges.map(c => c.operation),
-            changeCount: pathChanges.length
-          }
+            operations: pathChanges.map((c) => c.operation),
+            changeCount: pathChanges.length,
+          },
         });
       }
 
@@ -841,7 +964,7 @@ export class DryRunRollbackStrategy extends EventEmitter {
               type: ConflictType.TYPE_MISMATCH,
               currentValue: newType,
               rollbackValue: oldType,
-              context: { change }
+              context: { change },
             });
           }
         }
@@ -851,8 +974,11 @@ export class DryRunRollbackStrategy extends EventEmitter {
     return conflicts;
   }
 
-  private async analyzeDependencies(changes: DiffEntry[], dependencyGraph: DependencyMap) {
-    const changePaths = new Set(changes.map(c => c.path));
+  private async analyzeDependencies(
+    changes: DiffEntry[],
+    dependencyGraph: DependencyMap
+  ) {
+    const changePaths = new Set(changes.map((c) => c.path));
     const required = new Set<string>();
     const affected = new Set<string>();
     const circular: string[][] = [];
@@ -877,7 +1003,8 @@ export class DryRunRollbackStrategy extends EventEmitter {
 
     for (const change of changes) {
       const deps = dependencyGraph.dependencies.get(change.path) || [];
-      const reverseDeps = dependencyGraph.reverseDependencies.get(change.path) || [];
+      const reverseDeps =
+        dependencyGraph.reverseDependencies.get(change.path) || [];
 
       for (const dep of deps) {
         if (!changePaths.has(dep)) {
@@ -897,16 +1024,20 @@ export class DryRunRollbackStrategy extends EventEmitter {
     return {
       required: Array.from(required),
       affected: Array.from(affected),
-      circular
+      circular,
     };
   }
 
-  private log(level: 'info' | 'warn' | 'error' | 'debug', message: string, data?: Record<string, any>): void {
+  private log(
+    level: 'info' | 'warn' | 'error' | 'debug',
+    message: string,
+    data?: Record<string, any>
+  ): void {
     const entry: RollbackLogEntry = {
       timestamp: new Date(),
       level,
       message,
-      data
+      data,
     };
 
     if (this.context.onLog) {
@@ -930,5 +1061,5 @@ export type {
   PartialRollbackSelection,
   TimebasedFilter,
   DependencyMap,
-  RollbackPreview
+  RollbackPreview,
 };

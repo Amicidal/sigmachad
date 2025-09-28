@@ -1,5 +1,27 @@
 # Rollback Capabilities Architecture Diagrams
 
+## Metadata
+
+- Scope: rollback
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: rollback).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
+## Desired Capabilities
+
+- [ ] Define required capabilities and acceptance criteria.
+- [ ] Note API/Graph impacts.
+
+## Overview
+
+_Concise purpose, target outcomes, and context._
+
 ## System Overview
 
 ```mermaid

@@ -5,14 +5,13 @@
 
 import { EventEmitter } from 'events';
 import { NeogmaService } from './NeogmaService.js';
-import { createEntityModels } from '../../models/ogm/EntityModels.js';
-import { modelToEntity } from '../../models/ogm/BaseModels.js';
-import { EmbeddingService } from './EmbeddingService.js';
-import { Entity } from '@memento/core';
 import {
-  GraphSearchRequest,
-  GraphExamples,
-} from '../../models/types.js';
+  createEntityModels,
+  modelToEntity,
+} from '@memento/graph/models-ogm/EntityModels.js';
+import { EmbeddingService } from './EmbeddingService.js';
+import { Entity } from '@memento/shared-types.js';
+import { GraphSearchRequest, GraphExamples } from '../../models/types.js';
 import {
   ISearchService,
   StructuralSearchOptions,
@@ -185,12 +184,37 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
       }
 
       // Search in symbols
-      if (!options.filter?.type || ['symbol', 'function', 'class', 'interface'].includes(options.filter.type)) {
+      if (
+        !options.filter?.type ||
+        ['symbol', 'function', 'class', 'interface'].includes(
+          options.filter.type
+        )
+      ) {
         searchPromises.push(
-          this.searchInModel(this.models.SymbolModel, query, options, 'symbol').catch(() => [] as SearchResult[]),
-          this.searchInModel(this.models.FunctionSymbolModel, query, options, 'symbol').catch(() => [] as SearchResult[]),
-          this.searchInModel(this.models.ClassSymbolModel, query, options, 'symbol').catch(() => [] as SearchResult[]),
-          this.searchInModel(this.models.InterfaceSymbolModel, query, options, 'symbol').catch(() => [] as SearchResult[])
+          this.searchInModel(
+            this.models.SymbolModel,
+            query,
+            options,
+            'symbol'
+          ).catch(() => [] as SearchResult[]),
+          this.searchInModel(
+            this.models.FunctionSymbolModel,
+            query,
+            options,
+            'symbol'
+          ).catch(() => [] as SearchResult[]),
+          this.searchInModel(
+            this.models.ClassSymbolModel,
+            query,
+            options,
+            'symbol'
+          ).catch(() => [] as SearchResult[]),
+          this.searchInModel(
+            this.models.InterfaceSymbolModel,
+            query,
+            options,
+            'symbol'
+          ).catch(() => [] as SearchResult[])
         );
       }
 
@@ -241,9 +265,13 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
       // Sort by score and limit
       results.sort((a, b) => b.score - a.score);
       return results.slice(0, limit);
-
     } catch (error) {
-      this.emit('error', { operation: 'structuralSearch', error, query, options });
+      this.emit('error', {
+        operation: 'structuralSearch',
+        error,
+        query,
+        options,
+      });
       throw error;
     }
   }
@@ -279,9 +307,12 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
           ...this.buildFilterParams(options.filter),
         };
 
-        const results = await this.neogmaService.executeCypher(cypherQuery, params);
+        const results = await this.neogmaService.executeCypher(
+          cypherQuery,
+          params
+        );
 
-        return results.map(row => ({
+        return results.map((row) => ({
           entity: this.parseEntity(row.n),
           score: 1.0, // Exact match score
           type: 'structural' as const,
@@ -329,17 +360,28 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
         ...this.buildFilterParams(options.filter),
       };
 
-      const results = await this.neogmaService.executeCypher(cypherQuery, params);
+      const results = await this.neogmaService.executeCypher(
+        cypherQuery,
+        params
+      );
 
-      return results.map(row => ({
+      return results.map((row) => ({
         entity: this.parseEntity(row.n),
         score: row.score,
         type: 'structural' as const,
       }));
     } catch (error) {
       // If APOC is not available, fall back to exact search
-      console.warn(`Fuzzy search failed in ${entityType} model, falling back to exact search:`, error);
-      return this.searchInModel(Model, query, { ...options, fuzzy: false }, entityType);
+      console.warn(
+        `Fuzzy search failed in ${entityType} model, falling back to exact search:`,
+        error
+      );
+      return this.searchInModel(
+        Model,
+        query,
+        { ...options, fuzzy: false },
+        entityType
+      );
     }
   }
 
@@ -352,7 +394,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
   ): Promise<SearchResult[]> {
     const results = await this.embeddingService.search(query, options);
 
-    return results.map(result => ({
+    return results.map((result) => ({
       entity: result.entity,
       score: result.score,
       type: 'semantic' as const,
@@ -380,7 +422,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
     const merged = new Map<string, SearchResult>();
 
     // Add structural results with boost
-    structural.forEach(result => {
+    structural.forEach((result) => {
       merged.set(result.entity.id, {
         ...result,
         score: result.score * 1.2, // Boost structural matches
@@ -389,7 +431,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
     });
 
     // Add or merge semantic results
-    semantic.forEach(result => {
+    semantic.forEach((result) => {
       const existing = merged.get(result.entity.id);
       if (existing) {
         // Average the scores if found in both
@@ -423,7 +465,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
       filter: { type: 'symbol' },
     });
 
-    return results.map(r => r.entity);
+    return results.map((r) => r.entity);
   }
 
   /**
@@ -458,9 +500,14 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
       };
 
       const results = await this.neogmaService.executeCypher(query, params);
-      return results.map(row => this.parseEntity(row.n));
+      return results.map((row) => this.parseEntity(row.n));
     } catch (error) {
-      this.emit('error', { operation: 'findNearbySymbols', error, filePath, position });
+      this.emit('error', {
+        operation: 'findNearbySymbols',
+        error,
+        filePath,
+        position,
+      });
       throw error;
     }
   }
@@ -474,7 +521,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
   ): Promise<Entity[]> {
     const limit = options.limit || 50;
     let query: string;
-    let params: Record<string, any> = { pattern, limit };
+    const params: Record<string, any> = { pattern, limit };
 
     if (options.type === 'regex') {
       query = `
@@ -486,9 +533,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
       `;
     } else {
       // Glob pattern - convert to regex
-      const regexPattern = pattern
-        .replace(/\*/g, '.*')
-        .replace(/\?/g, '.');
+      const regexPattern = pattern.replace(/\*/g, '.*').replace(/\?/g, '.');
       query = `
         MATCH (n:Entity)
         WHERE n.name =~ $regexPattern
@@ -501,9 +546,14 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
 
     try {
       const results = await this.neogmaService.executeCypher(query, params);
-      return results.map(row => this.parseEntity(row.n));
+      return results.map((row) => this.parseEntity(row.n));
     } catch (error) {
-      this.emit('error', { operation: 'patternSearch', error, pattern, options });
+      this.emit('error', {
+        operation: 'patternSearch',
+        error,
+        pattern,
+        options,
+      });
       throw error;
     }
   }
@@ -529,7 +579,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
           signature: '',
           usageExamples: [],
           testExamples: [],
-          relatedPatterns: []
+          relatedPatterns: [],
         };
       }
 
@@ -546,7 +596,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
         id: entityId,
       });
 
-      const usageExamples = usageResults.map(row => {
+      const usageExamples = usageResults.map((row) => {
         const caller = this.parseEntity(row.caller);
         return {
           context: `Used in ${caller.type}: ${caller.name}`,
@@ -671,10 +721,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
   /**
    * Sort search results
    */
-  private sortResults(
-    results: SearchResult[],
-    sortBy: string
-  ): SearchResult[] {
+  private sortResults(results: SearchResult[], sortBy: string): SearchResult[] {
     return results.sort((a, b) => {
       const aVal = (a.entity as any)[sortBy];
       const bVal = (b.entity as any)[sortBy];
@@ -694,7 +741,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
   ): SearchResult[] {
     const grouped = new Map<string, SearchResult[]>();
 
-    results.forEach(result => {
+    results.forEach((result) => {
       const key = (result.entity as any)[groupBy] || 'unknown';
       if (!grouped.has(key)) {
         grouped.set(key, []);
@@ -704,7 +751,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
 
     // Flatten groups, keeping best from each
     const flattened: SearchResult[] = [];
-    grouped.forEach(group => {
+    grouped.forEach((group) => {
       group.sort((a, b) => b.score - a.score);
       flattened.push(...group.slice(0, 3)); // Top 3 from each group
     });

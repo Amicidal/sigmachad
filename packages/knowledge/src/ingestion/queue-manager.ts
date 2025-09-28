@@ -382,8 +382,8 @@ export class QueueManager extends EventEmitter<IngestionEvents> {
    * Setup metrics collection
    */
   private setupMetricsCollection(): void {
-    let lastProcessedCount = 0;
-    let lastErrorCount = 0;
+    const lastProcessedCount = 0;
+    const lastErrorCount = 0;
     let lastUpdateTime = Date.now();
 
     this.metricsTimer = setInterval(() => {

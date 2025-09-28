@@ -1,5 +1,21 @@
 # High-Throughput Ingestion Pipeline Guide
 
+## Metadata
+
+- Scope: sync
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Prerequisites
+
+- Access, roles, and environment assumptions.
+
+## Steps
+
+- Step 1
+- Step 2
+- Step 3
+
 ## Overview
 
 The High-Throughput Ingestion Pipeline is designed to process large codebases efficiently, targeting **10,000+ lines of code per minute** while maintaining data integrity and enabling real-time analysis.

@@ -1111,7 +1111,7 @@ export class TestDataStorage implements ITestDataStorage {
     let totalRecords = 0;
     let validRecords = 0;
     let corruptedRecords = 0;
-    let missingRecords = 0;
+    const missingRecords = 0;
 
     try {
       // Check executions

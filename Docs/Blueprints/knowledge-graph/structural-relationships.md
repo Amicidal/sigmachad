@@ -1,5 +1,18 @@
 # Structural Relationship Blueprint
 
+## Metadata
+
+- Scope: knowledge-graph
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: knowledge-graph).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Structural relationships (`CONTAINS`, `DEFINES`, `EXPORTS`, `IMPORTS`, optionally `BELONGS_TO`) encode the static architecture of the codebase—module hierarchies, symbol definitions, and import/export dependencies. They serve as the backbone for navigation, dependency analysis, and change impact scoping.
 

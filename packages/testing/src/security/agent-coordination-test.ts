@@ -6,8 +6,7 @@
 import { SecurityFixAgent } from '../../agents/src/security-fix-agent.js';
 import { AgentCoordinator } from '../../agents/src/coordinator.js';
 import { AgentRegistry } from '../../agents/src/registry.js';
-import { SecurityScanner } from './scanner.js';
-import { AgentTask, AgentEventTypes } from '../../agents/src/types.js';
+import { AgentTask } from '../../agents/src/types.js';
 
 export class SecurityAgentCoordinationTest {
   private coordinator: AgentCoordinator;
@@ -20,19 +19,19 @@ export class SecurityAgentCoordinationTest {
     this.mockDb = {
       falkordbQuery: async () => [],
       falkordbCommand: async () => undefined,
-      getConfig: () => ({ falkordb: { graphKey: 'test' } })
+      getConfig: () => ({ falkordb: { graphKey: 'test' } }),
     };
 
     this.mockKgService = {
       getEntity: async () => null,
       createRelationship: async () => undefined,
-      findEntitiesByType: async () => []
+      findEntitiesByType: async () => [],
     };
 
     this.coordinator = new AgentCoordinator({
       maxConcurrentTasks: 5,
       taskTimeout: 60000,
-      enableMetrics: true
+      enableMetrics: true,
     });
 
     this.registry = new AgentRegistry(this.coordinator);
@@ -72,7 +71,7 @@ export class SecurityAgentCoordinationTest {
         name: 'Security Fix Agent',
         description: 'Automatically fixes security issues',
         version: '1.0.0',
-        capabilities: ['automatic-fixes', 'rollback', 'verification']
+        capabilities: ['automatic-fixes', 'rollback', 'verification'],
       },
       this.mockDb,
       this.mockKgService
@@ -98,7 +97,10 @@ export class SecurityAgentCoordinationTest {
 
     // Listen for events from SecurityFixAgent
     this.securityFixAgent.on('security-fix-completed', (event) => {
-      console.log('📨 Received security-fix-completed event:', event.data.result.status);
+      console.log(
+        '📨 Received security-fix-completed event:',
+        event.data.result.status
+      );
       eventReceived = true;
     });
 
@@ -112,10 +114,10 @@ export class SecurityAgentCoordinationTest {
         ruleId: 'HARDCODED_SECRET',
         severity: 'high',
         autoFix: true,
-        dryRun: true
+        dryRun: true,
       },
       createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60000)
+      expiresAt: new Date(Date.now() + 60000),
     };
 
     // Execute the task
@@ -124,7 +126,7 @@ export class SecurityAgentCoordinationTest {
       console.log('✅ Task executed successfully:', result.status);
 
       // Wait a bit for event propagation
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       if (eventReceived) {
         console.log('✅ Event communication working');
@@ -154,8 +156,8 @@ export class SecurityAgentCoordinationTest {
               high: 2,
               medium: 0,
               low: 0,
-              info: 0
-            }
+              info: 0,
+            },
           },
           issues: [
             {
@@ -163,18 +165,18 @@ export class SecurityAgentCoordinationTest {
               ruleId: 'HARDCODED_SECRET',
               severity: 'critical',
               confidence: 0.9,
-              metadata: { filePath: '/test/file1.js' }
+              metadata: { filePath: '/test/file1.js' },
             },
             {
               id: 'issue-2',
               ruleId: 'SQL_INJECTION',
               severity: 'high',
               confidence: 0.8,
-              metadata: { filePath: '/test/file2.js' }
-            }
-          ]
-        }
-      }
+              metadata: { filePath: '/test/file2.js' },
+            },
+          ],
+        },
+      },
     };
 
     // Track fix tasks created
@@ -189,9 +191,11 @@ export class SecurityAgentCoordinationTest {
     await this.securityFixAgent.onEvent(scanEvent);
 
     // Wait for processing
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
-    console.log(`✅ Created ${fixTasksCreated} fix tasks for critical/high issues`);
+    console.log(
+      `✅ Created ${fixTasksCreated} fix tasks for critical/high issues`
+    );
   }
 
   private async testParallelSecurityFixes(): Promise<void> {
@@ -206,10 +210,10 @@ export class SecurityAgentCoordinationTest {
           issueId: 'mock-issue-1',
           ruleId: 'HARDCODED_SECRET',
           autoFix: true,
-          dryRun: true
+          dryRun: true,
         },
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 60000)
+        expiresAt: new Date(Date.now() + 60000),
       },
       {
         id: 'parallel-fix-2',
@@ -219,10 +223,10 @@ export class SecurityAgentCoordinationTest {
           issueId: 'mock-issue-2',
           ruleId: 'WEAK_CRYPTO',
           autoFix: true,
-          dryRun: true
+          dryRun: true,
         },
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 60000)
+        expiresAt: new Date(Date.now() + 60000),
       },
       {
         id: 'parallel-fix-3',
@@ -232,11 +236,11 @@ export class SecurityAgentCoordinationTest {
           issueId: 'mock-issue-3',
           ruleId: 'XSS_VULNERABILITY',
           autoFix: true,
-          dryRun: true
+          dryRun: true,
         },
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 60000)
-      }
+        expiresAt: new Date(Date.now() + 60000),
+      },
     ];
 
     const startTime = Date.now();
@@ -244,18 +248,23 @@ export class SecurityAgentCoordinationTest {
     try {
       // Execute tasks in parallel using coordinator
       const results = await Promise.all(
-        fixTasks.map(task => this.coordinator.executeTask(task))
+        fixTasks.map((task) => this.coordinator.executeTask(task))
       );
 
       const endTime = Date.now();
       const duration = endTime - startTime;
 
-      console.log(`✅ Completed ${results.length} parallel fixes in ${duration}ms`);
+      console.log(
+        `✅ Completed ${results.length} parallel fixes in ${duration}ms`
+      );
 
       // Verify all tasks completed successfully
-      const successfulFixes = results.filter(r => r.status === 'completed').length;
-      console.log(`✅ ${successfulFixes}/${results.length} fixes completed successfully`);
-
+      const successfulFixes = results.filter(
+        (r) => r.status === 'completed'
+      ).length;
+      console.log(
+        `✅ ${successfulFixes}/${results.length} fixes completed successfully`
+      );
     } catch (error) {
       console.log('❌ Parallel execution failed:', error);
     }
@@ -272,8 +281,8 @@ export class SecurityAgentCoordinationTest {
       timestamp: new Date(),
       data: {
         rollbackId: 'mock-rollback-1',
-        reason: 'Fix caused test failures'
-      }
+        reason: 'Fix caused test failures',
+      },
     };
 
     let rollbackCompleted = false;
@@ -292,7 +301,7 @@ export class SecurityAgentCoordinationTest {
     await this.securityFixAgent.onEvent(rollbackEvent);
 
     // Wait for processing
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     if (rollbackCompleted) {
       console.log('✅ Rollback coordination working');
@@ -312,17 +321,20 @@ export class SecurityAgentCoordinationTest {
       data: {
         issueId: 'non-existent-issue',
         ruleId: 'UNKNOWN_RULE',
-        autoFix: true
+        autoFix: true,
       },
       createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60000)
+      expiresAt: new Date(Date.now() + 60000),
     };
 
     try {
       const result = await this.securityFixAgent.execute(failingTask);
       console.log('⚠️ Expected failure but task succeeded:', result.status);
     } catch (error) {
-      console.log('✅ Task failed as expected:', error instanceof Error ? error.message : error);
+      console.log(
+        '✅ Task failed as expected:',
+        error instanceof Error ? error.message : error
+      );
 
       // Check that agent is still responsive
       const healthStatus = await this.securityFixAgent.getHealth();
@@ -345,26 +357,26 @@ export class SecurityAgentCoordinationTest {
       '3. Fix tasks created',
       '4. Fixes applied',
       '5. Verification scan',
-      '6. Rollback if needed'
+      '6. Rollback if needed',
     ];
 
     console.log('Workflow steps:');
-    workflowSteps.forEach(step => console.log(`   ${step}`));
+    workflowSteps.forEach((step) => console.log(`   ${step}`));
 
     // Simulate workflow events
     const events = [
       {
         type: 'security-scan-started',
-        data: { scanId: 'workflow-scan-1' }
+        data: { scanId: 'workflow-scan-1' },
       },
       {
         type: 'security-issues-detected',
-        data: { issueCount: 3, criticalCount: 1 }
+        data: { issueCount: 3, criticalCount: 1 },
       },
       {
         type: 'security-fix-tasks-created',
-        data: { taskCount: 3 }
-      }
+        data: { taskCount: 3 },
+      },
     ];
 
     for (const event of events) {
@@ -374,11 +386,11 @@ export class SecurityAgentCoordinationTest {
         type: event.type,
         agentId: 'workflow-coordinator',
         timestamp: new Date(),
-        data: event.data
+        data: event.data,
       });
 
       // Add small delay between events
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     console.log('✅ Workflow integration test completed');
@@ -400,10 +412,10 @@ export class SecurityAgentCoordinationTest {
           issueId: `perf-issue-${i}`,
           ruleId: 'HARDCODED_SECRET',
           autoFix: true,
-          dryRun: true
+          dryRun: true,
         },
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 60000)
+        expiresAt: new Date(Date.now() + 60000),
       });
     }
 
@@ -423,10 +435,15 @@ export class SecurityAgentCoordinationTest {
       console.log(`📊 Performance Results:`);
       console.log(`   Tasks: ${taskCount}`);
       console.log(`   Duration: ${duration}ms`);
-      console.log(`   Throughput: ${(taskCount / (duration / 1000)).toFixed(2)} tasks/sec`);
+      console.log(
+        `   Throughput: ${(taskCount / (duration / 1000)).toFixed(2)} tasks/sec`
+      );
       console.log(`   Memory Used: ${(memoryUsed / 1024 / 1024).toFixed(2)}MB`);
-      console.log(`   Success Rate: ${results.filter(r => r.status === 'completed').length}/${taskCount}`);
-
+      console.log(
+        `   Success Rate: ${
+          results.filter((r) => r.status === 'completed').length
+        }/${taskCount}`
+      );
     } catch (error) {
       console.log('❌ Performance benchmark failed:', error);
     }
@@ -442,7 +459,7 @@ class MockSecurityScanAgent {
     name: 'Mock Security Scanner',
     description: 'Mock scanner for testing',
     version: '1.0.0',
-    capabilities: ['sast', 'secrets', 'dependencies']
+    capabilities: ['sast', 'secrets', 'dependencies'],
   };
 
   async initialize(): Promise<void> {}
@@ -454,8 +471,8 @@ class MockSecurityScanAgent {
       status: 'completed',
       data: {
         summary: { totalIssues: 0 },
-        issues: []
-      }
+        issues: [],
+      },
     };
   }
 
@@ -475,7 +492,7 @@ class MockSecurityReviewAgent {
     name: 'Mock Security Reviewer',
     description: 'Mock reviewer for testing',
     version: '1.0.0',
-    capabilities: ['manual-review', 'approval']
+    capabilities: ['manual-review', 'approval'],
   };
 
   async initialize(): Promise<void> {}
@@ -487,8 +504,8 @@ class MockSecurityReviewAgent {
       status: 'completed',
       data: {
         approved: true,
-        comments: 'Automated approval for testing'
-      }
+        comments: 'Automated approval for testing',
+      },
     };
   }
 

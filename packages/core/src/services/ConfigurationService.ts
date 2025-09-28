@@ -6,19 +6,19 @@
 import type { IDatabaseService } from '@memento/shared-types';
 // Avoid a hard dependency on @memento/sync; use a minimal interface instead
 export interface ISynchronizationCoordinator {}
-import * as fs from "fs/promises";
-import * as path from "path";
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
-const SYSTEM_CONFIG_DOCUMENT_ID = "00000000-0000-4000-8000-00000000c0f1";
-const SYSTEM_CONFIG_DOCUMENT_TYPE = "system_config";
+const SYSTEM_CONFIG_DOCUMENT_ID = '00000000-0000-4000-8000-00000000c0f1';
+const SYSTEM_CONFIG_DOCUMENT_TYPE = 'system_config';
 
 export interface SystemConfiguration {
   version: string;
   environment: string;
   databases: {
-    falkordb: "configured" | "error" | "unavailable";
-    qdrant: "configured" | "error" | "unavailable";
-    postgres: "configured" | "error" | "unavailable";
+    falkordb: 'configured' | 'error' | 'unavailable';
+    qdrant: 'configured' | 'error' | 'unavailable';
+    postgres: 'configured' | 'error' | 'unavailable';
   };
   features: {
     websocket: boolean;
@@ -63,7 +63,7 @@ export class ConfigurationService {
 
     const config: SystemConfiguration = {
       version: await this.getVersion(),
-      environment: process.env.NODE_ENV || "development",
+      environment: process.env.NODE_ENV || 'development',
       databases: await this.checkDatabaseStatus(),
       features: await this.checkFeatureStatus(),
       performance: await this.getPerformanceConfig(),
@@ -82,40 +82,67 @@ export class ConfigurationService {
     incident: { enabled: boolean; hops: number };
     schedule: { pruneIntervalHours: number; checkpointIntervalHours: number };
   } {
-    const enabled = (process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false';
-    const retentionDays = parseInt(process.env.HISTORY_RETENTION_DAYS || '', 10);
+    const enabled =
+      (process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false';
+    const retentionDays = parseInt(
+      process.env.HISTORY_RETENTION_DAYS || '',
+      10
+    );
     const hops = parseInt(process.env.HISTORY_CHECKPOINT_HOPS || '', 10);
-    const embedVersions = (process.env.HISTORY_EMBED_VERSIONS || 'false').toLowerCase() === 'true';
-    const incidentEnabled = (process.env.HISTORY_INCIDENT_ENABLED || 'true').toLowerCase() !== 'false';
+    const embedVersions =
+      (process.env.HISTORY_EMBED_VERSIONS || 'false').toLowerCase() === 'true';
+    const incidentEnabled =
+      (process.env.HISTORY_INCIDENT_ENABLED || 'true').toLowerCase() !==
+      'false';
     const incidentHops = parseInt(process.env.HISTORY_INCIDENT_HOPS || '', 10);
-    const pruneHours = parseInt(process.env.HISTORY_PRUNE_INTERVAL_HOURS || '', 10);
-    const checkpointHours = parseInt(process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || '', 10);
+    const pruneHours = parseInt(
+      process.env.HISTORY_PRUNE_INTERVAL_HOURS || '',
+      10
+    );
+    const checkpointHours = parseInt(
+      process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS || '',
+      10
+    );
     return {
       enabled,
-      retentionDays: Number.isFinite(retentionDays) && retentionDays > 0 ? retentionDays : 30,
+      retentionDays:
+        Number.isFinite(retentionDays) && retentionDays > 0
+          ? retentionDays
+          : 30,
       checkpoint: {
         hops: Number.isFinite(hops) && hops > 0 ? Math.min(hops, 5) : 2,
         embedVersions,
       },
       incident: {
         enabled: incidentEnabled,
-        hops: Number.isFinite(incidentHops) && incidentHops > 0 ? Math.min(incidentHops, 5) : (Number.isFinite(hops) && hops > 0 ? Math.min(hops, 5) : 2),
+        hops:
+          Number.isFinite(incidentHops) && incidentHops > 0
+            ? Math.min(incidentHops, 5)
+            : Number.isFinite(hops) && hops > 0
+            ? Math.min(hops, 5)
+            : 2,
       },
       schedule: {
-        pruneIntervalHours: Number.isFinite(pruneHours) && pruneHours > 0 ? pruneHours : 24,
-        checkpointIntervalHours: Number.isFinite(checkpointHours) && checkpointHours > 0 ? checkpointHours : 24,
+        pruneIntervalHours:
+          Number.isFinite(pruneHours) && pruneHours > 0 ? pruneHours : 24,
+        checkpointIntervalHours:
+          Number.isFinite(checkpointHours) && checkpointHours > 0
+            ? checkpointHours
+            : 24,
       },
     };
   }
 
   // Update history configuration at runtime (process.env backed)
-  updateHistoryConfig(updates: Partial<{
-    enabled: boolean;
-    retentionDays: number;
-    checkpoint: { hops: number; embedVersions: boolean };
-    incident: { enabled: boolean; hops: number };
-    schedule: { pruneIntervalHours: number; checkpointIntervalHours: number };
-  }>): {
+  updateHistoryConfig(
+    updates: Partial<{
+      enabled: boolean;
+      retentionDays: number;
+      checkpoint: { hops: number; embedVersions: boolean };
+      incident: { enabled: boolean; hops: number };
+      schedule: { pruneIntervalHours: number; checkpointIntervalHours: number };
+    }>
+  ): {
     enabled: boolean;
     retentionDays: number;
     checkpoint: { hops: number; embedVersions: boolean };
@@ -135,12 +162,16 @@ export class ConfigurationService {
         process.env.HISTORY_CHECKPOINT_HOPS = String(h);
       }
       if (updates.checkpoint.embedVersions !== undefined) {
-        process.env.HISTORY_EMBED_VERSIONS = String(!!updates.checkpoint.embedVersions);
+        process.env.HISTORY_EMBED_VERSIONS = String(
+          !!updates.checkpoint.embedVersions
+        );
       }
     }
     if (updates.incident) {
       if (typeof updates.incident.enabled === 'boolean') {
-        process.env.HISTORY_INCIDENT_ENABLED = String(!!updates.incident.enabled);
+        process.env.HISTORY_INCIDENT_ENABLED = String(
+          !!updates.incident.enabled
+        );
       }
       if (typeof updates.incident.hops === 'number') {
         const ih = Math.max(1, Math.min(5, Math.floor(updates.incident.hops)));
@@ -153,7 +184,10 @@ export class ConfigurationService {
         process.env.HISTORY_PRUNE_INTERVAL_HOURS = String(ph);
       }
       if (typeof updates.schedule.checkpointIntervalHours === 'number') {
-        const ch = Math.max(1, Math.floor(updates.schedule.checkpointIntervalHours));
+        const ch = Math.max(
+          1,
+          Math.floor(updates.schedule.checkpointIntervalHours)
+        );
         process.env.HISTORY_CHECKPOINT_INTERVAL_HOURS = String(ch);
       }
     }
@@ -164,23 +198,23 @@ export class ConfigurationService {
     try {
       // Read version from package.json
       const workingDir = this.testWorkingDir || process.cwd();
-      const packageJsonPath = path.join(workingDir, "package.json");
-      const packageJson = await fs.readFile(packageJsonPath, "utf-8");
+      const packageJsonPath = path.join(workingDir, 'package.json');
+      const packageJson = await fs.readFile(packageJsonPath, 'utf-8');
       const pkg = JSON.parse(packageJson);
-      return pkg.version || "0.1.0";
+      return pkg.version || '0.1.0';
     } catch (error) {
-      console.warn("Could not read package.json for version:", error);
-      return "0.1.0";
+      console.warn('Could not read package.json for version:', error);
+      return '0.1.0';
     }
   }
 
   private async checkDatabaseStatus(): Promise<
-    SystemConfiguration["databases"]
+    SystemConfiguration['databases']
   > {
-    const status: SystemConfiguration["databases"] = {
-      falkordb: "unavailable",
-      qdrant: "unavailable",
-      postgres: "unavailable",
+    const status: SystemConfiguration['databases'] = {
+      falkordb: 'unavailable',
+      qdrant: 'unavailable',
+      postgres: 'unavailable',
     };
 
     // If database service is not available, return unavailable status
@@ -191,36 +225,36 @@ export class ConfigurationService {
 
     try {
       // Check FalkorDB
-      await dbService.falkordbQuery("MATCH (n) RETURN count(n) LIMIT 1");
-      status.falkordb = "configured";
+      await dbService.falkordbQuery('MATCH (n) RETURN count(n) LIMIT 1');
+      status.falkordb = 'configured';
     } catch (error) {
-      console.warn("FalkorDB connection check failed:", error);
-      status.falkordb = "error";
+      console.warn('FalkorDB connection check failed:', error);
+      status.falkordb = 'error';
     }
 
     try {
       // Check Qdrant
       const qdrantClient = dbService.getQdrantClient();
       await qdrantClient.getCollections();
-      status.qdrant = "configured";
+      status.qdrant = 'configured';
     } catch (error) {
-      console.warn("Qdrant connection check failed:", error);
-      status.qdrant = "error";
+      console.warn('Qdrant connection check failed:', error);
+      status.qdrant = 'error';
     }
 
     try {
       // Check PostgreSQL
-      await dbService.postgresQuery("SELECT 1");
-      status.postgres = "configured";
+      await dbService.postgresQuery('SELECT 1');
+      status.postgres = 'configured';
     } catch (error) {
-      console.warn("PostgreSQL connection check failed:", error);
-      status.postgres = "error";
+      console.warn('PostgreSQL connection check failed:', error);
+      status.postgres = 'error';
     }
 
     return status;
   }
 
-  private async checkFeatureStatus(): Promise<SystemConfiguration["features"]> {
+  private async checkFeatureStatus(): Promise<SystemConfiguration['features']> {
     const features = {
       websocket: true, // Always available in current implementation
       graphSearch: false,
@@ -228,7 +262,8 @@ export class ConfigurationService {
       securityScanning: false,
       mcpServer: true, // Always available
       syncCoordinator: !!this.syncCoordinator,
-      history: (process.env.HISTORY_ENABLED || "true").toLowerCase() !== "false",
+      history:
+        (process.env.HISTORY_ENABLED || 'true').toLowerCase() !== 'false',
     };
 
     const dbService = this.dbService;
@@ -238,7 +273,7 @@ export class ConfigurationService {
 
     try {
       // Check graph search capability
-      await dbService.falkordbQuery("MATCH (n) RETURN count(n) LIMIT 1");
+      await dbService.falkordbQuery('MATCH (n) RETURN count(n) LIMIT 1');
       // If query succeeds without throwing, graph search is available
       features.graphSearch = true;
     } catch (error) {
@@ -267,22 +302,24 @@ export class ConfigurationService {
     return features;
   }
 
-  private async getPerformanceConfig(): Promise<SystemConfiguration["performance"]> {
+  private async getPerformanceConfig(): Promise<
+    SystemConfiguration['performance']
+  > {
     await this.ensureConfigLoaded();
 
     const defaults = {
       maxConcurrentSync:
-        parseInt(process.env.MAX_CONCURRENT_SYNC || "", 10) ||
+        parseInt(process.env.MAX_CONCURRENT_SYNC || '', 10) ||
         (this.syncCoordinator ? 5 : 1),
-      cacheSize: parseInt(process.env.CACHE_SIZE || "", 10) || 1000,
-      requestTimeout: parseInt(process.env.REQUEST_TIMEOUT || "", 10) || 30000,
+      cacheSize: parseInt(process.env.CACHE_SIZE || '', 10) || 1000,
+      requestTimeout: parseInt(process.env.REQUEST_TIMEOUT || '', 10) || 30000,
     };
 
     const overrides = (this.cachedConfig.performance ?? {}) as Partial<
-      SystemConfiguration["performance"]
+      SystemConfiguration['performance']
     >;
     const resolvedMaxConcurrentSync =
-      typeof overrides.maxConcurrentSync === "number" &&
+      typeof overrides.maxConcurrentSync === 'number' &&
       overrides.maxConcurrentSync >= 1
         ? overrides.maxConcurrentSync
         : defaults.maxConcurrentSync;
@@ -294,50 +331,50 @@ export class ConfigurationService {
     return {
       maxConcurrentSync,
       cacheSize:
-        typeof overrides.cacheSize === "number" && overrides.cacheSize >= 0
+        typeof overrides.cacheSize === 'number' && overrides.cacheSize >= 0
           ? overrides.cacheSize
           : defaults.cacheSize,
       requestTimeout:
-        typeof overrides.requestTimeout === "number" &&
+        typeof overrides.requestTimeout === 'number' &&
         overrides.requestTimeout >= 1000
           ? overrides.requestTimeout
           : defaults.requestTimeout,
     };
   }
 
-  private async getSecurityConfig(): Promise<SystemConfiguration["security"]> {
+  private async getSecurityConfig(): Promise<SystemConfiguration['security']> {
     await this.ensureConfigLoaded();
 
     const defaults = {
       rateLimiting:
         process.env.ENABLE_RATE_LIMITING === undefined
           ? true
-          : process.env.ENABLE_RATE_LIMITING === "true",
-      authentication: process.env.ENABLE_AUTHENTICATION === "true",
-      auditLogging: process.env.ENABLE_AUDIT_LOGGING === "true",
+          : process.env.ENABLE_RATE_LIMITING === 'true',
+      authentication: process.env.ENABLE_AUTHENTICATION === 'true',
+      auditLogging: process.env.ENABLE_AUDIT_LOGGING === 'true',
     };
 
     const overrides = (this.cachedConfig.security ?? {}) as Partial<
-      SystemConfiguration["security"]
+      SystemConfiguration['security']
     >;
 
     return {
       rateLimiting:
-        typeof overrides.rateLimiting === "boolean"
+        typeof overrides.rateLimiting === 'boolean'
           ? overrides.rateLimiting
           : defaults.rateLimiting,
       authentication:
-        typeof overrides.authentication === "boolean"
+        typeof overrides.authentication === 'boolean'
           ? overrides.authentication
           : defaults.authentication,
       auditLogging:
-        typeof overrides.auditLogging === "boolean"
+        typeof overrides.auditLogging === 'boolean'
           ? overrides.auditLogging
           : defaults.auditLogging,
     };
   }
 
-  private async getSystemInfo(): Promise<SystemConfiguration["system"]> {
+  private async getSystemInfo(): Promise<SystemConfiguration['system']> {
     let memUsage: NodeJS.MemoryUsage | undefined;
     let cpuUsage;
 
@@ -379,25 +416,19 @@ export class ConfigurationService {
       const { maxConcurrentSync, cacheSize, requestTimeout } =
         updates.performance;
 
-      if (
-        typeof maxConcurrentSync === "number" &&
-        maxConcurrentSync < 1
-      ) {
-        throw new Error("maxConcurrentSync must be at least 1");
+      if (typeof maxConcurrentSync === 'number' && maxConcurrentSync < 1) {
+        throw new Error('maxConcurrentSync must be at least 1');
       }
-      if (typeof cacheSize === "number" && cacheSize < 0) {
-        throw new Error("cacheSize cannot be negative");
+      if (typeof cacheSize === 'number' && cacheSize < 0) {
+        throw new Error('cacheSize cannot be negative');
       }
-      if (
-        typeof requestTimeout === "number" &&
-        requestTimeout < 1000
-      ) {
-        throw new Error("requestTimeout must be at least 1000ms");
+      if (typeof requestTimeout === 'number' && requestTimeout < 1000) {
+        throw new Error('requestTimeout must be at least 1000ms');
       }
     }
 
     console.log(
-      "Configuration update requested:",
+      'Configuration update requested:',
       JSON.stringify(updates, null, 2)
     );
 
@@ -408,7 +439,7 @@ export class ConfigurationService {
 
     await this.persistConfiguration(this.cachedConfig).catch((error) => {
       console.warn(
-        "Configuration persistence failed; continuing with in-memory overrides",
+        'Configuration persistence failed; continuing with in-memory overrides',
         error
       );
     });
@@ -440,16 +471,14 @@ export class ConfigurationService {
       if (rows.length > 0) {
         const rawContent = rows[0]?.content;
         const parsed: any =
-          typeof rawContent === "string"
-            ? JSON.parse(rawContent)
-            : rawContent;
+          typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;
 
-        if (parsed && typeof parsed === "object") {
+        if (parsed && typeof parsed === 'object') {
           this.cachedConfig = this.deepMergeConfig(this.cachedConfig, parsed);
         }
       }
     } catch (error) {
-      console.warn("Configuration load failed; using defaults", error);
+      console.warn('Configuration load failed; using defaults', error);
     } finally {
       this.configLoaded = true;
     }
@@ -461,7 +490,7 @@ export class ConfigurationService {
   ): Partial<T> {
     const result: Record<string, unknown> = { ...(target || {}) };
 
-    if (!source || typeof source !== "object") {
+    if (!source || typeof source !== 'object') {
       return result as Partial<T>;
     }
 
@@ -474,12 +503,12 @@ export class ConfigurationService {
 
       if (
         value &&
-        typeof value === "object" &&
+        typeof value === 'object' &&
         !Array.isArray(value) &&
         !(value instanceof Date)
       ) {
         const currentObject =
-          current && typeof current === "object" && !Array.isArray(current)
+          current && typeof current === 'object' && !Array.isArray(current)
             ? (current as Record<string, unknown>)
             : {};
         result[key] = this.deepMergeConfig(currentObject, value as any);
@@ -503,8 +532,7 @@ export class ConfigurationService {
 
     const payload = JSON.stringify(
       config,
-      (_key, value) =>
-        value instanceof Date ? value.toISOString() : value,
+      (_key, value) => (value instanceof Date ? value.toISOString() : value),
       2
     );
 
@@ -512,12 +540,7 @@ export class ConfigurationService {
       `INSERT INTO documents (id, type, content, created_at, updated_at)
        VALUES ($1::uuid, $2, $3::jsonb, $4, $4)
        ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, updated_at = EXCLUDED.updated_at`,
-      [
-        SYSTEM_CONFIG_DOCUMENT_ID,
-        SYSTEM_CONFIG_DOCUMENT_TYPE,
-        payload,
-        now,
-      ]
+      [SYSTEM_CONFIG_DOCUMENT_ID, SYSTEM_CONFIG_DOCUMENT_TYPE, payload, now]
     );
   }
 
@@ -530,16 +553,16 @@ export class ConfigurationService {
     if (!dbService) {
       return {
         falkordb: {
-          status: "unavailable",
-          error: "Database service not configured",
+          status: 'unavailable',
+          error: 'Database service not configured',
         },
         qdrant: {
-          status: "unavailable",
-          error: "Database service not configured",
+          status: 'unavailable',
+          error: 'Database service not configured',
         },
         postgres: {
-          status: "unavailable",
-          error: "Database service not configured",
+          status: 'unavailable',
+          error: 'Database service not configured',
         },
       };
     }
@@ -552,15 +575,15 @@ export class ConfigurationService {
 
     try {
       // Get FalkorDB stats
-      const falkordbStats = await dbService.falkordbQuery("INFO");
+      const falkordbStats = await dbService.falkordbQuery('INFO');
       health.falkordb = {
-        status: "healthy",
+        status: 'healthy',
         stats: falkordbStats,
       };
     } catch (error) {
       health.falkordb = {
-        status: "error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
 
@@ -569,13 +592,13 @@ export class ConfigurationService {
       const qdrantClient = dbService.getQdrantClient();
       const qdrantHealth = await qdrantClient.getCollections();
       health.qdrant = {
-        status: "healthy",
+        status: 'healthy',
         collections: qdrantHealth.collections?.length || 0,
       };
     } catch (error) {
       health.qdrant = {
-        status: "error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
 
@@ -592,13 +615,13 @@ export class ConfigurationService {
         LIMIT 10
       `);
       health.postgres = {
-        status: "healthy",
+        status: 'healthy',
         tables: ((postgresStats as any)?.rows ?? []).length,
       };
     } catch (error) {
       health.postgres = {
-        status: "error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
 
@@ -622,12 +645,12 @@ export class ConfigurationService {
       used: number;
     };
   }> {
-    const os = await import("os");
+    const os = await import('os');
 
     let diskInfo;
     try {
       // Try to get disk information (may not be available on all platforms)
-      const fsModule = await import("fs/promises");
+      const fsModule = await import('fs/promises');
       // This is a simplified disk check - in production you'd use a proper disk library
       diskInfo = {
         total: 0,
@@ -644,19 +667,19 @@ export class ConfigurationService {
     try {
       timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     } catch (error) {
-      timezone = "UTC"; // Fallback timezone
+      timezone = 'UTC'; // Fallback timezone
     }
 
     try {
       locale = Intl.DateTimeFormat().resolvedOptions().locale;
     } catch (error) {
-      locale = "en-US"; // Fallback locale
+      locale = 'en-US'; // Fallback locale
     }
 
     return {
       nodeVersion: process.version,
       platform: process.platform,
-      environment: process.env.NODE_ENV || "development",
+      environment: process.env.NODE_ENV || 'development',
       timezone,
       locale,
       memory: {
@@ -680,27 +703,27 @@ export class ConfigurationService {
     // Check database configurations
     const dbStatus = await this.checkDatabaseStatus();
 
-    if (dbStatus.falkordb === "error") {
-      issues.push("FalkorDB connection is failing");
+    if (dbStatus.falkordb === 'error') {
+      issues.push('FalkorDB connection is failing');
       recommendations.push(
-        "Check FalkorDB server status and connection string"
+        'Check FalkorDB server status and connection string'
       );
     }
 
-    if (dbStatus.qdrant === "error") {
-      issues.push("Qdrant connection is failing");
-      recommendations.push("Check Qdrant server status and API configuration");
+    if (dbStatus.qdrant === 'error') {
+      issues.push('Qdrant connection is failing');
+      recommendations.push('Check Qdrant server status and API configuration');
     }
 
-    if (dbStatus.postgres === "error") {
-      issues.push("PostgreSQL connection is failing");
+    if (dbStatus.postgres === 'error') {
+      issues.push('PostgreSQL connection is failing');
       recommendations.push(
-        "Check PostgreSQL server status and connection string"
+        'Check PostgreSQL server status and connection string'
       );
     }
 
     // Check environment variables
-    const requiredEnvVars = ["NODE_ENV"];
+    const requiredEnvVars = ['NODE_ENV'];
     for (const envVar of requiredEnvVars) {
       if (!process.env[envVar]) {
         issues.push(`Required environment variable ${envVar} is not set`);
@@ -712,13 +735,13 @@ export class ConfigurationService {
       const memUsage = process.memoryUsage();
       const memUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
       if (memUsagePercent > 90) {
-        issues.push("High memory usage detected");
+        issues.push('High memory usage detected');
         recommendations.push(
-          "Consider increasing memory limits or optimizing memory usage"
+          'Consider increasing memory limits or optimizing memory usage'
         );
       }
     } catch (error) {
-      recommendations.push("Could not determine memory usage");
+      recommendations.push('Could not determine memory usage');
     }
 
     return {

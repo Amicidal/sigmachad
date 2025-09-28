@@ -1,5 +1,21 @@
 # Rollback Capabilities Operator Guide
 
+## Metadata
+
+- Scope: rollback
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Prerequisites
+
+- Access, roles, and environment assumptions.
+
+## Steps
+
+- Step 1
+- Step 2
+- Step 3
+
 ## Overview
 
 The Memento Rollback Capabilities system provides comprehensive backup, restoration, and conflict resolution for knowledge graph operations. This guide covers deployment, monitoring, maintenance, and troubleshooting procedures for production environments.

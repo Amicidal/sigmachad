@@ -27,6 +27,8 @@ export default [
         clearInterval: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
+        require: 'readonly',
+        module: 'readonly',
       },
     },
     plugins: {
@@ -59,7 +61,10 @@ export default [
       // TypeScript specific rules
       '@typescript-eslint/no-unused-vars': [
         'error',
-        { argsIgnorePattern: '^_' },
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+        },
       ],
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
@@ -100,6 +105,77 @@ export default [
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       'security/detect-object-injection': 'off', // Common in tests
+    },
+  },
+  {
+    files: ['packages/shared-types/**/*.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        project: './packages/shared-types/tsconfig.json',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+      // Disable object injection detection for shared types since they only contain type definitions
+      'security/detect-object-injection': 'off',
+    },
+  },
+  {
+    files: ['packages/database/src/**/*.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        project: './packages/database/tsconfig.json',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+      // Disable overly strict object injection detection for database operations
+      'security/detect-object-injection': 'warn',
+    },
+  },
+  {
+    files: ['packages/testing/src/**/*.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        project: './packages/testing/tsconfig.json',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+      // Disable overly strict object injection detection for testing utilities
+      'security/detect-object-injection': 'warn',
+    },
+  },
+  {
+    files: ['packages/knowledge/scripts/**/*.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        project: './packages/knowledge/tsconfig.json',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+        },
+      ],
+      // Disable object injection detection for knowledge scripts to reduce false positives
+      'security/detect-object-injection': 'warn',
     },
   },
   {

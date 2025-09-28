@@ -1,5 +1,23 @@
 # Multi-Agent Orchestration Blueprint
 
+## Metadata
+
+- Scope: orchestration
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: orchestration).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
+## Desired Capabilities
+
+- [ ] Define required capabilities and acceptance criteria.
+- [ ] Note API/Graph impacts.
+
 ## 1. Overview
 Memento started as a knowledge graph (KG) for single AI agents to query codebase context but is transitioning to an orchestration layer that spawns multiple specialized agents in parallel. This enables efficient, real-time codebase updates and verification, addressing single-agent context bloat and sequential bottlenecks. The KG serves as the shared, fresh visibility hub—agents query/update it atomically via events.
 

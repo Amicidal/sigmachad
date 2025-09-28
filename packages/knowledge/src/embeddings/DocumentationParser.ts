@@ -4,12 +4,12 @@
  * Refactored into modular components for better maintainability
  */
 
-import { KnowledgeGraphService } from "./KnowledgeGraphService.js";
-import { DatabaseService } from "../core/DatabaseService.js";
+import { KnowledgeGraphService } from '../orchestration/KnowledgeGraphService.js';
+import { DatabaseService } from '@memento/database/src/index.js';
 import {
   DocumentationIntelligenceProvider,
   HeuristicDocumentationIntelligenceProvider,
-} from "./DocumentationIntelligenceProvider.js";
+} from './DocumentationIntelligenceProvider.js';
 import {
   DocTokenizer,
   IntentExtractor,
@@ -18,20 +18,26 @@ import {
   DomainExtraction,
   SyncResult,
   SearchResult,
-} from "./docs-parser/index.js";
+} from './docs-parser/index.js';
 import {
   DocumentationNode,
   BusinessDomain,
   SemanticCluster,
-} from '@memento/core';
+} from '@memento/shared-types.js';
 import {
   RelationshipType,
   DocumentationRelationship,
-} from '@memento/core';
-import { join, extname, basename } from "path";
-import { marked, TokensList } from "marked";
+} from '@memento/shared-types.js';
+import { join, extname, basename } from 'path';
+import { marked, TokensList, Tokens } from 'marked';
 
-export { ParsedDocument, DomainExtraction, SyncResult, SearchResult };
+// Re-export types from docs-parser to avoid conflicts
+export type {
+  ParsedDocument,
+  DomainExtraction,
+  SyncResult,
+  SearchResult,
+} from './docs-parser/index.js';
 
 export class DocumentationParser {
   private tokenizer: DocTokenizer;
@@ -39,7 +45,7 @@ export class DocumentationParser {
   private syncOrchestrator: SyncOrchestrator;
   private intelligenceProvider: DocumentationIntelligenceProvider;
   private kgService: KnowledgeGraphService;
-  private supportedExtensions = [".md", ".txt", ".rst", ".adoc"];
+  private supportedExtensions = ['.md', '.txt', '.rst', '.adoc'];
 
   constructor(
     kgService: KnowledgeGraphService,
@@ -60,25 +66,25 @@ export class DocumentationParser {
 
   private inferDocIntent(
     filePath: string,
-    docType: DocumentationNode["docType"]
-  ): DocumentationNode["docIntent"] {
+    docType: DocumentationNode['docType']
+  ): DocumentationNode['docIntent'] {
     const normalizedPath = filePath.toLowerCase();
 
     if (
-      normalizedPath.includes("/adr") ||
-      normalizedPath.includes("adr-") ||
-      normalizedPath.includes("/architecture") ||
-      normalizedPath.includes("/decisions") ||
-      docType === "architecture"
+      normalizedPath.includes('/adr') ||
+      normalizedPath.includes('adr-') ||
+      normalizedPath.includes('/architecture') ||
+      normalizedPath.includes('/decisions') ||
+      docType === 'architecture'
     ) {
-      return "governance";
+      return 'governance';
     }
 
-    if (docType === "design-doc" || docType === "user-guide") {
-      return "mixed";
+    if (docType === 'design-doc' || docType === 'user-guide') {
+      return 'mixed';
     }
 
-    return "ai-context";
+    return 'ai-context';
   }
 
   private inferDocLocale(
@@ -93,26 +99,26 @@ export class DocumentationParser {
     }
 
     if (
-      typeof metadata?.language === "string" &&
+      typeof metadata?.language === 'string' &&
       metadata.language.length > 0
     ) {
       return metadata.language;
     }
 
-    return "en";
+    return 'en';
   }
 
   private normalizeDomainPath(domainName: string): string {
     const cleaned = domainName
       .trim()
       .toLowerCase()
-      .replace(/>+/g, "/")
-      .replace(/\s+/g, "/")
-      .replace(/[^a-z0-9/_-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/\/+/, "/")
-      .replace(/\/+/, "/");
-    return cleaned.replace(/^\/+|\/+$/g, "");
+      .replace(/>+/g, '/')
+      .replace(/\s+/g, '/')
+      .replace(/[^a-z0-9/_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/\/+/, '/')
+      .replace(/\/+/, '/');
+    return cleaned.replace(/^\/+|\/+$/g, '');
   }
 
   /**
@@ -159,7 +165,7 @@ export class DocumentationParser {
     }
 
     const markdownMetadata = {
-      format: "markdown",
+      format: 'markdown',
       headings,
       links: this.extractLinksFromContent(content, tokens),
       codeBlocks: this.extractCodeBlocks(tokens),
@@ -170,9 +176,9 @@ export class DocumentationParser {
 
     const signals = await this.intelligenceProvider.extractSignals({
       content,
-      format: "markdown",
+      format: 'markdown',
       filePath,
-      docTypeHint: docType,
+      docTypeHint: docType as any, // Type conversion due to mismatch
       metadata: markdownMetadata,
     });
 
@@ -182,11 +188,11 @@ export class DocumentationParser {
       businessDomains: signals.businessDomains ?? [],
       stakeholders: signals.stakeholders ?? [],
       technologies: signals.technologies ?? [],
-      docType,
-      docIntent: signals.docIntent ?? "ai-context",
-      docVersion: "",
-      docHash: "",
-      docSource: signals.docSource ?? "parser",
+      docType: docType as any, // Type conversion due to mismatch between ParsedDocument and DocumentationNode types
+      docIntent: (signals.docIntent ?? 'ai-context') as any, // Type conversion due to mismatch
+      docVersion: '',
+      docHash: '',
+      docSource: (signals.docSource ?? 'parser') as 'parser' | 'manual',
       docLocale: signals.docLocale,
       lastIndexed: new Date(),
       metadata: markdownMetadata,
@@ -200,21 +206,21 @@ export class DocumentationParser {
     content: string,
     filePath?: string
   ): Promise<ParsedDocument> {
-    const lines = content.split("\n");
-    const title = lines[0]?.trim() || "Untitled Document";
+    const lines = content.split('\n');
+    const title = lines[0]?.trim() || 'Untitled Document';
     const docType = this.inferDocType(content, title);
 
     const baseMetadata = {
       lineCount: lines.length,
       wordCount: content.split(/\s+/).filter(Boolean).length,
-      format: "plaintext",
+      format: 'plaintext',
     };
 
     const signals = await this.intelligenceProvider.extractSignals({
       content,
-      format: "plaintext",
+      format: 'plaintext',
       filePath,
-      docTypeHint: docType,
+      docTypeHint: docType as any, // Type conversion due to mismatch
       metadata: baseMetadata,
     });
 
@@ -224,11 +230,11 @@ export class DocumentationParser {
       businessDomains: signals.businessDomains ?? [],
       stakeholders: signals.stakeholders ?? [],
       technologies: signals.technologies ?? [],
-      docType,
-      docIntent: signals.docIntent ?? "ai-context",
-      docVersion: "",
-      docHash: "",
-      docSource: signals.docSource ?? "parser",
+      docType: docType as any, // Type conversion due to mismatch between ParsedDocument and DocumentationNode types
+      docIntent: (signals.docIntent ?? 'ai-context') as any, // Type conversion due to mismatch
+      docVersion: '',
+      docHash: '',
+      docSource: (signals.docSource ?? 'parser') as 'parser' | 'manual',
       docLocale: signals.docLocale,
       lastIndexed: new Date(),
       metadata: baseMetadata,
@@ -242,22 +248,22 @@ export class DocumentationParser {
     content: string,
     filePath?: string
   ): Promise<ParsedDocument> {
-    const lines = content.split("\n");
+    const lines = content.split('\n');
     const title = this.extractRstTitle(lines);
     const docType = this.inferDocType(content, title);
 
     const rstMetadata = {
       sections: this.extractRstSections(lines),
-      format: "rst",
+      format: 'rst',
       lineCount: lines.length,
       wordCount: content.split(/\s+/).filter(Boolean).length,
     };
 
     const signals = await this.intelligenceProvider.extractSignals({
       content,
-      format: "rst",
+      format: 'rst',
       filePath,
-      docTypeHint: docType,
+      docTypeHint: docType as any, // Type conversion due to mismatch
       metadata: rstMetadata,
     });
 
@@ -267,11 +273,11 @@ export class DocumentationParser {
       businessDomains: signals.businessDomains ?? [],
       stakeholders: signals.stakeholders ?? [],
       technologies: signals.technologies ?? [],
-      docType,
-      docIntent: signals.docIntent ?? "ai-context",
-      docVersion: "",
-      docHash: "",
-      docSource: signals.docSource ?? "parser",
+      docType: docType as any, // Type conversion due to mismatch between ParsedDocument and DocumentationNode types
+      docIntent: (signals.docIntent ?? 'ai-context') as any, // Type conversion due to mismatch
+      docVersion: '',
+      docHash: '',
+      docSource: (signals.docSource ?? 'parser') as 'parser' | 'manual',
       docLocale: signals.docLocale,
       lastIndexed: new Date(),
       metadata: rstMetadata,
@@ -285,21 +291,21 @@ export class DocumentationParser {
     content: string,
     filePath?: string
   ): Promise<ParsedDocument> {
-    const lines = content.split("\n");
+    const lines = content.split('\n');
     const title = this.extractAsciiDocTitle(lines);
     const docType = this.inferDocType(content, title);
 
     const adocMetadata = {
-      format: "asciidoc",
+      format: 'asciidoc',
       lineCount: lines.length,
       wordCount: content.split(/\s+/).filter(Boolean).length,
     };
 
     const signals = await this.intelligenceProvider.extractSignals({
       content,
-      format: "asciidoc",
+      format: 'asciidoc',
       filePath,
-      docTypeHint: docType,
+      docTypeHint: docType as any, // Type conversion due to mismatch
       metadata: adocMetadata,
     });
 
@@ -309,11 +315,11 @@ export class DocumentationParser {
       businessDomains: signals.businessDomains ?? [],
       stakeholders: signals.stakeholders ?? [],
       technologies: signals.technologies ?? [],
-      docType,
-      docIntent: signals.docIntent ?? "ai-context",
-      docVersion: "",
-      docHash: "",
-      docSource: signals.docSource ?? "parser",
+      docType: docType as any, // Type conversion due to mismatch between ParsedDocument and DocumentationNode types
+      docIntent: (signals.docIntent ?? 'ai-context') as any, // Type conversion due to mismatch
+      docVersion: '',
+      docHash: '',
+      docSource: (signals.docSource ?? 'parser') as 'parser' | 'manual',
       docLocale: signals.docLocale,
       lastIndexed: new Date(),
       metadata: adocMetadata,
@@ -325,11 +331,11 @@ export class DocumentationParser {
    */
   private extractTitle(tokens: TokensList): string {
     for (const token of tokens) {
-      if (token.type === "heading" && token.depth === 1) {
+      if (token.type === 'heading' && token.depth === 1) {
         return token.text;
       }
     }
-    return "Untitled Document";
+    return 'Untitled Document';
   }
 
   /**
@@ -338,68 +344,68 @@ export class DocumentationParser {
   private inferDocType(
     content: string,
     title: string
-  ): DocumentationNode["docType"] {
+  ): ParsedDocument['docType'] {
     const lowerContent = content.toLowerCase();
     const lowerTitle = title.toLowerCase();
 
     // Prioritize architecture detection when title indicates it
     if (
-      lowerTitle.includes("architecture") ||
-      lowerContent.includes("system architecture") ||
-      lowerContent.includes("technical architecture")
+      lowerTitle.includes('architecture') ||
+      lowerContent.includes('system architecture') ||
+      lowerContent.includes('technical architecture')
     ) {
-      return "architecture";
+      return 'architecture';
     }
 
     // Check for API documentation
     if (
-      lowerTitle.includes("api") ||
-      lowerContent.includes("endpoint") ||
-      lowerContent.includes("swagger") ||
-      lowerContent.includes("rest")
+      lowerTitle.includes('api') ||
+      lowerContent.includes('endpoint') ||
+      lowerContent.includes('swagger') ||
+      lowerContent.includes('rest')
     ) {
-      return "api-docs";
+      return 'api-doc';
     }
 
     // Check for design documents
     if (
-      lowerTitle.includes("design") ||
-      lowerContent.includes("system design") ||
-      lowerContent.includes("design document")
+      lowerTitle.includes('design') ||
+      lowerContent.includes('system design') ||
+      lowerContent.includes('design document')
     ) {
-      return "design-doc";
+      return 'design-doc';
     }
 
     // Check for user guides and manuals - broader detection
     if (
-      lowerTitle.includes("guide") ||
-      lowerTitle.includes("manual") ||
-      lowerTitle.includes("getting started") ||
-      lowerTitle.includes("tutorial") ||
-      lowerTitle.includes("user") ||
-      lowerContent.includes("how to") ||
-      lowerContent.includes("step by step") ||
-      lowerContent.includes("instructions") ||
-      lowerContent.includes("getting started") ||
-      lowerContent.includes("introduction")
+      lowerTitle.includes('guide') ||
+      lowerTitle.includes('manual') ||
+      lowerTitle.includes('getting started') ||
+      lowerTitle.includes('tutorial') ||
+      lowerTitle.includes('user') ||
+      lowerContent.includes('how to') ||
+      lowerContent.includes('step by step') ||
+      lowerContent.includes('instructions') ||
+      lowerContent.includes('getting started') ||
+      lowerContent.includes('introduction')
     ) {
-      return "user-guide";
+      return 'user-guide';
     }
 
     // Check for README files
-    if (lowerTitle.includes("readme") || lowerTitle.includes("read me")) {
-      return "readme";
+    if (lowerTitle.includes('readme') || lowerTitle.includes('read me')) {
+      return 'readme';
     }
 
     // Check for high-level overview content
     if (
-      lowerContent.includes("high level") ||
-      lowerContent.includes("overview")
+      lowerContent.includes('high level') ||
+      lowerContent.includes('overview')
     ) {
-      return "architecture";
+      return 'architecture';
     }
 
-    return "readme"; // Default fallback
+    return 'readme'; // Default fallback
   }
 
   /**
@@ -409,7 +415,7 @@ export class DocumentationParser {
     tokens: TokensList
   ): Array<{ level: number; text: string }> {
     return tokens
-      .filter((token): token is Tokens.Heading => token.type === "heading")
+      .filter((token): token is Tokens.Heading => token.type === 'heading')
       .map((heading) => ({
         level: heading.depth,
         text: heading.text,
@@ -423,10 +429,10 @@ export class DocumentationParser {
     // Kept for backward compatibility; now superseded by extractLinksFromContent
     const links: string[] = [];
     const extractFromToken = (token: any) => {
-      if (token.type === "link") {
+      if (token.type === 'link') {
         links.push(token.href);
       }
-      if ("tokens" in token && token.tokens) {
+      if ('tokens' in token && token.tokens) {
         token.tokens.forEach(extractFromToken);
       }
     };
@@ -474,9 +480,9 @@ export class DocumentationParser {
     tokens: TokensList
   ): Array<{ lang?: string; code: string }> {
     return tokens
-      .filter((token): token is any => token.type === "code")
+      .filter((token): token is any => token.type === 'code')
       .map((codeBlock: any) => ({
-        lang: (codeBlock.lang ?? "") as string,
+        lang: (codeBlock.lang ?? '') as string,
         code: codeBlock.text,
       }));
   }
@@ -498,7 +504,7 @@ export class DocumentationParser {
         return line;
       }
     }
-    return lines[0]?.trim() || "Untitled Document";
+    return lines[0]?.trim() || 'Untitled Document';
   }
 
   /**
@@ -532,11 +538,11 @@ export class DocumentationParser {
    */
   private extractAsciiDocTitle(lines: string[]): string {
     for (const line of lines) {
-      if (line.startsWith("= ")) {
+      if (line.startsWith('= ')) {
         return line.substring(2).trim();
       }
     }
-    return lines[0]?.trim() || "Untitled Document";
+    return lines[0]?.trim() || 'Untitled Document';
   }
 
   /**
@@ -563,7 +569,7 @@ export class DocumentationParser {
    * Find all documentation files in a directory
    */
   private async findDocumentationFiles(docsPath: string): Promise<string[]> {
-    const fs = await import("fs/promises");
+    const fs = await import('fs/promises');
     const files: string[] = [];
 
     const processDirectory = async (dirPath: string): Promise<void> => {
@@ -581,20 +587,20 @@ export class DocumentationParser {
 
           if (
             stat &&
-            typeof stat.isDirectory === "function" &&
+            typeof stat.isDirectory === 'function' &&
             stat.isDirectory()
           ) {
             // Skip node_modules and hidden directories
             if (
-              !name.startsWith(".") &&
-              name !== "node_modules" &&
-              name !== "dist"
+              !name.startsWith('.') &&
+              name !== 'node_modules' &&
+              name !== 'dist'
             ) {
               await processDirectory(fullPath);
             }
           } else if (
             stat &&
-            typeof stat.isFile === "function" &&
+            typeof stat.isFile === 'function' &&
             stat.isFile()
           ) {
             const ext = extname(name).toLowerCase();
@@ -628,17 +634,17 @@ export class DocumentationParser {
       id: docId,
       path: filePath,
       hash: this.calculateChecksum(parsedDoc.content),
-      language: "markdown", // or detect from extension
+      language: 'markdown', // or detect from extension
       lastModified: new Date(),
       created: new Date(),
-      type: "documentation",
+      type: 'documentation',
       title: parsedDoc.title,
       content: parsedDoc.content,
       docType: parsedDoc.docType,
       businessDomains: parsedDoc.businessDomains,
       stakeholders: parsedDoc.stakeholders,
       technologies: parsedDoc.technologies,
-      status: "active",
+      status: 'active',
       docVersion: parsedDoc.docVersion,
       docHash: parsedDoc.docHash,
       docIntent: parsedDoc.docIntent,
@@ -662,14 +668,14 @@ export class DocumentationParser {
 
     for (const domainName of parsedDoc.businessDomains) {
       const domainId = `domain_${domainName
-        .replace(/\s+/g, "_")
+        .replace(/\s+/g, '_')
         .toLowerCase()}`;
 
       // Check if domain already exists
       const existingDomain = await this.kgService.getEntity(domainId);
       const domain: BusinessDomain = {
         id: domainId,
-        type: "businessDomain",
+        type: 'businessDomain',
         name: domainName,
         description: `Business domain extracted from documentation: ${parsedDoc.title}`,
         criticality: this.inferDomainCriticality(domainName),
@@ -685,14 +691,14 @@ export class DocumentationParser {
 
       const domainPath = this.normalizeDomainPath(domainName);
       const taxonomyVersion =
-        typeof parsedDoc.metadata?.taxonomyVersion === "string"
+        typeof parsedDoc.metadata?.taxonomyVersion === 'string'
           ? parsedDoc.metadata.taxonomyVersion
-          : "v1";
+          : 'v1';
       const updatedFromDocAt =
         parsedDoc.metadata?.lastModified instanceof Date
           ? parsedDoc.metadata.lastModified
           : parsedDoc.lastIndexed;
-      const sectionAnchor = "_root";
+      const sectionAnchor = '_root';
 
       // Create/ensure relationship from documentation -> domain
       try {
@@ -705,7 +711,7 @@ export class DocumentationParser {
           lastModified: new Date(),
           version: 1,
           confidence: 0.6,
-          source: "parser",
+          source: 'parser',
           docIntent: parsedDoc.docIntent,
           domainPath,
           taxonomyVersion,
@@ -715,7 +721,7 @@ export class DocumentationParser {
           metadata: {
             inferred: true,
             confidence: 0.6,
-            source: "doc-domain-extract",
+            source: 'doc-domain-extract',
             domainName,
             domainPath,
             taxonomyVersion,
@@ -737,25 +743,25 @@ export class DocumentationParser {
    */
   private inferDomainCriticality(
     domainName: string
-  ): BusinessDomain["criticality"] {
+  ): BusinessDomain['criticality'] {
     const lowerName = domainName.toLowerCase();
 
     if (
-      lowerName.includes("authentication") ||
-      lowerName.includes("security") ||
-      lowerName.includes("payment")
+      lowerName.includes('authentication') ||
+      lowerName.includes('security') ||
+      lowerName.includes('payment')
     ) {
-      return "core";
+      return 'core';
     }
     if (
-      lowerName.includes("user management") ||
-      lowerName.includes("reporting") ||
-      lowerName.includes("communication")
+      lowerName.includes('user management') ||
+      lowerName.includes('reporting') ||
+      lowerName.includes('communication')
     ) {
-      return "supporting";
+      return 'supporting';
     }
 
-    return "utility";
+    return 'utility';
   }
 
   /**
@@ -768,15 +774,15 @@ export class DocumentationParser {
     // This is a simplified implementation
     // In a real scenario, this would analyze the content and group related entities
     for (const domain of parsedDoc.businessDomains) {
-      const clusterId = `cluster_${domain.replace(/\s+/g, "_").toLowerCase()}`;
+      const clusterId = `cluster_${domain.replace(/\s+/g, '_').toLowerCase()}`;
 
       const cluster: SemanticCluster = {
         id: clusterId,
-        type: "semanticCluster",
+        type: 'semanticCluster',
         name: `${domain} Cluster`,
         description: `Semantic cluster for ${domain} domain`,
-        businessDomainId: `domain_${domain.replace(/\s+/g, "_").toLowerCase()}`,
-        clusterType: "capability",
+        businessDomainId: `domain_${domain.replace(/\s+/g, '_').toLowerCase()}`,
+        clusterType: 'capability',
         cohesionScore: 0.8,
         lastAnalyzed: new Date(),
         memberEntities: [],
@@ -795,21 +801,21 @@ export class DocumentationParser {
           lastModified: new Date(),
           version: 1,
           confidence: 0.6,
-          source: "parser",
+          source: 'parser',
           docIntent: parsedDoc.docIntent,
-          sectionAnchor: "_root",
-          documentationQuality: "partial",
-          coverageScope: "behavior",
+          sectionAnchor: '_root',
+          documentationQuality: 'partial',
+          coverageScope: 'behavior',
           docVersion: parsedDoc.docVersion,
           docHash: parsedDoc.docHash,
           lastValidated: parsedDoc.lastIndexed,
           metadata: {
             inferred: true,
             confidence: 0.6,
-            source: "doc-cluster-link",
-            sectionAnchor: "_root",
-            documentationQuality: "partial",
-            coverageScope: "behavior",
+            source: 'doc-cluster-link',
+            sectionAnchor: '_root',
+            documentationQuality: 'partial',
+            coverageScope: 'behavior',
             docVersion: parsedDoc.docVersion,
             docHash: parsedDoc.docHash,
             docIntent: parsedDoc.docIntent,
@@ -819,7 +825,7 @@ export class DocumentationParser {
 
       // Link cluster to domain explicitly
       try {
-        const domainId = `domain_${domain.replace(/\s+/g, "_").toLowerCase()}`;
+        const domainId = `domain_${domain.replace(/\s+/g, '_').toLowerCase()}`;
         await this.kgService.createRelationship({
           id: `rel_${clusterId}_${domainId}_BELONGS_TO_DOMAIN`,
           fromEntityId: clusterId,
@@ -830,7 +836,7 @@ export class DocumentationParser {
           version: 1,
           confidence: 0.6,
           strength: 0.5,
-          source: "parser",
+          source: 'parser',
           docIntent: parsedDoc.docIntent,
           domainPath: this.normalizeDomainPath(domain),
           lastValidated: parsedDoc.lastIndexed,
@@ -838,7 +844,7 @@ export class DocumentationParser {
             inferred: true,
             confidence: 0.6,
             strength: 0.5,
-            source: "cluster-domain",
+            source: 'cluster-domain',
             domainPath: this.normalizeDomainPath(domain),
             docIntent: parsedDoc.docIntent,
           },

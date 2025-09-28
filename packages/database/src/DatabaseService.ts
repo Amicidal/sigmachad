@@ -7,70 +7,36 @@ import {
   DatabaseConfig,
   INeo4jService,
   IPostgreSQLService,
+  IQdrantService,
   IRedisService,
   IDatabaseHealthCheck,
-} from '../database/index.js';
+  BulkQueryMetrics,
+} from '@memento/shared-types';
 import type { IDatabaseService } from '@memento/shared-types';
-import type { BulkQueryMetrics } from '../database/index.js';
+import { QdrantClient } from '@qdrant/js-client-rest';
 import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
   SCMCommitRecord,
-} from '../../models/types.js';
-import type { PerformanceRelationship } from '../../models/relationships.js';
-import { Neo4jService } from '../database/Neo4jService.js';
-import { PostgreSQLService } from '../database/PostgreSQLService.js';
-import { RedisService } from '../database/RedisService.js';
-export type { DatabaseConfig } from '../database/index.js';
-
-// Type definitions for better type safety
-export interface DatabaseQueryResult {
-  rows?: any[];
-  rowCount?: number;
-  fields?: any[];
-}
-
-export interface FalkorDBQueryResult {
-  headers?: any[];
-  data?: any[];
-  statistics?: any;
-}
-
-export interface TestSuiteResult {
-  id?: string;
-  name: string;
-  status: 'passed' | 'failed' | 'skipped';
-  duration: number;
-  timestamp: Date;
-  testResults: TestResult[];
-}
-
-export interface TestResult {
-  id?: string;
-  name: string;
-  status: 'passed' | 'failed' | 'skipped';
-  duration: number;
-  error?: string;
-}
-
-export interface FlakyTestAnalysis {
-  testId: string;
-  testName: string;
-  failureCount: number;
-  totalRuns: number;
-  lastFailure: Date;
-  failurePatterns: string[];
-}
-
-export type DatabaseServiceDeps = {
-  neo4jFactory?: (cfg: DatabaseConfig['neo4j']) => INeo4jService;
-  postgresFactory?: (cfg: DatabaseConfig['postgresql']) => IPostgreSQLService;
-  redisFactory?: (cfg: NonNullable<DatabaseConfig['redis']>) => IRedisService;
-};
+} from '@memento/core/types/types.js';
+import type { PerformanceRelationship } from '@memento/core/models/relationships.js';
+import { Neo4jService } from './neo4j/Neo4jService.js';
+import { PostgreSQLService } from './postgres/PostgreSQLService.js';
+import { QdrantService } from './qdrant/QdrantService.js';
+import { RedisService } from './redis/RedisService.js';
+import {
+  DatabaseQueryResult,
+  FalkorDBQueryResult,
+  TestSuiteResult,
+  TestResult,
+  FlakyTestAnalysis,
+  DatabaseServiceDeps,
+} from '@memento/shared-types';
 
 export class DatabaseService implements IDatabaseService {
   private neo4jService!: INeo4jService;
   private postgresqlService!: IPostgreSQLService;
+  private qdrantService?: IQdrantService;
   private redisService?: IRedisService;
   private initialized = false;
   private initializing = false;
@@ -120,7 +86,7 @@ export class DatabaseService implements IDatabaseService {
     return this.neo4jService;
   }
 
-  getQdrantService(): any {
+  getQdrantService(): { getClient(): unknown } {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
@@ -130,22 +96,25 @@ export class DatabaseService implements IDatabaseService {
     };
   }
 
-  getQdrantClient(): any {
+  getQdrantClient(): QdrantClient {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
-    return this.qdrant;
+    if (!this.qdrantService) {
+      throw new Error('Qdrant service not configured');
+    }
+    return this.qdrantService.getClient();
   }
 
   // Direct client/pool getters for convenience
-  getNeo4jDriver(): any {
+  getNeo4jDriver(): unknown {
     if (!this.initialized) {
       return undefined;
     }
     return this.neo4jService.getDriver();
   }
 
-  getPostgresPool(): any {
+  getPostgresPool(): unknown {
     if (!this.initialized) {
       return undefined;
     }
@@ -180,7 +149,11 @@ export class DatabaseService implements IDatabaseService {
   private async _initialize(): Promise<void> {
     // Track initialized services for cleanup on failure
     const initializedServices: Array<{
-      service: INeo4jService | IPostgreSQLService | IRedisService;
+      service:
+        | INeo4jService
+        | IPostgreSQLService
+        | IQdrantService
+        | IRedisService;
       close: () => Promise<void>;
     }> = [];
 
@@ -193,15 +166,31 @@ export class DatabaseService implements IDatabaseService {
         ? this.postgresFactory(this.config.postgresql)
         : new PostgreSQLService(this.config.postgresql);
 
+      // Initialize Qdrant service if configured
+      if (this.config.qdrant?.url) {
+        this.qdrantService = new QdrantService({
+          url: this.config.qdrant.url,
+          apiKey: this.config.qdrant.apiKey,
+        });
+      }
+
       // Initialize Neo4j service and track successful initializations
-      if (typeof (this.neo4jService as any)?.initialize === 'function') {
+      if (
+        typeof (this.neo4jService as { initialize?: () => Promise<void> })
+          ?.initialize === 'function'
+      ) {
         await this.neo4jService.initialize();
         // Setup graph constraints and vector indexes after service is ready
-        if (typeof (this.neo4jService as any)?.setupGraph === 'function') {
+        if (
+          typeof (this.neo4jService as { setupGraph?: () => Promise<void> })
+            ?.setupGraph === 'function'
+        ) {
           await this.neo4jService.setupGraph();
         }
         if (
-          typeof (this.neo4jService as any)?.setupVectorIndexes === 'function'
+          typeof (
+            this.neo4jService as { setupVectorIndexes?: () => Promise<void> }
+          )?.setupVectorIndexes === 'function'
         ) {
           await this.neo4jService.setupVectorIndexes();
         }
@@ -221,6 +210,17 @@ export class DatabaseService implements IDatabaseService {
           service: this.postgresqlService,
           close: () => this.postgresqlService.close(),
         });
+      }
+
+      // Initialize Qdrant (optional, for vector search)
+      if (this.qdrantService) {
+        await this.qdrantService.initialize();
+        if (typeof (this.qdrantService as any)?.close === 'function') {
+          initializedServices.push({
+            service: this.qdrantService,
+            close: () => this.qdrantService!.close(),
+          });
+        }
       }
 
       // Initialize Redis (optional, for caching)
@@ -341,13 +341,13 @@ export class DatabaseService implements IDatabaseService {
   // Neo4j graph operations (backwards compatible with FalkorDB interface)
   async falkordbQuery(
     query: string,
-    params: Record<string, any> = {},
+    params?: Record<string, unknown>,
     options: { graph?: string } = {}
-  ): Promise<any> {
+  ): Promise<FalkorDBQueryResult> {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
-    const result = await this.neo4jService.query(query, params, {
+    const result = await this.neo4jService.query(query, params || {}, {
       database: options.graph,
     });
     // Convert Neo4j result to FalkorDB format
@@ -361,11 +361,14 @@ export class DatabaseService implements IDatabaseService {
     };
   }
 
-  async falkordbCommand(...args: any[]): Promise<FalkorDBQueryResult> {
+  async falkordbCommand(
+    command: string,
+    ...args: unknown[]
+  ): Promise<FalkorDBQueryResult> {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
-    return this.neo4jService.command(...args);
+    return this.neo4jService.command(command, ...args);
   }
 
   // Neo4j vector operations (replaces Qdrant)
@@ -385,8 +388,8 @@ export class DatabaseService implements IDatabaseService {
     collection: string,
     vector: number[],
     limit?: number,
-    filter?: Record<string, any>
-  ): Promise<Array<{ id: string; score: number; metadata?: any }>> {
+    filter?: Record<string, unknown>
+  ): Promise<Array<{ id: string; score: number; metadata?: unknown }>> {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
@@ -398,7 +401,7 @@ export class DatabaseService implements IDatabaseService {
     limit?: number,
     offset?: number
   ): Promise<{
-    points: Array<{ id: string; vector: number[]; metadata?: any }>;
+    points: Array<{ id: string; vector: number[]; metadata?: unknown }>;
     total: number;
   }> {
     if (!this.initialized) {
@@ -408,14 +411,15 @@ export class DatabaseService implements IDatabaseService {
   }
 
   // Qdrant compatibility shim
-  get qdrant(): any {
+  get qdrant(): unknown {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
     // Return a compatibility wrapper for Qdrant operations
     return {
-      upsert: async (collection: string, data: any) => {
-        const { points } = data;
+      upsert: async (collection: string, data: unknown) => {
+        const dataObj = data as any;
+        const { points } = dataObj;
         for (const point of points) {
           await this.neo4jService.upsertVector(
             collection,
@@ -425,23 +429,26 @@ export class DatabaseService implements IDatabaseService {
           );
         }
       },
-      search: async (collection: string, params: any) => {
+      search: async (collection: string, params: unknown) => {
+        const paramsObj = params as any;
         return this.neo4jService.searchVector(
           collection,
-          params.vector,
-          params.limit,
-          params.filter
+          paramsObj.vector,
+          paramsObj.limit,
+          paramsObj.filter
         );
       },
-      scroll: async (collection: string, params: any) => {
+      scroll: async (collection: string, params: unknown) => {
+        const paramsObj = params as any;
         return this.neo4jService.scrollVectors(
           collection,
-          params.limit,
-          params.offset
+          paramsObj.limit,
+          paramsObj.offset
         );
       },
-      delete: async (collection: string, params: any) => {
-        const ids = params.points || [];
+      delete: async (collection: string, params: unknown) => {
+        const paramsObj = params as any;
+        const ids = paramsObj.points || [];
         for (const id of ids) {
           await this.neo4jService.deleteVector(collection, id);
         }
@@ -456,13 +463,32 @@ export class DatabaseService implements IDatabaseService {
           ],
         };
       },
+      updateCollection: async (collectionName: string, config: unknown) => {
+        // Since we're using Neo4j as the backend, this is a no-op
+        // In a real Qdrant implementation, this would update collection configuration
+        console.log(
+          `Qdrant shim: updateCollection called for ${collectionName}`,
+          config
+        );
+        return { status: 'ok' };
+      },
+      getCollection: async (_collectionName: string) => {
+        // Return mock collection info since we're using Neo4j backend
+        // In a real Qdrant implementation, this would return actual collection metadata
+        return {
+          points_count: 0, // We don't track this in Neo4j
+          vectors_count: 0,
+          segments_count: 1,
+          status: 'green',
+        };
+      },
     };
   }
 
   // PostgreSQL operations
   async postgresQuery(
     query: string,
-    params: any[] = [],
+    params: unknown[] = [],
     options: { timeout?: number } = {}
   ): Promise<DatabaseQueryResult> {
     if (!this.initialized) {
@@ -472,7 +498,7 @@ export class DatabaseService implements IDatabaseService {
   }
 
   async postgresTransaction<T>(
-    callback: (client: any) => Promise<T>,
+    callback: (client: unknown) => Promise<T>,
     options: { timeout?: number; isolationLevel?: string } = {}
   ): Promise<T> {
     if (!this.initialized) {
@@ -531,7 +557,7 @@ export class DatabaseService implements IDatabaseService {
 
     const settledResults = await Promise.allSettled(healthCheckPromises);
 
-    const toStatus = (v: any) =>
+    const toStatus = (v: unknown) =>
       v === true
         ? { status: 'healthy' as const }
         : v === false
@@ -602,7 +628,7 @@ export class DatabaseService implements IDatabaseService {
    * Execute bulk PostgreSQL operations efficiently
    */
   async postgresBulkQuery(
-    queries: Array<{ query: string; params: any[] }>,
+    queries: Array<{ query: string; params: unknown[] }>,
     options: { continueOnError?: boolean } = {}
   ): Promise<DatabaseQueryResult[]> {
     if (!this.initialized) {

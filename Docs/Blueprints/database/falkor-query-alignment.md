@@ -1,5 +1,18 @@
 # Falkor Query Alignment Blueprint
 
+## Metadata
+
+- Scope: database
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: database).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Knowledge graph queries now support richer symbol taxonomy (graph node `type` versus `kind`) and enhanced evidence metadata. The REST layer and unit tests already translate legacy inputs such as `type=function` into the `{ type: 'symbol', kind: 'function' }` shape that `KnowledgeGraphService.listEntities` consumes, so baseline filtering paths have stabilised. The remaining work focuses on consolidating that mapping logic, documenting the contract, and finishing the surrounding consistency fixes (metadata, counters, error contracts) so every Falkor-facing surface behaves predictably.
 

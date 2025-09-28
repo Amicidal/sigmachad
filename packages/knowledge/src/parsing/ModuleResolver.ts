@@ -124,7 +124,7 @@ export class ModuleResolver {
 
       if (!resolved.resolvedModule?.resolvedFileName) return null;
 
-      let candidate = resolved.resolvedModule.resolvedFileName;
+      const candidate = resolved.resolvedModule.resolvedFileName;
 
       // Prefer .ts over .d.ts files when both exist
       const prefer = fsSync.existsSync(candidate.replace(/\.d\.ts$/, ".ts"))

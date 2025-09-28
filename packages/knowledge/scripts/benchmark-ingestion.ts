@@ -9,10 +9,16 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { performance } from 'perf_hooks';
-import { fileURLToPath } from 'url';
 
 // Import the pipeline components
-import { HighThroughputIngestionPipeline } from '../src/ingestion/pipeline.js';
+import {
+  HighThroughputIngestionPipeline,
+  type IngestionEvents,
+} from '../src/ingestion/pipeline.js';
+import type {
+  BatchResult,
+  BatchProcessingError,
+} from '../src/ingestion/types.js';
 import { createKnowledgeGraphAdapter } from '../src/ingestion/knowledge-graph-adapter.js';
 import { PipelineConfig } from '../src/ingestion/types.js';
 
@@ -75,13 +81,13 @@ class IngestionBenchmark {
       concurrencyLevels: [1, 2, 4, 8],
       batchSizes: [50, 100, 200, 500],
       runs: 3,
-      ...config
+      ...config,
     };
 
     this.results = {
       config: this.config,
       runs: [],
-      summary: {} as BenchmarkSummary
+      summary: {} as BenchmarkSummary,
     };
 
     this.setupMockServices();
@@ -92,52 +98,62 @@ class IngestionBenchmark {
    */
   private setupMockServices(): void {
     this.mockKnowledgeGraphService = {
-      createEntitiesBulk: async (entities: any[], options: any = {}) => {
+      createEntitiesBulk: async (entities: any[], _options: any = {}) => {
         // Simulate processing time based on batch size
         const baseLatency = 10; // Base 10ms
         const perEntityLatency = 0.5; // 0.5ms per entity
-        const latency = baseLatency + (entities.length * perEntityLatency);
+        const latency = baseLatency + entities.length * perEntityLatency;
 
-        await new Promise(resolve => setTimeout(resolve, latency));
+        await new Promise((resolve) => setTimeout(resolve, latency));
 
         return {
           success: true,
           processed: entities.length,
           failed: 0,
-          results: entities.map(e => ({ entity: e, success: true }))
+          results: entities.map((e) => ({ entity: e, success: true })),
         };
       },
 
-      createRelationshipsBulk: async (relationships: any[], options: any = {}) => {
+      createRelationshipsBulk: async (
+        relationships: any[],
+        _options: any = {}
+      ) => {
         const baseLatency = 5;
         const perRelLatency = 0.3;
-        const latency = baseLatency + (relationships.length * perRelLatency);
+        const latency = baseLatency + relationships.length * perRelLatency;
 
-        await new Promise(resolve => setTimeout(resolve, latency));
+        await new Promise((resolve) => setTimeout(resolve, latency));
 
         return {
           success: true,
           processed: relationships.length,
           failed: 0,
-          results: relationships.map(r => ({ relationship: r, success: true }))
+          results: relationships.map((r) => ({
+            relationship: r,
+            success: true,
+          })),
         };
       },
 
-      createEmbeddingsBatch: async (entities: any[], options: any = {}) => {
+      createEmbeddingsBatch: async (entities: any[], _options: any = {}) => {
         // Embeddings are slower
         const baseLatency = 50;
         const perEmbeddingLatency = 2;
-        const latency = baseLatency + (entities.length * perEmbeddingLatency);
+        const latency = baseLatency + entities.length * perEmbeddingLatency;
 
-        await new Promise(resolve => setTimeout(resolve, latency));
+        await new Promise((resolve) => setTimeout(resolve, latency));
 
         return {
           success: true,
           processed: entities.length,
           failed: 0,
-          results: entities.map(e => ({ entity: e, success: true, embedding: new Array(768).fill(0) }))
+          results: entities.map((e) => ({
+            entity: e,
+            success: true,
+            embedding: new Array(768).fill(0),
+          })),
         };
-      }
+      },
     };
   }
 
@@ -170,7 +186,11 @@ class IngestionBenchmark {
       for (const batchSize of this.config.batchSizes!) {
         for (let run = 0; run < this.config.runs!; run++) {
           runId++;
-          console.log(`🔄 Running benchmark ${runId}: concurrency=${concurrency}, batchSize=${batchSize}, run=${run + 1}/${this.config.runs}`);
+          console.log(
+            `🔄 Running benchmark ${runId}: concurrency=${concurrency}, batchSize=${batchSize}, run=${
+              run + 1
+            }/${this.config.runs}`
+          );
 
           const benchmarkRun = await this.runSingleBenchmark(
             runId,
@@ -182,11 +202,19 @@ class IngestionBenchmark {
 
           this.results.runs.push(benchmarkRun);
 
-          console.log(`   ✅ ${benchmarkRun.metrics.locPerMinute.toLocaleString()} LOC/min, ${benchmarkRun.metrics.filesPerSecond.toFixed(2)} files/sec`);
-          console.log(`   ⏱️  P95: ${benchmarkRun.metrics.p95LatencyMs.toFixed(2)}ms, Avg: ${benchmarkRun.metrics.avgLatencyMs.toFixed(2)}ms`);
+          console.log(
+            `   ✅ ${benchmarkRun.metrics.locPerMinute.toLocaleString()} LOC/min, ${benchmarkRun.metrics.filesPerSecond.toFixed(
+              2
+            )} files/sec`
+          );
+          console.log(
+            `   ⏱️  P95: ${benchmarkRun.metrics.p95LatencyMs.toFixed(
+              2
+            )}ms, Avg: ${benchmarkRun.metrics.avgLatencyMs.toFixed(2)}ms`
+          );
 
           // Cool down between runs
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
     }
@@ -224,48 +252,56 @@ class IngestionBenchmark {
     try {
       // Create pipeline configuration
       const pipelineConfig: PipelineConfig = {
-        batchSize,
-        maxConcurrency: concurrency,
+        eventBus: {
+          type: 'memory',
+          partitions: Math.max(4, concurrency),
+        },
         workers: {
           parsers: Math.max(1, Math.floor(concurrency / 2)),
           entityWorkers: concurrency,
           relationshipWorkers: concurrency,
-          embeddingWorkers: Math.max(1, Math.floor(concurrency / 4))
+          embeddingWorkers: Math.max(1, Math.floor(concurrency / 4)),
         },
         queues: {
           maxSize: 10000,
+          partitionCount: Math.max(4, concurrency),
           partitions: Math.max(4, concurrency),
+          batchSize: 100,
+          batchTimeout: 1000,
+          retryAttempts: 3,
+          retryDelay: 1000,
           persistenceConfig: {
-            enabled: false
-          }
+            enabled: false,
+          },
         },
         batching: {
           entityBatchSize: batchSize,
           relationshipBatchSize: batchSize,
           embeddingBatchSize: Math.max(25, Math.floor(batchSize / 2)),
+          timeoutMs: 30000,
           maxConcurrentBatches: concurrency,
           flushInterval: 1000,
-          idempotencyTTL: 300000
-        },
-        enrichment: {
-          enableEmbeddings: true,
-          batchSize: Math.max(25, Math.floor(batchSize / 2)),
-          maxConcurrentEnrichments: Math.max(1, Math.floor(concurrency / 4))
+          idempotencyTTL: 300000,
         },
         monitoring: {
           metricsInterval: 5000,
           healthCheckInterval: 10000,
           alertThresholds: {
-            queueDepth: 5000,
+            queueDepth: 1000,
+            latency: 5000,
             errorRate: 0.1,
-            latency: 10000
-          }
-        }
+          },
+        },
       };
 
       // Create adapter and pipeline
-      const adapter = createKnowledgeGraphAdapter(this.mockKnowledgeGraphService);
-      const pipeline = new HighThroughputIngestionPipeline(pipelineConfig, adapter);
+      const adapter = createKnowledgeGraphAdapter(
+        this.mockKnowledgeGraphService
+      );
+      const pipeline = new HighThroughputIngestionPipeline(
+        pipelineConfig,
+        adapter
+      );
 
       // Set up event handlers for metrics collection
       pipeline.on('batch:completed', (data: any) => {
@@ -277,14 +313,12 @@ class IngestionBenchmark {
         }
       });
 
-      pipeline.on('embedding:completed', (data: any) => {
-        embeddingsGenerated += data.processed || 0;
-      });
+      // Note: embedding:completed event is not currently implemented
 
-      pipeline.on('error', (error: any) => {
+      pipeline.on('pipeline:error', (error: any) => {
         errors.push({
           file: error.context?.filePath || 'unknown',
-          error: error.message || 'Unknown error'
+          error: error.message || 'Unknown error',
         });
       });
 
@@ -306,26 +340,23 @@ class IngestionBenchmark {
 
             const fileLatency = performance.now() - fileStartTime;
             latencies.push(fileLatency);
-
           } catch (error) {
             errors.push({
               file,
-              error: error instanceof Error ? error.message : 'Unknown error'
+              error: error instanceof Error ? error.message : 'Unknown error',
             });
           }
         }
 
         // Wait for pipeline to complete processing
         await pipeline.waitForCompletion();
-
       } finally {
         await pipeline.stop();
       }
-
     } catch (error) {
       errors.push({
         file: 'pipeline',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
 
@@ -344,9 +375,10 @@ class IngestionBenchmark {
     const p99Index = Math.floor(latencies.length * 0.99);
     const p95LatencyMs = latencies[p95Index] || 0;
     const p99LatencyMs = latencies[p99Index] || 0;
-    const avgLatencyMs = latencies.length > 0
-      ? latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length
-      : 0;
+    const avgLatencyMs =
+      latencies.length > 0
+        ? latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length
+        : 0;
 
     return {
       runId,
@@ -366,9 +398,9 @@ class IngestionBenchmark {
         memoryUsageMB: endMemory - startMemory,
         p95LatencyMs,
         p99LatencyMs,
-        avgLatencyMs
+        avgLatencyMs,
       },
-      errors
+      errors,
     };
   }
 
@@ -387,14 +419,26 @@ class IngestionBenchmark {
 
           if (entry.isDirectory()) {
             // Skip common directories
-            if (['node_modules', '.git', 'dist', 'build'].includes(entry.name)) {
+            if (
+              ['node_modules', '.git', 'dist', 'build'].includes(entry.name)
+            ) {
               continue;
             }
             await scan(fullPath);
           } else if (entry.isFile()) {
             // Check file extensions
             const ext = path.extname(entry.name).toLowerCase();
-            const validExts = ['.ts', '.js', '.tsx', '.jsx', '.py', '.java', '.cpp', '.c', '.h'];
+            const validExts = [
+              '.ts',
+              '.js',
+              '.tsx',
+              '.jsx',
+              '.py',
+              '.java',
+              '.cpp',
+              '.c',
+              '.h',
+            ];
 
             if (validExts.includes(ext)) {
               files.push(fullPath);
@@ -419,7 +463,9 @@ class IngestionBenchmark {
     for (const file of files) {
       try {
         const content = await fs.readFile(file, 'utf-8');
-        const lines = content.split('\n').filter(line => line.trim().length > 0);
+        const lines = content
+          .split('\n')
+          .filter((line) => line.trim().length > 0);
         totalLOC += lines.length;
       } catch (error) {
         console.warn(`Warning: Could not read file ${file}:`, error);
@@ -443,14 +489,17 @@ class IngestionBenchmark {
     );
 
     const worstRun = this.results.runs.reduce((worst, current) =>
-      current.metrics.locPerMinute < worst.metrics.locPerMinute ? current : worst
+      current.metrics.locPerMinute < worst.metrics.locPerMinute
+        ? current
+        : worst
     );
 
     // Calculate averages
     const avgMetrics = this.calculateAverageMetrics();
 
     // Check if target was achieved
-    const targetAchieved = bestRun.metrics.locPerMinute >= this.config.targetLOCPerMinute!;
+    const targetAchieved =
+      bestRun.metrics.locPerMinute >= this.config.targetLOCPerMinute!;
 
     // Generate recommendations
     const recommendations = this.generateRecommendations();
@@ -460,7 +509,7 @@ class IngestionBenchmark {
       worstRun,
       averageMetrics: avgMetrics,
       targetAchieved,
-      recommendations
+      recommendations,
     };
   }
 
@@ -472,20 +521,33 @@ class IngestionBenchmark {
     const count = runs.length;
 
     return {
-      totalTimeMs: runs.reduce((sum, r) => sum + r.metrics.totalTimeMs, 0) / count,
-      filesProcessed: runs.reduce((sum, r) => sum + r.metrics.filesProcessed, 0) / count,
+      totalTimeMs:
+        runs.reduce((sum, r) => sum + r.metrics.totalTimeMs, 0) / count,
+      filesProcessed:
+        runs.reduce((sum, r) => sum + r.metrics.filesProcessed, 0) / count,
       totalLOC: runs[0].metrics.totalLOC, // Same for all runs
-      entitiesCreated: runs.reduce((sum, r) => sum + r.metrics.entitiesCreated, 0) / count,
-      relationshipsCreated: runs.reduce((sum, r) => sum + r.metrics.relationshipsCreated, 0) / count,
-      embeddingsGenerated: runs.reduce((sum, r) => sum + r.metrics.embeddingsGenerated, 0) / count,
+      entitiesCreated:
+        runs.reduce((sum, r) => sum + r.metrics.entitiesCreated, 0) / count,
+      relationshipsCreated:
+        runs.reduce((sum, r) => sum + r.metrics.relationshipsCreated, 0) /
+        count,
+      embeddingsGenerated:
+        runs.reduce((sum, r) => sum + r.metrics.embeddingsGenerated, 0) / count,
       errors: runs.reduce((sum, r) => sum + r.metrics.errors, 0) / count,
-      locPerMinute: runs.reduce((sum, r) => sum + r.metrics.locPerMinute, 0) / count,
-      filesPerSecond: runs.reduce((sum, r) => sum + r.metrics.filesPerSecond, 0) / count,
-      entitiesPerSecond: runs.reduce((sum, r) => sum + r.metrics.entitiesPerSecond, 0) / count,
-      memoryUsageMB: runs.reduce((sum, r) => sum + r.metrics.memoryUsageMB, 0) / count,
-      p95LatencyMs: runs.reduce((sum, r) => sum + r.metrics.p95LatencyMs, 0) / count,
-      p99LatencyMs: runs.reduce((sum, r) => sum + r.metrics.p99LatencyMs, 0) / count,
-      avgLatencyMs: runs.reduce((sum, r) => sum + r.metrics.avgLatencyMs, 0) / count
+      locPerMinute:
+        runs.reduce((sum, r) => sum + r.metrics.locPerMinute, 0) / count,
+      filesPerSecond:
+        runs.reduce((sum, r) => sum + r.metrics.filesPerSecond, 0) / count,
+      entitiesPerSecond:
+        runs.reduce((sum, r) => sum + r.metrics.entitiesPerSecond, 0) / count,
+      memoryUsageMB:
+        runs.reduce((sum, r) => sum + r.metrics.memoryUsageMB, 0) / count,
+      p95LatencyMs:
+        runs.reduce((sum, r) => sum + r.metrics.p95LatencyMs, 0) / count,
+      p99LatencyMs:
+        runs.reduce((sum, r) => sum + r.metrics.p99LatencyMs, 0) / count,
+      avgLatencyMs:
+        runs.reduce((sum, r) => sum + r.metrics.avgLatencyMs, 0) / count,
     };
   }
 
@@ -501,11 +563,15 @@ class IngestionBenchmark {
     const concurrencyPerformance = new Map<number, number>();
     for (const run of this.results.runs) {
       const existing = concurrencyPerformance.get(run.concurrency) || 0;
-      concurrencyPerformance.set(run.concurrency, Math.max(existing, run.metrics.locPerMinute));
+      concurrencyPerformance.set(
+        run.concurrency,
+        Math.max(existing, run.metrics.locPerMinute)
+      );
     }
 
-    const bestConcurrency = Array.from(concurrencyPerformance.entries())
-      .reduce((best, current) => current[1] > best[1] ? current : best)[0];
+    const bestConcurrency = Array.from(concurrencyPerformance.entries()).reduce(
+      (best, current) => (current[1] > best[1] ? current : best)
+    )[0];
 
     recommendations.push(`Optimal concurrency level: ${bestConcurrency}`);
 
@@ -513,31 +579,46 @@ class IngestionBenchmark {
     const batchPerformance = new Map<number, number>();
     for (const run of this.results.runs) {
       const existing = batchPerformance.get(run.batchSize) || 0;
-      batchPerformance.set(run.batchSize, Math.max(existing, run.metrics.locPerMinute));
+      batchPerformance.set(
+        run.batchSize,
+        Math.max(existing, run.metrics.locPerMinute)
+      );
     }
 
-    const bestBatchSize = Array.from(batchPerformance.entries())
-      .reduce((best, current) => current[1] > best[1] ? current : best)[0];
+    const bestBatchSize = Array.from(batchPerformance.entries()).reduce(
+      (best, current) => (current[1] > best[1] ? current : best)
+    )[0];
 
     recommendations.push(`Optimal batch size: ${bestBatchSize}`);
 
     // Performance recommendations
     if (avgMetrics.p95LatencyMs > 1000) {
-      recommendations.push('High P95 latency detected - consider reducing batch sizes');
+      recommendations.push(
+        'High P95 latency detected - consider reducing batch sizes'
+      );
     }
 
     if (avgMetrics.memoryUsageMB > 500) {
-      recommendations.push('High memory usage - consider reducing concurrency or batch sizes');
+      recommendations.push(
+        'High memory usage - consider reducing concurrency or batch sizes'
+      );
     }
 
     if (avgMetrics.errors > 0) {
-      recommendations.push('Errors detected - check error handling and retry logic');
+      recommendations.push(
+        'Errors detected - check error handling and retry logic'
+      );
     }
 
     if (!this.results.summary.targetAchieved) {
-      const shortfall = this.config.targetLOCPerMinute! - bestRun.metrics.locPerMinute;
-      recommendations.push(`Target not achieved. Shortfall: ${shortfall.toFixed(0)} LOC/min`);
-      recommendations.push('Consider: increasing concurrency, optimizing AST parsing, or using faster storage');
+      const shortfall =
+        this.config.targetLOCPerMinute! - bestRun.metrics.locPerMinute;
+      recommendations.push(
+        `Target not achieved. Shortfall: ${shortfall.toFixed(0)} LOC/min`
+      );
+      recommendations.push(
+        'Consider: increasing concurrency, optimizing AST parsing, or using faster storage'
+      );
     }
 
     return recommendations;
@@ -566,14 +647,24 @@ class IngestionBenchmark {
    * Generate human-readable report
    */
   private generateReport(): string {
-    const { bestRun, worstRun, averageMetrics, targetAchieved, recommendations } = this.results.summary;
+    const {
+      bestRun,
+      worstRun,
+      averageMetrics,
+      targetAchieved,
+      recommendations,
+    } = this.results.summary;
 
     return `
 🎯 TARGET: ${this.config.targetLOCPerMinute!.toLocaleString()} LOC/minute
-${targetAchieved ? '✅' : '❌'} Target ${targetAchieved ? 'ACHIEVED' : 'NOT ACHIEVED'}
+${targetAchieved ? '✅' : '❌'} Target ${
+      targetAchieved ? 'ACHIEVED' : 'NOT ACHIEVED'
+    }
 
 📈 BEST PERFORMANCE:
-   Configuration: ${bestRun.concurrency} workers, batch size ${bestRun.batchSize}
+   Configuration: ${bestRun.concurrency} workers, batch size ${
+      bestRun.batchSize
+    }
    Throughput: ${bestRun.metrics.locPerMinute.toLocaleString()} LOC/min
    Files/sec: ${bestRun.metrics.filesPerSecond.toFixed(2)}
    Entities/sec: ${bestRun.metrics.entitiesPerSecond.toFixed(0)}
@@ -581,7 +672,9 @@ ${targetAchieved ? '✅' : '❌'} Target ${targetAchieved ? 'ACHIEVED' : 'NOT AC
    Memory: ${bestRun.metrics.memoryUsageMB.toFixed(1)}MB
 
 📉 WORST PERFORMANCE:
-   Configuration: ${worstRun.concurrency} workers, batch size ${worstRun.batchSize}
+   Configuration: ${worstRun.concurrency} workers, batch size ${
+      worstRun.batchSize
+    }
    Throughput: ${worstRun.metrics.locPerMinute.toLocaleString()} LOC/min
 
 📊 AVERAGE METRICS:
@@ -595,7 +688,7 @@ ${targetAchieved ? '✅' : '❌'} Target ${targetAchieved ? 'ACHIEVED' : 'NOT AC
    Memory Usage: ${averageMetrics.memoryUsageMB.toFixed(1)}MB
 
 💡 RECOMMENDATIONS:
-${recommendations.map(r => `   • ${r}`).join('\n')}
+${recommendations.map((r) => `   • ${r}`).join('\n')}
 
 📋 RUNS COMPLETED: ${this.results.runs.length}
 `;
@@ -620,7 +713,7 @@ async function main(): Promise<void> {
     targetLOCPerMinute: parseInt(process.env.TARGET_LOC_PER_MINUTE || '10000'),
     concurrencyLevels: [1, 2, 4, 8, 16],
     batchSizes: [25, 50, 100, 200, 500],
-    runs: parseInt(process.env.BENCHMARK_RUNS || '3')
+    runs: parseInt(process.env.BENCHMARK_RUNS || '3'),
   };
 
   try {
@@ -629,7 +722,6 @@ async function main(): Promise<void> {
 
     console.log('\n🎉 Benchmark completed successfully!');
     process.exit(0);
-
   } catch (error) {
     console.error('\n❌ Benchmark failed:', error);
     process.exit(1);

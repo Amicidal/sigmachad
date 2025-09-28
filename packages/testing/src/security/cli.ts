@@ -18,13 +18,13 @@ import { SecurityScanRequest, SecurityScanOptions } from './types.js';
 const mockDb = {
   falkordbQuery: async () => [],
   falkordbCommand: async () => undefined,
-  getConfig: () => ({ falkordb: { graphKey: 'cli' } })
+  getConfig: () => ({ falkordb: { graphKey: 'cli' } }),
 };
 
 const mockKgService = {
   getEntity: async () => null,
   createRelationship: async () => undefined,
-  findEntitiesByType: async () => []
+  findEntitiesByType: async () => [],
 };
 
 program
@@ -41,9 +41,17 @@ program
   .option('--include-sast', 'Include static analysis', true)
   .option('--include-secrets', 'Include secrets detection', true)
   .option('--include-deps', 'Include dependency scanning', true)
-  .option('--severity <level>', 'Minimum severity: critical, high, medium, low, info', 'medium')
-  .option('--confidence <threshold>', 'Minimum confidence threshold (0-1)', '0.7')
-  .action(async (options) => {
+  .option(
+    '--severity <level>',
+    'Minimum severity: critical, high, medium, low, info',
+    'medium'
+  )
+  .option(
+    '--confidence <threshold>',
+    'Minimum confidence threshold (0-1)',
+    '0.7'
+  )
+  .action(async (_options) => {
     try {
       console.log('🔒 Starting security scan...');
 
@@ -51,23 +59,23 @@ program
       await scanner.initialize();
 
       const scanOptions: Partial<SecurityScanOptions> = {
-        includeSAST: options.includeSast,
-        includeSecrets: options.includeSecrets,
-        includeDependencies: options.includeDeps,
-        includeSCA: options.includeDeps,
-        severityThreshold: options.severity,
-        confidenceThreshold: parseFloat(options.confidence)
+        includeSAST: _options.includeSast,
+        includeSecrets: _options.includeSecrets,
+        includeDependencies: _options.includeDeps,
+        includeSCA: _options.includeDeps,
+        severityThreshold: _options.severity,
+        confidenceThreshold: parseFloat(_options.confidence),
       };
 
       const request: SecurityScanRequest = {
         scanTypes: [],
-        options: scanOptions
+        options: scanOptions,
       };
 
       // Apply scope filtering
-      if (options.scope === 'critical-only') {
+      if (_options.scope === 'critical-only') {
         scanOptions.severityThreshold = 'critical';
-      } else if (options.scope === 'recent') {
+      } else if (_options.scope === 'recent') {
         // Would implement recent filtering logic
       }
 
@@ -79,14 +87,14 @@ program
         vulnerabilities: result.vulnerabilities,
         status: result.status,
         scanId: result.scanId,
-        duration: result.duration
+        duration: result.duration,
       };
 
-      if (options.output) {
-        if (options.format === 'json') {
-          fs.writeFileSync(options.output, JSON.stringify(output, null, 2));
+      if (_options.output) {
+        if (_options.format === 'json') {
+          fs.writeFileSync(_options.output, JSON.stringify(output, null, 2));
         }
-        console.log(`📄 Results saved to ${options.output}`);
+        console.log(`📄 Results saved to ${_options.output}`);
       } else {
         console.log(JSON.stringify(output, null, 2));
       }
@@ -95,7 +103,6 @@ program
       if (result.summary.bySeverity.critical > 0) {
         process.exit(1);
       }
-
     } catch (error) {
       console.error('❌ Scan failed:', error);
       process.exit(1);
@@ -107,22 +114,21 @@ program
   .description('Run security audit')
   .option('--scope <scope>', 'Audit scope: full, recent, critical-only', 'full')
   .option('--output <file>', 'Output file path')
-  .action(async (options) => {
+  .action(async (_options) => {
     try {
       console.log('🔍 Starting security audit...');
 
       const scanner = new SecurityScanner(mockDb, mockKgService);
       await scanner.initialize();
 
-      const audit = await scanner.performSecurityAudit(options.scope);
+      const audit = await scanner.performSecurityAudit(_options.scope);
 
-      if (options.output) {
-        fs.writeFileSync(options.output, JSON.stringify(audit, null, 2));
-        console.log(`📄 Audit results saved to ${options.output}`);
+      if (_options.output) {
+        fs.writeFileSync(_options.output, JSON.stringify(audit, null, 2));
+        console.log(`📄 Audit results saved to ${_options.output}`);
       } else {
         console.log(JSON.stringify(audit, null, 2));
       }
-
     } catch (error) {
       console.error('❌ Audit failed:', error);
       process.exit(1);
@@ -132,10 +138,18 @@ program
 program
   .command('report')
   .description('Generate security report')
-  .option('--format <format>', 'Report format: json, html, markdown, csv', 'json')
+  .option(
+    '--format <format>',
+    'Report format: json, html, markdown, csv',
+    'json'
+  )
   .option('--output <file>', 'Output file path')
-  .option('--type <type>', 'Report type: vulnerability, compliance, summary', 'vulnerability')
-  .action(async (options) => {
+  .option(
+    '--type <type>',
+    'Report type: vulnerability, compliance, summary',
+    'vulnerability'
+  )
+  .action(async (_options) => {
     try {
       console.log('📊 Generating security report...');
 
@@ -143,7 +157,7 @@ program
       await reports.initialize();
 
       let reportData;
-      switch (options.type) {
+      switch (_options.type) {
         case 'vulnerability':
           reportData = await reports.generateVulnerabilityReport();
           break;
@@ -154,14 +168,17 @@ program
           reportData = await reports.getMetrics();
       }
 
-      const report = await reports.generateReport('audit', options.format, reportData);
+      const report = await reports.generateReport(
+        'audit',
+        _options.format,
+        reportData
+      );
 
-      if (options.output) {
-        await reports.saveReport(report, options.output);
+      if (_options.output) {
+        await reports.saveReport(report, _options.output);
       } else {
         console.log(report.data);
       }
-
     } catch (error) {
       console.error('❌ Report generation failed:', error);
       process.exit(1);
@@ -171,24 +188,32 @@ program
 program
   .command('compliance')
   .description('Check compliance status')
-  .option('--framework <framework>', 'Compliance framework: owasp, nist, pci', 'owasp')
+  .option(
+    '--framework <framework>',
+    'Compliance framework: owasp, nist, pci',
+    'owasp'
+  )
   .option('--output <file>', 'Output file path')
-  .action(async (options) => {
+  .action(async (_options) => {
     try {
-      console.log(`📋 Checking ${options.framework.toUpperCase()} compliance...`);
+      console.log(
+        `📋 Checking ${_options.framework.toUpperCase()} compliance...`
+      );
 
       const scanner = new SecurityScanner(mockDb, mockKgService);
       await scanner.initialize();
 
-      const compliance = await scanner.getComplianceStatus(options.framework, 'full');
+      const compliance = await scanner.getComplianceStatus(
+        _options.framework,
+        'full'
+      );
 
-      if (options.output) {
-        fs.writeFileSync(options.output, JSON.stringify(compliance, null, 2));
-        console.log(`📄 Compliance report saved to ${options.output}`);
+      if (_options.output) {
+        fs.writeFileSync(_options.output, JSON.stringify(compliance, null, 2));
+        console.log(`📄 Compliance report saved to ${_options.output}`);
       } else {
         console.log(JSON.stringify(compliance, null, 2));
       }
-
     } catch (error) {
       console.error('❌ Compliance check failed:', error);
       process.exit(1);
@@ -199,7 +224,7 @@ program
   .command('secrets-check')
   .description('Check for exposed secrets')
   .option('--staged', 'Check only staged files')
-  .action(async (options) => {
+  .action(async (_options) => {
     try {
       console.log('🔍 Scanning for secrets...');
 
@@ -207,9 +232,7 @@ program
       await scanner.initialize();
 
       // Mock file entities for scanning
-      const entities = [
-        { id: 'test', type: 'file', path: process.cwd() }
-      ];
+      const entities = [{ id: 'test', type: 'file', path: process.cwd() }];
 
       const scanOptions = {
         includeSAST: false,
@@ -218,21 +241,20 @@ program
         includeDependencies: false,
         includeCompliance: false,
         severityThreshold: 'info' as const,
-        confidenceThreshold: 0.5
+        confidenceThreshold: 0.5,
       };
 
       const issues = await scanner.scan(entities, scanOptions);
 
       if (issues.length > 0) {
         console.log(`❌ Found ${issues.length} potential secrets`);
-        issues.forEach(issue => {
+        issues.forEach((issue) => {
           console.log(`  - ${issue.ruleId}: ${issue.description}`);
         });
         process.exit(1);
       } else {
         console.log('✅ No secrets detected');
       }
-
     } catch (error) {
       console.error('❌ Secrets check failed:', error);
       process.exit(1);
@@ -256,7 +278,11 @@ program
       await scanner.initialize();
 
       const entities = [
-        { id: path.basename(filePath), type: 'file', path: path.resolve(filePath) }
+        {
+          id: path.basename(filePath),
+          type: 'file',
+          path: path.resolve(filePath),
+        },
       ];
 
       const scanOptions = {
@@ -266,18 +292,19 @@ program
         includeDependencies: false,
         includeCompliance: false,
         severityThreshold: 'info' as const,
-        confidenceThreshold: 0.5
+        confidenceThreshold: 0.5,
       };
 
       const issues = await scanner.scan(entities, scanOptions);
 
       if (issues.length > 0) {
-        console.log(`❌ Found ${issues.length} potential secrets in ${filePath}`);
+        console.log(
+          `❌ Found ${issues.length} potential secrets in ${filePath}`
+        );
         process.exit(1);
       } else {
         console.log(`✅ No secrets detected in ${filePath}`);
       }
-
     } catch (error) {
       console.error('❌ File secrets check failed:', error);
       process.exit(1);
@@ -288,7 +315,7 @@ program
   .command('deps-check')
   .description('Check dependencies for vulnerabilities')
   .option('--quick', 'Quick check (skip detailed analysis)')
-  .action(async (options) => {
+  .action(async (_options) => {
     try {
       console.log('📦 Checking dependencies for vulnerabilities...');
 
@@ -296,13 +323,18 @@ program
       await scanner.initialize();
 
       // Look for package files in current directory
-      const packageFiles = ['package.json', 'requirements.txt', 'pom.xml', 'Cargo.toml'];
+      const packageFiles = [
+        'package.json',
+        'requirements.txt',
+        'pom.xml',
+        'Cargo.toml',
+      ];
       const entities = packageFiles
-        .filter(file => fs.existsSync(file))
-        .map(file => ({
+        .filter((file) => fs.existsSync(file))
+        .map((file) => ({
           id: file,
           type: 'file',
-          path: path.resolve(file)
+          path: path.resolve(file),
         }));
 
       if (entities.length === 0) {
@@ -317,15 +349,19 @@ program
         includeDependencies: true,
         includeCompliance: false,
         severityThreshold: 'medium' as const,
-        confidenceThreshold: 0.7
+        confidenceThreshold: 0.7,
       };
 
       const vulnerabilities = await scanner.scan(entities, scanOptions);
 
       if (vulnerabilities.length > 0) {
         console.log(`❌ Found ${vulnerabilities.length} vulnerabilities`);
-        const critical = vulnerabilities.filter(v => v.severity === 'critical').length;
-        const high = vulnerabilities.filter(v => v.severity === 'high').length;
+        const critical = vulnerabilities.filter(
+          (v) => v.severity === 'critical'
+        ).length;
+        const high = vulnerabilities.filter(
+          (v) => v.severity === 'high'
+        ).length;
 
         if (critical > 0 || high > 0) {
           console.log(`  - Critical: ${critical}, High: ${high}`);
@@ -334,7 +370,6 @@ program
       } else {
         console.log('✅ No vulnerabilities detected');
       }
-
     } catch (error) {
       console.error('❌ Dependency check failed:', error);
       process.exit(1);
@@ -344,7 +379,7 @@ program
 program
   .command('policy-check')
   .description('Check security policy compliance')
-  .action(async (options) => {
+  .action(async (_options) => {
     try {
       console.log('📋 Checking security policy compliance...');
 
@@ -353,7 +388,6 @@ program
 
       // Mock compliance check
       console.log('✅ Security policies compliant');
-
     } catch (error) {
       console.error('❌ Policy check failed:', error);
       process.exit(1);
@@ -373,7 +407,6 @@ program
 
       const fix = await scanner.generateSecurityFix(issueId);
       console.log(JSON.stringify(fix, null, 2));
-
     } catch (error) {
       console.error('❌ Fix generation failed:', error);
       process.exit(1);
@@ -385,7 +418,7 @@ program
   .description('Generate SARIF report for GitHub Security')
   .option('--output <file>', 'Output SARIF file', 'security-results.sarif')
   .option('--scope <scope>', 'Scan scope: full, critical-only, recent', 'full')
-  .action(async (options) => {
+  .action(async (_options) => {
     try {
       console.log('📄 Generating SARIF report...');
 
@@ -398,13 +431,14 @@ program
         includeSCA: true,
         includeSecrets: true,
         includeDependencies: true,
-        severityThreshold: options.scope === 'critical-only' ? 'critical' : 'medium',
-        confidenceThreshold: 0.7
+        severityThreshold:
+          _options.scope === 'critical-only' ? 'critical' : 'medium',
+        confidenceThreshold: 0.7,
       };
 
       const request: SecurityScanRequest = {
         scanTypes: ['sast', 'secrets', 'dependency'],
-        options: scanOptions
+        options: scanOptions,
       };
 
       const result = await scanner.performScan(request, scanOptions);
@@ -421,34 +455,35 @@ program
                 version: '1.0.0',
                 informationUri: 'https://github.com/example/memento',
                 shortDescription: {
-                  text: 'Comprehensive security scanner for detecting vulnerabilities, secrets, and compliance issues'
+                  text: 'Comprehensive security scanner for detecting vulnerabilities, secrets, and compliance issues',
                 },
                 fullDescription: {
-                  text: 'Memento Security Scanner provides SAST, SCA, secrets detection, and compliance checking with support for OWASP Top 10 and CWE classifications'
+                  text: 'Memento Security Scanner provides SAST, SCA, secrets detection, and compliance checking with support for OWASP Top 10 and CWE classifications',
                 },
                 semanticVersion: '1.0.0',
-                rules: []
-              }
+                rules: [],
+              },
             },
             columnKind: 'utf16CodeUnits',
             originalUriBaseIds: {
               '%SRCROOT%': {
-                uri: 'file:///' + process.cwd().replace(/\\/g, '/') + '/'
-              }
+                uri: 'file:///' + process.cwd().replace(/\\/g, '/') + '/',
+              },
             },
             results: [],
             invocations: [
               {
                 executionSuccessful: result.status === 'completed',
                 startTimeUtc: result.startedAt.toISOString(),
-                endTimeUtc: result.completedAt?.toISOString() || new Date().toISOString(),
+                endTimeUtc:
+                  result.completedAt?.toISOString() || new Date().toISOString(),
                 workingDirectory: {
-                  uri: 'file:///' + process.cwd().replace(/\\/g, '/') + '/'
-                }
-              }
-            ]
-          }
-        ]
+                  uri: 'file:///' + process.cwd().replace(/\\/g, '/') + '/',
+                },
+              },
+            ],
+          },
+        ],
       };
 
       const run = sarif.runs[0];
@@ -462,23 +497,25 @@ program
             id: issue.ruleId,
             name: issue.title,
             shortDescription: {
-              text: issue.title
+              text: issue.title,
             },
             fullDescription: {
-              text: issue.description
+              text: issue.description,
             },
             messageStrings: {
               default: {
-                text: issue.description
-              }
+                text: issue.description,
+              },
             },
             defaultConfiguration: {
-              level: this.mapSeverityToSarifLevel(issue.severity)
+              level: mapSeverityToSarifLevel(issue.severity),
             },
             properties: {
               category: 'security',
-              tags: ['security', issue.cwe || '', issue.owasp || ''].filter(Boolean)
-            }
+              tags: ['security', issue.cwe || '', issue.owasp || ''].filter(
+                Boolean
+              ),
+            },
           });
           ruleMap.set(issue.ruleId, true);
         }
@@ -486,40 +523,42 @@ program
         // Create SARIF result
         const sarifResult: any = {
           ruleId: issue.ruleId,
-          ruleIndex: run.tool.driver.rules.findIndex(r => r.id === issue.ruleId),
-          level: this.mapSeverityToSarifLevel(issue.severity),
+          ruleIndex: run.tool.driver.rules.findIndex(
+            (r) => r.id === issue.ruleId
+          ),
+          level: mapSeverityToSarifLevel(issue.severity),
           message: {
             text: issue.description,
-            markdown: `**${issue.title}**\n\n${issue.description}\n\n**Remediation:** ${issue.remediation}`
+            markdown: `**${issue.title}**\n\n${issue.description}\n\n**Remediation:** ${issue.remediation}`,
           },
           locations: [
             {
               physicalLocation: {
                 artifactLocation: {
                   uri: issue.metadata?.filePath || 'unknown',
-                  uriBaseId: '%SRCROOT%'
+                  uriBaseId: '%SRCROOT%',
                 },
                 region: {
                   startLine: issue.lineNumber,
                   startColumn: issue.metadata?.column || 1,
                   snippet: {
-                    text: issue.codeSnippet
-                  }
-                }
-              }
-            }
+                    text: issue.codeSnippet,
+                  },
+                },
+              },
+            },
           ],
           properties: {
             confidence: issue.confidence,
             cwe: issue.cwe,
             owasp: issue.owasp,
-            tool: issue.tool
-          }
+            tool: issue.tool,
+          },
         };
 
         // Add fingerprints for deduplication
         sarifResult.fingerprints = {
-          'mementoSecurityScanner/v1': issue.id
+          'mementoSecurityScanner/v1': issue.id,
         };
 
         // Add fixes if available
@@ -527,28 +566,28 @@ program
           sarifResult.fixes = [
             {
               description: {
-                text: `Fix for ${issue.title}`
+                text: `Fix for ${issue.title}`,
               },
               artifactChanges: [
                 {
                   artifactLocation: {
                     uri: issue.metadata?.filePath || 'unknown',
-                    uriBaseId: '%SRCROOT%'
+                    uriBaseId: '%SRCROOT%',
                   },
                   replacements: [
                     {
                       deletedRegion: {
                         startLine: issue.lineNumber,
-                        startColumn: 1
+                        startColumn: 1,
                       },
                       insertedContent: {
-                        text: `// TODO: ${issue.remediation}`
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
+                        text: `// TODO: ${issue.remediation}`,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
           ];
         }
 
@@ -564,69 +603,76 @@ program
             id: ruleId,
             name: `Dependency Vulnerability: ${vuln.vulnerabilityId}`,
             shortDescription: {
-              text: `Vulnerability in ${vuln.packageName}`
+              text: `Vulnerability in ${vuln.packageName}`,
             },
             fullDescription: {
-              text: vuln.description
+              text: vuln.description,
             },
             messageStrings: {
               default: {
-                text: vuln.description
-              }
+                text: vuln.description,
+              },
             },
             defaultConfiguration: {
-              level: this.mapSeverityToSarifLevel(vuln.severity)
+              level: mapSeverityToSarifLevel(vuln.severity),
             },
             properties: {
               category: 'dependency',
-              tags: ['security', 'dependency', 'vulnerability']
-            }
+              tags: ['security', 'dependency', 'vulnerability'],
+            },
           });
           ruleMap.set(ruleId, true);
         }
 
         run.results.push({
           ruleId,
-          ruleIndex: run.tool.driver.rules.findIndex(r => r.id === ruleId),
-          level: this.mapSeverityToSarifLevel(vuln.severity),
+          ruleIndex: run.tool.driver.rules.findIndex((r) => r.id === ruleId),
+          level: mapSeverityToSarifLevel(vuln.severity),
           message: {
             text: `${vuln.packageName} ${vuln.version} has ${vuln.vulnerabilityId}: ${vuln.description}`,
-            markdown: `**Dependency Vulnerability**\n\n**Package:** ${vuln.packageName} (${vuln.version})\n**Vulnerability:** ${vuln.vulnerabilityId}\n**CVSS Score:** ${vuln.cvssScore}\n\n${vuln.description}\n\n**Fixed in:** ${vuln.fixedInVersion || 'No fix available'}`
+            markdown: `**Dependency Vulnerability**\n\n**Package:** ${
+              vuln.packageName
+            } (${vuln.version})\n**Vulnerability:** ${
+              vuln.vulnerabilityId
+            }\n**CVSS Score:** ${vuln.cvssScore}\n\n${
+              vuln.description
+            }\n\n**Fixed in:** ${vuln.fixedInVersion || 'No fix available'}`,
           },
           locations: [
             {
               physicalLocation: {
                 artifactLocation: {
                   uri: 'package.json',
-                  uriBaseId: '%SRCROOT%'
+                  uriBaseId: '%SRCROOT%',
                 },
                 region: {
                   startLine: 1,
                   startColumn: 1,
                   snippet: {
-                    text: `"${vuln.packageName}": "${vuln.version}"`
-                  }
-                }
-              }
-            }
+                    text: `"${vuln.packageName}": "${vuln.version}"`,
+                  },
+                },
+              },
+            },
           ],
           properties: {
             cvssScore: vuln.cvssScore,
             exploitability: vuln.exploitability,
             packageName: vuln.packageName,
             packageVersion: vuln.version,
-            vulnerabilityId: vuln.vulnerabilityId
+            vulnerabilityId: vuln.vulnerabilityId,
           },
           fingerprints: {
-            'mementoSecurityScanner/v1': vuln.id
-          }
+            'mementoSecurityScanner/v1': vuln.id,
+          },
         });
       }
 
-      fs.writeFileSync(options.output, JSON.stringify(sarif, null, 2));
-      console.log(`📄 SARIF report saved to ${options.output}`);
-      console.log(`📊 Generated ${run.results.length} findings across ${run.tool.driver.rules.length} rules`);
-
+      fs.writeFileSync(_options.output, JSON.stringify(sarif, null, 2));
+      console.log(`📄 SARIF report saved to ${_options.output}`);
+      console.log(
+        `📊 Generated ${run.results.length} findings across ${run.tool.driver.rules.length} rules`
+      );
     } catch (error) {
       console.error('❌ SARIF generation failed:', error);
       process.exit(1);

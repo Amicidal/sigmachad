@@ -15,34 +15,12 @@ import {
   RedisConfig,
   SessionCreationOptions,
 } from './SessionTypes.js';
-
-export interface ValidationResult {
-  valid: boolean;
-  errors: ValidationError[];
-  warnings: ValidationWarning[];
-  recommendations: Recommendation[];
-}
-
-export interface ValidationError {
-  field: string;
-  message: string;
-  value?: any;
-  code: string;
-}
-
-export interface ValidationWarning {
-  field: string;
-  message: string;
-  value?: any;
-  impact: 'low' | 'medium' | 'high';
-}
-
-export interface Recommendation {
-  category: 'performance' | 'security' | 'reliability' | 'cost';
-  message: string;
-  priority: 'low' | 'medium' | 'high';
-  action?: string;
-}
+import type {
+  ValidationResult,
+  ValidationError,
+  ValidationWarning,
+  Recommendation,
+} from '@memento/shared-types';
 
 export interface EnvironmentValidation {
   environment: 'development' | 'staging' | 'production';
@@ -57,7 +35,12 @@ const RedisConfigSchema = z.object({
   host: z.string().min(1, 'Redis host is required'),
   port: z.number().int().min(1).max(65535, 'Port must be between 1 and 65535'),
   password: z.string().optional(),
-  db: z.number().int().min(0).max(15, 'Redis database must be between 0 and 15').optional(),
+  db: z
+    .number()
+    .int()
+    .min(0)
+    .max(15, 'Redis database must be between 0 and 15')
+    .optional(),
   url: z.string().url().optional(),
   tls: z.boolean().optional(),
   maxRetries: z.number().int().min(0).optional(),
@@ -71,16 +54,37 @@ const PubSubChannelsSchema = z.object({
 
 const SessionManagerConfigSchema = z.object({
   redis: RedisConfigSchema,
-  defaultTTL: z.number().int().min(60, 'Default TTL must be at least 60 seconds').max(86400 * 7, 'Default TTL should not exceed 7 days'),
-  checkpointInterval: z.number().int().min(1, 'Checkpoint interval must be at least 1').max(1000, 'Checkpoint interval should not exceed 1000'),
-  maxEventsPerSession: z.number().int().min(10, 'Max events per session must be at least 10').max(100000, 'Max events per session should not exceed 100,000'),
-  graceTTL: z.number().int().min(60, 'Grace TTL must be at least 60 seconds').max(3600, 'Grace TTL should not exceed 1 hour'),
+  defaultTTL: z
+    .number()
+    .int()
+    .min(60, 'Default TTL must be at least 60 seconds')
+    .max(86400 * 7, 'Default TTL should not exceed 7 days'),
+  checkpointInterval: z
+    .number()
+    .int()
+    .min(1, 'Checkpoint interval must be at least 1')
+    .max(1000, 'Checkpoint interval should not exceed 1000'),
+  maxEventsPerSession: z
+    .number()
+    .int()
+    .min(10, 'Max events per session must be at least 10')
+    .max(100000, 'Max events per session should not exceed 100,000'),
+  graceTTL: z
+    .number()
+    .int()
+    .min(60, 'Grace TTL must be at least 60 seconds')
+    .max(3600, 'Grace TTL should not exceed 1 hour'),
   enableFailureSnapshots: z.boolean(),
   pubSubChannels: PubSubChannelsSchema.optional(),
 });
 
 const SessionCreationOptionsSchema = z.object({
-  ttl: z.number().int().min(60).max(86400 * 7).optional(),
+  ttl: z
+    .number()
+    .int()
+    .min(60)
+    .max(86400 * 7)
+    .optional(),
   metadata: z.record(z.any()).optional(),
   priority: z.enum(['low', 'normal', 'high']).optional(),
   tags: z.array(z.string()).optional(),
@@ -119,6 +123,11 @@ export class SessionConfigValidator {
           code: 'INVALID_FORMAT',
         });
       }
+    }
+
+    // Bail out early if schema validation failed
+    if (!result.valid) {
+      return result;
     }
 
     // Runtime validation
@@ -162,7 +171,9 @@ export class SessionConfigValidator {
   /**
    * Validate environment setup
    */
-  async validateEnvironment(environment: 'development' | 'staging' | 'production'): Promise<EnvironmentValidation> {
+  async validateEnvironment(
+    environment: 'development' | 'staging' | 'production'
+  ): Promise<EnvironmentValidation> {
     const recommendations: Recommendation[] = [];
 
     // Check Node.js version
@@ -172,7 +183,8 @@ export class SessionConfigValidator {
     if (nodeMajorVersion < 18) {
       recommendations.push({
         category: 'security',
-        message: 'Node.js version is outdated. Consider upgrading to Node.js 18 or later',
+        message:
+          'Node.js version is outdated. Consider upgrading to Node.js 18 or later',
         priority: 'medium',
         action: 'Upgrade Node.js to the latest LTS version',
       });
@@ -191,7 +203,8 @@ export class SessionConfigValidator {
           if (redisMajorVersion < 6) {
             recommendations.push({
               category: 'performance',
-              message: 'Redis version is outdated. Consider upgrading to Redis 6 or later for better performance',
+              message:
+                'Redis version is outdated. Consider upgrading to Redis 6 or later for better performance',
               priority: 'medium',
               action: 'Upgrade Redis to version 6 or later',
             });
@@ -212,10 +225,12 @@ export class SessionConfigValidator {
     const memoryAvailable = memoryUsage.heapTotal;
 
     if (environment === 'production') {
-      if (memoryAvailable < 512 * 1024 * 1024) { // 512MB
+      if (memoryAvailable < 512 * 1024 * 1024) {
+        // 512MB
         recommendations.push({
           category: 'performance',
-          message: 'Available memory may be insufficient for production workloads',
+          message:
+            'Available memory may be insufficient for production workloads',
           priority: 'high',
           action: 'Increase available memory to at least 1GB for production',
         });
@@ -231,7 +246,8 @@ export class SessionConfigValidator {
         },
         {
           category: 'reliability',
-          message: 'Enable Redis persistence (RDB and/or AOF) for data durability',
+          message:
+            'Enable Redis persistence (RDB and/or AOF) for data durability',
           priority: 'high',
           action: 'Configure Redis persistence settings',
         },
@@ -245,7 +261,8 @@ export class SessionConfigValidator {
     } else if (environment === 'development') {
       recommendations.push({
         category: 'performance',
-        message: 'Consider using shorter TTLs in development to reduce memory usage',
+        message:
+          'Consider using shorter TTLs in development to reduce memory usage',
         priority: 'low',
         action: 'Set defaultTTL to 300-600 seconds for development',
       });
@@ -263,7 +280,9 @@ export class SessionConfigValidator {
   /**
    * Validate Redis connection
    */
-  async validateRedisConnection(config: RedisConfig): Promise<ValidationResult> {
+  async validateRedisConnection(
+    config: RedisConfig
+  ): Promise<ValidationResult> {
     const result: ValidationResult = {
       valid: true,
       errors: [],
@@ -296,7 +315,8 @@ export class SessionConfigValidator {
       if (value !== 'test') {
         result.errors.push({
           field: 'redis.connection',
-          message: 'Redis connection test failed - could not read/write test data',
+          message:
+            'Redis connection test failed - could not read/write test data',
           code: 'CONNECTION_TEST_FAILED',
         });
         result.valid = false;
@@ -319,7 +339,9 @@ export class SessionConfigValidator {
           if (memoryUsagePercent > 80) {
             result.warnings.push({
               field: 'redis.memory',
-              message: `Redis memory usage is at ${memoryUsagePercent.toFixed(1)}%`,
+              message: `Redis memory usage is at ${memoryUsagePercent.toFixed(
+                1
+              )}%`,
               value: memoryUsagePercent,
               impact: 'high',
             });
@@ -328,15 +350,19 @@ export class SessionConfigValidator {
       }
 
       // Check Redis configuration
-      await this.validateRedisConfiguration(testClient, result);
+      await this.validateRedisConfiguration(
+        testClient as RedisClientType,
+        result
+      );
 
       await testClient.quit();
-
     } catch (error) {
       result.valid = false;
       result.errors.push({
         field: 'redis.connection',
-        message: `Failed to connect to Redis: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to connect to Redis: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         code: 'CONNECTION_FAILED',
       });
     }
@@ -347,7 +373,9 @@ export class SessionConfigValidator {
   /**
    * Validate production readiness
    */
-  async validateProductionReadiness(config: SessionManagerConfig): Promise<ValidationResult> {
+  async validateProductionReadiness(
+    config: SessionManagerConfig
+  ): Promise<ValidationResult> {
     const result: ValidationResult = {
       valid: true,
       errors: [],
@@ -356,31 +384,38 @@ export class SessionConfigValidator {
     };
 
     // Check TTL configuration
-    if (config.defaultTTL < 3600) { // 1 hour
+    const defaultTTL = config.defaultTTL;
+    if (typeof defaultTTL === 'number' && defaultTTL < 3600) {
+      // 1 hour
       result.warnings.push({
         field: 'defaultTTL',
         message: 'Default TTL is quite short for production use',
-        value: config.defaultTTL,
+        value: defaultTTL,
         impact: 'medium',
       });
     }
 
     // Check checkpoint interval
-    if (config.checkpointInterval > 100) {
+    const checkpointInterval = config.checkpointInterval;
+    if (typeof checkpointInterval === 'number' && checkpointInterval > 100) {
       result.warnings.push({
         field: 'checkpointInterval',
         message: 'Checkpoint interval is high, may impact recovery time',
-        value: config.checkpointInterval,
+        value: checkpointInterval,
         impact: 'medium',
       });
     }
 
     // Check max events per session
-    if (config.maxEventsPerSession > 10000) {
+    const maxEventsPerSession = config.maxEventsPerSession;
+    if (
+      typeof maxEventsPerSession === 'number' &&
+      maxEventsPerSession > 10000
+    ) {
       result.warnings.push({
         field: 'maxEventsPerSession',
         message: 'High max events per session may impact memory usage',
-        value: config.maxEventsPerSession,
+        value: maxEventsPerSession,
         impact: 'medium',
       });
     }
@@ -420,7 +455,10 @@ export class SessionConfigValidator {
   /**
    * Perform runtime validation
    */
-  private async performRuntimeValidation(config: any, result: ValidationResult): Promise<void> {
+  private async performRuntimeValidation(
+    config: SessionManagerConfig,
+    result: ValidationResult
+  ): Promise<void> {
     // Validate Redis connection if client is available
     if (this.redis) {
       try {
@@ -439,7 +477,8 @@ export class SessionConfigValidator {
     const memoryUsage = process.memoryUsage();
     const heapUsedMB = memoryUsage.heapUsed / 1024 / 1024;
 
-    if (heapUsedMB > 500) { // 500MB
+    if (heapUsedMB > 500) {
+      // 500MB
       result.warnings.push({
         field: 'system.memory',
         message: 'High memory usage detected',
@@ -452,33 +491,43 @@ export class SessionConfigValidator {
   /**
    * Perform performance validation
    */
-  private performPerformanceValidation(config: any, result: ValidationResult): void {
+  private performPerformanceValidation(
+    config: SessionManagerConfig,
+    result: ValidationResult
+  ): void {
     // TTL recommendations
-    if (config.defaultTTL > 86400 * 3) { // 3 days
+    const defaultTTL = config.defaultTTL;
+    if (typeof defaultTTL === 'number' && defaultTTL > 86400 * 3) {
+      // 3 days
       result.warnings.push({
         field: 'defaultTTL',
         message: 'Very long default TTL may impact memory usage',
-        value: config.defaultTTL,
+        value: defaultTTL,
         impact: 'medium',
       });
     }
 
     // Checkpoint interval recommendations
-    if (config.checkpointInterval < 5) {
+    const checkpointInterval = config.checkpointInterval;
+    if (typeof checkpointInterval === 'number' && checkpointInterval < 5) {
       result.warnings.push({
         field: 'checkpointInterval',
         message: 'Very frequent checkpoints may impact performance',
-        value: config.checkpointInterval,
+        value: checkpointInterval,
         impact: 'medium',
       });
     }
 
     // Max events validation
-    if (config.maxEventsPerSession > 50000) {
+    const maxEventsPerSession = config.maxEventsPerSession;
+    if (
+      typeof maxEventsPerSession === 'number' &&
+      maxEventsPerSession > 50000
+    ) {
       result.warnings.push({
         field: 'maxEventsPerSession',
         message: 'Very high max events may cause memory issues',
-        value: config.maxEventsPerSession,
+        value: maxEventsPerSession,
         impact: 'high',
       });
     }
@@ -487,12 +536,16 @@ export class SessionConfigValidator {
   /**
    * Perform security validation
    */
-  private performSecurityValidation(config: any, result: ValidationResult): void {
+  private performSecurityValidation(
+    config: SessionManagerConfig,
+    result: ValidationResult
+  ): void {
     // Redis security checks
     if (config.redis.host === '0.0.0.0') {
       result.warnings.push({
         field: 'redis.host',
-        message: 'Redis host set to bind all interfaces, ensure firewall is configured',
+        message:
+          'Redis host set to bind all interfaces, ensure firewall is configured',
         value: config.redis.host,
         impact: 'high',
       });
@@ -507,7 +560,7 @@ export class SessionConfigValidator {
     }
 
     // Pub/sub channel security
-    if (config.pubSubChannels && config.pubSubChannels.global === 'global') {
+    if (config.pubSubChannels?.global === 'global') {
       result.warnings.push({
         field: 'pubSubChannels.global',
         message: 'Generic pub/sub channel name may cause conflicts',
@@ -520,9 +573,13 @@ export class SessionConfigValidator {
   /**
    * Generate recommendations
    */
-  private generateRecommendations(config: any, result: ValidationResult): void {
+  private generateRecommendations(
+    config: SessionManagerConfig,
+    result: ValidationResult
+  ): void {
     // Performance recommendations
-    if (config.defaultTTL < 1800) {
+    const defaultTTL = config.defaultTTL;
+    if (defaultTTL === undefined || defaultTTL < 1800) {
       result.recommendations.push({
         category: 'performance',
         message: 'Consider increasing default TTL to reduce Redis memory churn',
@@ -549,7 +606,8 @@ export class SessionConfigValidator {
     });
 
     // Cost optimization
-    if (config.maxEventsPerSession > 1000) {
+    const maxEventsPerSession = config.maxEventsPerSession;
+    if (typeof maxEventsPerSession === 'number' && maxEventsPerSession > 1000) {
       result.recommendations.push({
         category: 'cost',
         message: 'High max events per session increases memory costs',
@@ -562,22 +620,22 @@ export class SessionConfigValidator {
   /**
    * Validate Redis configuration
    */
-  private async validateRedisConfiguration(client: RedisClientType, result: ValidationResult): Promise<void> {
+  private async validateRedisConfiguration(
+    client: RedisClientType,
+    result: ValidationResult
+  ): Promise<void> {
     try {
       // Check Redis configuration
       const configs = await client.configGet('*');
-      const configMap = new Map();
-
-      for (let i = 0; i < configs.length; i += 2) {
-        configMap.set(configs[i], configs[i + 1]);
-      }
+      const configMap = new Map(Object.entries(configs));
 
       // Check maxmemory policy
       const maxMemoryPolicy = configMap.get('maxmemory-policy');
       if (maxMemoryPolicy === 'noeviction') {
         result.warnings.push({
           field: 'redis.maxmemory-policy',
-          message: 'Redis maxmemory-policy is set to noeviction, may cause out of memory errors',
+          message:
+            'Redis maxmemory-policy is set to noeviction, may cause out of memory errors',
           value: maxMemoryPolicy,
           impact: 'high',
         });
@@ -588,11 +646,11 @@ export class SessionConfigValidator {
       if (!save || save === '') {
         result.warnings.push({
           field: 'redis.save',
-          message: 'Redis persistence is disabled, data will be lost on restart',
+          message:
+            'Redis persistence is disabled, data will be lost on restart',
           impact: 'high',
         });
       }
-
     } catch (error) {
       result.warnings.push({
         field: 'redis.config',
@@ -606,10 +664,11 @@ export class SessionConfigValidator {
    * Transform Zod errors to validation errors
    */
   private transformZodErrors(zodError: z.ZodError): ValidationError[] {
-    return zodError.errors.map(error => ({
+    return zodError.errors.map((error) => ({
       field: error.path.join('.'),
       message: error.message,
-      value: error.code === 'invalid_type' ? (error as any).received : undefined,
+      value:
+        error.code === 'invalid_type' ? (error as any).received : undefined,
       code: error.code.toUpperCase(),
     }));
   }

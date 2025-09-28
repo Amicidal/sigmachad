@@ -3,135 +3,43 @@
  * Central orchestrator for graph synchronization operations
  */
 
-import { EventEmitter } from "events";
-import crypto from "crypto";
-import { KnowledgeGraphService } from "@memento/knowledge";
-import { ASTParser } from "@memento/knowledge";
-import { DatabaseService } from "@memento/core";
-import { FileChange } from "@memento/core";
+import { EventEmitter } from 'events';
+import crypto from 'crypto';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { ASTParser } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database';
+import { FileChange } from '@memento/shared-types';
+import { GraphRelationship, RelationshipType } from '@memento/graph';
+import { TimeRangeParams } from '@memento/shared-types';
 import {
-  GraphRelationship,
-  RelationshipType,
-} from "@memento/graph";
-import { TimeRangeParams } from "@memento/core";
-import { GitService } from "../scm/GitService.js";
-import {
-  ConflictResolution as ConflictResolutionService,
+  SyncOperation,
+  SyncError,
+  SyncOptions,
+  SessionEventKind,
   Conflict,
-} from "../scm/ConflictResolution.js";
-import { RollbackCapabilities } from "../scm/RollbackCapabilities.js";
+  ConflictResolution,
+  ConflictResolutionResult,
+  SessionStreamPayload,
+  SessionStreamEvent,
+  CheckpointMetricsSnapshot,
+  OperationCancelledError,
+  SessionSequenceTrackingState,
+} from '@memento/shared-types';
+import { GitService } from '../scm/GitService.js';
+import { ConflictResolution as ConflictResolutionService } from '../scm/ConflictResolution.js';
+import { RollbackCapabilities } from '../scm/RollbackCapabilities.js';
 import {
   SessionCheckpointJobRunner,
-  type SessionCheckpointJobMetrics,
   type SessionCheckpointJobSnapshot,
-} from "@memento/jobs";
-import type { SessionCheckpointJobOptions } from "@memento/jobs";
-import { PostgresSessionCheckpointJobStore } from "@memento/jobs";
-import { canonicalRelationshipId } from "@memento/core";
+} from '@memento/jobs';
+import type {
+  SessionCheckpointJobMetrics,
+  SessionCheckpointJobOptions,
+} from '@memento/shared-types';
+import { PostgresSessionCheckpointJobStore } from '@memento/jobs';
+import { canonicalRelationshipId } from '@memento/shared-types';
 
-export interface SyncOperation {
-  id: string;
-  type: "full" | "incremental" | "partial";
-  status: "pending" | "running" | "completed" | "failed" | "rolled_back";
-  startTime: Date;
-  endTime?: Date;
-  filesProcessed: number;
-  entitiesCreated: number;
-  entitiesUpdated: number;
-  entitiesDeleted: number;
-  relationshipsCreated: number;
-  relationshipsUpdated: number;
-  relationshipsDeleted: number;
-  errors: SyncError[];
-  conflicts: Conflict[];
-  rollbackPoint?: string;
-}
-
-export interface SyncError {
-  file: string;
-  type:
-    | "parse"
-    | "database"
-    | "conflict"
-    | "unknown"
-    | "rollback"
-    | "cancelled"
-    | "capability";
-  message: string;
-  timestamp: Date;
-  recoverable: boolean;
-}
-
-export type SyncConflict = Conflict;
-
-export interface SyncOptions {
-  force?: boolean;
-  includeEmbeddings?: boolean;
-  maxConcurrency?: number;
-  timeout?: number;
-  rollbackOnError?: boolean;
-  conflictResolution?: "overwrite" | "merge" | "skip" | "manual";
-  batchSize?: number;
-}
-
-export type SessionEventKind =
-  | "session_started"
-  | "session_keepalive"
-  | "session_relationships"
-  | "session_checkpoint"
-  | "session_teardown";
-
-export interface SessionStreamPayload {
-  changeId?: string;
-  relationships?: Array<{
-    id: string;
-    type: string;
-    fromEntityId?: string;
-    toEntityId?: string;
-    metadata?: Record<string, unknown> | null;
-  }>;
-  checkpointId?: string;
-  seeds?: string[];
-  status?:
-    | SyncOperation["status"]
-    | "failed"
-    | "cancelled"
-    | "queued"
-    | "manual_intervention";
-  errors?: SyncError[];
-  processedChanges?: number;
-  totalChanges?: number;
-  details?: Record<string, unknown>;
-}
-
-export interface SessionStreamEvent {
-  type: SessionEventKind;
-  sessionId: string;
-  operationId: string;
-  timestamp: string;
-  payload?: SessionStreamPayload;
-}
-
-export interface CheckpointMetricsSnapshot {
-  event: string;
-  metrics: SessionCheckpointJobMetrics;
-  deadLetters: SessionCheckpointJobSnapshot[];
-  context?: Record<string, unknown>;
-  timestamp: string;
-}
-
-class OperationCancelledError extends Error {
-  constructor(operationId: string) {
-    super(`Operation ${operationId} cancelled`);
-    this.name = "OperationCancelledError";
-  }
-}
-
-interface SessionSequenceTrackingState {
-  lastSequence: number | null;
-  lastType: RelationshipType | null;
-  perType: Map<RelationshipType | string, number>;
-}
+// Types are now imported from @memento/shared-types
 
 export class SynchronizationCoordinator extends EventEmitter {
   private activeOperations = new Map<string, SyncOperation>();
@@ -151,7 +59,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   // Collect relationships that couldn't be resolved during per-file processing
   private unresolvedRelationships: Array<{
-    relationship: import("../../models/relationships.js").GraphRelationship;
+    relationship: import('../../models/relationships.js').GraphRelationship;
     sourceFilePath?: string;
   }> = [];
 
@@ -176,8 +84,8 @@ export class SynchronizationCoordinator extends EventEmitter {
   private checkpointJobRunner: SessionCheckpointJobRunner;
 
   private anomalyResolutionMode = (
-    process.env.ANOMALY_RESOLUTION_MODE ?? "warn"
-  ).toLowerCase() as "skip" | "warn" | "process";
+    process.env.ANOMALY_RESOLUTION_MODE ?? 'warn'
+  ).toLowerCase() as 'skip' | 'warn' | 'process';
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -203,9 +111,9 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   private setupEventHandlers(): void {
-    this.on("operationCompleted", this.handleOperationCompleted.bind(this));
-    this.on("operationFailed", this.handleOperationFailed.bind(this));
-    this.on("conflictDetected", this.handleConflictDetected.bind(this));
+    this.on('operationCompleted', this.handleOperationCompleted.bind(this));
+    this.on('operationFailed', this.handleOperationFailed.bind(this));
+    this.on('conflictDetected', this.handleConflictDetected.bind(this));
   }
 
   private nextSessionSequence(sessionId: string): number {
@@ -217,7 +125,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   private createCheckpointJobOptions(): SessionCheckpointJobOptions {
     const options: SessionCheckpointJobOptions = {};
-    if (!this.dbService || typeof this.dbService.isInitialized !== "function") {
+    if (!this.dbService || typeof this.dbService.isInitialized !== 'function') {
       return options;
     }
     if (!this.dbService.isInitialized()) {
@@ -225,7 +133,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     }
     try {
       const postgresService = this.dbService.getPostgreSQLService();
-      if (postgresService && typeof postgresService.query === "function") {
+      if (postgresService && typeof postgresService.query === 'function') {
         options.persistence = new PostgresSessionCheckpointJobStore(
           postgresService
         );
@@ -244,7 +152,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     ) {
       return;
     }
-    if (!this.dbService || typeof this.dbService.isInitialized !== "function") {
+    if (!this.dbService || typeof this.dbService.isInitialized !== 'function') {
       return;
     }
     if (!this.dbService.isInitialized()) {
@@ -253,14 +161,14 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     try {
       const postgresService = this.dbService.getPostgreSQLService();
-      if (!postgresService || typeof postgresService.query !== "function") {
+      if (!postgresService || typeof postgresService.query !== 'function') {
         return;
       }
 
       const store = new PostgresSessionCheckpointJobStore(postgresService);
       await this.checkpointJobRunner.attachPersistence(store);
-      this.emitCheckpointMetrics("persistence_attached", {
-        store: "postgres",
+      this.emitCheckpointMetrics('persistence_attached', {
+        store: 'postgres',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -272,7 +180,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     sessionId: string,
     seedEntityIds: string[],
     options?: {
-      reason?: "daily" | "incident" | "manual";
+      reason?: 'daily' | 'incident' | 'manual';
       hopCount?: number;
       eventId?: string;
       actor?: string;
@@ -285,12 +193,12 @@ export class SynchronizationCoordinator extends EventEmitter {
     | { success: false; error: string }
   > {
     if (!seedEntityIds || seedEntityIds.length === 0) {
-      return { success: false, error: "No checkpoint seeds provided" };
+      return { success: false, error: 'No checkpoint seeds provided' };
     }
 
     const dedupedSeeds = Array.from(new Set(seedEntityIds.filter(Boolean)));
     if (dedupedSeeds.length === 0) {
-      return { success: false, error: "No valid checkpoint seeds resolved" };
+      return { success: false, error: 'No valid checkpoint seeds resolved' };
     }
 
     try {
@@ -299,17 +207,17 @@ export class SynchronizationCoordinator extends EventEmitter {
       const jobId = await this.checkpointJobRunner.enqueue({
         sessionId,
         seedEntityIds: dedupedSeeds,
-        reason: options?.reason ?? "manual",
+        reason: options?.reason ?? 'manual',
         hopCount: Math.max(1, Math.min(options?.hopCount ?? 2, 5)),
         sequenceNumber,
         operationId: options?.operationId,
         eventId: options?.eventId,
         actor: options?.actor,
         annotations: options?.annotations,
-        triggeredBy: "SynchronizationCoordinator",
+        triggeredBy: 'SynchronizationCoordinator',
         window: options?.window,
       });
-      this.emit("checkpointScheduled", {
+      this.emit('checkpointScheduled', {
         sessionId,
         sequenceNumber,
         seeds: dedupedSeeds.length,
@@ -324,7 +232,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       console.warn(
         `⚠️ Failed to enqueue session checkpoint job for ${sessionId}: ${message}`
       );
-      this.emit("checkpointScheduleFailed", { sessionId, error: message });
+      this.emit('checkpointScheduleFailed', { sessionId, error: message });
       return { success: false, error: message };
     }
   }
@@ -333,7 +241,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     sessionId: string;
     seeds: string[];
     options?: {
-      reason?: "daily" | "incident" | "manual";
+      reason?: 'daily' | 'incident' | 'manual';
       hopCount?: number;
       operationId?: string;
       eventId?: string;
@@ -357,7 +265,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     if (checkpointResult.success) {
       params.publish({
-        status: "queued",
+        status: 'queued',
         checkpointId: undefined,
         seeds: params.seeds,
         processedChanges: params.processedChanges,
@@ -371,29 +279,29 @@ export class SynchronizationCoordinator extends EventEmitter {
     }
 
     const errorMessage =
-      checkpointResult.error || "Failed to schedule checkpoint";
+      checkpointResult.error || 'Failed to schedule checkpoint';
     try {
       await this.kgService.annotateSessionRelationshipsWithCheckpoint(
         params.sessionId,
         params.seeds,
         {
-          status: "manual_intervention",
+          status: 'manual_intervention',
           reason: params.options?.reason,
           hopCount: params.options?.hopCount,
           seedEntityIds: params.seeds,
           jobId: undefined,
           error: errorMessage,
-          triggeredBy: "SynchronizationCoordinator",
+          triggeredBy: 'SynchronizationCoordinator',
         }
       );
     } catch (error) {
       console.warn(
-        "⚠️ Failed to annotate session relationships after checkpoint enqueue failure",
+        '⚠️ Failed to annotate session relationships after checkpoint enqueue failure',
         error instanceof Error ? error.message : error
       );
     }
     params.publish({
-      status: "manual_intervention",
+      status: 'manual_intervention',
       checkpointId: undefined,
       seeds: params.seeds,
       processedChanges: params.processedChanges,
@@ -401,7 +309,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       errors: [
         {
           file: params.sessionId,
-          type: "checkpoint",
+          type: 'checkpoint',
           message: errorMessage,
           timestamp: new Date(),
           recoverable: false,
@@ -415,17 +323,17 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   private bindCheckpointJobEvents(): void {
-    this.checkpointJobRunner.on("jobEnqueued", ({ jobId, payload }) => {
-      this.emitCheckpointMetrics("job_enqueued", {
+    this.checkpointJobRunner.on('jobEnqueued', ({ jobId, payload }) => {
+      this.emitCheckpointMetrics('job_enqueued', {
         jobId,
         sessionId: payload?.sessionId,
       });
     });
 
     this.checkpointJobRunner.on(
-      "jobStarted",
+      'jobStarted',
       ({ jobId, attempts, payload }) => {
-        this.emitCheckpointMetrics("job_started", {
+        this.emitCheckpointMetrics('job_started', {
           jobId,
           attempts,
           sessionId: payload?.sessionId,
@@ -434,9 +342,9 @@ export class SynchronizationCoordinator extends EventEmitter {
     );
 
     this.checkpointJobRunner.on(
-      "jobAttemptFailed",
+      'jobAttemptFailed',
       ({ jobId, attempts, error, payload }) => {
-        this.emitCheckpointMetrics("job_attempt_failed", {
+        this.emitCheckpointMetrics('job_attempt_failed', {
           jobId,
           attempts,
           error,
@@ -446,18 +354,18 @@ export class SynchronizationCoordinator extends EventEmitter {
     );
 
     this.checkpointJobRunner.on(
-      "jobCompleted",
+      'jobCompleted',
       ({ payload, checkpointId, jobId, attempts }) => {
         const operationId = payload.operationId ?? payload.sessionId;
         this.emitSessionEvent({
-          type: "session_checkpoint",
+          type: 'session_checkpoint',
           sessionId: payload.sessionId,
           operationId,
           timestamp: new Date().toISOString(),
           payload: {
             checkpointId,
             seeds: payload.seedEntityIds,
-            status: "completed",
+            status: 'completed',
             details: {
               jobId,
               attempts,
@@ -465,7 +373,7 @@ export class SynchronizationCoordinator extends EventEmitter {
           },
         });
 
-        this.emitCheckpointMetrics("job_completed", {
+        this.emitCheckpointMetrics('job_completed', {
           jobId,
           attempts,
           sessionId: payload.sessionId,
@@ -475,22 +383,22 @@ export class SynchronizationCoordinator extends EventEmitter {
     );
 
     this.checkpointJobRunner.on(
-      "jobFailed",
+      'jobFailed',
       ({ payload, jobId, attempts, error }) => {
         const operationId = payload.operationId ?? payload.sessionId;
         this.emitSessionEvent({
-          type: "session_checkpoint",
+          type: 'session_checkpoint',
           sessionId: payload.sessionId,
           operationId,
           timestamp: new Date().toISOString(),
           payload: {
             checkpointId: undefined,
             seeds: payload.seedEntityIds,
-            status: "manual_intervention",
+            status: 'manual_intervention',
             errors: [
               {
                 file: payload.sessionId,
-                type: "unknown",
+                type: 'unknown',
                 message: error,
                 timestamp: new Date(),
                 recoverable: false,
@@ -503,7 +411,7 @@ export class SynchronizationCoordinator extends EventEmitter {
           },
         });
 
-        this.emitCheckpointMetrics("job_failed", {
+        this.emitCheckpointMetrics('job_failed', {
           jobId,
           attempts,
           sessionId: payload.sessionId,
@@ -513,9 +421,9 @@ export class SynchronizationCoordinator extends EventEmitter {
     );
 
     this.checkpointJobRunner.on(
-      "jobDeadLettered",
+      'jobDeadLettered',
       ({ jobId, attempts, error, payload }) => {
-        this.emitCheckpointMetrics("job_dead_lettered", {
+        this.emitCheckpointMetrics('job_dead_lettered', {
           jobId,
           attempts,
           error,
@@ -538,7 +446,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       batchSize?: number;
     };
     if (
-      typeof tuning.maxConcurrency === "number" &&
+      typeof tuning.maxConcurrency === 'number' &&
       isFinite(tuning.maxConcurrency)
     ) {
       merged.maxConcurrency = Math.max(
@@ -546,14 +454,14 @@ export class SynchronizationCoordinator extends EventEmitter {
         Math.min(Math.floor(tuning.maxConcurrency), 64)
       );
     }
-    if (typeof tuning.batchSize === "number" && isFinite(tuning.batchSize)) {
+    if (typeof tuning.batchSize === 'number' && isFinite(tuning.batchSize)) {
       merged.batchSize = Math.max(
         1,
         Math.min(Math.floor(tuning.batchSize), 5000)
       );
     }
     this.tuning.set(operationId, merged);
-    this.emit("syncProgress", op, { phase: "tuning_updated", progress: 0 });
+    this.emit('syncProgress', op, { phase: 'tuning_updated', progress: 0 });
     return true;
   }
 
@@ -570,9 +478,9 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   private ensureDatabaseReady(): void {
     const hasChecker =
-      typeof (this.dbService as any)?.isInitialized === "function";
+      typeof (this.dbService as any)?.isInitialized === 'function';
     if (!hasChecker || !this.dbService.isInitialized()) {
-      throw new Error("Database not initialized");
+      throw new Error('Database not initialized');
     }
   }
 
@@ -593,37 +501,37 @@ export class SynchronizationCoordinator extends EventEmitter {
       this.sessionSequenceState.set(sessionId, state);
     }
 
-    let reason: "duplicate" | "out_of_order" | null = null;
+    let reason: 'duplicate' | 'out_of_order' | null = null;
     let previousSequence: number | null = null;
     let previousType: RelationshipType | null = null;
 
     if (state.lastSequence !== null) {
       if (sequenceNumber === state.lastSequence) {
-        reason = "duplicate";
+        reason = 'duplicate';
         previousSequence = state.lastSequence;
         previousType = state.lastType;
       } else if (sequenceNumber < state.lastSequence) {
-        reason = "out_of_order";
+        reason = 'out_of_order';
         previousSequence = state.lastSequence;
         previousType = state.lastType;
       }
     }
 
     const perTypePrevious = state.perType.get(type);
-    if (!reason && typeof perTypePrevious === "number") {
+    if (!reason && typeof perTypePrevious === 'number') {
       if (sequenceNumber === perTypePrevious) {
-        reason = "duplicate";
+        reason = 'duplicate';
         previousSequence = perTypePrevious;
         previousType = type;
       } else if (sequenceNumber < perTypePrevious) {
-        reason = "out_of_order";
+        reason = 'out_of_order';
         previousSequence = perTypePrevious;
         previousType = type;
       }
     }
 
     if (reason) {
-      this.emit("sessionSequenceAnomaly", {
+      this.emit('sessionSequenceAnomaly', {
         sessionId,
         type,
         sequenceNumber,
@@ -634,8 +542,8 @@ export class SynchronizationCoordinator extends EventEmitter {
         previousType: previousType ?? null,
       });
 
-      const skipModes = ["duplicate", "out_of_order"];
-      if (this.anomalyResolutionMode === "skip" && skipModes.includes(reason)) {
+      const skipModes = ['duplicate', 'out_of_order'];
+      if (this.anomalyResolutionMode === 'skip' && skipModes.includes(reason)) {
         return { shouldSkip: true, reason };
       }
     }
@@ -665,11 +573,11 @@ export class SynchronizationCoordinator extends EventEmitter {
     if (value instanceof Date) {
       return value.toISOString();
     }
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       const parsed = new Date(value);
       return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
     }
-    if (typeof value === "number") {
+    if (typeof value === 'number') {
       const parsed = new Date(value);
       return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
     }
@@ -692,7 +600,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       result.sessionId = asAny.sessionId;
     }
 
-    if (typeof asAny.sequenceNumber === "number") {
+    if (typeof asAny.sequenceNumber === 'number') {
       result.sequenceNumber = asAny.sequenceNumber;
     }
 
@@ -711,11 +619,11 @@ export class SynchronizationCoordinator extends EventEmitter {
       result.lastModified = modifiedIso;
     }
 
-    if (typeof asAny.eventId === "string") {
+    if (typeof asAny.eventId === 'string') {
       result.eventId = asAny.eventId;
     }
 
-    if (typeof asAny.actor === "string") {
+    if (typeof asAny.actor === 'string') {
       result.actor = asAny.actor;
     }
 
@@ -740,10 +648,10 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   private emitSessionEvent(event: SessionStreamEvent): void {
     try {
-      this.emit("sessionEvent", event);
+      this.emit('sessionEvent', event);
     } catch (error) {
       console.warn(
-        "Failed to emit session event",
+        'Failed to emit session event',
         error instanceof Error ? error.message : error
       );
     }
@@ -772,16 +680,16 @@ export class SynchronizationCoordinator extends EventEmitter {
       timestamp: new Date().toISOString(),
     };
     try {
-      this.emit("checkpointMetricsUpdated", payload);
+      this.emit('checkpointMetricsUpdated', payload);
     } catch (error) {
       console.warn(
-        "Failed to emit checkpoint metrics",
+        'Failed to emit checkpoint metrics',
         error instanceof Error ? error.message : String(error)
       );
     }
 
     try {
-      console.log("[session.checkpoint.metrics]", {
+      console.log('[session.checkpoint.metrics]', {
         event,
         enqueued: snapshot.metrics.enqueued,
         completed: snapshot.metrics.completed,
@@ -804,12 +712,12 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Mark all active operations as completed to simulate stop
     const now = new Date();
     for (const [id, op] of this.activeOperations.entries()) {
-      if (op.status === "running" || op.status === "pending") {
-        op.status = "completed";
+      if (op.status === 'running' || op.status === 'pending') {
+        op.status = 'completed';
         op.endTime = now;
         this.completedOperations.set(id, op);
         this.activeOperations.delete(id);
-        this.emit("operationCompleted", op);
+        this.emit('operationCompleted', op);
       }
     }
     // Clear queued operations
@@ -838,9 +746,9 @@ export class SynchronizationCoordinator extends EventEmitter {
       options.includeEmbeddings = false;
     }
     const operation: SyncOperation = {
-      id: this.nextOperationId("full_sync"),
-      type: "full",
-      status: "pending",
+      id: this.nextOperationId('full_sync'),
+      type: 'full',
+      status: 'pending',
       startTime: new Date(),
       filesProcessed: 0,
       entitiesCreated: 0,
@@ -861,19 +769,19 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     if (options.rollbackOnError) {
       if (!this.rollbackCapabilities) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "rollback",
+          file: 'coordinator',
+          type: 'rollback',
           message:
-            "Rollback requested but rollback capabilities are not configured",
+            'Rollback requested but rollback capabilities are not configured',
           timestamp: new Date(),
           recoverable: false,
         });
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.emit('operationFailed', operation);
         return operation.id;
       }
       try {
@@ -883,27 +791,27 @@ export class SynchronizationCoordinator extends EventEmitter {
         );
         operation.rollbackPoint = rollbackId;
       } catch (error) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "rollback",
+          file: 'coordinator',
+          type: 'rollback',
           message: `Failed to create rollback point: ${
-            error instanceof Error ? error.message : "unknown"
+            error instanceof Error ? error.message : 'unknown'
           }`,
           timestamp: new Date(),
           recoverable: false,
         });
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.emit('operationFailed', operation);
         return operation.id;
       }
     }
 
     this.operationQueue.push(operation);
 
-    this.emit("operationStarted", operation);
+    this.emit('operationStarted', operation);
 
     if (!this.isProcessing) {
       // Begin processing immediately to avoid pending state in edge cases
@@ -913,17 +821,17 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Guard against lingering 'pending' state under heavy load
     setTimeout(() => {
       const op = this.activeOperations.get(operation.id);
-      if (op && op.status === "pending") {
-        op.status = "failed";
+      if (op && op.status === 'pending') {
+        op.status = 'failed';
         op.endTime = new Date();
         op.errors.push({
-          file: "coordinator",
-          type: "unknown",
-          message: "Operation timed out while pending",
+          file: 'coordinator',
+          type: 'unknown',
+          message: 'Operation timed out while pending',
           timestamp: new Date(),
           recoverable: false,
         });
-        this.emit("operationFailed", op);
+        this.emit('operationFailed', op);
       }
     }, options.timeout ?? 30000);
 
@@ -936,9 +844,9 @@ export class SynchronizationCoordinator extends EventEmitter {
   ): Promise<string> {
     this.ensureDatabaseReady();
     const operation: SyncOperation = {
-      id: this.nextOperationId("incremental_sync"),
-      type: "incremental",
-      status: "pending",
+      id: this.nextOperationId('incremental_sync'),
+      type: 'incremental',
+      status: 'pending',
       startTime: new Date(),
       filesProcessed: 0,
       entitiesCreated: 0,
@@ -960,19 +868,19 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     if (options.rollbackOnError) {
       if (!this.rollbackCapabilities) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "rollback",
+          file: 'coordinator',
+          type: 'rollback',
           message:
-            "Rollback requested but rollback capabilities are not configured",
+            'Rollback requested but rollback capabilities are not configured',
           timestamp: new Date(),
           recoverable: false,
         });
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.emit('operationFailed', operation);
         return operation.id;
       }
       try {
@@ -982,27 +890,27 @@ export class SynchronizationCoordinator extends EventEmitter {
         );
         operation.rollbackPoint = rollbackId;
       } catch (error) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "rollback",
+          file: 'coordinator',
+          type: 'rollback',
           message: `Failed to create rollback point: ${
-            error instanceof Error ? error.message : "unknown"
+            error instanceof Error ? error.message : 'unknown'
           }`,
           timestamp: new Date(),
           recoverable: false,
         });
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.emit('operationFailed', operation);
         return operation.id;
       }
     }
 
     this.operationQueue.push(operation);
 
-    this.emit("operationStarted", operation);
+    this.emit('operationStarted', operation);
 
     if (!this.isProcessing) {
       // Begin processing immediately to avoid pending state in edge cases
@@ -1012,17 +920,17 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Guard against lingering 'pending' state under heavy load
     setTimeout(() => {
       const op = this.activeOperations.get(operation.id);
-      if (op && op.status === "pending") {
-        op.status = "failed";
+      if (op && op.status === 'pending') {
+        op.status = 'failed';
         op.endTime = new Date();
         op.errors.push({
-          file: "coordinator",
-          type: "unknown",
-          message: "Operation timed out while pending",
+          file: 'coordinator',
+          type: 'unknown',
+          message: 'Operation timed out while pending',
           timestamp: new Date(),
           recoverable: false,
         });
-        this.emit("operationFailed", op);
+        this.emit('operationFailed', op);
       }
     }, options.timeout ?? 30000);
 
@@ -1035,9 +943,9 @@ export class SynchronizationCoordinator extends EventEmitter {
   ): Promise<string> {
     this.ensureDatabaseReady();
     const operation: SyncOperation = {
-      id: this.nextOperationId("partial_sync"),
-      type: "partial",
-      status: "pending",
+      id: this.nextOperationId('partial_sync'),
+      type: 'partial',
+      status: 'pending',
       startTime: new Date(),
       filesProcessed: 0,
       entitiesCreated: 0,
@@ -1059,19 +967,19 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     if (options.rollbackOnError) {
       if (!this.rollbackCapabilities) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "rollback",
+          file: 'coordinator',
+          type: 'rollback',
           message:
-            "Rollback requested but rollback capabilities are not configured",
+            'Rollback requested but rollback capabilities are not configured',
           timestamp: new Date(),
           recoverable: false,
         });
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.emit('operationFailed', operation);
         return operation.id;
       }
       try {
@@ -1081,27 +989,27 @@ export class SynchronizationCoordinator extends EventEmitter {
         );
         operation.rollbackPoint = rollbackId;
       } catch (error) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "rollback",
+          file: 'coordinator',
+          type: 'rollback',
           message: `Failed to create rollback point: ${
-            error instanceof Error ? error.message : "unknown"
+            error instanceof Error ? error.message : 'unknown'
           }`,
           timestamp: new Date(),
           recoverable: false,
         });
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.emit('operationFailed', operation);
         return operation.id;
       }
     }
 
     this.operationQueue.push(operation);
 
-    this.emit("operationStarted", operation);
+    this.emit('operationStarted', operation);
 
     if (!this.isProcessing) {
       // Begin processing immediately to avoid pending state in edge cases
@@ -1111,17 +1019,17 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Guard against lingering 'pending' state under heavy load
     setTimeout(() => {
       const op = this.activeOperations.get(operation.id);
-      if (op && op.status === "pending") {
-        op.status = "failed";
+      if (op && op.status === 'pending') {
+        op.status = 'failed';
         op.endTime = new Date();
         op.errors.push({
-          file: "coordinator",
-          type: "unknown",
-          message: "Operation timed out while pending",
+          file: 'coordinator',
+          type: 'unknown',
+          message: 'Operation timed out while pending',
           timestamp: new Date(),
           recoverable: false,
         });
-        this.emit("operationFailed", op);
+        this.emit('operationFailed', op);
       }
     }, options.timeout ?? 30000);
 
@@ -1141,14 +1049,14 @@ export class SynchronizationCoordinator extends EventEmitter {
         await new Promise<void>((resolve) => this.resumeWaiters.push(resolve));
       }
       const operation = this.operationQueue.shift()!;
-      operation.status = "running";
+      operation.status = 'running';
 
       if (this.cancelledOperations.has(operation.id)) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "cancelled",
+          file: 'coordinator',
+          type: 'cancelled',
           message: `Operation ${operation.id} cancelled before execution`,
           timestamp: new Date(),
           recoverable: true,
@@ -1156,19 +1064,19 @@ export class SynchronizationCoordinator extends EventEmitter {
         this.activeOperations.delete(operation.id);
         this.completedOperations.set(operation.id, operation);
         this.cancelledOperations.delete(operation.id);
-        this.emit("operationCancelled", operation);
+        this.emit('operationCancelled', operation);
         continue;
       }
 
       try {
         switch (operation.type) {
-          case "full":
+          case 'full':
             await this.performFullSync(operation);
             break;
-          case "incremental":
+          case 'incremental':
             await this.performIncrementalSync(operation);
             break;
-          case "partial":
+          case 'partial':
             await this.performPartialSync(operation);
             break;
         }
@@ -1182,9 +1090,9 @@ export class SynchronizationCoordinator extends EventEmitter {
       } catch (error) {
         const cancelled = error instanceof OperationCancelledError;
         operation.errors.push({
-          file: "coordinator",
-          type: cancelled ? "cancelled" : "unknown",
-          message: error instanceof Error ? error.message : "Unknown error",
+          file: 'coordinator',
+          type: cancelled ? 'cancelled' : 'unknown',
+          message: error instanceof Error ? error.message : 'Unknown error',
           timestamp: new Date(),
           recoverable: cancelled,
         });
@@ -1207,7 +1115,7 @@ export class SynchronizationCoordinator extends EventEmitter {
   }
 
   private finalizeSuccessfulOperation(operation: SyncOperation): void {
-    operation.status = "completed";
+    operation.status = 'completed';
     operation.endTime = new Date();
     if (operation.rollbackPoint && this.rollbackCapabilities) {
       try {
@@ -1220,7 +1128,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     this.activeOperations.delete(operation.id);
     this.completedOperations.set(operation.id, operation);
     this.cancelledOperations.delete(operation.id);
-    this.emit("operationCompleted", operation);
+    this.emit('operationCompleted', operation);
   }
 
   private async finalizeFailedOperation(
@@ -1240,16 +1148,16 @@ export class SynchronizationCoordinator extends EventEmitter {
       operation.rollbackPoint = undefined;
     }
 
-    operation.status = "failed";
+    operation.status = 'failed';
     operation.endTime = new Date();
     this.activeOperations.delete(operation.id);
     this.completedOperations.set(operation.id, operation);
     this.cancelledOperations.delete(operation.id);
 
     if (isCancelled) {
-      this.emit("operationCancelled", operation);
+      this.emit('operationCancelled', operation);
     } else {
-      this.emit("operationFailed", operation);
+      this.emit('operationFailed', operation);
     }
   }
 
@@ -1261,9 +1169,9 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     if (!operation.rollbackPoint) {
       operation.errors.push({
-        file: "coordinator",
-        type: "rollback",
-        message: "Rollback requested but no rollback point was recorded",
+        file: 'coordinator',
+        type: 'rollback',
+        message: 'Rollback requested but no rollback point was recorded',
         timestamp: new Date(),
         recoverable: false,
       });
@@ -1272,10 +1180,10 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     if (!this.rollbackCapabilities) {
       operation.errors.push({
-        file: "coordinator",
-        type: "rollback",
+        file: 'coordinator',
+        type: 'rollback',
         message:
-          "Rollback requested but rollback capabilities are not configured",
+          'Rollback requested but rollback capabilities are not configured',
         timestamp: new Date(),
         recoverable: false,
       });
@@ -1290,8 +1198,8 @@ export class SynchronizationCoordinator extends EventEmitter {
       if (!result.success || result.errors.length > 0) {
         for (const rollbackError of result.errors) {
           operation.errors.push({
-            file: "coordinator",
-            type: "rollback",
+            file: 'coordinator',
+            type: 'rollback',
             message: `Rollback ${rollbackError.action} failed for ${rollbackError.id}: ${rollbackError.error}`,
             timestamp: new Date(),
             recoverable: rollbackError.recoverable,
@@ -1300,10 +1208,10 @@ export class SynchronizationCoordinator extends EventEmitter {
       }
     } catch (error) {
       operation.errors.push({
-        file: "coordinator",
-        type: "rollback",
+        file: 'coordinator',
+        type: 'rollback',
         message: `Rollback execution failed: ${
-          error instanceof Error ? error.message : "unknown"
+          error instanceof Error ? error.message : 'unknown'
         }`,
         timestamp: new Date(),
         recoverable: false,
@@ -1345,11 +1253,11 @@ export class SynchronizationCoordinator extends EventEmitter {
   private async performFullSync(operation: SyncOperation): Promise<void> {
     // Implementation for full synchronization
     const scanStart = new Date();
-    this.emit("syncProgress", operation, { phase: "scanning", progress: 0 });
+    this.emit('syncProgress', operation, { phase: 'scanning', progress: 0 });
 
     // Ensure a Module entity exists for the root package if applicable (best-effort)
     try {
-      const { ModuleIndexer } = await import("../knowledge/ModuleIndexer.js");
+      const { ModuleIndexer } = await import('../knowledge/ModuleIndexer.js');
       const mi = new ModuleIndexer(this.kgService);
       await mi.indexRootPackage().catch(() => {});
     } catch {}
@@ -1358,7 +1266,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     const files = await this.scanSourceFiles();
     this.ensureNotCancelled(operation);
 
-    this.emit("syncProgress", operation, { phase: "parsing", progress: 0.2 });
+    this.emit('syncProgress', operation, { phase: 'parsing', progress: 0.2 });
 
     // Local helper to cooperatively pause execution between units of work
     const awaitIfPaused = async () => {
@@ -1378,11 +1286,11 @@ export class SynchronizationCoordinator extends EventEmitter {
 
         // Build local index for this file's symbols to avoid DB lookups
         for (const ent of result.entities) {
-          if ((ent as any)?.type === "symbol") {
+          if ((ent as any)?.type === 'symbol') {
             const nm = (ent as any).name as string | undefined;
             const p = (ent as any).path as string | undefined;
             if (nm && p) {
-              const filePath = p.includes(":") ? p.split(":")[0] : p;
+              const filePath = p.includes(':') ? p.split(':')[0] : p;
               this.localSymbolIndex.set(`${filePath}:${nm}`, ent.id);
             }
           }
@@ -1402,11 +1310,11 @@ export class SynchronizationCoordinator extends EventEmitter {
           } catch (conflictError) {
             operation.errors.push({
               file,
-              type: "conflict",
+              type: 'conflict',
               message:
                 conflictError instanceof Error
                   ? conflictError.message
-                  : "Conflict detection failed",
+                  : 'Conflict detection failed',
               timestamp: new Date(),
               recoverable: true,
             });
@@ -1429,8 +1337,8 @@ export class SynchronizationCoordinator extends EventEmitter {
       } catch (error) {
         operation.errors.push({
           file,
-          type: "parse",
-          message: error instanceof Error ? error.message : "Parse error",
+          type: 'parse',
+          message: error instanceof Error ? error.message : 'Parse error',
           timestamp: new Date(),
           recoverable: true,
         });
@@ -1488,10 +1396,10 @@ export class SynchronizationCoordinator extends EventEmitter {
               operation.entitiesCreated++;
             } catch (err) {
               operation.errors.push({
-                file: (ent as any).path || "unknown",
-                type: "database",
+                file: (ent as any).path || 'unknown',
+                type: 'database',
                 message: `Entity create failed: ${
-                  err instanceof Error ? err.message : "unknown"
+                  err instanceof Error ? err.message : 'unknown'
                 }`,
                 timestamp: new Date(),
                 recoverable: true,
@@ -1532,12 +1440,12 @@ export class SynchronizationCoordinator extends EventEmitter {
             }
           } catch (relationshipError) {
             operation.errors.push({
-              file: "coordinator",
-              type: "database",
+              file: 'coordinator',
+              type: 'database',
               message: `Failed to resolve relationship: ${
                 relationshipError instanceof Error
                   ? relationshipError.message
-                  : "Unknown error"
+                  : 'Unknown error'
               }`,
               timestamp: new Date(),
               recoverable: true,
@@ -1559,10 +1467,10 @@ export class SynchronizationCoordinator extends EventEmitter {
                 operation.relationshipsCreated++;
               } catch (err) {
                 operation.errors.push({
-                  file: "coordinator",
-                  type: "database",
+                  file: 'coordinator',
+                  type: 'database',
                   message: `Failed to create relationship: ${
-                    err instanceof Error ? err.message : "unknown"
+                    err instanceof Error ? err.message : 'unknown'
                   }`,
                   timestamp: new Date(),
                   recoverable: true,
@@ -1576,16 +1484,16 @@ export class SynchronizationCoordinator extends EventEmitter {
       // Batch embeddings after entities to avoid per-entity overhead
       if (includeEmbeddings && batchEntities.length > 0) {
         if (
-          typeof (this.kgService as any).createEmbeddingsBatch === "function"
+          typeof (this.kgService as any).createEmbeddingsBatch === 'function'
         ) {
           try {
             await this.kgService.createEmbeddingsBatch(batchEntities);
           } catch (e) {
             operation.errors.push({
-              file: "coordinator",
-              type: "database",
+              file: 'coordinator',
+              type: 'database',
               message: `Batch embedding failed: ${
-                e instanceof Error ? e.message : "unknown"
+                e instanceof Error ? e.message : 'unknown'
               }`,
               timestamp: new Date(),
               recoverable: true,
@@ -1593,10 +1501,10 @@ export class SynchronizationCoordinator extends EventEmitter {
           }
         } else {
           operation.errors.push({
-            file: "coordinator",
-            type: "capability",
+            file: 'coordinator',
+            type: 'capability',
             message:
-              "Embedding batch API unavailable; skipping inline embedding",
+              'Embedding batch API unavailable; skipping inline embedding',
             timestamp: new Date(),
             recoverable: true,
           });
@@ -1609,7 +1517,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       }
 
       const progress = 0.2 + (i / files.length) * 0.8;
-      this.emit("syncProgress", operation, { phase: "parsing", progress });
+      this.emit('syncProgress', operation, { phase: 'parsing', progress });
     }
 
     // Post-pass: attempt to resolve and create any deferred relationships now that all entities exist
@@ -1621,13 +1529,13 @@ export class SynchronizationCoordinator extends EventEmitter {
       await this.kgService.finalizeScan(scanStart);
     } catch {}
 
-    this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
+    this.emit('syncProgress', operation, { phase: 'completed', progress: 1.0 });
 
     // Fire-and-forget background embeddings if they were skipped during full sync
     const pendingToEmbed: any[] = (operation as any)._embedQueue || [];
     if (
       pendingToEmbed.length > 0 &&
-      typeof (this.kgService as any).createEmbeddingsBatch === "function"
+      typeof (this.kgService as any).createEmbeddingsBatch === 'function'
     ) {
       // Run in background without blocking completion
       const chunks: any[][] = [];
@@ -1642,7 +1550,7 @@ export class SynchronizationCoordinator extends EventEmitter {
           } catch (e) {
             // log and continue
             try {
-              console.warn("Background embedding batch failed:", e);
+              console.warn('Background embedding batch failed:', e);
             } catch {}
           }
         }
@@ -1654,9 +1562,9 @@ export class SynchronizationCoordinator extends EventEmitter {
       })().catch(() => {});
     } else if (pendingToEmbed.length > 0) {
       operation.errors.push({
-        file: "coordinator",
-        type: "capability",
-        message: "Embedding batch API unavailable; queued embeddings skipped",
+        file: 'coordinator',
+        type: 'capability',
+        message: 'Embedding batch API unavailable; queued embeddings skipped',
         timestamp: new Date(),
         recoverable: true,
       });
@@ -1668,8 +1576,8 @@ export class SynchronizationCoordinator extends EventEmitter {
   ): Promise<void> {
     // Implementation for incremental synchronization
     const scanStart = new Date();
-    this.emit("syncProgress", operation, {
-      phase: "processing_changes",
+    this.emit('syncProgress', operation, {
+      phase: 'processing_changes',
       progress: 0,
     });
 
@@ -1678,8 +1586,8 @@ export class SynchronizationCoordinator extends EventEmitter {
     const syncOptions = ((operation as any).options || {}) as SyncOptions;
 
     if (changes.length === 0) {
-      this.emit("syncProgress", operation, {
-        phase: "completed",
+      this.emit('syncProgress', operation, {
+        phase: 'completed',
         progress: 1.0,
       });
       return;
@@ -1699,10 +1607,10 @@ export class SynchronizationCoordinator extends EventEmitter {
     try {
       await this.kgService.createOrUpdateEntity({
         id: sessionId,
-        type: "session",
+        type: 'session',
         startTime: operation.startTime,
-        status: "active",
-        agentType: "sync",
+        status: 'active',
+        agentType: 'sync',
         changes: [],
         specs: [],
       } as any);
@@ -1711,7 +1619,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Track entities to embed in batch and session relationships buffer
     const toEmbed: any[] = [];
     const sessionRelBuffer: Array<
-      import("../../models/relationships.js").GraphRelationship
+      import('../../models/relationships.js').GraphRelationship
     > = [];
     const sessionSequenceLocal = new Map<string, number>();
     const allocateSessionSequence = () => {
@@ -1734,7 +1642,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         const relationships = batch.map((rel) =>
           this.serializeSessionRelationship(rel)
         );
-        publishSessionEvent("session_relationships", {
+        publishSessionEvent('session_relationships', {
           changeId,
           relationships,
           processedChanges,
@@ -1742,10 +1650,10 @@ export class SynchronizationCoordinator extends EventEmitter {
         });
       } catch (e) {
         operation.errors.push({
-          file: "coordinator",
-          type: "database",
+          file: 'coordinator',
+          type: 'database',
           message: `Bulk session rels failed: ${
-            e instanceof Error ? e.message : "unknown"
+            e instanceof Error ? e.message : 'unknown'
           }`,
           timestamp: new Date(),
           recoverable: true,
@@ -1768,13 +1676,13 @@ export class SynchronizationCoordinator extends EventEmitter {
       const timestamp = options.timestamp ?? new Date();
       const sequenceNumber = allocateSessionSequence();
       const eventId =
-        "evt_" +
+        'evt_' +
         crypto
-          .createHash("sha1")
+          .createHash('sha1')
           .update(
             `${sessionId}|${sequenceNumber}|${type}|${toEntityId}|${timestamp.valueOf()}`
           )
-          .digest("hex")
+          .digest('hex')
           .slice(0, 16);
       const sequenceCheck = this.recordSessionSequence(
         sessionId,
@@ -1790,7 +1698,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         return { sequenceNumber, eventId, timestamp, skipped: true };
       }
       const metadata = { ...(options.metadata ?? {}) };
-      if (metadata.source === undefined) metadata.source = "sync";
+      if (metadata.source === undefined) metadata.source = 'sync';
       if (metadata.sessionId === undefined) metadata.sessionId = sessionId;
       const relationship: any = {
         fromEntityId: sessionId,
@@ -1803,7 +1711,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         sequenceNumber,
         timestamp,
         eventId,
-        actor: options.actor ?? "sync-coordinator",
+        actor: options.actor ?? 'sync-coordinator',
         annotations: options.annotations,
         changeInfo: options.changeInfo ?? undefined,
         stateTransition: options.stateTransition ?? undefined,
@@ -1816,7 +1724,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         graphRelationship
       );
       sessionRelBuffer.push(
-        relationship as import("../../models/relationships.js").GraphRelationship
+        relationship as import('../../models/relationships.js').GraphRelationship
       );
       this.recordSessionSequence(
         sessionId,
@@ -1834,9 +1742,9 @@ export class SynchronizationCoordinator extends EventEmitter {
     try {
       await this.kgService.createOrUpdateEntity({
         id: changeId,
-        type: "change",
-        changeType: "update",
-        entityType: "batch",
+        type: 'change',
+        changeType: 'update',
+        entityType: 'batch',
         entityId: operation.id,
         timestamp: new Date(),
         sessionId,
@@ -1850,9 +1758,9 @@ export class SynchronizationCoordinator extends EventEmitter {
             timestamp: new Date(),
             metadata: { changeId },
             stateTransition: {
-              from: "working",
-              to: "working",
-              verifiedBy: "sync",
+              from: 'working',
+              to: 'working',
+              verifiedBy: 'sync',
               confidence: 0.5,
             },
           }
@@ -1878,14 +1786,14 @@ export class SynchronizationCoordinator extends EventEmitter {
     const sessionDetails: Record<string, unknown> = {
       totalChanges,
     };
-    if (typeof syncOptions.batchSize === "number") {
+    if (typeof syncOptions.batchSize === 'number') {
       sessionDetails.batchSize = syncOptions.batchSize;
     }
-    if (typeof syncOptions.maxConcurrency === "number") {
+    if (typeof syncOptions.maxConcurrency === 'number') {
       sessionDetails.maxConcurrency = syncOptions.maxConcurrency;
     }
 
-    publishSessionEvent("session_started", {
+    publishSessionEvent('session_started', {
       totalChanges,
       processedChanges: 0,
       details: sessionDetails,
@@ -1893,7 +1801,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     const keepaliveInterval = Math.min(
       Math.max(
-        typeof syncOptions.timeout === "number"
+        typeof syncOptions.timeout === 'number'
           ? Math.floor(syncOptions.timeout / 6)
           : 5000,
         3000
@@ -1905,11 +1813,11 @@ export class SynchronizationCoordinator extends EventEmitter {
     const sendTeardown = (payload: SessionStreamPayload) => {
       if (teardownSent) return;
       teardownSent = true;
-      publishSessionEvent("session_teardown", payload);
+      publishSessionEvent('session_teardown', payload);
     };
 
     const keepalive = () => {
-      publishSessionEvent("session_keepalive", {
+      publishSessionEvent('session_keepalive', {
         processedChanges,
         totalChanges,
       });
@@ -1919,7 +1827,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     const keepaliveTimer = setInterval(keepalive, keepaliveInterval);
     this.sessionKeepaliveTimers.set(operation.id, keepaliveTimer);
 
-    let teardownPayload: SessionStreamPayload = { status: "completed" };
+    let teardownPayload: SessionStreamPayload = { status: 'completed' };
     let runError: unknown;
 
     try {
@@ -1927,14 +1835,14 @@ export class SynchronizationCoordinator extends EventEmitter {
         await awaitIfPaused();
         this.ensureNotCancelled(operation);
         try {
-          this.emit("syncProgress", operation, {
-            phase: "processing_changes",
+          this.emit('syncProgress', operation, {
+            phase: 'processing_changes',
             progress: (processedChanges / totalChanges) * 0.8,
           });
 
           switch (change.type) {
-            case "create":
-            case "modify":
+            case 'create':
+            case 'modify':
               // Parse the file and update graph
               let parseResult;
               try {
@@ -1945,9 +1853,9 @@ export class SynchronizationCoordinator extends EventEmitter {
                 // Handle parsing errors (e.g., invalid file paths)
                 operation.errors.push({
                   file: change.path,
-                  type: "parse",
+                  type: 'parse',
                   message: `Failed to parse file: ${
-                    error instanceof Error ? error.message : "Unknown error"
+                    error instanceof Error ? error.message : 'Unknown error'
                   }`,
                   timestamp: new Date(),
                   recoverable: false,
@@ -1997,9 +1905,9 @@ export class SynchronizationCoordinator extends EventEmitter {
                 } catch (error) {
                   operation.errors.push({
                     file: change.path,
-                    type: "database",
+                    type: 'database',
                     message: `Failed to process entity ${entity.id}: ${
-                      error instanceof Error ? error.message : "Unknown"
+                      error instanceof Error ? error.message : 'Unknown'
                     }`,
                     timestamp: new Date(),
                     recoverable: true,
@@ -2025,9 +1933,9 @@ export class SynchronizationCoordinator extends EventEmitter {
                 } catch (error) {
                   operation.errors.push({
                     file: change.path,
-                    type: "database",
+                    type: 'database',
                     message: `Failed to create relationship: ${
-                      error instanceof Error ? error.message : "Unknown"
+                      error instanceof Error ? error.message : 'Unknown'
                     }`,
                     timestamp: new Date(),
                     recoverable: true,
@@ -2076,9 +1984,8 @@ export class SynchronizationCoordinator extends EventEmitter {
                               commitHash: info.hash,
                               date: info.date,
                             }
-                          : { source: "sync" },
-                      } as any
-                      );
+                          : { source: 'sync' },
+                      } as any);
                     } catch {}
                     try {
                       enqueueSessionRelationship(
@@ -2086,8 +1993,8 @@ export class SynchronizationCoordinator extends EventEmitter {
                         entity.id,
                         {
                           timestamp: now2,
-                          metadata: { severity: "high", file: change.path },
-                          impact: { severity: "high" },
+                          metadata: { severity: 'high', file: change.path },
+                          impact: { severity: 'high' },
                         }
                       );
                     } catch {}
@@ -2102,9 +2009,9 @@ export class SynchronizationCoordinator extends EventEmitter {
                       entity.id;
                     operation.errors.push({
                       file: change.path,
-                      type: "database",
+                      type: 'database',
                       message: `Failed to delete entity ${label}: ${
-                        error instanceof Error ? error.message : "Unknown"
+                        error instanceof Error ? error.message : 'Unknown'
                       }`,
                       timestamp: new Date(),
                       recoverable: true,
@@ -2127,43 +2034,43 @@ export class SynchronizationCoordinator extends EventEmitter {
                       });
                       operation.entitiesUpdated++;
                       const operationKind =
-                        change.type === "create"
-                          ? "added"
-                          : change.type === "delete"
-                          ? "deleted"
-                          : "modified";
+                        change.type === 'create'
+                          ? 'added'
+                          : change.type === 'delete'
+                          ? 'deleted'
+                          : 'modified';
                       const changeInfo = {
-                        elementType: "file",
+                        elementType: 'file',
                         elementName: change.path,
                         operation: operationKind,
                       };
                       let stateTransition: Record<string, any> | undefined = {
-                        from: "unknown",
-                        to: "working",
-                        verifiedBy: "manual",
+                        from: 'unknown',
+                        to: 'working',
+                        verifiedBy: 'manual',
                         confidence: 0.5,
                       };
                       try {
                         const git = new GitService();
                         const diff = await git.getUnifiedDiff(change.path, 3);
-                        let beforeSnippet = "";
-                        let afterSnippet = "";
+                        let beforeSnippet = '';
+                        let afterSnippet = '';
                         if (diff) {
-                          const lines = diff.split("\n");
+                          const lines = diff.split('\n');
                           for (const ln of lines) {
                             if (
-                              ln.startsWith("---") ||
-                              ln.startsWith("+++") ||
-                              ln.startsWith("@@")
+                              ln.startsWith('---') ||
+                              ln.startsWith('+++') ||
+                              ln.startsWith('@@')
                             )
                               continue;
                             if (
-                              ln.startsWith("-") &&
+                              ln.startsWith('-') &&
                               beforeSnippet.length < 400
                             )
-                              beforeSnippet += ln.substring(1) + "\n";
-                            if (ln.startsWith("+") && afterSnippet.length < 400)
-                              afterSnippet += ln.substring(1) + "\n";
+                              beforeSnippet += ln.substring(1) + '\n';
+                            if (ln.startsWith('+') && afterSnippet.length < 400)
+                              afterSnippet += ln.substring(1) + '\n';
                             if (
                               beforeSnippet.length >= 400 &&
                               afterSnippet.length >= 400
@@ -2206,52 +2113,52 @@ export class SynchronizationCoordinator extends EventEmitter {
                           ent.id,
                           {
                             timestamp: now,
-                            metadata: { severity: "medium", file: change.path },
-                            impact: { severity: "medium" },
+                            metadata: { severity: 'medium', file: change.path },
+                            impact: { severity: 'medium' },
                           }
                         );
                       } catch {}
 
                       try {
                         await this.kgService.createRelationship({
-                            id: `rel_${ent.id}_${changeId}_MODIFIED_IN`,
-                            fromEntityId: ent.id,
-                            toEntityId: changeId,
-                            type: RelationshipType.MODIFIED_IN as any,
-                            created: now,
-                            lastModified: now,
-                            version: 1,
-                          } as any);
+                          id: `rel_${ent.id}_${changeId}_MODIFIED_IN`,
+                          fromEntityId: ent.id,
+                          toEntityId: changeId,
+                          type: RelationshipType.MODIFIED_IN as any,
+                          created: now,
+                          lastModified: now,
+                          version: 1,
+                        } as any);
                       } catch {}
                       // Attach MODIFIED_BY with git metadata (best-effort)
                       try {
                         const git = new GitService();
                         const info = await git.getLastCommitInfo(change.path);
                         await this.kgService.createRelationship({
-                            id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
-                            fromEntityId: ent.id,
-                            toEntityId: sessionId,
-                            type: RelationshipType.MODIFIED_BY as any,
-                            created: now,
-                            lastModified: now,
-                            version: 1,
-                            metadata: info
-                              ? {
-                                  author: info.author,
-                                  email: info.email,
-                                  commitHash: info.hash,
-                                  date: info.date,
-                                }
-                              : { source: "sync" },
-                          } as any);
+                          id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
+                          fromEntityId: ent.id,
+                          toEntityId: sessionId,
+                          type: RelationshipType.MODIFIED_BY as any,
+                          created: now,
+                          lastModified: now,
+                          version: 1,
+                          metadata: info
+                            ? {
+                                author: info.author,
+                                email: info.email,
+                                commitHash: info.hash,
+                                date: info.date,
+                              }
+                            : { source: 'sync' },
+                        } as any);
                       } catch {}
                       changedSeeds.add(ent.id);
                     } catch (err) {
                       operation.errors.push({
                         file: change.path,
-                        type: "database",
+                        type: 'database',
                         message: `appendVersion failed for ${ent.id}: ${
-                          err instanceof Error ? err.message : "unknown"
+                          err instanceof Error ? err.message : 'unknown'
                         }`,
                         timestamp: new Date(),
                         recoverable: true,
@@ -2267,7 +2174,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                     try {
                       let toId = rel.toEntityId;
                       // Resolve placeholder targets like kind:name or import:module:symbol
-                      if (!toId || String(toId).includes(":")) {
+                      if (!toId || String(toId).includes(':')) {
                         const resolved = await (
                           this as any
                         ).resolveRelationshipTarget(rel, change.path);
@@ -2296,9 +2203,9 @@ export class SynchronizationCoordinator extends EventEmitter {
                     } catch (err) {
                       operation.errors.push({
                         file: change.path,
-                        type: "database",
+                        type: 'database',
                         message: `openEdge failed: ${
-                          err instanceof Error ? err.message : "unknown"
+                          err instanceof Error ? err.message : 'unknown'
                         }`,
                         timestamp: new Date(),
                         recoverable: true,
@@ -2313,7 +2220,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                     .removedRelationships as GraphRelationship[]) {
                     try {
                       let toId = rel.toEntityId;
-                      if (!toId || String(toId).includes(":")) {
+                      if (!toId || String(toId).includes(':')) {
                         const resolved = await (
                           this as any
                         ).resolveRelationshipTarget(rel, change.path);
@@ -2332,9 +2239,9 @@ export class SynchronizationCoordinator extends EventEmitter {
                     } catch (err) {
                       operation.errors.push({
                         file: change.path,
-                        type: "database",
+                        type: 'database',
                         message: `closeEdge failed: ${
-                          err instanceof Error ? err.message : "unknown"
+                          err instanceof Error ? err.message : 'unknown'
                         }`,
                         timestamp: new Date(),
                         recoverable: true,
@@ -2350,58 +2257,58 @@ export class SynchronizationCoordinator extends EventEmitter {
                     try {
                       const now3 = new Date();
                       await this.kgService.createRelationship({
-                          id: `rel_${ent.id}_${changeId}_CREATED_IN`,
-                          fromEntityId: ent.id,
-                          toEntityId: changeId,
-                          type: RelationshipType.CREATED_IN as any,
-                          created: now3,
-                          lastModified: now3,
-                          version: 1,
-                        } as any);
+                        id: `rel_${ent.id}_${changeId}_CREATED_IN`,
+                        fromEntityId: ent.id,
+                        toEntityId: changeId,
+                        type: RelationshipType.CREATED_IN as any,
+                        created: now3,
+                        lastModified: now3,
+                        version: 1,
+                      } as any);
                       // Also MODIFIED_BY with git metadata (best-effort)
                       try {
                         const git = new GitService();
                         const info = await git.getLastCommitInfo(change.path);
                         await this.kgService.createRelationship({
-                            id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
-                            fromEntityId: ent.id,
-                            toEntityId: sessionId,
-                            type: RelationshipType.MODIFIED_BY as any,
-                            created: now3,
-                            lastModified: now3,
-                            version: 1,
-                            metadata: info
-                              ? {
-                                  author: info.author,
-                                  email: info.email,
-                                  commitHash: info.hash,
-                                  date: info.date,
-                                }
-                              : { source: "sync" },
-                          } as any);
+                          id: `rel_${ent.id}_${sessionId}_MODIFIED_BY`,
+                          fromEntityId: ent.id,
+                          toEntityId: sessionId,
+                          type: RelationshipType.MODIFIED_BY as any,
+                          created: now3,
+                          lastModified: now3,
+                          version: 1,
+                          metadata: info
+                            ? {
+                                author: info.author,
+                                email: info.email,
+                                commitHash: info.hash,
+                                date: info.date,
+                              }
+                            : { source: 'sync' },
+                        } as any);
                       } catch {}
                       let stateTransitionNew: Record<string, any> | undefined =
                         {
-                          from: "unknown",
-                          to: "working",
-                          verifiedBy: "manual",
+                          from: 'unknown',
+                          to: 'working',
+                          verifiedBy: 'manual',
                           confidence: 0.4,
                         };
                       try {
                         const git = new GitService();
                         const diff = await git.getUnifiedDiff(change.path, 2);
-                        let afterSnippet = "";
+                        let afterSnippet = '';
                         if (diff) {
-                          const lines = diff.split("\n");
+                          const lines = diff.split('\n');
                           for (const ln of lines) {
                             if (
-                              ln.startsWith("+++") ||
-                              ln.startsWith("---") ||
-                              ln.startsWith("@@")
+                              ln.startsWith('+++') ||
+                              ln.startsWith('---') ||
+                              ln.startsWith('@@')
                             )
                               continue;
-                            if (ln.startsWith("+") && afterSnippet.length < 300)
-                              afterSnippet += ln.substring(1) + "\n";
+                            if (ln.startsWith('+') && afterSnippet.length < 300)
+                              afterSnippet += ln.substring(1) + '\n';
                             if (afterSnippet.length >= 300) break;
                           }
                         }
@@ -2423,9 +2330,9 @@ export class SynchronizationCoordinator extends EventEmitter {
                           ent.id,
                           {
                             timestamp: now3,
-                            metadata: { severity: "low", file: change.path },
+                            metadata: { severity: 'low', file: change.path },
                             stateTransition: stateTransitionNew,
-                            impact: { severity: "low" },
+                            impact: { severity: 'low' },
                           }
                         );
                       } catch {}
@@ -2436,10 +2343,12 @@ export class SynchronizationCoordinator extends EventEmitter {
               }
               break;
 
-            case "delete":
+            case 'delete':
               // Handle file deletion
               try {
-                const fileEntities = await this.kgService.getEntitiesByFile(change.path);
+                const fileEntities = await this.kgService.getEntitiesByFile(
+                  change.path
+                );
 
                 for (const entity of fileEntities) {
                   await this.kgService.deleteEntity(entity.id);
@@ -2452,9 +2361,9 @@ export class SynchronizationCoordinator extends EventEmitter {
               } catch (error) {
                 operation.errors.push({
                   file: change.path,
-                  type: "database",
+                  type: 'database',
                   message: `Failed to handle file deletion: ${
-                    error instanceof Error ? error.message : "Unknown"
+                    error instanceof Error ? error.message : 'Unknown'
                   }`,
                   timestamp: new Date(),
                   recoverable: false,
@@ -2468,8 +2377,8 @@ export class SynchronizationCoordinator extends EventEmitter {
         } catch (error) {
           operation.errors.push({
             file: change.path,
-            type: "parse",
-            message: error instanceof Error ? error.message : "Unknown error",
+            type: 'parse',
+            message: error instanceof Error ? error.message : 'Unknown error',
             timestamp: new Date(),
             recoverable: true,
           });
@@ -2491,14 +2400,14 @@ export class SynchronizationCoordinator extends EventEmitter {
           sessionId,
           seeds,
           options: {
-            reason: "manual",
+            reason: 'manual',
             hopCount: 2,
             operationId: operation.id,
           },
           processedChanges,
           totalChanges,
           publish: (payload) =>
-            publishSessionEvent("session_checkpoint", payload),
+            publishSessionEvent('session_checkpoint', payload),
         });
       }
 
@@ -2508,10 +2417,10 @@ export class SynchronizationCoordinator extends EventEmitter {
           await this.kgService.createEmbeddingsBatch(toEmbed);
         } catch (e) {
           operation.errors.push({
-            file: "coordinator",
-            type: "database",
+            file: 'coordinator',
+            type: 'database',
             message: `Batch embedding failed: ${
-              e instanceof Error ? e.message : "unknown"
+              e instanceof Error ? e.message : 'unknown'
             }`,
             timestamp: new Date(),
             recoverable: true,
@@ -2526,7 +2435,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     } catch (error) {
       runError = error;
       teardownPayload = {
-        status: "failed",
+        status: 'failed',
         details: {
           message: error instanceof Error ? error.message : String(error),
         },
@@ -2549,33 +2458,33 @@ export class SynchronizationCoordinator extends EventEmitter {
 
       if (
         !summaryPayload.errors &&
-        (summaryPayload.status === "failed" || operation.errors.length > 0)
+        (summaryPayload.status === 'failed' || operation.errors.length > 0)
       ) {
         summaryPayload.errors = operation.errors.slice(-5);
       }
 
-      if (summaryPayload.status !== "failed" && runError) {
-        summaryPayload.status = "failed";
+      if (summaryPayload.status !== 'failed' && runError) {
+        summaryPayload.status = 'failed';
       }
 
       if (
-        summaryPayload.status !== "failed" &&
+        summaryPayload.status !== 'failed' &&
         operation.errors.some((err) => err.recoverable === false)
       ) {
-        summaryPayload.status = "failed";
+        summaryPayload.status = 'failed';
       }
 
       keepalive();
       sendTeardown(summaryPayload);
     }
 
-    this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
+    this.emit('syncProgress', operation, { phase: 'completed', progress: 1.0 });
   }
 
   private async performPartialSync(operation: SyncOperation): Promise<void> {
     // Implementation for partial synchronization
-    this.emit("syncProgress", operation, {
-      phase: "processing_partial",
+    this.emit('syncProgress', operation, {
+      phase: 'processing_partial',
       progress: 0,
     });
 
@@ -2583,8 +2492,8 @@ export class SynchronizationCoordinator extends EventEmitter {
     const updates = ((operation as any).updates as PartialUpdate[]) || [];
 
     if (updates.length === 0) {
-      this.emit("syncProgress", operation, {
-        phase: "completed",
+      this.emit('syncProgress', operation, {
+        phase: 'completed',
         progress: 1.0,
       });
       return;
@@ -2596,13 +2505,13 @@ export class SynchronizationCoordinator extends EventEmitter {
     for (const update of updates) {
       this.ensureNotCancelled(operation);
       try {
-        this.emit("syncProgress", operation, {
-          phase: "processing_partial",
+        this.emit('syncProgress', operation, {
+          phase: 'processing_partial',
           progress: (processedUpdates / totalUpdates) * 0.9,
         });
 
         switch (update.type) {
-          case "create":
+          case 'create':
             // Create new entity
             if (update.newValue) {
               try {
@@ -2611,9 +2520,9 @@ export class SynchronizationCoordinator extends EventEmitter {
               } catch (error) {
                 operation.errors.push({
                   file: update.entityId,
-                  type: "database",
+                  type: 'database',
                   message: `Failed to create entity: ${
-                    error instanceof Error ? error.message : "Unknown"
+                    error instanceof Error ? error.message : 'Unknown'
                   }`,
                   timestamp: new Date(),
                   recoverable: true,
@@ -2622,7 +2531,7 @@ export class SynchronizationCoordinator extends EventEmitter {
             }
             break;
 
-          case "update":
+          case 'update':
             // Update existing entity
             if (update.changes) {
               try {
@@ -2634,9 +2543,9 @@ export class SynchronizationCoordinator extends EventEmitter {
               } catch (error) {
                 operation.errors.push({
                   file: update.entityId,
-                  type: "database",
+                  type: 'database',
                   message: `Failed to update entity: ${
-                    error instanceof Error ? error.message : "Unknown"
+                    error instanceof Error ? error.message : 'Unknown'
                   }`,
                   timestamp: new Date(),
                   recoverable: true,
@@ -2645,7 +2554,7 @@ export class SynchronizationCoordinator extends EventEmitter {
             }
             break;
 
-          case "delete":
+          case 'delete':
             // Delete entity
             try {
               await this.kgService.deleteEntity(update.entityId);
@@ -2653,9 +2562,9 @@ export class SynchronizationCoordinator extends EventEmitter {
             } catch (error) {
               operation.errors.push({
                 file: update.entityId,
-                type: "database",
+                type: 'database',
                 message: `Failed to delete entity: ${
-                  error instanceof Error ? error.message : "Unknown"
+                  error instanceof Error ? error.message : 'Unknown'
                 }`,
                 timestamp: new Date(),
                 recoverable: true,
@@ -2667,39 +2576,39 @@ export class SynchronizationCoordinator extends EventEmitter {
         processedUpdates++;
       } catch (error) {
         operation.errors.push({
-          file: "partial_update",
-          type: "unknown",
-          message: error instanceof Error ? error.message : "Unknown error",
+          file: 'partial_update',
+          type: 'unknown',
+          message: error instanceof Error ? error.message : 'Unknown error',
           timestamp: new Date(),
           recoverable: false,
         });
       }
     }
 
-    this.emit("syncProgress", operation, { phase: "completed", progress: 1.0 });
+    this.emit('syncProgress', operation, { phase: 'completed', progress: 1.0 });
   }
 
   private async scanSourceFiles(): Promise<string[]> {
     // Scan for source files in the project using fs
-    const fs = await import("fs/promises");
-    const path = await import("path");
+    const fs = await import('fs/promises');
+    const path = await import('path');
 
     const files: string[] = [];
-    const extensions = [".ts", ".tsx", ".js", ".jsx"];
+    const extensions = ['.ts', '.tsx', '.js', '.jsx'];
 
     // Directories to scan
-    const directories = ["src", "lib", "packages", "tests"];
+    const directories = ['src', 'lib', 'packages', 'tests'];
 
     // Exclude patterns
     const shouldExclude = (filePath: string): boolean => {
       return (
-        filePath.includes("node_modules") ||
-        filePath.includes("dist") ||
-        filePath.includes("build") ||
-        filePath.includes(".git") ||
-        filePath.includes("coverage") ||
-        filePath.endsWith(".d.ts") ||
-        filePath.endsWith(".min.js")
+        filePath.includes('node_modules') ||
+        filePath.includes('dist') ||
+        filePath.includes('build') ||
+        filePath.includes('.git') ||
+        filePath.includes('coverage') ||
+        filePath.endsWith('.d.ts') ||
+        filePath.endsWith('.min.js')
       );
     };
 
@@ -2739,7 +2648,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
       return uniqueFiles;
     } catch (error) {
-      console.error("Error scanning source files:", error);
+      console.error('Error scanning source files:', error);
       return [];
     }
   }
@@ -2754,7 +2663,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     const unresolved = conflicts.filter((conflict) => !conflict.resolved);
     const resolvedCount = conflicts.length - unresolved.length;
-    const resolutionMode = options?.conflictResolution ?? "manual";
+    const resolutionMode = options?.conflictResolution ?? 'manual';
 
     if (unresolved.length > 0) {
       console.warn(
@@ -2767,7 +2676,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     }
 
     for (const conflict of conflicts) {
-      this.emit("conflictDetected", conflict);
+      this.emit('conflictDetected', conflict);
     }
   }
 
@@ -2790,7 +2699,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     }
 
     const resolutionMode = options?.conflictResolution;
-    if (resolutionMode && resolutionMode !== "manual") {
+    if (resolutionMode && resolutionMode !== 'manual') {
       const results = await this.conflictResolution.resolveConflictsAuto(
         conflicts
       );
@@ -2808,17 +2717,17 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   async rollbackOperation(operationId: string): Promise<boolean> {
     const operation = this.activeOperations.get(operationId);
-    if (!operation || operation.status !== "failed") {
+    if (!operation || operation.status !== 'failed') {
       return false;
     }
 
     try {
       // Implement rollback logic
-      operation.status = "rolled_back";
-      this.emit("operationRolledBack", operation);
+      operation.status = 'rolled_back';
+      this.emit('operationRolledBack', operation);
       return true;
     } catch (error) {
-      this.emit("rollbackFailed", operation, error);
+      this.emit('rollbackFailed', operation, error);
       return false;
     }
   }
@@ -2853,7 +2762,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Convert paths to partial updates
     const updates: PartialUpdate[] = paths.map((path) => ({
       entityId: path,
-      type: "update" as const,
+      type: 'update' as const,
       changes: {},
     }));
 
@@ -2865,10 +2774,10 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     const active = this.activeOperations.get(operationId);
     if (active) {
-      if (!active.errors.some((e) => e.type === "cancelled")) {
+      if (!active.errors.some((e) => e.type === 'cancelled')) {
         active.errors.push({
-          file: "coordinator",
-          type: "cancelled",
+          file: 'coordinator',
+          type: 'cancelled',
           message: `Operation ${operationId} cancellation requested`,
           timestamp: new Date(),
           recoverable: true,
@@ -2882,11 +2791,11 @@ export class SynchronizationCoordinator extends EventEmitter {
     );
     if (queueIndex !== -1) {
       const [operation] = this.operationQueue.splice(queueIndex, 1);
-      operation.status = "failed";
+      operation.status = 'failed';
       operation.endTime = new Date();
       operation.errors.push({
-        file: "coordinator",
-        type: "cancelled",
+        file: 'coordinator',
+        type: 'cancelled',
         message: `Operation ${operationId} cancelled before execution`,
         timestamp: new Date(),
         recoverable: true,
@@ -2894,7 +2803,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       this.retryQueue.delete(operationId);
       this.completedOperations.set(operationId, operation);
       this.cancelledOperations.delete(operationId);
-      this.emit("operationCancelled", operation);
+      this.emit('operationCancelled', operation);
       return true;
     }
 
@@ -2947,16 +2856,16 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     return {
       total: allOperations.length + this.operationQueue.length,
-      active: activeOperations.filter((op) => op.status === "running").length,
+      active: activeOperations.filter((op) => op.status === 'running').length,
       queued: this.operationQueue.length,
-      completed: allOperations.filter((op) => op.status === "completed").length,
-      failed: allOperations.filter((op) => op.status === "failed").length,
+      completed: allOperations.filter((op) => op.status === 'completed').length,
+      failed: allOperations.filter((op) => op.status === 'failed').length,
       retried: retryOperations.length,
       totalOperations: allOperations.length + this.operationQueue.length,
       completedOperations: allOperations.filter(
-        (op) => op.status === "completed"
+        (op) => op.status === 'completed'
       ).length,
-      failedOperations: allOperations.filter((op) => op.status === "failed")
+      failedOperations: allOperations.filter((op) => op.status === 'failed')
         .length,
       totalFilesProcessed,
       totalEntitiesCreated,
@@ -2984,9 +2893,9 @@ export class SynchronizationCoordinator extends EventEmitter {
     try {
       const msg = operation.errors
         ?.map((e) => `${e.type}:${e.message}`)
-        .join("; ");
+        .join('; ');
       console.error(
-        `❌ Sync operation ${operation.id} failed: ${msg || "unknown"}`
+        `❌ Sync operation ${operation.id} failed: ${msg || 'unknown'}`
       );
     } catch {
       console.error(
@@ -3025,7 +2934,7 @@ export class SynchronizationCoordinator extends EventEmitter {
           `❌ Max retry attempts reached for operation ${operation.id}`
         );
         this.retryQueue.delete(operation.id);
-        this.emit("operationAbandoned", operation);
+        this.emit('operationAbandoned', operation);
       }
     } else {
       console.error(
@@ -3038,7 +2947,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     console.log(`🔄 Retrying operation ${operation.id}`);
 
     // Reset operation status
-    operation.status = "pending";
+    operation.status = 'pending';
     operation.startTime = new Date();
     operation.endTime = undefined;
     operation.errors = [];
@@ -3055,18 +2964,18 @@ export class SynchronizationCoordinator extends EventEmitter {
     const options = ((operation as any).options || {}) as SyncOptions;
     if (options.rollbackOnError) {
       if (!this.rollbackCapabilities) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "rollback",
+          file: 'coordinator',
+          type: 'rollback',
           message:
-            "Rollback requested but rollback capabilities are not configured",
+            'Rollback requested but rollback capabilities are not configured',
           timestamp: new Date(),
           recoverable: false,
         });
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.emit('operationFailed', operation);
         return;
       }
       try {
@@ -3076,19 +2985,19 @@ export class SynchronizationCoordinator extends EventEmitter {
         );
         operation.rollbackPoint = rollbackId;
       } catch (error) {
-        operation.status = "failed";
+        operation.status = 'failed';
         operation.endTime = new Date();
         operation.errors.push({
-          file: "coordinator",
-          type: "rollback",
+          file: 'coordinator',
+          type: 'rollback',
           message: `Failed to create rollback point during retry: ${
-            error instanceof Error ? error.message : "unknown"
+            error instanceof Error ? error.message : 'unknown'
           }`,
           timestamp: new Date(),
           recoverable: false,
         });
         this.completedOperations.set(operation.id, operation);
-        this.emit("operationFailed", operation);
+        this.emit('operationFailed', operation);
         return;
       }
     }
@@ -3121,8 +3030,8 @@ export class SynchronizationCoordinator extends EventEmitter {
   // Attempt to resolve and create deferred relationships
   private async runPostResolution(operation: SyncOperation): Promise<void> {
     if (this.unresolvedRelationships.length === 0) return;
-    this.emit("syncProgress", operation, {
-      phase: "resolving_relationships",
+    this.emit('syncProgress', operation, {
+      phase: 'resolving_relationships',
       progress: 0.95,
     });
 
@@ -3148,7 +3057,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 export interface PartialUpdate {
   entityId: string;
   changes: Record<string, any>;
-  type: "update" | "delete" | "create";
+  type: 'update' | 'delete' | 'create';
   newValue?: any;
 }
 
@@ -3156,7 +3065,7 @@ export interface FileLikeEntity {
   path?: string;
 }
 
-declare module "./synchronization/SynchronizationCoordinator.js" {
+declare module './synchronization/SynchronizationCoordinator.js' {
   interface SynchronizationCoordinator {
     resolveAndCreateRelationship(
       relationship: GraphRelationship,
@@ -3196,12 +3105,12 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
       sourceFilePath
     );
     const resolvedId =
-      typeof resolvedResult === "string"
+      typeof resolvedResult === 'string'
         ? resolvedResult
         : resolvedResult?.id || null;
     if (!resolvedId) return false;
     const enrichedMeta = { ...(relationship as any).metadata } as any;
-    if (resolvedResult && typeof resolvedResult === "object") {
+    if (resolvedResult && typeof resolvedResult === 'object') {
       if (
         Array.isArray((resolvedResult as any).candidates) &&
         (resolvedResult as any).candidates.length > 0
@@ -3218,7 +3127,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
       }
       if ((resolvedResult as any).resolutionPath)
         enrichedMeta.resolutionPath = (resolvedResult as any).resolutionPath;
-      enrichedMeta.resolvedTo = { kind: "entity", id: resolvedId };
+      enrichedMeta.resolvedTo = { kind: 'entity', id: resolvedId };
     }
     const resolvedRel = {
       ...relationship,
@@ -3254,7 +3163,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
       }
     | null
   > {
-    const to = (relationship.toEntityId as any) || "";
+    const to = (relationship.toEntityId as any) || '';
 
     // Prefer structured toRef when present to avoid brittle string parsing
     const toRef: any = (relationship as any).toRef;
@@ -3269,23 +3178,23 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
     }> = [];
     try {
       const fromRef: any = (relationship as any).fromRef;
-      if (!currentFilePath && fromRef && typeof fromRef === "object") {
-        if (fromRef.kind === "fileSymbol" && fromRef.file) {
+      if (!currentFilePath && fromRef && typeof fromRef === 'object') {
+        if (fromRef.kind === 'fileSymbol' && fromRef.file) {
           currentFilePath = fromRef.file;
-        } else if (fromRef.kind === "entity" && fromRef.id) {
+        } else if (fromRef.kind === 'entity' && fromRef.id) {
           const ent = await (this as any).kgService.getEntity(fromRef.id);
           const p = (ent as any)?.path as string | undefined;
-          if (p) currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+          if (p) currentFilePath = p.includes(':') ? p.split(':')[0] : p;
         }
       }
     } catch {}
-    if (toRef && typeof toRef === "object") {
+    if (toRef && typeof toRef === 'object') {
       try {
-        if (toRef.kind === "entity" && toRef.id) {
-          return { id: toRef.id, candidates, resolutionPath: "entity" };
+        if (toRef.kind === 'entity' && toRef.id) {
+          return { id: toRef.id, candidates, resolutionPath: 'entity' };
         }
         if (
-          toRef.kind === "fileSymbol" &&
+          toRef.kind === 'fileSymbol' &&
           toRef.file &&
           (toRef.symbol || toRef.name)
         ) {
@@ -3294,9 +3203,9 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
             toRef.symbol || toRef.name
           );
           if (ent)
-            return { id: ent.id, candidates, resolutionPath: "fileSymbol" };
+            return { id: ent.id, candidates, resolutionPath: 'fileSymbol' };
         }
-        if (toRef.kind === "external" && toRef.name) {
+        if (toRef.kind === 'external' && toRef.name) {
           const name = toRef.name as string;
           if (!currentFilePath) {
             try {
@@ -3305,7 +3214,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
               );
               if (fromEntity && (fromEntity as any).path) {
                 const p = (fromEntity as any).path as string;
-                currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+                currentFilePath = p.includes(':') ? p.split(':')[0] : p;
               }
             } catch {}
           }
@@ -3319,7 +3228,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
                 id: local.id,
                 name: (local as any).name,
                 path: (local as any).path,
-                resolver: "local",
+                resolver: 'local',
                 score: 1.0,
               });
             }
@@ -3333,7 +3242,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
                 id: n.id,
                 name: (n as any).name,
                 path: (n as any).path,
-                resolver: "nearby",
+                resolver: 'nearby',
               });
           }
           const global = await (this as any).kgService.findSymbolsByName(name);
@@ -3342,13 +3251,13 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
               id: g.id,
               name: (g as any).name,
               path: (g as any).path,
-              resolver: "name",
+              resolver: 'name',
             });
           }
           if (candidates.length > 0) {
             const chosen = candidates[0];
             const resolutionPath =
-              chosen.resolver === "local" ? "external-local" : "external-name";
+              chosen.resolver === 'local' ? 'external-local' : 'external-name';
             return { id: chosen.id, candidates, resolutionPath };
           }
         }
@@ -3370,7 +3279,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
             return {
               id: ent.id,
               candidates,
-              resolutionPath: "file-placeholder",
+              resolutionPath: 'file-placeholder',
             };
         } catch {}
         return null;
@@ -3386,7 +3295,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
         );
         if (fromEntity && (fromEntity as any).path) {
           const p = (fromEntity as any).path as string;
-          currentFilePath = p.includes(":") ? p.split(":")[0] : p;
+          currentFilePath = p.includes(':') ? p.split(':')[0] : p;
         }
       } catch {}
     }
@@ -3400,7 +3309,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
         const key = `${currentFilePath}:${name}`;
         const localId = (this as any).localSymbolIndex?.get?.(key);
         if (localId)
-          return { id: localId, candidates, resolutionPath: "local-index" };
+          return { id: localId, candidates, resolutionPath: 'local-index' };
         const local = await (this as any).kgService.findSymbolInFile(
           currentFilePath,
           name
@@ -3410,7 +3319,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
             id: local.id,
             name: (local as any).name,
             path: (local as any).path,
-            resolver: "local",
+            resolver: 'local',
           });
         }
         // Prefer nearby directory symbols if available
@@ -3424,7 +3333,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
             id: n.id,
             name: (n as any).name,
             path: (n as any).path,
-            resolver: "nearby",
+            resolver: 'nearby',
           });
       }
       const byKind = await (this as any).kgService.findSymbolByKindAndName(
@@ -3436,13 +3345,13 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
           id: c.id,
           name: (c as any).name,
           path: (c as any).path,
-          resolver: "kind-name",
+          resolver: 'kind-name',
         });
       if (candidates.length > 0)
         return {
           id: candidates[0].id,
           candidates,
-          resolutionPath: "kind-name",
+          resolutionPath: 'kind-name',
         };
       return null;
     }
@@ -3460,7 +3369,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
             id: local.id,
             name: (local as any).name,
             path: (local as any).path,
-            resolver: "local",
+            resolver: 'local',
           });
         }
         // Prefer nearby directory symbols for imported names
@@ -3474,7 +3383,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
             id: n.id,
             name: (n as any).name,
             path: (n as any).path,
-            resolver: "nearby",
+            resolver: 'nearby',
           });
       }
       const byName = await (this as any).kgService.findSymbolsByName(name);
@@ -3483,12 +3392,12 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
           id: c.id,
           name: (c as any).name,
           path: (c as any).path,
-          resolver: "name",
+          resolver: 'name',
         });
       }
       if (candidates.length > 0) {
         const chosen = candidates[0];
-        const suffix = chosen.resolver === "local" ? "local" : "name";
+        const suffix = chosen.resolver === 'local' ? 'local' : 'name';
         return {
           id: chosen.id,
           candidates,
@@ -3511,7 +3420,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
             id: local.id,
             name: (local as any).name,
             path: (local as any).path,
-            resolver: "local",
+            resolver: 'local',
           });
         }
         // Prefer nearby matches
@@ -3525,7 +3434,7 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
             id: n.id,
             name: (n as any).name,
             path: (n as any).path,
-            resolver: "nearby",
+            resolver: 'nearby',
           });
       }
       const global = await (this as any).kgService.findSymbolsByName(name);
@@ -3534,12 +3443,12 @@ declare module "./synchronization/SynchronizationCoordinator.js" {
           id: g.id,
           name: (g as any).name,
           path: (g as any).path,
-          resolver: "name",
+          resolver: 'name',
         });
       }
       if (candidates.length > 0) {
         const chosen = candidates[0];
-        const suffix = chosen.resolver === "local" ? "local" : "name";
+        const suffix = chosen.resolver === 'local' ? 'local' : 'name';
         return {
           id: chosen.id,
           candidates,

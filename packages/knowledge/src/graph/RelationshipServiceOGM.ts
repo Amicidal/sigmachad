@@ -6,13 +6,13 @@
 import { EventEmitter } from 'events';
 import { createHash } from 'crypto';
 import { NeogmaService } from './NeogmaService.js';
-import { createRelationshipModels } from '../../models/ogm/RelationshipModels.js';
-import { createEntityModels } from '../../models/ogm/EntityModels.js';
+import { createRelationshipModels } from '@memento/graph/models-ogm/RelationshipModels.js';
+import { createEntityModels } from '@memento/graph/models-ogm/EntityModels.js';
 import {
   GraphRelationship,
   RelationshipType,
   RelationshipQuery,
-} from '@memento/core';
+} from '@memento/shared-types.js';
 import {
   normalizeCodeEdge,
   canonicalRelationshipId,
@@ -20,6 +20,7 @@ import {
   mergeEdgeEvidence,
   mergeEdgeLocations,
 } from '../../utils/codeEdges.js';
+import { getNeo4jNumericField, normalizeNeo4jValue } from '@memento/utils';
 
 export interface BulkRelationshipOptions {
   skipExisting?: boolean;
@@ -37,7 +38,9 @@ export interface RelationshipStats {
 
 // Interface for adapter pattern compatibility
 export interface IRelationshipService extends EventEmitter {
-  createRelationship(relationship: GraphRelationship): Promise<GraphRelationship>;
+  createRelationship(
+    relationship: GraphRelationship
+  ): Promise<GraphRelationship>;
   createRelationshipsBulk(
     relationships: GraphRelationship[],
     options?: BulkRelationshipOptions
@@ -47,7 +50,9 @@ export interface IRelationshipService extends EventEmitter {
     failed: number;
   }>;
   getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]>;
-  getRelationshipById(relationshipId: string): Promise<GraphRelationship | null>;
+  getRelationshipById(
+    relationshipId: string
+  ): Promise<GraphRelationship | null>;
   deleteRelationship(
     fromId: string,
     toId: string,
@@ -74,7 +79,10 @@ export interface IRelationshipService extends EventEmitter {
   getEdgeCandidates(relationshipId: string, limit?: number): Promise<any[]>;
 }
 
-export class RelationshipServiceOGM extends EventEmitter implements IRelationshipService {
+export class RelationshipServiceOGM
+  extends EventEmitter
+  implements IRelationshipService
+{
   private relationshipModels: ReturnType<typeof createRelationshipModels>;
   private entityModels: ReturnType<typeof createEntityModels>;
 
@@ -108,7 +116,8 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       [RelationshipType.DEPENDS_ON]: this.relationshipModels.DependsOnRelation,
       // Type Usage
       [RelationshipType.TYPE_USES]: this.relationshipModels.TypeUsesRelation,
-      [RelationshipType.RETURNS_TYPE]: this.relationshipModels.ReturnsTypeRelation,
+      [RelationshipType.RETURNS_TYPE]:
+        this.relationshipModels.ReturnsTypeRelation,
       [RelationshipType.PARAM_TYPE]: this.relationshipModels.ParamTypeRelation,
       // Test
       [RelationshipType.TESTS]: this.relationshipModels.TestsRelation,
@@ -116,13 +125,18 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       // Spec
       [RelationshipType.REQUIRES]: this.relationshipModels.RequiresRelation,
       [RelationshipType.IMPACTS]: this.relationshipModels.ImpactsRelation,
-      [RelationshipType.IMPLEMENTS_SPEC]: this.relationshipModels.ImplementsSpecRelation,
+      [RelationshipType.IMPLEMENTS_SPEC]:
+        this.relationshipModels.ImplementsSpecRelation,
       // Documentation
-      [RelationshipType.DOCUMENTED_BY]: this.relationshipModels.DocumentedByRelation,
-      [RelationshipType.DOCUMENTS_SECTION]: this.relationshipModels.DocumentsSectionRelation,
+      [RelationshipType.DOCUMENTED_BY]:
+        this.relationshipModels.DocumentedByRelation,
+      [RelationshipType.DOCUMENTS_SECTION]:
+        this.relationshipModels.DocumentsSectionRelation,
       // Temporal
-      [RelationshipType.PREVIOUS_VERSION]: this.relationshipModels.PreviousVersionRelation,
-      [RelationshipType.MODIFIED_BY]: this.relationshipModels.ModifiedByRelation,
+      [RelationshipType.PREVIOUS_VERSION]:
+        this.relationshipModels.PreviousVersionRelation,
+      [RelationshipType.MODIFIED_BY]:
+        this.relationshipModels.ModifiedByRelation,
     };
 
     return modelMap[type] || null;
@@ -131,20 +145,27 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
   /**
    * Create or update a relationship using Neogma
    */
-  async createRelationship(relationship: GraphRelationship): Promise<GraphRelationship> {
+  async createRelationship(
+    relationship: GraphRelationship
+  ): Promise<GraphRelationship> {
     try {
       const normalized = this.normalizeRelationship(relationship);
       const relId = this.generateRelationshipId(normalized);
 
       // For complex relationships, fall back to Cypher for now
-      if (!this.getRelationshipModel(normalized.type) || isCodeRelationship(normalized.type)) {
+      if (
+        !this.getRelationshipModel(normalized.type) ||
+        isCodeRelationship(normalized.type)
+      ) {
         return this.createRelationshipWithCypher(normalized, relId);
       }
 
       // Use Neogma models for simple structural relationships
       const RelationshipModel = this.getRelationshipModel(normalized.type);
       if (!RelationshipModel) {
-        throw new Error(`No model found for relationship type: ${normalized.type}`);
+        throw new Error(
+          `No model found for relationship type: ${normalized.type}`
+        );
       }
 
       const properties = this.extractRelationshipProperties(normalized);
@@ -154,7 +175,11 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       // Note: For now we use Cypher since Neogma relationship creation is complex
       return this.createRelationshipWithCypher(normalized, relId);
     } catch (error) {
-      this.emit('error', { operation: 'createRelationship', relationship, error });
+      this.emit('error', {
+        operation: 'createRelationship',
+        relationship,
+        error,
+      });
       throw error;
     }
   }
@@ -212,35 +237,57 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
     failed: number;
   }> {
     try {
-      const normalized = relationships.map(r => ({
-        ...this.normalizeRelationship(r),
-        _id: this.generateRelationshipId(r),
-      }));
-
-      const query = options.mergeEvidence
-        ? this.buildBulkMergeQuery(options)
-        : this.buildBulkCreateQuery(options);
-
-      const result = await this.neogmaService.executeCypher(query, {
-        relationships: normalized.map(r => ({
-          fromId: r.fromEntityId,
-          toId: r.toEntityId,
-          type: r.type,
-          relId: r._id,
-          properties: this.extractRelationshipProperties(r),
-        })),
+      const normalized = relationships.map((relationship) => {
+        const normalizedRelationship = this.normalizeRelationship(relationship);
+        return {
+          ...normalizedRelationship,
+          _id: this.generateRelationshipId(normalizedRelationship),
+        };
       });
 
-      const count = result[0]?.count || 0;
+      const grouped = this.groupRelationshipsByType(normalized);
+
+      let created = 0;
+      let updated = 0;
+      let failed = 0;
+
+      for (const [type, rels] of grouped) {
+        const query = options.mergeEvidence
+          ? this.buildBulkMergeQuery(type, options)
+          : this.buildBulkCreateQuery(type, options);
+
+        const payload = rels.map((rel) => {
+          const properties = this.extractRelationshipProperties(rel);
+          properties.id = rel._id;
+          return {
+            fromId: rel.fromEntityId,
+            toId: rel.toEntityId,
+            relId: rel._id,
+            properties,
+          };
+        });
+
+        const result = await this.neogmaService.executeCypher(query, {
+          relationships: payload,
+        });
+
+        const affected = getNeo4jNumericField(result[0] ?? {}, 'count', 0);
+        created += affected;
+        if (options.mergeEvidence) {
+          updated += Math.max(rels.length - affected, 0);
+        }
+        failed += Math.max(rels.length - affected, 0);
+      }
+
       this.emit('relationships:bulk:created', {
-        count,
+        count: created,
         total: relationships.length,
       });
 
       return {
-        created: count,
-        updated: options.mergeEvidence ? relationships.length - count : 0,
-        failed: relationships.length - count,
+        created,
+        updated,
+        failed,
       };
     } catch (error) {
       console.error('Bulk relationship creation failed:', error);
@@ -249,10 +296,27 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
     }
   }
 
+  private groupRelationshipsByType<
+    T extends GraphRelationship & { _id: string }
+  >(relationships: T[]): Map<RelationshipType, T[]> {
+    const grouped = new Map<RelationshipType, T[]>();
+
+    for (const relationship of relationships) {
+      const relType = relationship.type;
+      const bucket = grouped.get(relType) ?? [];
+      bucket.push(relationship);
+      grouped.set(relType, bucket);
+    }
+
+    return grouped;
+  }
+
   /**
    * Get relationships based on query
    */
-  async getRelationships(query: RelationshipQuery): Promise<GraphRelationship[]> {
+  async getRelationships(
+    query: RelationshipQuery
+  ): Promise<GraphRelationship[]> {
     try {
       const where: string[] = [];
       const params: Record<string, any> = {};
@@ -308,7 +372,8 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
         }
       }
 
-      const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+      const whereClause =
+        where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
       const limit = query.limit || 100;
       const offset = query.offset || 0;
 
@@ -324,8 +389,11 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       params.offset = offset;
       params.limit = limit;
 
-      const result = await this.neogmaService.executeCypher(cypherQuery, params);
-      return result.map(row => this.parseRelationshipFromNeo4j(row));
+      const result = await this.neogmaService.executeCypher(
+        cypherQuery,
+        params
+      );
+      return result.map((row) => this.parseRelationshipFromNeo4j(row));
     } catch (error) {
       this.emit('error', { operation: 'getRelationships', query, error });
       throw error;
@@ -349,7 +417,13 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       await this.neogmaService.executeCypher(query, { fromId, toId });
       this.emit('relationship:deleted', { fromId, toId, type });
     } catch (error) {
-      this.emit('error', { operation: 'deleteRelationship', fromId, toId, type, error });
+      this.emit('error', {
+        operation: 'deleteRelationship',
+        fromId,
+        toId,
+        type,
+        error,
+      });
       throw error;
     }
   }
@@ -376,7 +450,11 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
         locations: rel.locations ? JSON.stringify(rel.locations) : null,
       });
     } catch (error) {
-      this.emit('error', { operation: 'updateRelationshipAuxiliary', relId, error });
+      this.emit('error', {
+        operation: 'updateRelationshipAuxiliary',
+        relId,
+        error,
+      });
       throw error;
     }
   }
@@ -398,11 +476,15 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
         since: since.toISOString(),
       });
 
-      const count = result[0]?.count || 0;
+      const count = getNeo4jNumericField(result[0] ?? {}, 'count', 0);
       this.emit('relationships:marked:inactive', { count, since });
       return count;
     } catch (error) {
-      this.emit('error', { operation: 'markInactiveEdgesNotSeenSince', since, error });
+      this.emit('error', {
+        operation: 'markInactiveEdgesNotSeenSince',
+        since,
+        error,
+      });
       throw error;
     }
   }
@@ -437,12 +519,14 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       `;
 
       await this.neogmaService.executeCypher(query, {
-        updates: updates.map(u => ({
+        updates: updates.map((u) => ({
           fromId: u.fromId,
           toId: u.toId,
           type: u.type,
           evidence: JSON.stringify(u.evidence.slice(0, 20)),
-          locations: u.locations ? JSON.stringify(u.locations.slice(0, 20)) : null,
+          locations: u.locations
+            ? JSON.stringify(u.locations.slice(0, 20))
+            : null,
         })),
       });
     } catch (error) {
@@ -488,22 +572,30 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       ];
 
       const results = await Promise.all(
-        queries.map(q => this.neogmaService.executeCypher(q.query))
+        queries.map((q) => this.neogmaService.executeCypher(q.query))
       );
 
       const byType: Record<string, number> = {};
-      results[1].forEach((row: any) => {
+      results[1].forEach((row: Record<string, unknown>) => {
         if (row.type) {
-          byType[row.type] = row.count;
+          byType[String(row.type)] = getNeo4jNumericField(row, 'count', 0);
         }
       });
 
+      const total = getNeo4jNumericField(results[0]?.[0] ?? {}, 'count', 0);
+      const active = getNeo4jNumericField(results[2]?.[0] ?? {}, 'count', 0);
+      const withEvidence = getNeo4jNumericField(
+        results[3]?.[0] ?? {},
+        'count',
+        0
+      );
+
       return {
-        total: results[0][0]?.count || 0,
+        total,
         byType,
-        active: results[2][0]?.count || 0,
-        inactive: (results[0][0]?.count || 0) - (results[2][0]?.count || 0),
-        withEvidence: results[3][0]?.count || 0,
+        active,
+        inactive: Math.max(total - active, 0),
+        withEvidence,
       };
     } catch (error) {
       this.emit('error', { operation: 'getRelationshipStats', error });
@@ -538,7 +630,7 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       `;
 
       const result = await this.neogmaService.executeCypher(query);
-      const count = result[0]?.count || 0;
+      const count = getNeo4jNumericField(result[0] ?? {}, 'count', 0);
 
       if (count > 0) {
         this.emit('relationships:merged', { count });
@@ -608,7 +700,13 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
     const properties: Record<string, any> = {};
 
     // Skip complex objects and arrays for main properties
-    const skipKeys = ['evidence', 'locations', 'metadata', 'fromEntity', 'toEntity'];
+    const skipKeys = [
+      'evidence',
+      'locations',
+      'metadata',
+      'fromEntity',
+      'toEntity',
+    ];
 
     for (const [key, value] of Object.entries(rel)) {
       if (skipKeys.includes(key) || value === null || value === undefined) {
@@ -642,12 +740,19 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
    * Parse relationship from Neo4j result
    */
   private parseRelationshipFromNeo4j(row: any): GraphRelationship {
-    const rel = row.r;
-    const properties = rel.properties || rel;
+    const rel = normalizeNeo4jValue(row.r ?? {}) as Record<string, unknown>;
+    const properties = normalizeNeo4jValue(rel.properties ?? rel) as Record<
+      string,
+      unknown
+    >;
+    const fromNode = normalizeNeo4jValue(row.from ?? {}) as Record<string, any>;
+    const toNode = normalizeNeo4jValue(row.to ?? {}) as Record<string, any>;
     const parsed: any = {
-      type: rel.type || row.type,
-      fromEntityId: row.from?.properties?.id || row.from?.id,
-      toEntityId: row.to?.properties?.id || row.to?.id,
+      type: (rel as Record<string, unknown>).type || row.type,
+      fromEntityId:
+        fromNode?.properties?.id ?? fromNode?.id ?? row.from?.properties?.id,
+      toEntityId:
+        toNode?.properties?.id ?? toNode?.id ?? row.to?.properties?.id,
     };
 
     for (const [key, value] of Object.entries(properties)) {
@@ -656,9 +761,7 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       // Parse dates
       if (key === 'created' || key === 'lastModified' || key.endsWith('At')) {
         parsed[key] = new Date(value as string);
-      }
-      // Parse JSON strings
-      else if (
+      } else if (
         typeof value === 'string' &&
         (key === 'evidence' || key === 'locations' || key === 'metadata')
       ) {
@@ -678,24 +781,34 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
   /**
    * Build bulk merge query for relationships
    */
-  private buildBulkMergeQuery(options: BulkRelationshipOptions): string {
+  private buildBulkMergeQuery(
+    relationshipType: RelationshipType,
+    options: BulkRelationshipOptions
+  ): string {
+    const timestampClause = options.updateTimestamps
+      ? 'SET r.lastModified = datetime()'
+      : '';
+
     return `
       UNWIND $relationships AS rel
       MATCH (from:Entity {id: rel.fromId})
       MATCH (to:Entity {id: rel.toId})
-      MERGE (from)-[r:\${rel.type} {id: rel.relId}]->(to)
+      MERGE (from)-[r:${relationshipType} {id: rel.relId}]->(to)
       SET r += rel.properties
-      ${options.updateTimestamps ? 'SET r.lastModified = datetime()' : ''}
-      RETURN count(r) as count
+      ${timestampClause}
+      RETURN count(r) AS count
     `;
   }
 
   /**
    * Build bulk create query for relationships
    */
-  private buildBulkCreateQuery(options: BulkRelationshipOptions): string {
+  private buildBulkCreateQuery(
+    relationshipType: RelationshipType,
+    options: BulkRelationshipOptions
+  ): string {
     const skipClause = options.skipExisting
-      ? 'WHERE NOT EXISTS((from)-[:\${rel.type} {id: rel.relId}]->(to))'
+      ? `WHERE NOT EXISTS((from)-[:${relationshipType} {id: rel.relId}]->(to))`
       : '';
 
     return `
@@ -703,16 +816,18 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
       MATCH (from:Entity {id: rel.fromId})
       MATCH (to:Entity {id: rel.toId})
       ${skipClause}
-      CREATE (from)-[r:\${rel.type} {id: rel.relId}]->(to)
+      CREATE (from)-[r:${relationshipType} {id: rel.relId}]->(to)
       SET r += rel.properties
-      RETURN count(r) as count
+      RETURN count(r) AS count
     `;
   }
 
   /**
    * Get a single relationship by its ID
    */
-  async getRelationshipById(relationshipId: string): Promise<GraphRelationship | null> {
+  async getRelationshipById(
+    relationshipId: string
+  ): Promise<GraphRelationship | null> {
     try {
       const query = `
         MATCH (from)-[r {id: $relationshipId}]->(to)
@@ -729,7 +844,11 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
 
       return this.parseRelationshipFromNeo4j(result[0]);
     } catch (error) {
-      this.emit('error', { operation: 'getRelationshipById', relationshipId, error });
+      this.emit('error', {
+        operation: 'getRelationshipById',
+        relationshipId,
+        error,
+      });
       throw error;
     }
   }
@@ -737,7 +856,10 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
   /**
    * Get evidence nodes for a relationship edge
    */
-  async getEdgeEvidenceNodes(relationshipId: string, limit: number = 200): Promise<any[]> {
+  async getEdgeEvidenceNodes(
+    relationshipId: string,
+    limit: number = 200
+  ): Promise<any[]> {
     try {
       const query = `
         MATCH (from)-[r {id: $relationshipId}]->(to)
@@ -753,11 +875,18 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
         limit,
       });
 
-      return result.map(row => row.evidence);
+      return result.map((row) => row.evidence);
     } catch (error) {
-      this.emit('error', { operation: 'getEdgeEvidenceNodes', relationshipId, error });
+      this.emit('error', {
+        operation: 'getEdgeEvidenceNodes',
+        relationshipId,
+        error,
+      });
       // Return empty array on error rather than throwing
-      console.warn(`Failed to get evidence nodes for relationship ${relationshipId}:`, error);
+      console.warn(
+        `Failed to get evidence nodes for relationship ${relationshipId}:`,
+        error
+      );
       return [];
     }
   }
@@ -765,7 +894,10 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
   /**
    * Get edge sites for a relationship (locations where the relationship is used)
    */
-  async getEdgeSites(relationshipId: string, limit: number = 50): Promise<any[]> {
+  async getEdgeSites(
+    relationshipId: string,
+    limit: number = 50
+  ): Promise<any[]> {
     try {
       const query = `
         MATCH (from)-[r {id: $relationshipId}]->(to)
@@ -781,11 +913,14 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
         limit,
       });
 
-      return result.map(row => row.location);
+      return result.map((row) => row.location);
     } catch (error) {
       this.emit('error', { operation: 'getEdgeSites', relationshipId, error });
       // Return empty array on error rather than throwing
-      console.warn(`Failed to get edge sites for relationship ${relationshipId}:`, error);
+      console.warn(
+        `Failed to get edge sites for relationship ${relationshipId}:`,
+        error
+      );
       return [];
     }
   }
@@ -793,7 +928,10 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
   /**
    * Get edge candidates for a relationship (potential relationship targets)
    */
-  async getEdgeCandidates(relationshipId: string, limit: number = 50): Promise<any[]> {
+  async getEdgeCandidates(
+    relationshipId: string,
+    limit: number = 50
+  ): Promise<any[]> {
     try {
       const query = `
         MATCH (from)-[r {id: $relationshipId}]->(to)
@@ -809,11 +947,18 @@ export class RelationshipServiceOGM extends EventEmitter implements IRelationshi
         limit,
       });
 
-      return result.map(row => row.candidates);
+      return result.map((row) => row.candidates);
     } catch (error) {
-      this.emit('error', { operation: 'getEdgeCandidates', relationshipId, error });
+      this.emit('error', {
+        operation: 'getEdgeCandidates',
+        relationshipId,
+        error,
+      });
       // Return empty array on error rather than throwing
-      console.warn(`Failed to get edge candidates for relationship ${relationshipId}:`, error);
+      console.warn(
+        `Failed to get edge candidates for relationship ${relationshipId}:`,
+        error
+      );
       return [];
     }
   }

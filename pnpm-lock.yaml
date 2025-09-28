@@ -9,11 +9,6 @@ overrides:
   tree-sitter-javascript: 0.23.1
   tree-sitter-typescript: 0.23.2
 
-patchedDependencies:
-  tree-sitter@0.25.0:
-    hash: 581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb
-    path: patches/tree-sitter@0.25.0.patch
-
 importers:
 
   .:
@@ -86,13 +81,13 @@ importers:
         version: 2.2.2
       tree-sitter:
         specifier: 0.25.0
-        version: 0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb)
+        version: 0.25.0
       tree-sitter-javascript:
         specifier: 0.23.1
-        version: 0.23.1(tree-sitter@0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb))
+        version: 0.23.1(tree-sitter@0.25.0)
       tree-sitter-typescript:
         specifier: 0.23.2
-        version: 0.23.2(tree-sitter@0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb))
+        version: 0.23.2(tree-sitter@0.25.0)
       trpc-openapi:
         specifier: ^1.2.0
         version: 1.2.0(@trpc/server@10.45.2)(@types/node@22.18.0)(zod@3.25.76)
@@ -355,6 +350,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       redis:
         specifier: ^4.7.0
         version: 4.7.1
@@ -377,6 +375,9 @@ importers:
       '@memento/core':
         specifier: workspace:*
         version: link:../core
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@qdrant/js-client-rest':
         specifier: ^1.9.0
         version: 1.15.1(typescript@5.9.2)
@@ -446,6 +447,9 @@ importers:
       '@memento/database':
         specifier: workspace:*
         version: link:../database
+      '@memento/utils':
+        specifier: workspace:*
+        version: link:../utils
       '@typescript/vfs':
         specifier: ^1.6.0
         version: 1.6.1(typescript@5.9.2)
@@ -454,13 +458,13 @@ importers:
         version: 5.16.0(ws@8.18.3)(zod@3.25.76)
       tree-sitter:
         specifier: 0.25.0
-        version: 0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb)
+        version: 0.25.0
       tree-sitter-javascript:
         specifier: 0.23.1
-        version: 0.23.1(tree-sitter@0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb))
+        version: 0.23.1(tree-sitter@0.25.0)
       tree-sitter-typescript:
         specifier: 0.23.2
-        version: 0.23.2(tree-sitter@0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb))
+        version: 0.23.2(tree-sitter@0.25.0)
       ts-morph:
         specifier: ^26.0.0
         version: 26.0.0
@@ -493,6 +497,12 @@ importers:
       '@types/node':
         specifier: ^20.8.0
         version: 20.19.17
+
+  packages/shared-types:
+    devDependencies:
+      typescript:
+        specifier: '*'
+        version: 5.9.2
 
   packages/sync:
     dependencies:
@@ -543,6 +553,22 @@ importers:
       '@vitest/ui':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.2
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@22.18.0)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@22.1.0)(terser@5.44.0)(tsx@4.20.5)(yaml@2.8.1)
+
+  packages/utils:
+    dependencies:
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+      neo4j-driver:
+        specifier: ^5.28.2
+        version: 5.28.2
+    devDependencies:
       typescript:
         specifier: ^5.7.2
         version: 5.9.2
@@ -16171,24 +16197,24 @@ snapshots:
 
   tree-kill@1.2.2: {}
 
-  tree-sitter-javascript@0.23.1(tree-sitter@0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb)):
+  tree-sitter-javascript@0.23.1(tree-sitter@0.25.0):
     dependencies:
       node-addon-api: 8.5.0
       node-gyp-build: 4.8.4
     optionalDependencies:
-      tree-sitter: 0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb)
+      tree-sitter: 0.25.0
 
-  tree-sitter-typescript@0.23.2(tree-sitter@0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb)):
+  tree-sitter-typescript@0.23.2(tree-sitter@0.25.0):
     dependencies:
       node-addon-api: 8.5.0
       node-gyp-build: 4.8.4
-      tree-sitter-javascript: 0.23.1(tree-sitter@0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb))
+      tree-sitter-javascript: 0.23.1(tree-sitter@0.25.0)
     optionalDependencies:
-      tree-sitter: 0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb)
+      tree-sitter: 0.25.0
 
   tree-sitter-wasms@0.1.12: {}
 
-  tree-sitter@0.25.0(patch_hash=581e1c376edeabe3d25b64ea7bac59e14cc731627b17b97acccf0cce1dd051cb):
+  tree-sitter@0.25.0:
     dependencies:
       node-addon-api: 8.5.0
       node-gyp-build: 4.8.4

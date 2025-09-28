@@ -734,7 +734,7 @@ test_temporal:
     const badgeId = `${badgeType}_${testId || 'all'}_${entityId || 'all'}`;
 
     // Get relevant data
-    let executions: TestExecutionRecord[] = [];
+    const executions: TestExecutionRecord[] = [];
     for (const [key, execs] of this.executionData.entries()) {
       if (testId && !key.includes(testId)) continue;
       if (entityId && !key.includes(entityId)) continue;

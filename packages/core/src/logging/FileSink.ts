@@ -1,18 +1,25 @@
-import * as fs from "fs/promises";
-import * as path from "path";
-import { OriginalConsoleMethods } from "./InstrumentationDispatcher.js";
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { OriginalConsoleMethods } from './InstrumentationDispatcher.js';
 
 export interface FileSystemFacade {
-  appendFile(path: string, data: string, encoding?: BufferEncoding): Promise<void>;
-  mkdir(path: string, options: fs.MakeDirectoryOptions & { recursive: boolean }): Promise<void>;
-  stat(path: string): Promise<fs.Stats>;
-  rm(path: string, options: fs.RmOptions): Promise<void>;
+  appendFile(path: string, data: string, encoding?: string): Promise<void>;
+  mkdir(
+    path: string,
+    options: { recursive: boolean }
+  ): Promise<string | undefined>;
+  stat(path: string): Promise<any>;
+  rm(
+    path: string,
+    options: { recursive?: boolean; force?: boolean }
+  ): Promise<void>;
   rename(oldPath: string, newPath: string): Promise<void>;
   truncate(path: string, len?: number): Promise<void>;
 }
 
 const defaultFileSystem: FileSystemFacade = {
-  appendFile: (target, data, encoding) => fs.appendFile(target, data, encoding),
+  appendFile: (target, data, encoding) =>
+    fs.appendFile(target, data, encoding as any),
   mkdir: (target, options) => fs.mkdir(target, options),
   stat: (target) => fs.stat(target),
   rm: (target, options) => fs.rm(target, options),
@@ -99,18 +106,19 @@ export class FileSink {
     try {
       await this.ensureInitialized();
       await this.rotateIfNeeded(line);
-      await this.fileSystem.appendFile(this.targetFile, line, "utf8");
+      await this.fileSystem.appendFile(this.targetFile, line, 'utf8');
 
-      const lineSize = Buffer.byteLength(line, "utf8");
+      const lineSize = Buffer.byteLength(line, 'utf8');
       this.currentFileSize += lineSize;
       this.metrics.bytesWritten += lineSize;
       this.consecutiveFailures = 0;
     } catch (error) {
       this.consecutiveFailures += 1;
       this.metrics.failedWrites += 1;
-      this.metrics.lastError = error instanceof Error ? error.message : String(error);
+      this.metrics.lastError =
+        error instanceof Error ? error.message : String(error);
       this.consoleFallback.warn(
-        "LoggingService: failed to append log entry to file",
+        'LoggingService: failed to append log entry to file',
         error
       );
 
@@ -137,7 +145,7 @@ export class FileSink {
       this.currentFileSize = stats.size;
       this.lastRotationAt = stats.mtimeMs;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw error;
       }
       this.currentFileSize = 0;
@@ -148,7 +156,7 @@ export class FileSink {
   }
 
   private async rotateIfNeeded(line: string): Promise<void> {
-    const lineSize = Buffer.byteLength(line, "utf8");
+    const lineSize = Buffer.byteLength(line, 'utf8');
     const now = Date.now();
 
     const sizeThresholdExceeded =
@@ -172,7 +180,7 @@ export class FileSink {
       try {
         await this.fileSystem.truncate(this.targetFile, 0);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
           throw error;
         }
       }
@@ -180,15 +188,14 @@ export class FileSink {
     }
 
     for (let index = history; index >= 1; index -= 1) {
-      const source = index === 1
-        ? this.targetFile
-        : `${this.targetFile}.${index - 1}`;
+      const source =
+        index === 1 ? this.targetFile : `${this.targetFile}.${index - 1}`;
       const destination = `${this.targetFile}.${index}`;
 
       try {
         await this.fileSystem.stat(source);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
           continue;
         }
         throw error;

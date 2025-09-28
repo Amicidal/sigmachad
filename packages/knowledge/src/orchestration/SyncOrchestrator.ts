@@ -3,22 +3,22 @@
  * Handles synchronization of documentation files with the knowledge graph
  */
 
-import { readdirSync, statSync } from "fs";
-import { join, extname } from "path";
-import { KnowledgeGraphService } from "../KnowledgeGraphService.js";
-import { DatabaseService } from "../../core/DatabaseService.js";
-import { DocTokenizer, ParsedDocument } from "./DocTokenizer.js";
-import { IntentExtractor } from "./IntentExtractor.js";
+import { readdirSync, statSync } from 'fs';
+import { join, extname } from 'path';
+import { KnowledgeGraphService } from '../KnowledgeGraphService.js';
+import { DatabaseService } from '../../core/DatabaseService.js';
+import { DocTokenizer, ParsedDocument } from './DocTokenizer.js';
+import { IntentExtractor } from './IntentExtractor.js';
 import {
   DocumentationNode,
   BusinessDomain,
   SemanticCluster,
   Entity,
-} from '@memento/core';
+} from '@memento/shared-types.js';
 import {
   RelationshipType,
   DocumentationRelationship,
-} from '@memento/core';
+} from '@memento/shared-types.js';
 
 export interface SyncResult {
   processedFiles: number;
@@ -39,7 +39,7 @@ export interface SearchResult {
 export class SyncOrchestrator {
   private tokenizer: DocTokenizer;
   private intentExtractor: IntentExtractor;
-  private supportedExtensions = [".md", ".txt", ".rst", ".adoc"];
+  private supportedExtensions = ['.md', '.txt', '.rst', '.adoc'];
 
   constructor(
     private kgService: KnowledgeGraphService,
@@ -70,7 +70,7 @@ export class SyncOrchestrator {
           await this.processFile(filePath);
         } catch (error) {
           const errorMsg = `Failed to process ${filePath}: ${
-            error instanceof Error ? error.message : "Unknown error"
+            error instanceof Error ? error.message : 'Unknown error'
           }`;
           result.errors.push(errorMsg);
           console.error(errorMsg);
@@ -89,7 +89,7 @@ export class SyncOrchestrator {
       );
     } catch (error) {
       const errorMsg = `Documentation sync failed: ${
-        error instanceof Error ? error.message : "Unknown error"
+        error instanceof Error ? error.message : 'Unknown error'
       }`;
       result.errors.push(errorMsg);
       console.error(errorMsg);
@@ -135,8 +135,8 @@ export class SyncOrchestrator {
     const docEntity: DocumentationNode = {
       id: `doc_${document.docHash}`,
       name: document.title,
-      type: "documentation",
-      path: document.metadata?.filePath || "",
+      type: 'documentation',
+      path: document.metadata?.filePath || '',
       content: document.content,
       docType: document.docType,
       docIntent: document.docIntent,
@@ -169,7 +169,7 @@ export class SyncOrchestrator {
     const domainEntity: BusinessDomain = {
       id: `domain_${domainPath}`,
       name: domainName,
-      type: "business-domain",
+      type: 'business-domain',
       path: domainPath,
       description: `Business domain: ${domainName}`,
       criticality: this.intentExtractor.inferDomainCriticality(
@@ -197,7 +197,7 @@ export class SyncOrchestrator {
       type: RelationshipType.DOCUMENTS,
       properties: {
         confidence: 0.8,
-        source: "parser",
+        source: 'parser',
         lastSeen: new Date(),
       },
     });
@@ -216,9 +216,9 @@ export class SyncOrchestrator {
       const clusterEntity: SemanticCluster = {
         id: `cluster_${document.docHash}_${cluster.name
           .toLowerCase()
-          .replace(/\s+/g, "_")}`,
+          .replace(/\s+/g, '_')}`,
         name: cluster.name,
-        type: "semantic-cluster",
+        type: 'semantic-cluster',
         description: cluster.description,
         concepts: cluster.concepts,
         confidence: cluster.confidence,
@@ -240,7 +240,7 @@ export class SyncOrchestrator {
         type: RelationshipType.CONTAINS,
         properties: {
           confidence: cluster.confidence,
-          source: "parser",
+          source: 'parser',
           lastSeen: new Date(),
         },
       });
@@ -264,7 +264,7 @@ export class SyncOrchestrator {
     // First, find documents matching the query
     const documents = await this.kgService.searchEntities({
       query,
-      types: ["documentation"],
+      types: ['documentation'],
       limit: limit * 2, // Get more candidates for scoring
     });
 
@@ -306,7 +306,7 @@ export class SyncOrchestrator {
 
           if (stat.isDirectory()) {
             // Skip common non-doc directories
-            if (!["node_modules", ".git", "dist", "build"].includes(entry)) {
+            if (!['node_modules', '.git', 'dist', 'build'].includes(entry)) {
               walkDirectory(fullPath);
             }
           } else if (stat.isFile()) {
@@ -399,7 +399,7 @@ export class SyncOrchestrator {
 
     // Content matches
     const contentMatches = (
-      contentLower.match(new RegExp(queryLower, "g")) || []
+      contentLower.match(new RegExp(queryLower, 'g')) || []
     ).length;
     score += Math.min(contentMatches * 0.1, 0.4);
 
@@ -418,7 +418,7 @@ export class SyncOrchestrator {
    * Find sections in content that match the query
    */
   private findMatchedSections(query: string, content: string): string[] {
-    const lines = content.split("\n");
+    const lines = content.split('\n');
     const matchedSections: string[] = [];
     const queryLower = query.toLowerCase();
 
@@ -426,12 +426,12 @@ export class SyncOrchestrator {
       const line = lines[i];
       if (line.toLowerCase().includes(queryLower)) {
         // Find the section header for this line
-        let sectionHeader = "";
+        let sectionHeader = '';
         for (let j = i; j >= 0 && j > i - 10; j--) {
           if (lines[j].match(/^#{1,6}\s/) || lines[j].match(/^=+\s*$/)) {
             sectionHeader = lines[j]
-              .replace(/^#{1,6}\s*/, "")
-              .replace(/^=+\s*$/, "");
+              .replace(/^#{1,6}\s*/, '')
+              .replace(/^=+\s*$/, '');
             break;
           }
         }
@@ -448,7 +448,7 @@ export class SyncOrchestrator {
    * Get freshness window in days
    */
   private getFreshnessWindowDays(): number {
-    return parseInt(process.env.DOC_FRESHNESS_WINDOW_DAYS || "30");
+    return parseInt(process.env.DOC_FRESHNESS_WINDOW_DAYS || '30');
   }
 
   /**
@@ -458,12 +458,12 @@ export class SyncOrchestrator {
     const cleaned = domainName
       .trim()
       .toLowerCase()
-      .replace(/>+/g, "/")
-      .replace(/\s+/g, "/")
-      .replace(/[^a-z0-9/_-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/\/+/, "/")
-      .replace(/\/+/, "/");
-    return cleaned.replace(/^\/+|\/+$/g, "");
+      .replace(/>+/g, '/')
+      .replace(/\s+/g, '/')
+      .replace(/[^a-z0-9/_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/\/+/, '/')
+      .replace(/\/+/, '/');
+    return cleaned.replace(/^\/+|\/+$/g, '');
   }
 }

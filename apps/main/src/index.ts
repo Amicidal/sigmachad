@@ -48,7 +48,10 @@ async function main() {
     // Initialize AST parser
     console.log('📝 Initializing AST parser...');
     const astParser = new ASTParser();
-    if ('initialize' in astParser && typeof (astParser as any).initialize === 'function') {
+    if (
+      'initialize' in astParser &&
+      typeof (astParser as any).initialize === 'function'
+    ) {
       await (astParser as any).initialize();
     }
 
@@ -85,16 +88,28 @@ async function main() {
       syncMonitor.recordOperationFailed(operation, error);
     });
     // Track progress/phase updates
-    syncCoordinator.on('syncProgress', (operation: any, payload: { phase: string; progress?: number }) => {
-      try { syncMonitor.recordProgress(operation, payload); } catch {}
-    });
+    syncCoordinator.on(
+      'syncProgress',
+      (operation: any, payload: { phase: string; progress?: number }) => {
+        try {
+          syncMonitor.recordProgress(operation, payload);
+        } catch (error) {
+          console.warn('[monitor] failed to record sync progress', error);
+        }
+      }
+    );
     syncCoordinator.on('conflictDetected', (conflict) => {
       syncMonitor.recordConflict(conflict as any);
     });
     syncCoordinator.on('sessionSequenceAnomaly', (anomaly: any) => {
       try {
         syncMonitor.recordSessionSequenceAnomaly(anomaly);
-      } catch {}
+      } catch (error) {
+        console.warn(
+          '[monitor] failed to record session sequence anomaly',
+          error
+        );
+      }
     });
     syncCoordinator.on('checkpointMetricsUpdated', (snapshot) => {
       try {
@@ -134,7 +149,9 @@ async function main() {
       syncTimeout = setTimeout(async () => {
         if (pendingChanges.length > 0) {
           try {
-            console.log(`🔄 Processing batch of ${pendingChanges.length} file changes`);
+            console.log(
+              `🔄 Processing batch of ${pendingChanges.length} file changes`
+            );
 
             // Create rollback point for safety
             const rollbackId = await rollbackCapabilities.createRollbackPoint(
@@ -143,17 +160,27 @@ async function main() {
             );
 
             // Start synchronization operation
-            const operationId = await syncCoordinator.synchronizeFileChanges(pendingChanges);
+            const operationId = await syncCoordinator.synchronizeFileChanges(
+              pendingChanges
+            );
 
             // Wait for operation to complete
             const checkCompletion = () => {
               const operation = syncCoordinator.getOperationStatus(operationId);
-              if (operation && (operation.status === 'completed' || operation.status === 'failed')) {
+              if (
+                operation &&
+                (operation.status === 'completed' ||
+                  operation.status === 'failed')
+              ) {
                 if (operation.status === 'failed') {
-                  console.error(`❌ Sync operation failed, attempting rollback...`);
-                  rollbackCapabilities.rollbackToPoint(rollbackId).catch(rollbackError => {
-                    console.error('❌ Rollback also failed:', rollbackError);
-                  });
+                  console.error(
+                    `❌ Sync operation failed, attempting rollback...`
+                  );
+                  rollbackCapabilities
+                    .rollbackToPoint(rollbackId)
+                    .catch((rollbackError) => {
+                      console.error('❌ Rollback also failed:', rollbackError);
+                    });
                 } else {
                   console.log(`✅ Sync operation completed successfully`);
                   // Clean up rollback point on success
@@ -169,7 +196,6 @@ async function main() {
 
             // Clear pending changes
             pendingChanges = [];
-
           } catch (error) {
             console.error(`❌ Error in batch sync:`, error);
             pendingChanges = []; // Clear on error to prevent infinite retries
@@ -191,8 +217,11 @@ async function main() {
       return new Promise<void>((resolve, reject) => {
         const checkStatus = () => {
           const op = syncCoordinator.getOperationStatus(operationId);
-          if (op && ["completed", "failed", "rolled_back"].includes(op.status)) {
-            if (op.status === "completed") {
+          if (
+            op &&
+            ['completed', 'failed', 'rolled_back'].includes(op.status)
+          ) {
+            if (op.status === 'completed') {
               resolve();
             } else {
               reject(new Error(`Initial sync ${op.status}`));
@@ -201,7 +230,7 @@ async function main() {
           }
 
           if (Date.now() - startedAt > timeoutMs) {
-            reject(new Error("Timed out waiting for initial synchronization"));
+            reject(new Error('Timed out waiting for initial synchronization'));
             return;
           }
 
@@ -212,34 +241,42 @@ async function main() {
       });
     };
 
-    const skipInitialSync = String(process.env.SKIP_INITIAL_FULL_SYNC || "").toLowerCase() === "true";
+    const skipInitialSync =
+      String(process.env.SKIP_INITIAL_FULL_SYNC || '').toLowerCase() === 'true';
     if (!skipInitialSync) {
       try {
-        console.log("🔁 Performing initial full synchronization...");
-        const fullSyncId = await syncCoordinator.startFullSynchronization({ includeEmbeddings: false });
+        console.log('🔁 Performing initial full synchronization...');
+        const fullSyncId = await syncCoordinator.startFullSynchronization({
+          includeEmbeddings: false,
+        });
         await waitForSyncCompletion(fullSyncId).catch((error) => {
-          console.warn("⚠️ Initial synchronization did not complete cleanly:", error instanceof Error ? error.message : error);
+          console.warn(
+            '⚠️ Initial synchronization did not complete cleanly:',
+            error instanceof Error ? error.message : error
+          );
         });
       } catch (error) {
-        console.warn("⚠️ Failed to start initial synchronization:", error);
+        console.warn('⚠️ Failed to start initial synchronization:', error);
       }
     } else {
-      console.log("⏭️ SKIP_INITIAL_FULL_SYNC enabled – skipping boot-time synchronization");
+      console.log(
+        '⏭️ SKIP_INITIAL_FULL_SYNC enabled – skipping boot-time synchronization'
+      );
     }
 
     // Initialize API Gateway with enhanced services
     console.log('🌐 Initializing API Gateway...');
     const apiGateway = new APIGateway(
-      kgService, 
-      dbService, 
-      fileWatcher, 
-      astParser, 
+      kgService,
+      dbService,
+      fileWatcher,
+      astParser,
       docParser,
       securityScanner,
       {
         port: parseInt(process.env.PORT || '3000'),
         host: process.env.HOST || '0.0.0.0',
-      }, 
+      },
       {
         syncCoordinator,
         syncMonitor,
@@ -270,7 +307,10 @@ async function main() {
 
         console.log('✅ Shutdown complete');
 
-        const failureSignals = new Set(['uncaughtException', 'unhandledRejection']);
+        const failureSignals = new Set([
+          'uncaughtException',
+          'unhandledRejection',
+        ]);
         if (failureSignals.has(signal)) {
           process.exit(1);
           return;
@@ -299,11 +339,16 @@ async function main() {
     });
 
     console.log('🎉 Memento is running!');
-    console.log(`📊 API available at: http://localhost:${process.env.PORT || 3000}`);
-    console.log(`🔍 Health check: http://localhost:${process.env.PORT || 3000}/health`);
+    console.log(
+      `📊 API available at: http://localhost:${process.env.PORT || 3000}`
+    );
+    console.log(
+      `🔍 Health check: http://localhost:${process.env.PORT || 3000}/health`
+    );
     console.log(`🔌 WebSocket: ws://localhost:${process.env.PORT || 3000}/ws`);
-    console.log(`📁 Watching files in: ${fileWatcher.getWatchedPaths().join(', ')}`);
-
+    console.log(
+      `📁 Watching files in: ${fileWatcher.getWatchedPaths().join(', ')}`
+    );
   } catch (error) {
     console.error('💥 Failed to start Memento:', error);
     process.exit(1);

@@ -2,57 +2,36 @@
  * Lightweight API key registry to support scoped API keys with checksum validation.
  */
 
-import crypto from "crypto";
-import fs from "fs";
-import path from "path";
-import { normalizeScopes } from "./scopes.js";
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { normalizeScopes } from './scopes.js';
+import {
+  ApiKeyRecord,
+  ApiKeyRegistry,
+  ApiKeyVerification,
+  ApiKeyRegistryProvider,
+} from '@memento/shared-types.js';
 
-export interface ApiKeyRecord {
-  id: string;
-  secretHash: string;
-  algorithm?: "sha256" | "sha512";
-  scopes: string[];
-  lastRotatedAt?: string;
-  checksum?: string;
-  metadata?: Record<string, unknown>;
-}
+const DEFAULT_ALGORITHM = 'sha256';
 
-export interface ApiKeyRegistry {
-  version?: string;
-  updatedAt?: string;
-  keys: ApiKeyRecord[];
-}
-
-interface VerificationFailure {
-  ok: false;
-  errorCode: "INVALID_API_KEY" | "CHECKSUM_MISMATCH";
-  message: string;
-}
-
-interface VerificationSuccess {
-  ok: true;
-  record: ApiKeyRecord;
-  scopes: string[];
-}
-
-export type ApiKeyVerification = VerificationFailure | VerificationSuccess;
-
-const DEFAULT_ALGORITHM = "sha256";
-
-const hashSecret = (secret: string, algorithm: ApiKeyRecord["algorithm"]): string => {
+const hashSecret = (
+  secret: string,
+  algorithm: ApiKeyRecord['algorithm']
+): string => {
   const algo = algorithm ?? DEFAULT_ALGORITHM;
-  return crypto.createHash(algo).update(secret).digest("hex");
+  return crypto.createHash(algo).update(secret).digest('hex');
 };
 
 const computeChecksum = (record: ApiKeyRecord): string => {
-  const base = `${record.id}:${record.secretHash}:${record.algorithm ?? DEFAULT_ALGORITHM}`;
-  return crypto.createHash("sha256").update(base).digest("hex");
+  const base = `${record.id}:${record.secretHash}:${
+    record.algorithm ?? DEFAULT_ALGORITHM
+  }`;
+  return crypto.createHash('sha256').update(base).digest('hex');
 };
 
 let cachedSignature: string | null = null;
 let cachedRegistry: ApiKeyRegistry | null = null;
-
-export type ApiKeyRegistryProvider = () => ApiKeyRegistry | null;
 
 let registryProvider: ApiKeyRegistryProvider | null = null;
 
@@ -65,14 +44,16 @@ const normaliseRegistryShape = (input: any): ApiKeyRegistry => {
     return { keys: input } as ApiKeyRegistry;
   }
 
-  if (typeof input === "object" && Array.isArray(input.keys)) {
+  if (typeof input === 'object' && Array.isArray(input.keys)) {
     return input as ApiKeyRegistry;
   }
 
   return { keys: [] };
 };
 
-const normaliseAndFilter = (registry: ApiKeyRegistry | null): ApiKeyRegistry => {
+const normaliseAndFilter = (
+  registry: ApiKeyRegistry | null
+): ApiKeyRegistry => {
   const shaped = normaliseRegistryShape(registry);
   shaped.keys = Array.isArray(shaped.keys)
     ? shaped.keys.filter((record) => Boolean(record?.id && record?.secretHash))
@@ -93,7 +74,7 @@ const loadRegistryFromProvider = (): ApiKeyRegistry => {
 };
 
 const loadRegistryFromEnv = (): { source: string; signature: string } => {
-  const base = process.env.API_KEY_REGISTRY || "";
+  const base = process.env.API_KEY_REGISTRY || '';
   const registryPath = process.env.API_KEY_REGISTRY_PATH;
 
   if (!registryPath) {
@@ -104,7 +85,7 @@ const loadRegistryFromEnv = (): { source: string; signature: string } => {
     const absolutePath = path.resolve(registryPath);
     const stats = fs.statSync(absolutePath);
     const fileSignature = `file:${absolutePath}:${stats.mtimeMs}:${stats.size}`;
-    const fileContents = fs.readFileSync(absolutePath, "utf8");
+    const fileContents = fs.readFileSync(absolutePath, 'utf8');
     return { source: fileContents, signature: fileSignature };
   } catch {
     return { source: base, signature: `env:${base}` };
@@ -134,7 +115,9 @@ const loadRegistry = (): ApiKeyRegistry => {
   return cachedRegistry!;
 };
 
-export const setApiKeyRegistryProvider = (provider: ApiKeyRegistryProvider | null) => {
+export const setApiKeyRegistryProvider = (
+  provider: ApiKeyRegistryProvider | null
+) => {
   registryProvider = provider;
   cachedRegistry = null;
   cachedSignature = null;
@@ -150,24 +133,26 @@ export const isApiKeyRegistryConfigured = (): boolean => {
   return Array.isArray(registry.keys) && registry.keys.length > 0;
 };
 
-export const authenticateApiKey = (apiKeyHeader: string): ApiKeyVerification => {
+export const authenticateApiKey = (
+  apiKeyHeader: string
+): ApiKeyVerification => {
   let decoded: string;
   try {
-    decoded = Buffer.from(apiKeyHeader, "base64").toString("utf8");
+    decoded = Buffer.from(apiKeyHeader, 'base64').toString('utf8');
   } catch {
     return {
       ok: false,
-      errorCode: "INVALID_API_KEY",
-      message: "API key is not valid base64",
+      errorCode: 'INVALID_API_KEY',
+      message: 'API key is not valid base64',
     };
   }
 
-  const [keyId, providedSecret] = decoded.split(":");
+  const [keyId, providedSecret] = decoded.split(':');
   if (!keyId || !providedSecret) {
     return {
       ok: false,
-      errorCode: "INVALID_API_KEY",
-      message: "API key must be formatted as <id>:<secret>",
+      errorCode: 'INVALID_API_KEY',
+      message: 'API key must be formatted as <id>:<secret>',
     };
   }
 
@@ -176,8 +161,8 @@ export const authenticateApiKey = (apiKeyHeader: string): ApiKeyVerification => 
   if (!record) {
     return {
       ok: false,
-      errorCode: "INVALID_API_KEY",
-      message: "API key is not recognised",
+      errorCode: 'INVALID_API_KEY',
+      message: 'API key is not recognised',
     };
   }
 
@@ -186,8 +171,8 @@ export const authenticateApiKey = (apiKeyHeader: string): ApiKeyVerification => 
     if (expectedChecksum !== record.checksum) {
       return {
         ok: false,
-        errorCode: "CHECKSUM_MISMATCH",
-        message: "API key registry entry checksum mismatch",
+        errorCode: 'CHECKSUM_MISMATCH',
+        message: 'API key registry entry checksum mismatch',
       };
     }
   }
@@ -197,8 +182,8 @@ export const authenticateApiKey = (apiKeyHeader: string): ApiKeyVerification => 
   if (providedHash !== record.secretHash) {
     return {
       ok: false,
-      errorCode: "INVALID_API_KEY",
-      message: "API key secret does not match",
+      errorCode: 'INVALID_API_KEY',
+      message: 'API key secret does not match',
     };
   }
 

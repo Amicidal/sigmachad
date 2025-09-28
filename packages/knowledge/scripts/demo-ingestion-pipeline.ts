@@ -7,10 +7,11 @@
 
 import {
   HighThroughputIngestionPipeline,
+  type IngestionEvents,
   createDefaultPipelineConfig,
   createMockChangeEvent,
   createMockChangeFragment,
-  createKnowledgeGraphAdapter
+  createKnowledgeGraphAdapter,
 } from '../src/ingestion/index.js';
 
 // Mock KnowledgeGraphService
@@ -21,17 +22,19 @@ const mockKnowledgeGraphService = {
       success: true,
       processed: entities.length,
       failed: 0,
-      results: entities.map(e => ({ entity: e, success: true }))
+      results: entities.map((e) => ({ entity: e, success: true })),
     };
   },
 
   async createRelationshipsBulk(relationships: any[]) {
-    console.log(`[MockKG] Created ${relationships.length} relationships in bulk`);
+    console.log(
+      `[MockKG] Created ${relationships.length} relationships in bulk`
+    );
     return {
       success: true,
       processed: relationships.length,
       failed: 0,
-      results: relationships.map(r => ({ relationship: r, success: true }))
+      results: relationships.map((r) => ({ relationship: r, success: true })),
     };
   },
 
@@ -41,9 +44,26 @@ const mockKnowledgeGraphService = {
       success: true,
       processed: entities.length,
       failed: 0,
-      results: entities.map(e => ({ entity: e, success: true }))
+      results: entities.map((e) => ({ entity: e, success: true })),
     };
-  }
+  },
+
+  async createOrUpdateEntity(entity: any) {
+    console.log(`[MockKG] Created/updated entity: ${entity.id}`);
+    return entity;
+  },
+
+  async createRelationship(relationship: any) {
+    console.log(
+      `[MockKG] Created relationship: ${relationship.fromEntityId} -> ${relationship.toEntityId}`
+    );
+    return relationship;
+  },
+
+  async createEmbedding(entity: any) {
+    console.log(`[MockKG] Created embedding for entity: ${entity.id}`);
+    return { entityId: entity.id, vector: [0.1, 0.2, 0.3] };
+  },
 };
 
 async function runDemo() {
@@ -64,7 +84,9 @@ async function runDemo() {
   console.log('📋 Pipeline Configuration:');
   console.log(`  - Parsers: ${config.workers.parsers}`);
   console.log(`  - Entity Workers: ${config.workers.entityWorkers}`);
-  console.log(`  - Relationship Workers: ${config.workers.relationshipWorkers}`);
+  console.log(
+    `  - Relationship Workers: ${config.workers.relationshipWorkers}`
+  );
   console.log(`  - Embedding Workers: ${config.workers.embeddingWorkers}`);
   console.log(`  - Entity Batch Size: ${config.batching.entityBatchSize}`);
   console.log();
@@ -77,18 +99,28 @@ async function runDemo() {
 
   // Set up event listeners
   pipeline.on('pipeline:started', () => {
+    // eslint-disable-line @typescript-eslint/no-explicit-any
     console.log('✅ Pipeline started successfully');
   });
 
-  pipeline.on('event:received', (event) => {
+  pipeline.on('event:received', (event: any) => {
+    // eslint-disable-line @typescript-eslint/no-explicit-any
     console.log(`📥 Received event: ${event.id} (${event.filePath})`);
   });
 
-  pipeline.on('metrics:updated', (metrics) => {
-    console.log(`📊 Metrics: ${metrics.totalEvents} events, ${metrics.eventsPerSecond.toFixed(1)} events/sec, Queue: ${metrics.queueMetrics.queueDepth}`);
+  pipeline.on('metrics:updated', (metrics: any) => {
+    // eslint-disable-line @typescript-eslint/no-explicit-any
+    console.log(
+      `📊 Metrics: ${
+        metrics.totalEvents
+      } events, ${metrics.eventsPerSecond.toFixed(1)} events/sec, Queue: ${
+        metrics.queueMetrics.queueDepth
+      }`
+    );
   });
 
-  pipeline.on('pipeline:error', (error) => {
+  pipeline.on('pipeline:error', (error: any) => {
+    // eslint-disable-line @typescript-eslint/no-explicit-any
     console.error('❌ Pipeline error:', error.message);
   });
 
@@ -98,20 +130,22 @@ async function runDemo() {
     await pipeline.start();
 
     // Wait a moment for startup
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Generate and ingest mock change events
     console.log('\n📁 Generating mock change events...');
     const changeEvents = [];
     for (let i = 0; i < 20; i++) {
-      changeEvents.push(createMockChangeEvent({
-        id: `demo-event-${i}`,
-        filePath: `/demo/file${i}.ts`,
-        namespace: 'demo',
-        module: `demo-module-${i % 5}`,
-        size: 1000 + (i * 100),
-        diffHash: `hash-${i}`
-      }));
+      changeEvents.push(
+        createMockChangeEvent({
+          id: `demo-event-${i}`,
+          filePath: `/demo/file${i}.ts`,
+          namespace: 'demo',
+          module: `demo-module-${i % 5}`,
+          size: 1000 + i * 100,
+          diffHash: `hash-${i}`,
+        })
+      );
     }
 
     console.log(`📤 Ingesting ${changeEvents.length} change events...`);
@@ -119,30 +153,32 @@ async function runDemo() {
 
     // Wait for processing
     console.log('⏳ Waiting for processing...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Generate and process change fragments
     console.log('\n🔄 Generating change fragments...');
     const changeFragments = [];
     for (let i = 0; i < 10; i++) {
-      changeFragments.push(createMockChangeFragment({
-        id: `demo-fragment-${i}`,
-        eventId: `demo-event-${i}`,
-        data: {
-          id: `demo-entity-${i}`,
-          type: 'function',
-          name: `demoFunction${i}`,
-          properties: { module: `demo-module-${i % 3}` },
-          metadata: { createdAt: new Date() }
-        }
-      }));
+      changeFragments.push(
+        createMockChangeFragment({
+          id: `demo-fragment-${i}`,
+          eventId: `demo-event-${i}`,
+          data: {
+            id: `demo-entity-${i}`,
+            type: 'function',
+            name: `demoFunction${i}`,
+            properties: { module: `demo-module-${i % 3}` },
+            metadata: { createdAt: new Date() },
+          },
+        })
+      );
     }
 
     console.log(`🔄 Processing ${changeFragments.length} change fragments...`);
     await pipeline.processChangeFragments(changeFragments);
 
     // Wait for processing
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Schedule enrichment tasks
     console.log('\n🎯 Scheduling enrichment tasks...');
@@ -154,22 +190,28 @@ async function runDemo() {
         priority: 5,
         data: { content: `content for entity ${i}` },
         dependencies: [],
-        createdAt: new Date()
+        createdAt: new Date(),
       });
     }
 
     // Wait for enrichment processing
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Display final metrics
     console.log('\n📈 Final Metrics:');
     const finalMetrics = pipeline.getMetrics();
     console.log(`  - Total Events Processed: ${finalMetrics.totalEvents}`);
-    console.log(`  - Average Latency: ${finalMetrics.averageLatency.toFixed(2)}ms`);
+    console.log(
+      `  - Average Latency: ${finalMetrics.averageLatency.toFixed(2)}ms`
+    );
     console.log(`  - P95 Latency: ${finalMetrics.p95Latency.toFixed(2)}ms`);
     console.log(`  - Queue Depth: ${finalMetrics.queueMetrics.queueDepth}`);
-    console.log(`  - Completed Batches: ${finalMetrics.batchMetrics.completedBatches}`);
-    console.log(`  - Failed Batches: ${finalMetrics.batchMetrics.failedBatches}`);
+    console.log(
+      `  - Completed Batches: ${finalMetrics.batchMetrics.completedBatches}`
+    );
+    console.log(
+      `  - Failed Batches: ${finalMetrics.batchMetrics.failedBatches}`
+    );
     console.log(`  - Active Workers: ${finalMetrics.workerMetrics.length}`);
 
     // Display pipeline state
@@ -183,7 +225,11 @@ async function runDemo() {
     // Display telemetry
     console.log('\n🔍 Telemetry Summary:');
     const telemetry = pipeline.getTelemetry();
-    console.log(`  - Memory Usage: ${(telemetry.performance.memory / 1024 / 1024).toFixed(1)} MB`);
+    console.log(
+      `  - Memory Usage: ${(telemetry.performance.memory / 1024 / 1024).toFixed(
+        1
+      )} MB`
+    );
     console.log(`  - Total Workers: ${telemetry.workers.length}`);
     console.log(`  - Error Count: ${telemetry.errors.count}`);
 
@@ -191,7 +237,6 @@ async function runDemo() {
     await pipeline.stop();
 
     console.log('✅ Demo completed successfully!');
-
   } catch (error) {
     console.error('❌ Demo failed:', error);
     await pipeline.stop();

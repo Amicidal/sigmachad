@@ -3,11 +3,14 @@
  * Handles incremental parsing, partial updates, and change detection for the AST Parser
  */
 
-import * as path from "path";
-import * as fs from "fs/promises";
-import { Entity, Symbol as SymbolEntity } from '@memento/core';
-import { GraphRelationship } from '@memento/core';
-import { createHash } from "./utils.js";
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import {
+  Entity,
+  Symbol as SymbolEntity,
+} from '@memento/shared-types.js';
+import { GraphRelationship } from '@memento/shared-types.js';
+import { createHash } from './utils.js';
 import {
   ParseResult,
   ParseError,
@@ -15,7 +18,7 @@ import {
   PartialUpdate,
   ChangeRange,
   CachedFileInfo,
-} from "./types.js";
+} from './types.js';
 
 // Re-export types for backward compatibility
 export type {
@@ -53,7 +56,7 @@ export class IncrementalParser {
     const cachedInfo = fileCache.get(absolutePath);
 
     try {
-      const content = await fs.readFile(absolutePath, "utf-8");
+      const content = await fs.readFile(absolutePath, 'utf-8');
       const currentHash = createHash(content);
 
       // If file hasn't changed, return empty incremental result
@@ -88,7 +91,7 @@ export class IncrementalParser {
         try {
           const fileRel = path.relative(process.cwd(), absolutePath);
           const syms = fullResult.entities.filter(
-            (e) => (e as any).type === "symbol"
+            (e) => (e as any).type === 'symbol'
           ) as SymbolEntity[];
           indexManager.removeFileFromIndexes(fileRel);
           indexManager.addSymbolsToIndexes(fileRel, syms);
@@ -107,7 +110,7 @@ export class IncrementalParser {
 
       // If running integration tests, return incremental changes when file changed.
       // In unit tests, prefer full reparse when file changed to satisfy expectations.
-      if (process.env.RUN_INTEGRATION === "1") {
+      if (process.env.RUN_INTEGRATION === '1') {
         const incrementalResult = this.computeIncrementalChanges(
           cachedInfo,
           fullResult,
@@ -120,7 +123,7 @@ export class IncrementalParser {
         try {
           const fileRel = path.relative(process.cwd(), absolutePath);
           const syms = fullResult.entities.filter(
-            (e) => (e as any).type === "symbol"
+            (e) => (e as any).type === 'symbol'
           ) as SymbolEntity[];
           indexManager.removeFileFromIndexes(fileRel);
           indexManager.addSymbolsToIndexes(fileRel, syms);
@@ -141,7 +144,7 @@ export class IncrementalParser {
       try {
         const fileRel = path.relative(process.cwd(), absolutePath);
         const syms = fullResult.entities.filter(
-          (e) => (e as any).type === "symbol"
+          (e) => (e as any).type === 'symbol'
         ) as SymbolEntity[];
         indexManager.removeFileFromIndexes(fileRel);
         indexManager.addSymbolsToIndexes(fileRel, syms);
@@ -168,7 +171,7 @@ export class IncrementalParser {
       };
     } catch (error) {
       // Handle file deletion or other file access errors
-      if (cachedInfo && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (cachedInfo && (error as NodeJS.ErrnoException).code === 'ENOENT') {
         // File has been deleted, return incremental result with removed entities
         fileCache.delete(absolutePath);
         try {
@@ -183,8 +186,8 @@ export class IncrementalParser {
               file: filePath,
               line: 0,
               column: 0,
-              message: "File has been deleted",
-              severity: "warning",
+              message: 'File has been deleted',
+              severity: 'warning',
             },
           ],
           isIncremental: true,
@@ -206,9 +209,9 @@ export class IncrementalParser {
             line: 0,
             column: 0,
             message: `Incremental parse error: ${
-              error instanceof Error ? error.message : "Unknown error"
+              error instanceof Error ? error.message : 'Unknown error'
             }`,
-            severity: "error",
+            severity: 'error',
           },
         ],
         isIncremental: false,
@@ -271,34 +274,34 @@ export class IncrementalParser {
     // Relationships: compute logical diff to support temporal open/close behavior
     const keyOf = (rel: GraphRelationship): string => {
       try {
-        const from = String(rel.fromEntityId || "");
-        const type = String(rel.type || "");
+        const from = String(rel.fromEntityId || '');
+        const type = String(rel.type || '');
         const anyRel: any = rel as any;
         const toRef = anyRel.toRef;
-        let targetKey = "";
-        if (toRef && typeof toRef === "object") {
-          if (toRef.kind === "entity" && toRef.id)
+        let targetKey = '';
+        if (toRef && typeof toRef === 'object') {
+          if (toRef.kind === 'entity' && toRef.id)
             targetKey = `ENT:${toRef.id}`;
           else if (
-            toRef.kind === "fileSymbol" &&
+            toRef.kind === 'fileSymbol' &&
             (toRef.file || toRef.name || toRef.symbol)
           )
-            targetKey = `FS:${toRef.file || ""}:${
-              toRef.name || toRef.symbol || ""
+            targetKey = `FS:${toRef.file || ''}:${
+              toRef.name || toRef.symbol || ''
             }`;
-          else if (toRef.kind === "external" && (toRef.name || toRef.symbol))
+          else if (toRef.kind === 'external' && (toRef.name || toRef.symbol))
             targetKey = `EXT:${toRef.name || toRef.symbol}`;
         }
         if (!targetKey) {
-          const to = String(rel.toEntityId || "");
+          const to = String(rel.toEntityId || '');
           if (/^file:/.test(to)) {
             const m = to.match(/^file:(.+?):(.+)$/);
             targetKey = m ? `FS:${m[1]}:${m[2]}` : `FILE:${to}`;
           } else if (/^external:/.test(to)) {
-            targetKey = `EXT:${to.slice("external:".length)}`;
+            targetKey = `EXT:${to.slice('external:'.length)}`;
           } else if (/^(class|interface|function|typeAlias):/.test(to)) {
-            const parts = to.split(":");
-            targetKey = `PLH:${parts[0]}:${parts.slice(1).join(":")}`;
+            const parts = to.split(':');
+            targetKey = `PLH:${parts[0]}:${parts.slice(1).join(':')}`;
           } else if (/^sym:/.test(to)) {
             targetKey = `SYM:${to}`;
           } else {
@@ -307,7 +310,7 @@ export class IncrementalParser {
         }
         return `${from}|${type}|${targetKey}`;
       } catch {
-        return `${rel.id || ""}`;
+        return `${rel.id || ''}`;
       }
     };
 
@@ -369,7 +372,7 @@ export class IncrementalParser {
       const cachedInfo = fileCache.get(path.resolve(filePath));
       if (!cachedInfo) {
         // Fall back to full parsing if no cache exists
-        throw new Error("No cached info available for partial update");
+        throw new Error('No cached info available for partial update');
       }
 
       const updates: PartialUpdate[] = [];
@@ -401,7 +404,7 @@ export class IncrementalParser {
               updates.push(update);
 
               switch (update.type) {
-                case "add":
+                case 'add':
                   // Re-parse the affected section to get the new entity
                   const newEntity = await this.parseSymbolFromRange(
                     filePath,
@@ -410,7 +413,7 @@ export class IncrementalParser {
                   if (newEntity) {
                     // Normalize new symbol path to `${fileRel}:${name}` for consistency
                     try {
-                      if ((newEntity as any).type === "symbol") {
+                      if ((newEntity as any).type === 'symbol') {
                         const nm = (newEntity as any).name as string;
                         (newEntity as any).path = `${fileRel}:${nm}`;
                         // Update cache symbolMap and global indexes immediately
@@ -418,7 +421,9 @@ export class IncrementalParser {
                           `${(newEntity as any).path}`,
                           newEntity as any
                         );
-                        indexManager.addSymbolsToIndexes(fileRel, [newEntity as any]);
+                        indexManager.addSymbolsToIndexes(fileRel, [
+                          newEntity as any,
+                        ]);
                       }
                     } catch {}
                     // Attach newValue for downstream cache update clarity
@@ -426,7 +431,7 @@ export class IncrementalParser {
                     addedEntities.push(newEntity);
                   }
                   break;
-                case "remove":
+                case 'remove':
                   // Remove from global indexes and cache symbol map by id
                   try {
                     const nm = (cachedSymbol as any).name as string;
@@ -441,7 +446,7 @@ export class IncrementalParser {
                   } catch {}
                   removedEntities.push(cachedSymbol);
                   break;
-                case "update":
+                case 'update':
                   const updatedEntity = { ...cachedSymbol, ...update.changes };
                   try {
                     // Replace in cache symbolMap by searching existing entry (by id)
@@ -530,7 +535,7 @@ export class IncrementalParser {
     // Check if symbol's position overlaps with the change range
     // We'll use a conservative approach - if we don't have position info, assume affected
 
-    if (!symbol.location || typeof symbol.location !== "object") {
+    if (!symbol.location || typeof symbol.location !== 'object') {
       return true; // Conservative: assume affected if no location info
     }
 
@@ -573,10 +578,10 @@ export class IncrementalParser {
 
     const contentSnippet = originalContent.substring(change.start, change.end);
 
-    if (contentSnippet.trim() === "") {
+    if (contentSnippet.trim() === '') {
       // Empty change might be a deletion
       return {
-        type: "remove",
+        type: 'remove',
         entityType: symbol.kind as any,
         entityId: symbol.id,
       };
@@ -585,7 +590,7 @@ export class IncrementalParser {
     // Check if this looks like a new symbol declaration
     if (this.looksLikeNewSymbol(contentSnippet)) {
       return {
-        type: "add",
+        type: 'add',
         entityType: this.detectSymbolType(contentSnippet),
         entityId: `new_symbol_${Date.now()}`,
       };
@@ -593,7 +598,7 @@ export class IncrementalParser {
 
     // Assume it's an update
     return {
-      type: "update",
+      type: 'update',
       entityType: symbol.kind as any,
       entityId: symbol.id,
       changes: {
@@ -613,11 +618,11 @@ export class IncrementalParser {
     change: ChangeRange
   ): Promise<Entity | null> {
     try {
-      const fullContent = await fs.readFile(filePath, "utf-8");
+      const fullContent = await fs.readFile(filePath, 'utf-8');
       const contentSnippet = fullContent.substring(change.start, change.end);
 
       // Extract basic information from the code snippet
-      const lines = contentSnippet.split("\n");
+      const lines = contentSnippet.split('\n');
       const firstNonEmptyLine = lines.find((line) => line.trim().length > 0);
 
       if (!firstNonEmptyLine) {
@@ -639,28 +644,28 @@ export class IncrementalParser {
       // Create a basic entity for the new symbol
       const entity: SymbolEntity = {
         id: `${filePath}:${symbolName}`,
-        type: "symbol",
+        type: 'symbol',
         kind:
-          symbolType === "function"
-            ? "function"
-            : symbolType === "class"
-            ? "class"
-            : symbolType === "interface"
-            ? "interface"
-            : symbolType === "typeAlias"
-            ? "typeAlias"
-            : "variable",
+          symbolType === 'function'
+            ? 'function'
+            : symbolType === 'class'
+            ? 'class'
+            : symbolType === 'interface'
+            ? 'interface'
+            : symbolType === 'typeAlias'
+            ? 'typeAlias'
+            : 'variable',
         name: symbolName,
         path: filePath,
         hash: createHash(contentSnippet).substring(0, 16),
-        language: path.extname(filePath).replace(".", "") || "unknown",
-        visibility: firstNonEmptyLine.includes("export") ? "public" : "private",
+        language: path.extname(filePath).replace('.', '') || 'unknown',
+        visibility: firstNonEmptyLine.includes('export') ? 'public' : 'private',
         signature: contentSnippet.substring(
           0,
           Math.min(200, contentSnippet.length)
         ),
-        docstring: "",
-        isExported: firstNonEmptyLine.includes("export"),
+        docstring: '',
+        isExported: firstNonEmptyLine.includes('export'),
         isDeprecated: false,
         metadata: {
           parsed: new Date().toISOString(),
@@ -708,11 +713,11 @@ export class IncrementalParser {
     // Update the cache based on the partial updates
     for (const update of updates) {
       switch (update.type) {
-        case "add":
+        case 'add':
           // Add new symbols to cache when available
           try {
             const nv: any = (update as any).newValue;
-            if (nv && nv.type === "symbol") {
+            if (nv && nv.type === 'symbol') {
               const name = nv.name as string;
               const fileRel = indexManager.normalizeRelPath(
                 path.relative(process.cwd(), filePath)
@@ -729,7 +734,7 @@ export class IncrementalParser {
             }
           } catch {}
           break;
-        case "remove":
+        case 'remove':
           // Remove by matching value.id (since symbolMap keys are by path:name)
           try {
             let foundKey: string | null = null;
@@ -752,7 +757,7 @@ export class IncrementalParser {
             }
           } catch {}
           break;
-        case "update":
+        case 'update':
           try {
             // Locate by id; then apply changes and refresh indexes
             let foundKey: string | null = null;
@@ -816,15 +821,15 @@ export class IncrementalParser {
    */
   private detectSymbolType(
     content: string
-  ): "file" | "symbol" | "function" | "class" | "interface" | "typeAlias" {
+  ): 'file' | 'symbol' | 'function' | 'class' | 'interface' | 'typeAlias' {
     const trimmed = content.trim();
 
-    if (/^\s*function\s+/.test(trimmed)) return "function";
-    if (/^\s*class\s+/.test(trimmed)) return "class";
-    if (/^\s*interface\s+/.test(trimmed)) return "interface";
-    if (/^\s*type\s+/.test(trimmed)) return "typeAlias";
+    if (/^\s*function\s+/.test(trimmed)) return 'function';
+    if (/^\s*class\s+/.test(trimmed)) return 'class';
+    if (/^\s*interface\s+/.test(trimmed)) return 'interface';
+    if (/^\s*type\s+/.test(trimmed)) return 'typeAlias';
 
-    return "symbol";
+    return 'symbol';
   }
 
   /**

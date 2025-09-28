@@ -3,8 +3,11 @@
  * Provides memory and performance optimizations
  */
 
-import { Entity, Symbol as SymbolEntity } from '@memento/core';
-import { GraphRelationship } from '@memento/core';
+import {
+  Entity,
+  Symbol as SymbolEntity,
+} from '@memento/shared-types.js';
+import { GraphRelationship } from '@memento/shared-types.js';
 
 /**
  * Configuration for performance optimizations
@@ -144,7 +147,10 @@ export class PerformanceOptimizer {
    * @param maxAge - Maximum age in milliseconds
    * @returns Number of entries removed
    */
-  optimizeSymbolMap(symbolMap: Map<string, SymbolEntity>, maxAge: number = 3600000): number {
+  optimizeSymbolMap(
+    symbolMap: Map<string, SymbolEntity>,
+    maxAge: number = 3600000
+  ): number {
     const now = Date.now();
     let removedCount = 0;
 
@@ -164,7 +170,9 @@ export class PerformanceOptimizer {
    * @param maxSize - Maximum cache size
    * @returns LRU cache implementation
    */
-  createLRUCache<K, V>(maxSize: number = this.config.maxCacheSize): Map<K, V> & {
+  createLRUCache<K, V>(
+    maxSize: number = this.config.maxCacheSize
+  ): Map<K, V> & {
     delete: (key: K) => boolean;
     clear: () => void;
     has: (key: K) => boolean;
@@ -239,7 +247,7 @@ export class PerformanceOptimizer {
     if (compressed.metadata) {
       const metadata = compressed.metadata as any;
       if (metadata.sourceCode && metadata.sourceCode.length > 1000) {
-        metadata.sourceCode = metadata.sourceCode.substring(0, 500) + "...";
+        metadata.sourceCode = metadata.sourceCode.substring(0, 500) + '...';
       }
       if (metadata.comments && Array.isArray(metadata.comments)) {
         metadata.comments = metadata.comments.slice(0, 5); // Keep only first 5 comments
@@ -247,11 +255,14 @@ export class PerformanceOptimizer {
     }
 
     // Store large data in weak references if enabled
-    if (this.config.enableWeakRefs && entity.type === "symbol") {
+    if (this.config.enableWeakRefs && entity.type === 'symbol') {
       const symbol = entity as SymbolEntity;
       if (symbol.signature && symbol.signature.length > 500) {
-        this.weakEntityRefs.set(compressed, { originalSignature: symbol.signature });
-        (compressed as any).signature = symbol.signature.substring(0, 200) + "...";
+        this.weakEntityRefs.set(compressed, {
+          originalSignature: symbol.signature,
+        });
+        (compressed as any).signature =
+          symbol.signature.substring(0, 200) + '...';
       }
     }
 
@@ -264,9 +275,8 @@ export class PerformanceOptimizer {
    */
   getMetrics(): PerformanceMetrics {
     this.metrics.memoryUsage = process.memoryUsage();
-    this.metrics.averageParseTime = this.parsedFileCount > 0
-      ? this.totalParseTime / this.parsedFileCount
-      : 0;
+    this.metrics.averageParseTime =
+      this.parsedFileCount > 0 ? this.totalParseTime / this.parsedFileCount : 0;
 
     return { ...this.metrics };
   }
@@ -324,20 +334,28 @@ export class PerformanceOptimizer {
     const metrics = this.getMetrics();
 
     if (metrics.cacheHitRate < 50) {
-      suggestions.push("Cache hit rate is low - consider increasing cache size or improving cache strategy");
+      suggestions.push(
+        'Cache hit rate is low - consider increasing cache size or improving cache strategy'
+      );
     }
 
     if (metrics.averageParseTime > 1000) {
-      suggestions.push("Average parse time is high - consider enabling parallel processing or optimizing parser logic");
+      suggestions.push(
+        'Average parse time is high - consider enabling parallel processing or optimizing parser logic'
+      );
     }
 
     const memoryMB = metrics.memoryUsage.heapUsed / 1024 / 1024;
     if (memoryMB > 256) {
-      suggestions.push("Memory usage is high - consider enabling entity compression or reducing cache size");
+      suggestions.push(
+        'Memory usage is high - consider enabling entity compression or reducing cache size'
+      );
     }
 
     if (this.isMemoryPressureHigh()) {
-      suggestions.push("Memory pressure is high - consider running garbage collection more frequently");
+      suggestions.push(
+        'Memory pressure is high - consider running garbage collection more frequently'
+      );
     }
 
     return suggestions;

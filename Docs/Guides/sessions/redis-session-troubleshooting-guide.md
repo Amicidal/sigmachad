@@ -1,5 +1,21 @@
 # Redis Session Coordination - Troubleshooting Guide
 
+## Metadata
+
+- Scope: sessions
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Prerequisites
+
+- Access, roles, and environment assumptions.
+
+## Steps
+
+- Step 1
+- Step 2
+- Step 3
+
 ## Overview
 
 This guide provides solutions for common issues encountered when using the Redis session coordination system, including connection problems, performance issues, and operational challenges.

@@ -35,6 +35,5 @@
         "watch": true
       }
     }
-  },
-  "implicitDependencies": ["core", "database"]
+  }
 }

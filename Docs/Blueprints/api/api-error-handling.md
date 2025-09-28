@@ -1,5 +1,18 @@
 # API Error Handling Blueprint
 
+## Metadata
+
+- Scope: api
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: api).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 The API Gateway exposes REST endpoints layered over Fastify. Consistent error envelopes (status code, machine-readable code, human message, request correlation metadata) are required so HTTP clients, web socket bridges, and observability pipelines can correlate failures with logs and retry policies.
 

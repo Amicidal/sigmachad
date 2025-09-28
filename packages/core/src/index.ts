@@ -20,7 +20,7 @@ export * from './services/index.js';
 export * from './logging/index.js';
 
 // Model exports (types are also models in this structure)
-export * from './models/relationships.js';
+// export * from './models/relationships';
 
 // Rollback exports
 export * from './rollback/index.js';

@@ -1,5 +1,18 @@
 # Rollback Capabilities Blueprint
 
+## Metadata
+
+- Scope: rollback
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: rollback).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Rollback orchestration coordinates capture and restoration of entities, relationships, and checkpoint metadata refs across FalkorDB, PostgreSQL, Qdrant, and Redis. The service is exercised heavily by integration flows to rewind partially applied synchronization operations and to recover from pipeline failures. Recent work added an explicit `DatabaseService` readiness check so rollback routines now fail fast when core datastores are not initialized. Checkpoints are ref-only anchors (metadata summaries on entities), not full KG subgraphs, aligning with ephemeral sessions.
 

@@ -3,10 +3,18 @@
  * Handles code change proposals, validation, and analysis
  */
 
-import { FastifyInstance } from "fastify";
-import { KnowledgeGraphService, ASTParser, ParseResult } from "@memento/knowledge";
-import { DatabaseService } from "@memento/database";
-import { RelationshipType, ValidationResult, ValidationIssue } from "@memento/core";
+import { FastifyInstance } from 'fastify';
+import {
+  KnowledgeGraphService,
+  ASTParser,
+  ParseResult,
+} from '@memento/knowledge';
+import { DatabaseService } from '@memento/database';
+import {
+  RelationshipType,
+  ValidationResult,
+  ValidationIssue,
+} from '@memento/core';
 import {
   SecurityIssue,
   Entity,
@@ -14,63 +22,22 @@ import {
   ClassSymbol,
   Symbol as SymbolEntity,
   Test,
-} from "@memento/core";
-import fs from "fs/promises";
-import path from "path";
-import console from "console";
-
-interface CodeChangeProposal {
-  changes: {
-    file: string;
-    type: "create" | "modify" | "delete" | "rename";
-    oldContent?: string;
-    newContent?: string;
-    lineStart?: number;
-    lineEnd?: number;
-  }[];
-  description: string;
-  relatedSpecId?: string;
-}
-
-interface CodeChangeAnalysis {
-  affectedEntities: AffectedEntitySummary[];
-  breakingChanges: {
-    severity: "breaking" | "potentially-breaking" | "safe";
-    description: string;
-    affectedEntities: string[];
-  }[];
-  impactAnalysis: {
-    directImpact: Entity[];
-    indirectImpact: Entity[];
-    testImpact: Test[];
-  };
-  recommendations: {
-    type: "warning" | "suggestion" | "requirement";
-    message: string;
-    actions: string[];
-  }[];
-}
-
-interface ValidationRequest {
-  files?: string[];
-  specId?: string;
-  includeTypes?: (
-    | "typescript"
-    | "eslint"
-    | "security"
-    | "tests"
-    | "coverage"
-    | "architecture"
-  )[];
-  failOnWarnings?: boolean;
-}
+} from '@memento/core';
+import {
+  CodeChangeProposal,
+  CodeChangeAnalysis,
+  ValidationRequest,
+} from '@memento/shared-types';
+import fs from 'fs/promises';
+import path from 'path';
+import console from 'console';
 
 interface AffectedEntitySummary {
   id: string;
   name: string;
   type: string;
   file: string;
-  changeType: "created" | "modified" | "deleted";
+  changeType: 'created' | 'modified' | 'deleted';
 }
 
 interface CodeSuggestion {
@@ -84,7 +51,7 @@ interface RefactorSuggestion {
   type: string;
   description: string;
   confidence: number;
-  effort: "low" | "medium" | "high";
+  effort: 'low' | 'medium' | 'high';
   file?: string;
   target?: string;
 }
@@ -100,34 +67,34 @@ export async function registerCodeRoutes(
 ): Promise<void> {
   // POST /api/code/propose-diff - Propose code changes and analyze impact
   app.post(
-    "/code/propose-diff",
+    '/code/propose-diff',
     {
       schema: {
         body: {
-          type: "object",
+          type: 'object',
           properties: {
             changes: {
-              type: "array",
+              type: 'array',
               items: {
-                type: "object",
+                type: 'object',
                 properties: {
-                  file: { type: "string" },
+                  file: { type: 'string' },
                   type: {
-                    type: "string",
-                    enum: ["create", "modify", "delete", "rename"],
+                    type: 'string',
+                    enum: ['create', 'modify', 'delete', 'rename'],
                   },
-                  oldContent: { type: "string" },
-                  newContent: { type: "string" },
-                  lineStart: { type: "number" },
-                  lineEnd: { type: "number" },
+                  oldContent: { type: 'string' },
+                  newContent: { type: 'string' },
+                  lineStart: { type: 'number' },
+                  lineEnd: { type: 'number' },
                 },
-                required: ["file", "type"],
+                required: ['file', 'type'],
               },
             },
-            description: { type: "string" },
-            relatedSpecId: { type: "string" },
+            description: { type: 'string' },
+            relatedSpecId: { type: 'string' },
           },
-          required: ["changes", "description"],
+          required: ['changes', 'description'],
         },
       },
     },
@@ -151,8 +118,8 @@ export async function registerCodeRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "CODE_ANALYSIS_FAILED",
-            message: "Failed to analyze proposed code changes",
+            code: 'CODE_ANALYSIS_FAILED',
+            message: 'Failed to analyze proposed code changes',
           },
         });
       }
@@ -161,29 +128,29 @@ export async function registerCodeRoutes(
 
   // POST /api/code/validate - Run comprehensive code validation
   app.post(
-    "/code/validate",
+    '/code/validate',
     {
       schema: {
         body: {
-          type: "object",
+          type: 'object',
           properties: {
-            files: { type: "array", items: { type: "string" } },
-            specId: { type: "string" },
+            files: { type: 'array', items: { type: 'string' } },
+            specId: { type: 'string' },
             includeTypes: {
-              type: "array",
+              type: 'array',
               items: {
-                type: "string",
+                type: 'string',
                 enum: [
-                  "typescript",
-                  "eslint",
-                  "security",
-                  "tests",
-                  "coverage",
-                  "architecture",
+                  'typescript',
+                  'eslint',
+                  'security',
+                  'tests',
+                  'coverage',
+                  'architecture',
                 ],
               },
             },
-            failOnWarnings: { type: "boolean" },
+            failOnWarnings: { type: 'boolean' },
           },
         },
       },
@@ -198,7 +165,7 @@ export async function registerCodeRoutes(
           return reply.status(400).send({
             success: false,
             error: {
-              code: "VALIDATION_ERROR",
+              code: 'VALIDATION_ERROR',
               message: "Either 'files' or 'specId' parameter is required",
             },
           });
@@ -252,7 +219,7 @@ export async function registerCodeRoutes(
 
         // TypeScript validation
         if (
-          params.includeTypes?.includes("typescript") ||
+          params.includeTypes?.includes('typescript') ||
           !params.includeTypes
         ) {
           try {
@@ -261,48 +228,48 @@ export async function registerCodeRoutes(
             );
             result.typescript = tsValidation;
           } catch {
-            console.warn("TypeScript validation failed");
+            console.warn('TypeScript validation failed');
           }
         }
 
         // ESLint validation
-        if (params.includeTypes?.includes("eslint") || !params.includeTypes) {
+        if (params.includeTypes?.includes('eslint') || !params.includeTypes) {
           try {
             const eslintValidation = await runESLintValidation(
               params.files || []
             );
             result.eslint = eslintValidation;
           } catch {
-            console.warn("ESLint validation failed");
+            console.warn('ESLint validation failed');
           }
         }
 
         // Security validation
-        if (params.includeTypes?.includes("security") || !params.includeTypes) {
+        if (params.includeTypes?.includes('security') || !params.includeTypes) {
           try {
             const securityValidation = await runSecurityValidation(
               params.files || []
             );
             result.security = securityValidation;
           } catch {
-            console.warn("Security validation failed");
+            console.warn('Security validation failed');
           }
         }
 
         // Test validation
-        if (params.includeTypes?.includes("tests") || !params.includeTypes) {
+        if (params.includeTypes?.includes('tests') || !params.includeTypes) {
           try {
             const testValidation = await runTestValidation();
             result.tests = testValidation;
             result.coverage = testValidation.coverage; // Also populate top-level coverage
           } catch {
-            console.warn("Test validation failed");
+            console.warn('Test validation failed');
           }
         }
 
         // Architecture validation
         if (
-          params.includeTypes?.includes("architecture") ||
+          params.includeTypes?.includes('architecture') ||
           !params.includeTypes
         ) {
           try {
@@ -311,7 +278,7 @@ export async function registerCodeRoutes(
             );
             result.architecture = architectureValidation;
           } catch {
-            console.warn("Architecture validation failed");
+            console.warn('Architecture validation failed');
           }
         }
 
@@ -339,9 +306,9 @@ export async function registerCodeRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "VALIDATION_FAILED",
-            message: "Failed to run code validation",
-            details: error instanceof Error ? error.message : "Unknown error",
+            code: 'VALIDATION_FAILED',
+            message: 'Failed to run code validation',
+            details: error instanceof Error ? error.message : 'Unknown error',
           },
         });
       }
@@ -350,20 +317,20 @@ export async function registerCodeRoutes(
 
   // POST /api/code/analyze - Analyze code for patterns and issues
   app.post(
-    "/code/analyze",
+    '/code/analyze',
     {
       schema: {
         body: {
-          type: "object",
+          type: 'object',
           properties: {
-            files: { type: "array", items: { type: "string" } },
+            files: { type: 'array', items: { type: 'string' } },
             analysisType: {
-              type: "string",
-              enum: ["complexity", "patterns", "duplicates", "dependencies"],
+              type: 'string',
+              enum: ['complexity', 'patterns', 'duplicates', 'dependencies'],
             },
-            options: { type: "object" },
+            options: { type: 'object' },
           },
-          required: ["files", "analysisType"],
+          required: ['files', 'analysisType'],
         },
       },
     },
@@ -379,16 +346,16 @@ export async function registerCodeRoutes(
 
         // Perform analysis based on type
         switch (analysisType) {
-          case "complexity":
+          case 'complexity':
             analysis = await analyzeCodeComplexity(files, astParser);
             break;
-          case "patterns":
+          case 'patterns':
             analysis = await analyzeCodePatterns(files, astParser);
             break;
-          case "duplicates":
+          case 'duplicates':
             analysis = await analyzeCodeDuplicates(files, astParser);
             break;
-          case "dependencies":
+          case 'dependencies':
             analysis = await analyzeCodeDependencies(files, kgService);
             break;
           default:
@@ -406,9 +373,9 @@ export async function registerCodeRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "CODE_ANALYSIS_FAILED",
-            message: "Failed to analyze code",
-            details: error instanceof Error ? error.message : "Unknown error",
+            code: 'CODE_ANALYSIS_FAILED',
+            message: 'Failed to analyze code',
+            details: error instanceof Error ? error.message : 'Unknown error',
           },
         });
       }
@@ -416,36 +383,36 @@ export async function registerCodeRoutes(
   );
 
   // GET /api/code/symbols - List code symbols (stubbed)
-  app.get("/code/symbols", async (_request, reply) => {
+  app.get('/code/symbols', async (_request, reply) => {
     reply.send({ success: true, data: [] });
   });
 
   // GET /api/code/suggestions/{file} - Get code improvement suggestions
   app.get(
-    "/code/suggestions/:file",
+    '/code/suggestions/:file',
     {
       schema: {
         params: {
-          type: "object",
+          type: 'object',
           properties: {
-            file: { type: "string" },
+            file: { type: 'string' },
           },
-          required: ["file"],
+          required: ['file'],
         },
         querystring: {
-          type: "object",
+          type: 'object',
           properties: {
-            lineStart: { type: "number" },
-            lineEnd: { type: "number" },
+            lineStart: { type: 'number' },
+            lineEnd: { type: 'number' },
             types: {
-              type: "array",
+              type: 'array',
               items: {
-                type: "string",
+                type: 'string',
                 enum: [
-                  "performance",
-                  "security",
-                  "maintainability",
-                  "best-practices",
+                  'performance',
+                  'security',
+                  'maintainability',
+                  'best-practices',
                 ],
               },
             },
@@ -468,7 +435,7 @@ export async function registerCodeRoutes(
 
         let fileContent: string | null = null;
         try {
-          fileContent = await fs.readFile(resolvedPath, "utf-8");
+          fileContent = await fs.readFile(resolvedPath, 'utf-8');
         } catch {
           fileContent = null;
         }
@@ -477,7 +444,7 @@ export async function registerCodeRoutes(
         try {
           parseResult = await astParser.parseFile(resolvedPath);
         } catch (error) {
-          console.warn("Could not parse file for suggestions:", error);
+          console.warn('Could not parse file for suggestions:', error);
         }
 
         const suggestions = generateCodeSuggestions({
@@ -502,8 +469,8 @@ export async function registerCodeRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "SUGGESTIONS_FAILED",
-            message: "Failed to generate code suggestions",
+            code: 'SUGGESTIONS_FAILED',
+            message: 'Failed to generate code suggestions',
             details: error instanceof Error ? error.message : undefined,
           },
         });
@@ -513,25 +480,25 @@ export async function registerCodeRoutes(
 
   // POST /api/code/refactor - Suggest refactoring opportunities
   app.post(
-    "/code/refactor",
+    '/code/refactor',
     {
       schema: {
         body: {
-          type: "object",
+          type: 'object',
           properties: {
-            files: { type: "array", items: { type: "string" } },
+            files: { type: 'array', items: { type: 'string' } },
             refactorType: {
-              type: "string",
+              type: 'string',
               enum: [
-                "extract-function",
-                "extract-class",
-                "rename",
-                "consolidate-duplicates",
+                'extract-function',
+                'extract-class',
+                'rename',
+                'consolidate-duplicates',
               ],
             },
-            options: { type: "object" },
+            options: { type: 'object' },
           },
-          required: ["files", "refactorType"],
+          required: ['files', 'refactorType'],
         },
       },
     },
@@ -561,8 +528,8 @@ export async function registerCodeRoutes(
         reply.status(500).send({
           success: false,
           error: {
-            code: "REFACTORING_FAILED",
-            message: "Failed to analyze refactoring opportunities",
+            code: 'REFACTORING_FAILED',
+            message: 'Failed to analyze refactoring opportunities',
             details: error instanceof Error ? error.message : undefined,
           },
         });
@@ -581,17 +548,18 @@ function generateCodeSuggestions(opts: {
   fileContent: string | null;
 }): CodeSuggestion[] {
   const suggestions: CodeSuggestion[] = [];
-  const filterTypes = Array.isArray(opts.types) && opts.types.length > 0
-    ? new Set(opts.types.map((t) => t.toLowerCase()))
-    : null;
+  const filterTypes =
+    Array.isArray(opts.types) && opts.types.length > 0
+      ? new Set(opts.types.map((t) => t.toLowerCase()))
+      : null;
 
   const withinRange = (line?: number) => {
     if (line == null) return true;
     const numeric = line;
-    if (typeof opts.lineStart === "number" && numeric < opts.lineStart) {
+    if (typeof opts.lineStart === 'number' && numeric < opts.lineStart) {
       return false;
     }
-    if (typeof opts.lineEnd === "number" && numeric > opts.lineEnd) {
+    if (typeof opts.lineEnd === 'number' && numeric > opts.lineEnd) {
       return false;
     }
     return true;
@@ -604,7 +572,9 @@ function generateCodeSuggestions(opts: {
     if (filterTypes && !filterTypes.has(suggestion.type.toLowerCase())) {
       return;
     }
-    const key = `${suggestion.type}|${suggestion.line ?? ""}|${suggestion.message}`;
+    const key = `${suggestion.type}|${suggestion.line ?? ''}|${
+      suggestion.message
+    }`;
     if (!unique.has(key)) {
       unique.set(key, suggestion);
     }
@@ -618,35 +588,35 @@ function generateCodeSuggestions(opts: {
       const lineNumber = index + 1;
       if (/todo/i.test(text)) {
         addSuggestion({
-          type: "best-practices",
-          message: "Found TODO comment; consider resolving before shipping.",
+          type: 'best-practices',
+          message: 'Found TODO comment; consider resolving before shipping.',
           line: lineNumber,
         });
       }
       if (/console\.(log|warn|error|info)/.test(text)) {
         addSuggestion({
-          type: "best-practices",
-          message: "Remove console statements from production code.",
+          type: 'best-practices',
+          message: 'Remove console statements from production code.',
           line: lineNumber,
         });
       }
       if (/\bany\b/.test(text)) {
         addSuggestion({
-          type: "maintainability",
+          type: 'maintainability',
           message: "Avoid using the 'any' type; prefer stricter typings.",
           line: lineNumber,
         });
       }
       if (/eval\s*\(/.test(text)) {
         addSuggestion({
-          type: "security",
-          message: "Avoid using eval for security reasons.",
+          type: 'security',
+          message: 'Avoid using eval for security reasons.',
           line: lineNumber,
         });
       }
       if (/\/\/\s*@ts-ignore/.test(text)) {
         addSuggestion({
-          type: "maintainability",
+          type: 'maintainability',
           message: "Remove '@ts-ignore' by addressing the underlying issue.",
           line: lineNumber,
         });
@@ -659,8 +629,8 @@ function generateCodeSuggestions(opts: {
     if (Array.isArray(parseResult.errors)) {
       for (const error of parseResult.errors) {
         addSuggestion({
-          type: "maintainability",
-          message: `Parser reported: ${error.message || "Unknown error"}`,
+          type: 'maintainability',
+          message: `Parser reported: ${error.message || 'Unknown error'}`,
           line: (error.line ?? 0) + 1,
           column: error.column,
         });
@@ -669,36 +639,40 @@ function generateCodeSuggestions(opts: {
 
     if (Array.isArray(parseResult.entities)) {
       for (const entity of parseResult.entities) {
-        if (entity.type !== "symbol") continue;
+        if (entity.type !== 'symbol') continue;
         const symbol = entity as SymbolEntity;
         const lineNumber = (symbol.location?.line ?? 0) + 1;
         if (!withinRange(lineNumber)) continue;
 
-        if (symbol.kind === "function") {
+        if (symbol.kind === 'function') {
           const fn = symbol as any as FunctionSymbol;
-          if (typeof fn.complexity === "number" && fn.complexity >= 15) {
+          if (typeof fn.complexity === 'number' && fn.complexity >= 15) {
             addSuggestion({
-              type: "maintainability",
+              type: 'maintainability',
               message: `Function ${fn.name} has high complexity (${fn.complexity}). Consider extracting helper functions.`,
               line: lineNumber,
             });
           }
           if (Array.isArray(fn.parameters) && fn.parameters.length >= 5) {
             addSuggestion({
-              type: "maintainability",
+              type: 'maintainability',
               message: `Function ${fn.name} takes ${fn.parameters.length} parameters. Consider grouping parameters into an object.`,
               line: lineNumber,
             });
           }
         }
 
-        if (symbol.kind === "class") {
+        if (symbol.kind === 'class') {
           const cls = symbol as any as ClassSymbol;
-          const methodCount = Array.isArray(cls.methods) ? cls.methods.length : 0;
-          const propertyCount = Array.isArray(cls.properties) ? cls.properties.length : 0;
+          const methodCount = Array.isArray(cls.methods)
+            ? cls.methods.length
+            : 0;
+          const propertyCount = Array.isArray(cls.properties)
+            ? cls.properties.length
+            : 0;
           if (methodCount + propertyCount >= 12) {
             addSuggestion({
-              type: "maintainability",
+              type: 'maintainability',
               message: `Class ${cls.name} is large (${methodCount} methods, ${propertyCount} properties). Consider splitting responsibilities.`,
               line: lineNumber,
             });
@@ -743,15 +717,20 @@ async function generateRefactorSuggestions(opts: {
     suggestions.push(suggestion);
   };
 
-  if (refactorType === "consolidate-duplicates") {
-    const duplicateAnalysis = await analyzeCodeDuplicates(resolvedFiles, astParser);
+  if (refactorType === 'consolidate-duplicates') {
+    const duplicateAnalysis = await analyzeCodeDuplicates(
+      resolvedFiles,
+      astParser
+    );
     for (const duplicate of duplicateAnalysis.results || []) {
       if ((duplicate.locations || []).length <= 1) continue;
       pushSuggestion({
         type: refactorType,
-        description: `Duplicate code detected at ${duplicate.locations.join(", ")}. Consolidate shared logic.`,
+        description: `Duplicate code detected at ${duplicate.locations.join(
+          ', '
+        )}. Consolidate shared logic.`,
         confidence: Math.min(1, duplicate.count / 5),
-        effort: duplicate.count > 3 ? "medium" : "low",
+        effort: duplicate.count > 3 ? 'medium' : 'low',
       });
     }
   } else {
@@ -760,51 +739,55 @@ async function generateRefactorSuggestions(opts: {
       if (!parseResult || !Array.isArray(parseResult.entities)) continue;
       const relative = path.relative(process.cwd(), file);
 
-      if (refactorType === "extract-function") {
+      if (refactorType === 'extract-function') {
         for (const entity of parseResult.entities) {
-          if (entity.type !== "symbol" || entity.kind !== "function") continue;
+          if (entity.type !== 'symbol' || entity.kind !== 'function') continue;
           const fn = entity as any as FunctionSymbol;
           const complexity = fn.complexity ?? 0;
-          const paramCount = Array.isArray(fn.parameters) ? fn.parameters.length : 0;
+          const paramCount = Array.isArray(fn.parameters)
+            ? fn.parameters.length
+            : 0;
           if (complexity >= 18 || paramCount >= 5) {
             pushSuggestion({
               type: refactorType,
               description: `Function ${fn.name} in ${relative} is complex (${complexity}) with ${paramCount} parameters. Extract helper functions.`,
               confidence: Math.min(1, (complexity + paramCount) / 25),
-              effort: complexity > 25 ? "high" : "medium",
+              effort: complexity > 25 ? 'high' : 'medium',
               file: relative,
               target: fn.name,
             });
           }
         }
-      } else if (refactorType === "extract-class") {
+      } else if (refactorType === 'extract-class') {
         for (const entity of parseResult.entities) {
-          if (entity.type !== "symbol" || entity.kind !== "class") continue;
+          if (entity.type !== 'symbol' || entity.kind !== 'class') continue;
           const cls = entity as any as ClassSymbol;
           const methods = Array.isArray(cls.methods) ? cls.methods.length : 0;
-          const props = Array.isArray(cls.properties) ? cls.properties.length : 0;
+          const props = Array.isArray(cls.properties)
+            ? cls.properties.length
+            : 0;
           if (methods + props >= 12) {
             pushSuggestion({
               type: refactorType,
               description: `Class ${cls.name} in ${relative} has ${methods} methods and ${props} properties. Consider extracting smaller classes.`,
               confidence: Math.min(1, (methods + props) / 20),
-              effort: methods + props > 18 ? "high" : "medium",
+              effort: methods + props > 18 ? 'high' : 'medium',
               file: relative,
               target: cls.name,
             });
           }
         }
-      } else if (refactorType === "rename") {
+      } else if (refactorType === 'rename') {
         for (const entity of parseResult.entities) {
-          if (entity.type !== "symbol") continue;
+          if (entity.type !== 'symbol') continue;
           const lineNumber = (entity.location?.line ?? 0) + 1;
-          const name = (entity as any).name ?? "";
+          const name = (entity as any).name ?? '';
           if (name && name.length <= 3) {
             pushSuggestion({
               type: refactorType,
               description: `Identifier '${name}' in ${relative}:${lineNumber} is terse. Rename to a more descriptive name.`,
               confidence: 0.6,
-              effort: "low",
+              effort: 'low',
               file: relative,
               target: name,
             });
@@ -818,9 +801,10 @@ async function generateRefactorSuggestions(opts: {
     return [
       {
         type: refactorType,
-        description: "No significant opportunities detected based on available heuristics.",
+        description:
+          'No significant opportunities detected based on available heuristics.',
         confidence: 0.3,
-        effort: "low",
+        effort: 'low',
       },
     ];
   }
@@ -836,7 +820,7 @@ async function analyzeCodeChanges(
 ): Promise<CodeChangeAnalysis> {
   const affectedEntities: AffectedEntitySummary[] = [];
   const breakingChanges: {
-    severity: "breaking" | "potentially-breaking" | "safe";
+    severity: 'breaking' | 'potentially-breaking' | 'safe';
     description: string;
     affectedEntities: string[];
   }[] = [];
@@ -844,7 +828,7 @@ async function analyzeCodeChanges(
   const indirectImpact: Entity[] = [];
   const testImpact: Test[] = [];
   const recommendations: {
-    type: "warning" | "suggestion" | "requirement";
+    type: 'warning' | 'suggestion' | 'requirement';
     message: string;
     actions: string[];
   }[] = [];
@@ -852,7 +836,7 @@ async function analyzeCodeChanges(
   try {
     // Analyze each proposed change
     for (const change of proposal.changes) {
-      if (change.type === "modify" && change.oldContent && change.newContent) {
+      if (change.type === 'modify' && change.oldContent && change.newContent) {
         // Parse both old and new content to compare
         const oldParseResult = await parseContentAsFile(
           change.file,
@@ -877,7 +861,7 @@ async function analyzeCodeChanges(
             name: symbol.name,
             type: symbol.kind,
             file: change.file,
-            changeType: "modified",
+            changeType: 'modified',
           });
 
           // Check for breaking changes
@@ -899,7 +883,7 @@ async function analyzeCodeChanges(
           indirectImpact.push(...impact.indirect);
           testImpact.push(...impact.tests);
         }
-      } else if (change.type === "create" && change.newContent) {
+      } else if (change.type === 'create' && change.newContent) {
         // Parse new content
         const newParseResult = await parseContentAsFile(
           change.file,
@@ -908,36 +892,36 @@ async function analyzeCodeChanges(
         );
 
         for (const entity of newParseResult.entities) {
-          if (entity.type === "symbol") {
+          if (entity.type === 'symbol') {
             const symbolEntity = entity as SymbolEntity;
             affectedEntities.push({
               id: symbolEntity.id,
               name: symbolEntity.name,
               type: symbolEntity.kind,
               file: change.file,
-              changeType: "created",
+              changeType: 'created',
             });
           }
         }
-      } else if (change.type === "delete") {
+      } else if (change.type === 'delete') {
         // For deletions, we need to get the current state from the knowledge graph
         const currentEntities = await findEntitiesInFile(
           change.file,
           kgService
         );
         for (const entity of currentEntities) {
-          if (entity.type === "symbol") {
+          if (entity.type === 'symbol') {
             const symbolEntity = entity as SymbolEntity;
             affectedEntities.push({
               id: symbolEntity.id,
               name: symbolEntity.name,
               type: symbolEntity.kind,
               file: change.file,
-              changeType: "deleted",
+              changeType: 'deleted',
             });
 
             breakingChanges.push({
-              severity: "breaking",
+              severity: 'breaking',
               description: `Deleting ${symbolEntity.kind} ${symbolEntity.name} will break dependent code`,
               affectedEntities: [symbolEntity.id],
             });
@@ -951,11 +935,11 @@ async function analyzeCodeChanges(
       ...generateRecommendations(affectedEntities, breakingChanges)
     );
   } catch (error) {
-    console.error("Error analyzing code changes:", error);
+    console.error('Error analyzing code changes:', error);
     recommendations.push({
-      type: "warning",
-      message: "Could not complete full analysis due to parsing error",
-      actions: ["Review changes manually", "Run tests after applying changes"],
+      type: 'warning',
+      message: 'Could not complete full analysis due to parsing error',
+      actions: ['Review changes manually', 'Run tests after applying changes'],
     });
   }
 
@@ -980,12 +964,12 @@ async function parseContentAsFile(
   // Create a temporary file path for parsing
   const tempPath = `/tmp/memento-analysis-${Date.now()}-${filePath.replace(
     /[^a-zA-Z0-9]/g,
-    "_"
+    '_'
   )}`;
 
   try {
     // Write content to temporary file
-    await fs.writeFile(tempPath, content, "utf-8");
+    await fs.writeFile(tempPath, content, 'utf-8');
 
     // Parse the temporary file
     const result = await astParser.parseFile(tempPath);
@@ -1018,14 +1002,14 @@ function findAffectedSymbols(
   const newSymbolMap = new Map<string, SymbolEntity>();
 
   for (const entity of oldResult.entities) {
-    if (entity.type === "symbol") {
+    if (entity.type === 'symbol') {
       const symbol = entity as SymbolEntity;
       oldSymbolMap.set(`${symbol.name}:${symbol.kind}`, symbol);
     }
   }
 
   for (const entity of newResult.entities) {
-    if (entity.type === "symbol") {
+    if (entity.type === 'symbol') {
       const symbol = entity as SymbolEntity;
       newSymbolMap.set(`${symbol.name}:${symbol.kind}`, symbol);
     }
@@ -1055,35 +1039,35 @@ function detectBreakingChange(
   oldResult: ParseResult,
   newResult: ParseResult
 ): {
-  severity: "breaking" | "potentially-breaking" | "safe";
+  severity: 'breaking' | 'potentially-breaking' | 'safe';
   description: string;
   affectedEntities: string[];
 } | null {
   // Simple breaking change detection - in a full implementation,
   // this would be much more sophisticated
-  if (symbol.kind === "function") {
+  if (symbol.kind === 'function') {
     // Find the old and new versions of this symbol
     const oldSymbol = oldResult.entities.find(
-      (e) => e.type === "symbol" && (e as SymbolEntity).name === symbol.name
+      (e) => e.type === 'symbol' && (e as SymbolEntity).name === symbol.name
     ) as SymbolEntity;
     const newSymbol = newResult.entities.find(
-      (e) => e.type === "symbol" && (e as SymbolEntity).name === symbol.name
+      (e) => e.type === 'symbol' && (e as SymbolEntity).name === symbol.name
     ) as SymbolEntity;
 
     if (oldSymbol && newSymbol && oldSymbol.signature !== newSymbol.signature) {
       return {
-        severity: "potentially-breaking",
+        severity: 'potentially-breaking',
         description: `Function ${symbol.name} signature changed`,
         affectedEntities: [symbol.id],
       };
     }
   }
 
-  if (symbol.kind === "class") {
+  if (symbol.kind === 'class') {
     // Check if class structure changed significantly
     // This is a simplified check - would need more analysis
     return {
-      severity: "safe",
+      severity: 'safe',
       description: `Class ${symbol.name} modified`,
       affectedEntities: [symbol.id],
     };
@@ -1105,24 +1089,24 @@ async function analyzeKnowledgeGraphImpact(
     // Search for entities with similar names
     const searchResults = await kgService.search({
       query: symbolName,
-      searchType: "structural",
+      searchType: 'structural',
       limit: 20,
     });
 
     for (const entity of searchResults) {
-      if (entity.type === "symbol") {
+      if (entity.type === 'symbol') {
         const symbol = entity as SymbolEntity;
         if (symbol.name === symbolName) {
           direct.push(symbol);
         } else {
           indirect.push(symbol);
         }
-      } else if (entity.type === "test") {
+      } else if (entity.type === 'test') {
         tests.push(entity as Test);
       }
     }
   } catch (error) {
-    console.warn("Could not analyze knowledge graph impact:", error);
+    console.warn('Could not analyze knowledge graph impact:', error);
   }
 
   return { direct, indirect, tests };
@@ -1136,15 +1120,15 @@ async function findEntitiesInFile(
   try {
     const searchResults = await kgService.search({
       query: filePath,
-      searchType: "structural",
+      searchType: 'structural',
       limit: 50,
     });
 
     return searchResults
-      .filter((e) => e.type === "symbol")
+      .filter((e) => e.type === 'symbol')
       .map((e) => e as SymbolEntity);
   } catch (error) {
-    console.warn("Could not find entities in file:", error);
+    console.warn('Could not find entities in file:', error);
     return [];
   }
 }
@@ -1153,54 +1137,54 @@ async function findEntitiesInFile(
 function generateRecommendations(
   affectedEntities: AffectedEntitySummary[],
   breakingChanges: {
-    severity: "breaking" | "potentially-breaking" | "safe";
+    severity: 'breaking' | 'potentially-breaking' | 'safe';
     description: string;
     affectedEntities: string[];
   }[]
 ): {
-  type: "warning" | "suggestion" | "requirement";
+  type: 'warning' | 'suggestion' | 'requirement';
   message: string;
   actions: string[];
 }[] {
   const recommendations: {
-    type: "warning" | "suggestion" | "requirement";
+    type: 'warning' | 'suggestion' | 'requirement';
     message: string;
     actions: string[];
   }[] = [];
 
   if (breakingChanges.length > 0) {
     recommendations.push({
-      type: "warning",
+      type: 'warning',
       message: `${breakingChanges.length} breaking change(s) detected`,
       actions: [
-        "Review breaking changes carefully",
-        "Update dependent code",
-        "Consider versioning strategy",
-        "Run comprehensive tests",
+        'Review breaking changes carefully',
+        'Update dependent code',
+        'Consider versioning strategy',
+        'Run comprehensive tests',
       ],
     });
   }
 
   if (affectedEntities.length > 10) {
     recommendations.push({
-      type: "suggestion",
-      message: "Large number of affected entities",
+      type: 'suggestion',
+      message: 'Large number of affected entities',
       actions: [
-        "Consider breaking changes into smaller PRs",
-        "Review impact analysis thoroughly",
-        "Communicate changes to team",
+        'Consider breaking changes into smaller PRs',
+        'Review impact analysis thoroughly',
+        'Communicate changes to team',
       ],
     });
   }
 
-  if (affectedEntities.some((e) => e.changeType === "deleted")) {
+  if (affectedEntities.some((e) => e.changeType === 'deleted')) {
     recommendations.push({
-      type: "warning",
-      message: "Deletion of code elements detected",
+      type: 'warning',
+      message: 'Deletion of code elements detected',
       actions: [
-        "Verify no external dependencies",
-        "Check for deprecated usage",
-        "Consider deprecation warnings first",
+        'Verify no external dependencies',
+        'Check for deprecated usage',
+        'Consider deprecation warnings first',
       ],
     });
   }
@@ -1211,9 +1195,9 @@ function generateRecommendations(
 // Helper functions for validation
 async function runTypeScriptValidation(
   files: string[]
-): Promise<ValidationResult["typescript"]> {
+): Promise<ValidationResult['typescript']> {
   // Basic TypeScript validation - check for common issues in the actual file content
-  const result: ValidationResult["typescript"] = {
+  const result: ValidationResult['typescript'] = {
     errors: 0,
     warnings: 0,
     issues: [] as ValidationIssue[],
@@ -1224,17 +1208,17 @@ async function runTypeScriptValidation(
     // For now, we'll use a simple content-based validation
     // In a real implementation, this would use the TypeScript compiler API
     for (const file of files) {
-      if (file.endsWith(".ts") || file.endsWith(".tsx")) {
+      if (file.endsWith('.ts') || file.endsWith('.tsx')) {
         // Check for files that likely contain errors based on their names/paths
-        if (file.includes("Invalid") || file.includes("invalid")) {
+        if (file.includes('Invalid') || file.includes('invalid')) {
           result.errors++;
           result.issues.push({
             file,
             line: 5,
             column: 10,
-            rule: "no-implicit-any",
+            rule: 'no-implicit-any',
             message: "Parameter 'db' implicitly has an 'any' type",
-            severity: "error",
+            severity: 'error',
           });
 
           result.errors++;
@@ -1242,9 +1226,9 @@ async function runTypeScriptValidation(
             file,
             line: 10,
             column: 15,
-            rule: "no-return-type",
+            rule: 'no-return-type',
             message: "Function 'getUser' has no return type annotation",
-            severity: "error",
+            severity: 'error',
           });
 
           result.warnings++;
@@ -1252,10 +1236,10 @@ async function runTypeScriptValidation(
             file,
             line: 15,
             column: 20,
-            rule: "no-property-access",
+            rule: 'no-property-access',
             message:
               "Property 'nonexistentProperty' does not exist on type 'any'",
-            severity: "warning",
+            severity: 'warning',
           });
         } else {
           // For valid files, occasionally add warnings
@@ -1265,16 +1249,16 @@ async function runTypeScriptValidation(
               file,
               line: Math.floor(Math.random() * 20) + 1,
               column: Math.floor(Math.random() * 40) + 1,
-              rule: "no-unused-variable",
-              message: "Unused variable detected",
-              severity: "warning",
+              rule: 'no-unused-variable',
+              message: 'Unused variable detected',
+              severity: 'warning',
             });
           }
         }
       }
     }
   } catch (error) {
-    console.warn("TypeScript validation error:", error);
+    console.warn('TypeScript validation error:', error);
   }
 
   return result;
@@ -1282,9 +1266,9 @@ async function runTypeScriptValidation(
 
 async function runESLintValidation(
   files: string[]
-): Promise<ValidationResult["eslint"]> {
+): Promise<ValidationResult['eslint']> {
   // Basic ESLint validation - in a real implementation, this would run eslint
-  const result: ValidationResult["eslint"] = {
+  const result: ValidationResult['eslint'] = {
     errors: 0,
     warnings: 0,
     issues: [] as ValidationIssue[],
@@ -1292,7 +1276,7 @@ async function runESLintValidation(
 
   // Mock validation - check for common ESLint issues
   for (const file of files) {
-    if (file.endsWith(".ts") || file.endsWith(".tsx") || file.endsWith(".js")) {
+    if (file.endsWith('.ts') || file.endsWith('.tsx') || file.endsWith('.js')) {
       // Simulate finding some issues
       if (Math.random() > 0.9) {
         result.warnings++;
@@ -1300,9 +1284,9 @@ async function runESLintValidation(
           file,
           line: Math.floor(Math.random() * 100),
           column: Math.floor(Math.random() * 50),
-          message: "Unused variable",
-          rule: "no-unused-vars",
-          severity: "warning",
+          message: 'Unused variable',
+          rule: 'no-unused-vars',
+          severity: 'warning',
         });
       }
     }
@@ -1313,9 +1297,9 @@ async function runESLintValidation(
 
 async function runSecurityValidation(
   files: string[]
-): Promise<ValidationResult["security"]> {
+): Promise<ValidationResult['security']> {
   // Basic security validation - in a real implementation, this would use security scanning tools
-  const result: ValidationResult["security"] = {
+  const result: ValidationResult['security'] = {
     critical: 0,
     high: 0,
     medium: 0,
@@ -1330,17 +1314,17 @@ async function runSecurityValidation(
       result.medium++;
       result.issues.push({
         id: `sec_${Date.now()}_${Math.random()}`,
-        type: "securityIssue",
-        tool: "mock-scanner",
-        ruleId: "sql-injection",
-        severity: "medium",
-        title: "Potential SQL Injection",
-        description: "Potential SQL injection vulnerability detected",
+        type: 'securityIssue',
+        tool: 'mock-scanner',
+        ruleId: 'sql-injection',
+        severity: 'medium',
+        title: 'Potential SQL Injection',
+        description: 'Potential SQL injection vulnerability detected',
         affectedEntityId: file,
         lineNumber: Math.floor(Math.random() * 100),
         codeSnippet: "SELECT * FROM users WHERE id = ' + userInput",
-        remediation: "Use parameterized queries or prepared statements",
-        status: "open",
+        remediation: 'Use parameterized queries or prepared statements',
+        status: 'open',
         discoveredAt: new Date(),
         lastScanned: new Date(),
         confidence: 0.8,
@@ -1352,17 +1336,17 @@ async function runSecurityValidation(
       result.high++;
       result.issues.push({
         id: `sec_${Date.now()}_${Math.random()}`,
-        type: "securityIssue",
-        tool: "mock-scanner",
-        ruleId: "hardcoded-secret",
-        severity: "high",
-        title: "Hardcoded Secret",
-        description: "Hardcoded API key or secret detected",
+        type: 'securityIssue',
+        tool: 'mock-scanner',
+        ruleId: 'hardcoded-secret',
+        severity: 'high',
+        title: 'Hardcoded Secret',
+        description: 'Hardcoded API key or secret detected',
         affectedEntityId: file,
         lineNumber: Math.floor(Math.random() * 100),
         codeSnippet: 'const API_KEY = "sk-1234567890abcdef";',
-        remediation: "Use environment variables or secure credential storage",
-        status: "open",
+        remediation: 'Use environment variables or secure credential storage',
+        status: 'open',
         discoveredAt: new Date(),
         lastScanned: new Date(),
         confidence: 0.9,
@@ -1373,7 +1357,7 @@ async function runSecurityValidation(
   return result;
 }
 
-async function runTestValidation(): Promise<ValidationResult["tests"]> {
+async function runTestValidation(): Promise<ValidationResult['tests']> {
   // Basic test validation - in a real implementation, this would run the test suite
   const result = {
     passed: 85,
@@ -1392,9 +1376,9 @@ async function runTestValidation(): Promise<ValidationResult["tests"]> {
 
 async function runArchitectureValidation(
   files: string[]
-): Promise<ValidationResult["architecture"]> {
+): Promise<ValidationResult['architecture']> {
   // Basic architecture validation - check for common architectural issues
-  const result: ValidationResult["architecture"] = {
+  const result: ValidationResult['architecture'] = {
     violations: 0,
     issues: [] as ValidationIssue[],
   };
@@ -1408,9 +1392,9 @@ async function runArchitectureValidation(
         file,
         line: 1,
         column: 1,
-        rule: "circular-dependency",
-        severity: "warning",
-        message: "Circular dependency detected",
+        rule: 'circular-dependency',
+        severity: 'warning',
+        message: 'Circular dependency detected',
       });
     }
 
@@ -1421,9 +1405,9 @@ async function runArchitectureValidation(
         file,
         line: 1,
         column: 1,
-        rule: "large-file",
-        severity: "info",
-        message: "File exceeds recommended size limit",
+        rule: 'large-file',
+        severity: 'info',
+        message: 'File exceeds recommended size limit',
       });
     }
   }
@@ -1436,7 +1420,7 @@ async function analyzeCodeComplexity(
   files: string[],
   astParser: ASTParser
 ): Promise<{
-  type: "complexity";
+  type: 'complexity';
   filesAnalyzed: number;
   results: {
     file: string;
@@ -1473,13 +1457,13 @@ async function analyzeCodeComplexity(
         file,
         complexity: 0,
         details: { functions: 0, classes: 0, nestedDepth: 0 },
-        error: "Failed to analyze file",
+        error: 'Failed to analyze file',
       });
     }
   }
 
   return {
-    type: "complexity",
+    type: 'complexity',
     filesAnalyzed: files.length,
     results,
     summary: {
@@ -1496,7 +1480,7 @@ async function analyzeCodePatterns(
   files: string[],
   astParser: ASTParser
 ): Promise<{
-  type: "patterns";
+  type: 'patterns';
   filesAnalyzed: number;
   results: { pattern: string; frequency: number }[];
   summary: {
@@ -1525,7 +1509,7 @@ async function analyzeCodePatterns(
     .sort((a, b) => b.frequency - a.frequency);
 
   return {
-    type: "patterns",
+    type: 'patterns',
     filesAnalyzed: files.length,
     results,
     summary: {
@@ -1540,7 +1524,7 @@ async function analyzeCodeDuplicates(
   files: string[],
   astParser: ASTParser
 ): Promise<{
-  type: "duplicates";
+  type: 'duplicates';
   filesAnalyzed: number;
   results: { hash: string; locations: string[]; count: number }[];
   summary: {
@@ -1572,7 +1556,7 @@ async function analyzeCodeDuplicates(
     .map(([hash, locations]) => ({ hash, locations, count: locations.length }));
 
   return {
-    type: "duplicates",
+    type: 'duplicates',
     filesAnalyzed: files.length,
     results: duplicates,
     summary: {
@@ -1586,7 +1570,7 @@ async function analyzeCodeDependencies(
   files: string[],
   kgService: KnowledgeGraphService
 ): Promise<{
-  type: "dependencies";
+  type: 'dependencies';
   filesAnalyzed: number;
   results: {
     entity: string;
@@ -1604,12 +1588,12 @@ async function analyzeCodeDependencies(
     try {
       const fileEntities = await kgService.search({
         query: file,
-        searchType: "structural",
+        searchType: 'structural',
         limit: 20,
       });
 
       for (const entity of fileEntities) {
-        if (entity.type === "symbol") {
+        if (entity.type === 'symbol') {
           const deps = await kgService.getRelationships({
             fromEntityId: entity.id,
             type: [
@@ -1629,7 +1613,7 @@ async function analyzeCodeDependencies(
   }
 
   return {
-    type: "dependencies",
+    type: 'dependencies',
     filesAnalyzed: files.length,
     results: Array.from(dependencies.entries()).map(([entity, deps]) => ({
       entity,
@@ -1660,11 +1644,11 @@ function calculateComplexity(parseResult: ParseResult): {
   // Simple complexity calculation based on AST nodes
   if (parseResult.entities) {
     for (const entity of parseResult.entities) {
-      if (entity.type === "symbol") {
-        if (entity.kind === "function") {
+      if (entity.type === 'symbol') {
+        if (entity.kind === 'function') {
           score += 10;
           details.functions++;
-        } else if (entity.kind === "class") {
+        } else if (entity.kind === 'class') {
           score += 20;
           details.classes++;
         }
@@ -1681,16 +1665,16 @@ function extractPatterns(parseResult: ParseResult): Map<string, number> {
   // Simple pattern extraction - look for common coding patterns
   if (parseResult.entities) {
     for (const entity of parseResult.entities) {
-      if (entity.type === "symbol" && entity.kind === "function") {
+      if (entity.type === 'symbol' && entity.kind === 'function') {
         patterns.set(
-          "function_declaration",
-          (patterns.get("function_declaration") || 0) + 1
+          'function_declaration',
+          (patterns.get('function_declaration') || 0) + 1
         );
       }
-      if (entity.type === "symbol" && entity.kind === "class") {
+      if (entity.type === 'symbol' && entity.kind === 'class') {
         patterns.set(
-          "class_declaration",
-          (patterns.get("class_declaration") || 0) + 1
+          'class_declaration',
+          (patterns.get('class_declaration') || 0) + 1
         );
       }
     }
@@ -1707,7 +1691,7 @@ function extractCodeBlocks(
 
   if (parseResult.entities) {
     for (const entity of parseResult.entities) {
-      if (entity.type === "symbol" && entity.kind === "function") {
+      if (entity.type === 'symbol' && entity.kind === 'function') {
         const symbolEntity = entity as SymbolEntity;
         blocks.push({
           code: `function ${symbolEntity.name}`,

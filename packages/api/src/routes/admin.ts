@@ -1,7 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import type { KnowledgeGraphService } from '@memento/knowledge';
 import type { DatabaseService, FileWatcher, LoggingService, MaintenanceService, ConfigurationService } from '@memento/core';
-import type { SynchronizationCoordinator, SynchronizationMonitoring, ConflictResolution, RollbackCapabilities } from '@memento/sync';
+import type { SynchronizationCoordinator, SynchronizationMonitoring, ConflictResolution } from '@memento/sync';
+import type { RollbackCapabilities } from '@memento/sync/scm';
 import { BackupService, MaintenanceOperationError } from '@memento/backup';
 import { MaintenanceMetrics } from '@memento/testing';
 

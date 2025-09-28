@@ -1,5 +1,18 @@
 # Maintenance Operations Blueprint
 
+## Metadata
+
+- Scope: operations
+- Status: Draft
+- Last Updated: 2025-09-27
+
+## Working TODO
+
+- [ ] Add/update Scope metadata (Scope: operations).
+- [ ] Confirm Desired Capabilities with acceptance tests.
+- [ ] Link to code touchpoints (packages/, api routes).
+- [ ] Add migration/backfill plan if needed.
+
 ## 1. Overview
 Admin maintenance endpoints (backup, restore, housekeeping) now coordinate FalkorDB, Qdrant, PostgreSQL, and pluggable storage providers via a centralized control plane. Backups store structured metadata in PostgreSQL, emit audit events through the shared logging service, and drive a two-step restore workflow (preview token → confirmation) that enforces dry-run validation and optional secondary approval before destructive changes are applied.
 

@@ -6,7 +6,6 @@ import {
   CoordinationContext,
   CoordinatorConfig,
   AgentEventTypes,
-  AgentType
 } from './types.js';
 import { AgentRegistry } from './registry.js';
 
@@ -33,8 +32,8 @@ export class AgentCoordinator extends EventEmitter {
       pubSubChannels: config.pubSubChannels ?? {
         events: 'agent:events',
         coordination: 'agent:coordination',
-        heartbeat: 'agent:heartbeat'
-      }
+        heartbeat: 'agent:heartbeat',
+      },
     };
 
     // Set coordinator reference in registry
@@ -72,7 +71,8 @@ export class AgentCoordinator extends EventEmitter {
       participants: [...participants, initiatorId],
       sharedState,
       events: [],
-      ttl: ttl ?? this.config.sessionTtl
+      ttl: ttl ?? this.config.sessionTtl,
+      createdAt: new Date(),
     };
 
     this.contexts.set(sessionId, context);
@@ -85,10 +85,13 @@ export class AgentCoordinator extends EventEmitter {
       agentId: 'coordinator',
       sessionId,
       timestamp: new Date(),
-      data: { context }
+      data: { context },
     });
 
-    this.log('info', `Created coordination session: ${sessionId}`, { participants, ttl: context.ttl });
+    this.log('info', `Created coordination session: ${sessionId}`, {
+      participants,
+      ttl: context.ttl,
+    });
 
     return context;
   }
@@ -96,7 +99,10 @@ export class AgentCoordinator extends EventEmitter {
   /**
    * Join an existing coordination session
    */
-  async joinSession(sessionId: string, agentId: string): Promise<CoordinationContext> {
+  async joinSession(
+    sessionId: string,
+    agentId: string
+  ): Promise<CoordinationContext> {
     const context = this.contexts.get(sessionId);
     if (!context) {
       throw new Error(`Coordination session ${sessionId} not found`);
@@ -112,7 +118,7 @@ export class AgentCoordinator extends EventEmitter {
         agentId: 'coordinator',
         sessionId,
         timestamp: new Date(),
-        data: { joinedAgentId: agentId, participants: context.participants }
+        data: { joinedAgentId: agentId, participants: context.participants },
       });
 
       this.log('info', `Agent ${agentId} joined session: ${sessionId}`);
@@ -141,7 +147,7 @@ export class AgentCoordinator extends EventEmitter {
         agentId: 'coordinator',
         sessionId,
         timestamp: new Date(),
-        data: { leftAgentId: agentId, participants: context.participants }
+        data: { leftAgentId: agentId, participants: context.participants },
       });
 
       this.log('info', `Agent ${agentId} left session: ${sessionId}`);
@@ -169,7 +175,7 @@ export class AgentCoordinator extends EventEmitter {
       agentId: 'coordinator',
       sessionId,
       timestamp: new Date(),
-      data: { context }
+      data: { context },
     });
 
     // Clean up session data
@@ -201,7 +207,7 @@ export class AgentCoordinator extends EventEmitter {
     this.log('info', `Starting orchestration for session ${sessionId}`, {
       taskCount: tasks.length,
       parallel,
-      timeout
+      timeout,
     });
 
     const results: AgentResult[] = [];
@@ -209,30 +215,47 @@ export class AgentCoordinator extends EventEmitter {
     try {
       if (parallel) {
         // Execute tasks in parallel
-        const taskPromises = tasks.map(task => this.executeTaskWithRetry(task, retryAttempts, timeout));
+        const taskPromises = tasks.map((task) =>
+          this.executeTaskWithRetry(task, retryAttempts, timeout)
+        );
         const parallelResults = await Promise.all(taskPromises);
         results.push(...parallelResults);
       } else {
         // Execute tasks sequentially
         for (const task of tasks) {
-          const result = await this.executeTaskWithRetry(task, retryAttempts, timeout);
+          const result = await this.executeTaskWithRetry(
+            task,
+            retryAttempts,
+            timeout
+          );
           results.push(result);
 
           // Stop if task failed and no retry succeeded
           if (result.status === 'failed') {
-            this.log('warn', `Task ${task.id} failed, stopping sequential execution`);
+            this.log(
+              'warn',
+              `Task ${task.id} failed, stopping sequential execution`
+            );
             break;
           }
         }
       }
 
       // Update session with results
-      await this.updateSharedState('coordinator', 'orchestration_results', results, sessionId);
+      await this.updateSharedState(
+        'coordinator',
+        'orchestration_results',
+        results,
+        sessionId
+      );
 
       return results;
-
     } catch (error) {
-      this.log('error', `Orchestration failed for session ${sessionId}:`, error);
+      this.log(
+        'error',
+        `Orchestration failed for session ${sessionId}:`,
+        error
+      );
       throw error;
     }
   }
@@ -252,24 +275,34 @@ export class AgentCoordinator extends EventEmitter {
         return await this.executeTask(task, timeout);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        this.log('warn', `Task ${task.id} failed (attempt ${attempt}/${retryAttempts}):`, lastError);
+        this.log(
+          'warn',
+          `Task ${task.id} failed (attempt ${attempt}/${retryAttempts}):`,
+          lastError
+        );
 
         if (attempt < retryAttempts) {
           // Wait before retry with exponential backoff
           const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
     }
 
     // All retries failed
-    throw lastError || new Error(`Task ${task.id} failed after ${retryAttempts} attempts`);
+    throw (
+      lastError ||
+      new Error(`Task ${task.id} failed after ${retryAttempts} attempts`)
+    );
   }
 
   /**
    * Execute a single task by finding and delegating to appropriate agent
    */
-  private async executeTask(task: AgentTask, timeout: number): Promise<AgentResult> {
+  private async executeTask(
+    task: AgentTask,
+    timeout: number
+  ): Promise<AgentResult> {
     // Find available agent for task type
     const availableAgents = this.registry.findAvailableAgents(task.type, 1);
 
@@ -285,12 +318,13 @@ export class AgentCoordinator extends EventEmitter {
         reject(new Error(`Task ${task.id} timed out after ${timeout}ms`));
       }, timeout);
 
-      agent.execute(task)
-        .then(result => {
+      agent
+        .execute(task)
+        .then((result) => {
           clearTimeout(timeoutId);
           resolve(result);
         })
-        .catch(error => {
+        .catch((error) => {
           clearTimeout(timeoutId);
           reject(error);
         });
@@ -345,6 +379,7 @@ export class AgentCoordinator extends EventEmitter {
       throw new Error(`Session ${sessionId} not found`);
     }
 
+    // eslint-disable-next-line security/detect-object-injection
     context.sharedState[key] = value;
 
     // Notify participants about state update
@@ -354,7 +389,7 @@ export class AgentCoordinator extends EventEmitter {
       agentId,
       sessionId,
       timestamp: new Date(),
-      data: { key, value, sharedState: context.sharedState }
+      data: { key, value, sharedState: context.sharedState },
     });
   }
 
@@ -369,6 +404,7 @@ export class AgentCoordinator extends EventEmitter {
       return undefined;
     }
 
+    // eslint-disable-next-line security/detect-object-injection
     return context.sharedState[key];
   }
 
@@ -395,13 +431,18 @@ export class AgentCoordinator extends EventEmitter {
     if (context) {
       // Send to session participants
       for (const agentId of context.participants) {
-        if (agentId !== event.agentId) { // Don't send back to sender
+        if (agentId !== event.agentId) {
+          // Don't send back to sender
           const agent = this.registry.getAgent(agentId);
           if (agent) {
             try {
               await agent.onEvent(event);
             } catch (error) {
-              this.log('warn', `Error sending event to agent ${agentId}:`, error);
+              this.log(
+                'warn',
+                `Error sending event to agent ${agentId}:`,
+                error
+              );
             }
           }
         }
@@ -414,7 +455,11 @@ export class AgentCoordinator extends EventEmitter {
           try {
             await agent.onEvent(event);
           } catch (error) {
-            this.log('warn', `Error broadcasting event to agent ${agent.metadata.id}:`, error);
+            this.log(
+              'warn',
+              `Error broadcasting event to agent ${agent.metadata.id}:`,
+              error
+            );
           }
         }
       }
@@ -459,8 +504,8 @@ export class AgentCoordinator extends EventEmitter {
     const sessionsToEnd: string[] = [];
 
     for (const [sessionId, context] of this.contexts.entries()) {
-      // Calculate context age (assuming contexts track creation time)
-      const contextAge = now - new Date(context.events[0]?.timestamp || now).getTime();
+      // Calculate context age using creation time
+      const contextAge = now - context.createdAt.getTime();
 
       if (contextAge > context.ttl * 1000) {
         sessionsToEnd.push(sessionId);
@@ -469,7 +514,7 @@ export class AgentCoordinator extends EventEmitter {
 
     // End expired sessions
     for (const sessionId of sessionsToEnd) {
-      this.endSession(sessionId).catch(error => {
+      this.endSession(sessionId).catch((error) => {
         this.log('error', `Error ending expired session ${sessionId}:`, error);
       });
     }
@@ -501,7 +546,6 @@ export class AgentCoordinator extends EventEmitter {
       // this.redisClient.on('message', (channel, message) => {
       //   this.handleRedisMessage(channel, message);
       // });
-
     } catch (error) {
       this.log('error', 'Failed to initialize Redis:', error);
     }
@@ -550,13 +594,17 @@ export class AgentCoordinator extends EventEmitter {
   /**
    * Log a message with coordinator context
    */
-  private log(level: 'info' | 'warn' | 'error' | 'debug', message: string, data?: any): void {
+  private log(
+    level: 'info' | 'warn' | 'error' | 'debug',
+    message: string,
+    data?: any
+  ): void {
     const logData = {
       timestamp: new Date().toISOString(),
       component: 'AgentCoordinator',
       level,
       message,
-      data
+      data,
     };
 
     if (level !== 'debug') {
