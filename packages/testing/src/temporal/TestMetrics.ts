@@ -619,9 +619,11 @@ export class TestMetrics implements ITestMetrics {
       case 'day':
         return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
       case 'week':
-        const weekStart = new Date(d);
-        weekStart.setDate(d.getDate() - d.getDay());
-        return new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate()).getTime();
+        {
+          const weekStart = new Date(d);
+          weekStart.setDate(d.getDate() - d.getDay());
+          return new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate()).getTime();
+        }
       case 'month':
         return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
     }

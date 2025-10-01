@@ -5,10 +5,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import {
-  DatabaseService,
-  createTestDatabaseConfig,
-} from "../../src/services/DatabaseService";
+import { DatabaseService, createTestDatabaseConfig } from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -28,7 +25,7 @@ import {
   DocumentationRelationship,
   SecurityRelationship,
   PerformanceRelationship,
-} from "../../../src/models/relationships";
+} from "@memento/shared-types";
 
 describe("Relationships Integration Tests", () => {
   let dbService: DatabaseService;

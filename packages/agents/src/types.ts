@@ -16,7 +16,7 @@ import {
   CoordinatorConfig,
   AgentEventType,
   AgentEventTypes,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 // Re-export agent types
 export type {

@@ -36,6 +36,7 @@
   "author": "Memento Team",
   "license": "MIT",
   "dependencies": {
+    "@memento/shared-types": "workspace:*",
     "events": "^3.3.0"
   },
   "devDependencies": {

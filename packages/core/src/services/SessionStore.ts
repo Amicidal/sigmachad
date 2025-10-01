@@ -292,7 +292,9 @@ export class SessionStore extends EventEmitter implements ISessionStore {
         const redisUpdateData: Record<string, string | number> = {};
         Object.entries(updateData).forEach(([key, value]) => {
           if (value !== undefined) {
-            redisUpdateData[key] = value;
+            // TODO(2025-09-30.35): Replace with whitelisted field mapping
+            // eslint-disable-next-line security/detect-object-injection
+            redisUpdateData[key] = value as any;
           }
         });
         await this.redis.hSet(sessionKey, redisUpdateData);

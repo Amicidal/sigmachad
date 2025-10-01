@@ -7,15 +7,26 @@
 
 import { EventEmitter } from 'events';
 import type { RedisClientType } from 'redis';
-import { SessionDocument, SessionEvent, SessionError } from './SessionTypes.js';
+// import { SessionDocument, SessionEvent, SessionError } from './SessionTypes.js';
 import type {
   AgentInfo,
   TaskInfo,
   LoadBalancingStrategy,
-  HandoffContext,
   CoordinationMetrics,
   DeadAgentConfig,
 } from '@memento/shared-types';
+
+// Local handoff context used by coordination service
+interface CoordinationHandoffContext {
+  fromAgent: string;
+  toAgent: string;
+  sessionId: string;
+  reason: string;
+  context: Record<string, any>;
+  timestamp: string;
+  priority: number;
+  estimatedDuration?: number;
+}
 
 export class AgentCoordination extends EventEmitter {
   private redis: RedisClientType;
@@ -39,11 +50,14 @@ export class AgentCoordination extends EventEmitter {
     this.redis = redis;
     this.loadBalancingStrategy = loadBalancingStrategy;
     this.deadAgentConfig = {
-      heartbeatInterval: deadAgentConfig.heartbeatInterval ?? 30,
-      heartbeatTimeout: deadAgentConfig.heartbeatTimeout ?? 90,
-      maxMissedHeartbeats: deadAgentConfig.maxMissedHeartbeats ?? 3,
-      enableAutoRecovery: deadAgentConfig.enableAutoRecovery ?? true,
-      recoveryDelay: deadAgentConfig.recoveryDelay ?? 60,
+      // Max time an agent can be considered dead (minutes)
+      maxDeadTime: deadAgentConfig.maxDeadTime ?? 2,
+      // How many recovery attempts to try
+      recoveryAttempts: deadAgentConfig.recoveryAttempts ?? 3,
+      // Interval between checks/attempts (seconds)
+      recoveryInterval: deadAgentConfig.recoveryInterval ?? 30,
+      // Whether to attempt recovery automatically
+      autoRecovery: deadAgentConfig.autoRecovery ?? true,
     };
 
     this.initializeTimers();
@@ -376,7 +390,7 @@ export class AgentCoordination extends EventEmitter {
   /**
    * Initiate agent handoff
    */
-  async initiateHandoff(handoffContext: HandoffContext): Promise<void> {
+  async initiateHandoff(handoffContext: CoordinationHandoffContext): Promise<void> {
     const fromAgent = this.agents.get(handoffContext.fromAgent);
     const toAgent = this.agents.get(handoffContext.toAgent);
 
@@ -470,7 +484,7 @@ export class AgentCoordination extends EventEmitter {
     ).length;
 
     const queuedTasks = await this.redis.zCard('task:priority:queue');
-    const runningTasks = await this.redis.zCard('task:assigned:queue');
+    const _runningTasks = await this.redis.zCard('task:assigned:queue');
 
     const allTasks = Array.from(this.tasks.values());
     const completedTasks = allTasks.filter(
@@ -493,24 +507,32 @@ export class AgentCoordination extends EventEmitter {
       (sum, a) => sum + a.maxLoad,
       0
     );
-    const systemLoad = totalCapacity > 0 ? totalLoad / totalCapacity : 0;
+    const _systemLoad = totalCapacity > 0 ? totalLoad / totalCapacity : 0;
 
     const deadAgentCount = Array.from(this.agents.values()).filter(
       (a) => a.status === 'dead'
     ).length;
-    const handoffCount = (await this.redis.zCard('handoff:*')) || 0;
+    const handoffCount = (await this.redis.zCard('handoff:index').catch(() => 0)) || 0;
+
+    // Build load distribution per agent
+    const loadDistribution: Record<string, number> = {};
+    this.agents.forEach((a) => {
+      loadDistribution[a.id] = a.maxLoad > 0 ? a.load / a.maxLoad : 0;
+    });
+
+    const totalTasks = this.tasks.size;
 
     return {
       totalAgents,
       activeAgents,
+      totalTasks,
       queuedTasks,
-      runningTasks,
       completedTasks,
       failedTasks,
-      averageTaskDuration,
-      systemLoad,
-      deadAgentCount,
+      averageTaskCompletionTime: averageTaskDuration,
+      loadDistribution,
       handoffCount,
+      deadAgentCount,
     };
   }
 
@@ -719,7 +741,8 @@ export class AgentCoordination extends EventEmitter {
    */
   private async detectDeadAgents(): Promise<void> {
     const now = Date.now();
-    const timeout = this.deadAgentConfig.heartbeatTimeout * 1000;
+    // Convert configured minutes to milliseconds for timeout threshold
+    const timeout = this.deadAgentConfig.maxDeadTime * 60 * 1000;
 
     for (const agent of this.agents.values()) {
       const lastHeartbeat = new Date(agent.lastHeartbeat).getTime();
@@ -739,10 +762,10 @@ export class AgentCoordination extends EventEmitter {
         this.emit('agent:dead', { agentId: agent.id, timeSinceHeartbeat });
 
         // Schedule recovery if enabled
-        if (this.deadAgentConfig.enableAutoRecovery) {
+        if (this.deadAgentConfig.autoRecovery) {
           setTimeout(() => {
             this.recoverDeadAgent(agent.id);
-          }, this.deadAgentConfig.recoveryDelay * 1000);
+          }, this.deadAgentConfig.recoveryInterval * 1000);
         }
       }
     }
@@ -775,7 +798,7 @@ export class AgentCoordination extends EventEmitter {
       this.detectDeadAgents().catch((error) => {
         this.emit('error', error);
       });
-    }, this.deadAgentConfig.heartbeatInterval * 1000);
+    }, this.deadAgentConfig.recoveryInterval * 1000);
 
     // Load balancing timer
     this.loadBalancingTimer = setInterval(() => {

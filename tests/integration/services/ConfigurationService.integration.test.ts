@@ -7,14 +7,14 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   ConfigurationService,
   SystemConfiguration,
-} from "../../../src/services/core/ConfigurationService";
+} from "@memento/core/services/ConfigurationService";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/core/DatabaseService";
-import { SynchronizationCoordinator } from "../../../src/services/synchronization/SynchronizationCoordinator";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
-import { ASTParser } from "../../../src/services/knowledge/ASTParser";
+} from "@memento/database/DatabaseService";
+import { SynchronizationCoordinator } from "@memento/sync/synchronization/SynchronizationCoordinator";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { ASTParser } from "@memento/knowledge";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";

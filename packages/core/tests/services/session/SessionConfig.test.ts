@@ -11,7 +11,7 @@ import {
   validateRedisConnection,
   getRedisConnectionString,
   ENVIRONMENT_VARIABLES
-} from '../../../src/services/SessionConfig.js';
+} from '@memento/core/services/SessionConfig';
 
 describe('SessionConfig', () => {
   let originalEnv: NodeJS.ProcessEnv;

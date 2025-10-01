@@ -26,6 +26,7 @@
     "@memento/core": "workspace:*",
     "@memento/database": "workspace:*",
     "@memento/knowledge": "workspace:*",
+    "@memento/shared-types": "workspace:*",
     "commander": "^12.0.0"
   },
   "devDependencies": {

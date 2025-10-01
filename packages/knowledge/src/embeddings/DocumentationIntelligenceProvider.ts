@@ -1,8 +1,9 @@
+// security: avoid dynamic object indexing (none present here)
 import {
   DocumentationIntent,
   DocumentationNodeType,
   DocumentationSource,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 export interface DocumentationIntelligenceRequest {
   content: string;
@@ -264,8 +265,8 @@ export class HeuristicDocumentationIntelligenceProvider
       if (!raw) return;
 
       if (options.split) {
-        const segments = raw
-          .split(/[;,\/]/)
+          const segments = raw
+            .split(/[;,/]/)
           .map((segment) => segment.trim())
           .filter((segment) => segment.length > 0);
         if (segments.length > 1) {
@@ -313,8 +314,7 @@ export class HeuristicDocumentationIntelligenceProvider
     let domainSectionLevel: number | null = null;
     let collectingList = false;
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+    for (const line of lines) {
       const headingMatch = line.match(headingRegex);
 
       if (headingMatch) {
@@ -507,3 +507,4 @@ export class HeuristicDocumentationIntelligenceProvider
     return Array.from(technologies);
   }
 }
+ 

@@ -1,3 +1,4 @@
+// security: avoid dynamic object indexing (none present here)
 /**
  * Documentation Parser Service
  * Facade that orchestrates parsing, indexing, and synchronization of documentation files
@@ -5,11 +6,11 @@
  */
 
 import { KnowledgeGraphService } from '../orchestration/KnowledgeGraphService.js';
-import { DatabaseService } from '@memento/database/src/index.js';
+import { DatabaseService } from '@memento/database';
 import {
   DocumentationIntelligenceProvider,
   HeuristicDocumentationIntelligenceProvider,
-} from './DocumentationIntelligenceProvider.js';
+} from './DocumentationIntelligenceProvider';
 import {
   DocTokenizer,
   IntentExtractor,
@@ -18,16 +19,16 @@ import {
   DomainExtraction,
   SyncResult,
   SearchResult,
-} from './docs-parser/index.js';
+} from './docs-parser/index';
 import {
   DocumentationNode,
   BusinessDomain,
   SemanticCluster,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 import {
   RelationshipType,
   DocumentationRelationship,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 import { join, extname, basename } from 'path';
 import { marked, TokensList, Tokens } from 'marked';
 
@@ -37,7 +38,7 @@ export type {
   DomainExtraction,
   SyncResult,
   SearchResult,
-} from './docs-parser/index.js';
+} from './docs-parser/index';
 
 export class DocumentationParser {
   private tokenizer: DocTokenizer;
@@ -239,6 +240,14 @@ export class DocumentationParser {
       lastIndexed: new Date(),
       metadata: baseMetadata,
     };
+  }
+
+  /**
+   * Public wrapper to parse plain text content.
+   * Keeps internal implementation private while exposing a stable API.
+   */
+  async parseText(content: string, filePath?: string): Promise<ParsedDocument> {
+    return this.parsePlaintext(content, filePath);
   }
 
   /**
@@ -491,20 +500,16 @@ export class DocumentationParser {
    * Extract title from RST content
    */
   private extractRstTitle(lines: string[]): string {
-    for (let i = 0; i < lines.length - 1; i++) {
-      const line = lines[i].trim();
-      const nextLine = lines[i + 1]?.trim();
-
-      if (
-        line &&
-        nextLine &&
-        /^[=]+$/.test(nextLine) &&
-        nextLine.length >= line.length
-      ) {
+    let prev = '';
+    for (const currRaw of lines) {
+      const line = prev.trim();
+      const nextLine = currRaw?.trim();
+      if (line && nextLine && /^[=]+$/.test(nextLine) && nextLine.length >= line.length) {
         return line;
       }
+      prev = currRaw;
     }
-    return lines[0]?.trim() || 'Untitled Document';
+    return (lines[0]?.trim()) || 'Untitled Document';
   }
 
   /**
@@ -514,11 +519,10 @@ export class DocumentationParser {
     lines: string[]
   ): Array<{ title: string; level: number }> {
     const sections: Array<{ title: string; level: number }> = [];
-
-    for (let i = 0; i < lines.length - 1; i++) {
-      const line = lines[i].trim();
-      const nextLine = lines[i + 1]?.trim();
-
+    let prev = '';
+    for (const currRaw of lines) {
+      const line = prev.trim();
+      const nextLine = currRaw?.trim();
       if (line && nextLine) {
         if (/^[=]+$/.test(nextLine)) {
           sections.push({ title: line, level: 1 });
@@ -528,8 +532,8 @@ export class DocumentationParser {
           sections.push({ title: line, level: 3 });
         }
       }
+      prev = currRaw;
     }
-
     return sections;
   }
 
@@ -630,6 +634,45 @@ export class DocumentationParser {
       extname(filePath)
     )}_${this.calculateChecksum(parsedDoc.content).substring(0, 8)}`;
 
+    // Map parser enums to shared-types enums
+    const mapDocType = (t: ParsedDocument['docType']): DocumentationNode['docType'] => {
+      switch (t) {
+        case 'api-doc':
+          return 'api-docs';
+        case 'design-doc':
+          return 'design-doc';
+        case 'architecture':
+          return 'architecture';
+        case 'user-guide':
+          return 'user-guide';
+        case 'readme':
+          return 'readme';
+        // Collapse unsupported types to user-guide for now
+        case 'changelog':
+        case 'other':
+        default:
+          return 'user-guide';
+      }
+    };
+
+    const mapDocIntent = (
+      i: ParsedDocument['docIntent']
+    ): DocumentationNode['docIntent'] => {
+      switch (i) {
+        case 'governance':
+          return 'governance';
+        case 'mixed':
+          return 'mixed';
+        case 'ai-context':
+          return 'ai-context';
+        // Collapse unsupported intents to mixed
+        case 'reference':
+        case 'tutorial':
+        default:
+          return 'mixed';
+      }
+    };
+
     const docNode: DocumentationNode = {
       id: docId,
       path: filePath,
@@ -640,14 +683,14 @@ export class DocumentationParser {
       type: 'documentation',
       title: parsedDoc.title,
       content: parsedDoc.content,
-      docType: parsedDoc.docType,
+      docType: mapDocType(parsedDoc.docType),
       businessDomains: parsedDoc.businessDomains,
       stakeholders: parsedDoc.stakeholders,
       technologies: parsedDoc.technologies,
       status: 'active',
       docVersion: parsedDoc.docVersion,
       docHash: parsedDoc.docHash,
-      docIntent: parsedDoc.docIntent,
+      docIntent: mapDocIntent(parsedDoc.docIntent),
       docSource: parsedDoc.docSource,
       docLocale: parsedDoc.docLocale,
       lastIndexed: parsedDoc.lastIndexed,
@@ -673,9 +716,11 @@ export class DocumentationParser {
 
       // Check if domain already exists
       const existingDomain = await this.kgService.getEntity(domainId);
+      const domainPath = this.normalizeDomainPath(domainName);
       const domain: BusinessDomain = {
         id: domainId,
         type: 'businessDomain',
+        path: domainPath,
         name: domainName,
         description: `Business domain extracted from documentation: ${parsedDoc.title}`,
         criticality: this.inferDomainCriticality(domainName),
@@ -689,7 +734,6 @@ export class DocumentationParser {
         newDomainsCount++;
       }
 
-      const domainPath = this.normalizeDomainPath(domainName);
       const taxonomyVersion =
         typeof parsedDoc.metadata?.taxonomyVersion === 'string'
           ? parsedDoc.metadata.taxonomyVersion
@@ -779,6 +823,7 @@ export class DocumentationParser {
       const cluster: SemanticCluster = {
         id: clusterId,
         type: 'semanticCluster',
+        path: `/clusters/${domain.replace(/\s+/g, '_').toLowerCase()}`,
         name: `${domain} Cluster`,
         description: `Semantic cluster for ${domain} domain`,
         businessDomainId: `domain_${domain.replace(/\s+/g, '_').toLowerCase()}`,
@@ -821,7 +866,7 @@ export class DocumentationParser {
             docIntent: parsedDoc.docIntent,
           },
         } as DocumentationRelationship as any);
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       // Link cluster to domain explicitly
       try {
@@ -849,7 +894,7 @@ export class DocumentationParser {
             docIntent: parsedDoc.docIntent,
           },
         } as DocumentationRelationship as any);
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     }
   }
 
@@ -875,3 +920,4 @@ export class DocumentationParser {
     return this.syncOrchestrator.searchDocumentation(query, options);
   }
 }
+ 

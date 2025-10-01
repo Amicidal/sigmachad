@@ -5,14 +5,14 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { FastifyInstance } from 'fastify';
-import { APIGateway } from '../../../src/api/APIGateway.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { DatabaseService } from '../../../src/services/core/DatabaseService.js';
-import { FileWatcher } from '../../../src/services/core/FileWatcher.js';
-import { SynchronizationCoordinator } from '../../../src/services/synchronization/SynchronizationCoordinator.js';
-import { SynchronizationMonitoring } from '../../../src/services/synchronization/SynchronizationMonitoring.js';
-import { ASTParser } from '../../../src/services/knowledge/ASTParser.js';
-import { ConflictResolution } from '../../../src/services/scm/ConflictResolution.js';
+import { APIGateway } from '@memento/api/APIGateway';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database/DatabaseService';
+import { FileWatcher } from '@memento/core/services/FileWatcher';
+import { SynchronizationCoordinator } from '@memento/sync/synchronization/SynchronizationCoordinator';
+import { SynchronizationMonitoring } from '@memento/sync/synchronization/SynchronizationMonitoring';
+import { ASTParser } from '@memento/knowledge';
+import { ConflictResolution } from '@memento/sync/scm/ConflictResolution';
 import {
   setupTestDatabase,
   cleanupTestDatabase,

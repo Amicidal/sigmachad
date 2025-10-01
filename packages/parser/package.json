@@ -1,17 +1,37 @@
 {
   "name": "@memento/parser",
-  "version": "1.0.0",
-  "type": "module",
-  "main": "src/index.ts",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/**/*.ts"
+  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./builders": "./src/builders/index.ts"
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "default": "./index.js"
+    },
+    "./builders": {
+      "types": "./builders/index.d.ts",
+      "import": "./builders/index.js",
+      "default": "./builders/index.js"
+    },
+    "./*": {
+      "types": "./*.d.ts",
+      "import": "./*.js",
+      "default": "./*.js"
+    },
+    "./package.json": "./package.json"
   },
   "dependencies": {
-    "@memento/core": "workspace:*",
-    "@memento/graph": "workspace:*",
     "@babel/parser": "^7.23.0",
     "@babel/traverse": "^7.23.0",
+    "@memento/core": "workspace:*",
+    "@memento/graph": "workspace:*",
+    "@memento/shared-types": "workspace:*",
     "typescript": "^5.2.2"
   },
   "devDependencies": {

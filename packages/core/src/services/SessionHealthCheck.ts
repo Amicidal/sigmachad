@@ -1,3 +1,4 @@
+// TODO(2025-09-30.35): Replace dynamic metric key access with typed lookups.
 /**
  * Session Health Check Service
  *
@@ -438,9 +439,13 @@ export class SessionHealthCheck extends EventEmitter {
         errorRate: 0,
         lastCheck: new Date().toISOString(),
         details: {
-          totalSessions: stats.totalSessions,
           totalFrames: stats.totalFrames,
-          storageUsed: stats.storageUsed,
+          duration: stats.duration,
+          eventsProcessed: stats.eventsProcessed,
+          snapshotsGenerated: stats.snapshotsGenerated,
+          compressionRatio: stats.compressionRatio,
+          validationPassed: stats.validationPassed,
+          errors: stats.errors,
         },
       };
     } catch (error) {
@@ -568,8 +573,8 @@ export class SessionHealthCheck extends EventEmitter {
 
     return {
       averageResponseTime: average,
-      p95ResponseTime: sorted[p95Index] || 0,
-      p99ResponseTime: sorted[p99Index] || 0,
+      p95ResponseTime: sorted.at(p95Index) ?? 0,
+      p99ResponseTime: sorted.at(p99Index) ?? 0,
       throughput: this.totalRequests / ((Date.now() - this.startTime) / 1000),
     };
   }
@@ -686,17 +691,14 @@ export class SessionHealthCheck extends EventEmitter {
    * Parse Redis INFO command output
    */
   private parseRedisInfo(info: string): Record<string, string> {
-    const result: Record<string, string> = {};
     const lines = info.split('\r\n');
-
-    for (const line of lines) {
-      if (line.includes(':') && !line.startsWith('#')) {
-        const [key, value] = line.split(':');
-        result[key] = value;
-      }
-    }
-
-    return result;
+    const entries = lines
+      .filter((line) => line.includes(':') && !line.startsWith('#'))
+      .map((line) => {
+        const idx = line.indexOf(':');
+        return [line.slice(0, idx), line.slice(idx + 1)] as [string, string];
+      });
+    return Object.fromEntries(entries);
   }
 
   /**
@@ -759,3 +761,5 @@ export class SessionHealthCheck extends EventEmitter {
     this.emit('shutdown');
   }
 }
+ 
+// TODO(2025-09-30.35): Replace dynamic metric key access with typed lookups.

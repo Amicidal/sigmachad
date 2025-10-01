@@ -1,23 +1,15 @@
+// security: avoid dynamic object indexing; refactor batch logic to avoid string indexing
 /**
  * Entity Service OGM Implementation
  * Migrated version using Neogma OGM instead of custom Cypher queries
  */
 
 import { EventEmitter } from 'events';
-import { NeogmaService } from './NeogmaService.js';
-import {
-  createEntityModels,
-  modelToEntity,
-  entityToModelProps,
-} from '../../../graph/src/models-ogm/EntityModels.js';
-import {
-  Entity,
-  CodebaseEntity,
-  File,
-  FunctionSymbol,
-  ClassSymbol,
-} from '../../../core/src/index.js';
-import { BatchOperationHelper } from '../../../graph/src/models-ogm/BaseModels.js';
+import { NeogmaService } from './NeogmaService';
+import { createEntityModels } from '@memento/graph/models-ogm/EntityModels';
+import { modelToEntity, entityToModelProps } from '@memento/graph/models-ogm/BaseModels';
+import { Entity } from '@memento/core';
+import { BatchOperationHelper } from '@memento/graph/models-ogm/BaseModels';
 
 export interface ListEntitiesOptions {
   type?: string;
@@ -95,7 +87,7 @@ export class EntityServiceOGM extends EventEmitter {
   async createEntity(entity: Entity): Promise<Entity> {
     try {
       const Model = this.getModelForEntity(entity);
-      const props = entityToModelProps(entity);
+      const props = entityToModelProps(entity) as any;
 
       // Try to find existing entity first, then create if not found
       let instance;
@@ -105,13 +97,13 @@ export class EntityServiceOGM extends EventEmitter {
           limit: 1,
         });
         if (instances.length === 0) {
-          instance = await Model.createOne(props);
+          instance = await Model.createOne(props as any);
         } else {
           instance = instances[0];
         }
       } catch (error) {
         // If find fails, try to create
-        instance = await Model.createOne(props);
+        instance = await Model.createOne(props as any);
       }
 
       const created = modelToEntity<Entity>(instance);
@@ -135,12 +127,15 @@ export class EntityServiceOGM extends EventEmitter {
       }
 
       const Model = this.getModelForEntity(existing);
-      const props = entityToModelProps({ ...existing, ...updates });
+      const props = entityToModelProps({
+        ...(existing as any),
+        ...(updates as any),
+      } as Entity) as any;
       delete (props as any).id; // Don't update the ID
 
       // Update using Neogma
       const instances = await Model.update(
-        { ...props, lastModified: new Date().toISOString() },
+        { ...(props as any), lastModified: new Date().toISOString() } as any,
         { where: { id } as any }
       );
       const instance = Array.isArray(instances) ? instances[0] : instances;
@@ -351,8 +346,7 @@ export class EntityServiceOGM extends EventEmitter {
       // Group entities by type for efficient batch operations
       const entitiesByType = this.groupEntitiesByType(entities);
 
-      for (const [modelKey, entityGroup] of entitiesByType) {
-        const Model = (this.models as any)[modelKey];
+      for (const [Model, entityGroup] of entitiesByType) {
 
         const results = await this.batchHelper.executeBatched(
           entityGroup,
@@ -361,7 +355,7 @@ export class EntityServiceOGM extends EventEmitter {
 
             if (options.skipExisting) {
               // Create only if not exists
-              const createdInstances = [];
+              const createdInstances: any[] = [];
               for (const p of props) {
                 try {
                   const existing = await Model.findMany({
@@ -380,7 +374,7 @@ export class EntityServiceOGM extends EventEmitter {
               return createdInstances;
             } else if (options.updateExisting) {
               // Upsert behavior
-              const upserted = [];
+              const upserted: any[] = [];
               for (const p of props) {
                 try {
                   const existing = await Model.findMany({
@@ -404,7 +398,7 @@ export class EntityServiceOGM extends EventEmitter {
               return upserted;
             } else {
               // Create all (may fail on duplicates)
-              const createdInstances = [];
+              const createdInstances: any[] = [];
               for (const p of props) {
                 try {
                   const newInstance = await Model.createOne(p);
@@ -462,17 +456,14 @@ export class EntityServiceOGM extends EventEmitter {
   /**
    * Group entities by their model type for batch operations
    */
-  private groupEntitiesByType(entities: Entity[]): Map<string, Entity[]> {
-    const groups = new Map<string, Entity[]>();
+  private groupEntitiesByType(entities: Entity[]): Map<any, Entity[]> {
+    const groups = new Map<any, Entity[]>();
 
     for (const entity of entities) {
       const Model = this.getModelForEntity(entity);
-      const modelName = (Model as any).name || 'EntityModel';
-
-      if (!groups.has(modelName)) {
-        groups.set(modelName, []);
-      }
-      groups.get(modelName)!.push(entity);
+      const bucket = groups.get(Model) ?? [];
+      bucket.push(entity);
+      groups.set(Model, bucket);
     }
 
     return groups;
@@ -609,3 +600,5 @@ export class EntityServiceOGM extends EventEmitter {
     return props as Entity;
   }
 }
+ 
+// TODO(2025-09-30.35): Replace dynamic field access with typed mappers.

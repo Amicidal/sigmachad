@@ -5,7 +5,7 @@
 
 import { TestSuiteResult } from './TestEngine.js';
 import * as fs from 'fs/promises';
-import { ParsedTestSuite, ParsedTestResult } from '@memento/shared-types.js';
+import { ParsedTestSuite, ParsedTestResult } from '@memento/shared-types';
 
 export class TestResultParser {
   /**

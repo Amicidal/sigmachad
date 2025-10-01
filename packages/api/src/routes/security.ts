@@ -5,19 +5,14 @@
 
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '@memento/knowledge';
-import { DatabaseService } from '@memento/core';
-import { SecurityScanner } from '@memento/testing';
-import {
-  SecurityScanRequest,
-  SecurityScanResult,
-  VulnerabilityReport,
-} from '@memento/shared-types';
+import { DatabaseService } from '@memento/database';
+import { SecurityScanRequest, type SecuritySeverity } from '@memento/shared-types';
 
 export async function registerSecurityRoutes(
   app: FastifyInstance,
   kgService: KnowledgeGraphService,
   dbService: DatabaseService,
-  securityScanner: SecurityScanner
+  securityScanner: any
 ): Promise<void> {
   // POST /api/security/scan - Scan for security issues
   app.post(
@@ -119,7 +114,7 @@ export async function registerSecurityRoutes(
     },
     async (request, reply) => {
       try {
-        const { scope, includeDependencies, includeSecrets } = request.body as {
+        const { scope, includeDependencies: _includeDependencies, includeSecrets: _includeSecrets } = request.body as {
           scope?: string;
           includeDependencies?: boolean;
           includeSecrets?: boolean;
@@ -174,7 +169,7 @@ export async function registerSecurityRoutes(
     },
     async (request, reply) => {
       try {
-        const { severity, type, status, limit, offset } = request.query as {
+        const { severity, type: _type, status, limit, offset } = request.query as {
           severity?: string;
           type?: string;
           status?: string;
@@ -183,7 +178,7 @@ export async function registerSecurityRoutes(
         };
 
         const filters = {
-          severity: severity ? [severity] : undefined,
+          severity: severity ? [severity as SecuritySeverity] : undefined,
           status: status
             ? [
                 status as
@@ -380,9 +375,11 @@ export async function registerSecurityRoutes(
             threshold: alert.threshold || 1,
             channels: alert.channels || ['console'],
           })),
+          notifications: { enabled: true },
+          retention: { days: 7 },
         };
 
-        await securityScanner.setupMonitoring(monitoringConfig);
+        await (securityScanner as any).setupMonitoring(monitoringConfig as any);
 
         const monitoring = {
           alerts: alerts.length,

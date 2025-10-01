@@ -22,16 +22,17 @@ import {
   MaintenanceService,
   MaintenanceTask,
   MaintenanceResult,
-} from "../../../src/services/core/MaintenanceService";
+} from "@memento/core/services/MaintenanceService";
 import {
   DatabaseService,
   DatabaseConfig,
-} from "../../../src/services/core/DatabaseService";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
+} from "@memento/database/DatabaseService";
+import { KnowledgeGraphService } from "@memento/knowledge";
 import * as crypto from "crypto";
 
 // Import realistic mocks
 import {
+  applyQdrantMock,
   createLightweightDatabaseMocks,
   type LightweightDatabaseMocks,
 } from "../../test-utils/realistic-mocks";
@@ -72,15 +73,13 @@ describe("MaintenanceService", () => {
       digest: vi.fn().mockReturnValue("mock-checksum"),
     });
 
-    // Setup test configuration
+    // Setup test configuration (Neo4j replaces legacy Falkor connection)
     testConfig = {
-      falkordb: {
-        url: "redis://localhost:6379",
-        database: 0,
-      },
-      qdrant: {
-        url: "http://localhost:6333",
-        apiKey: "test-api-key",
+      neo4j: {
+        uri: "bolt://localhost:7688",
+        username: "neo4j",
+        password: "password",
+        database: "memento_test",
       },
       postgresql: {
         connectionString: "postgresql://test:test@localhost:5432/test",
@@ -93,17 +92,18 @@ describe("MaintenanceService", () => {
     };
 
     dbMocks = createLightweightDatabaseMocks();
+    await dbMocks.qdrant.initialize();
 
     mockDbService = new DatabaseService(testConfig, {
-      falkorFactory: () => dbMocks.falkor,
-      qdrantFactory: () => dbMocks.qdrant,
+      neo4jFactory: () => dbMocks.neo4j,
       postgresFactory: () => dbMocks.postgres,
       redisFactory: () => dbMocks.redis,
     });
     await mockDbService.initialize();
+    applyQdrantMock(mockDbService, dbMocks.qdrant);
 
     // Default DB calls return empty structures unless overridden per test
-    vi.spyOn(mockDbService, "falkordbQuery").mockResolvedValue([]);
+    vi.spyOn(mockDbService, "falkordbQuery").mockResolvedValue({ data: [] });
     vi.spyOn(mockDbService, "postgresQuery").mockResolvedValue([]);
 
     // Create mock KnowledgeGraph service
@@ -155,8 +155,10 @@ describe("MaintenanceService", () => {
       it("should execute cleanup task successfully", async () => {
         // Mock orphaned entities query to return some entities
         (mockDbService as any).falkordbQuery
-          .mockResolvedValueOnce([{ id: "orphan1" }, { id: "orphan2" }]) // findOrphanedEntities
-          .mockResolvedValueOnce([{ id: "dangling1" }]); // findDanglingRelationships
+          .mockResolvedValueOnce({
+            data: [{ id: "orphan1" }, { id: "orphan2" }],
+          }) // findOrphanedEntities
+          .mockResolvedValueOnce({ data: [[1]] }); // findDanglingRelationships
 
         const result = await maintenanceService.runMaintenanceTask("cleanup");
 
@@ -169,9 +171,6 @@ describe("MaintenanceService", () => {
         expect(result.statistics.relationshipsRemoved).toBe(1);
         expect(mockKgService.deleteEntity).toHaveBeenCalledWith("orphan1");
         expect(mockKgService.deleteEntity).toHaveBeenCalledWith("orphan2");
-        expect(mockKgService.deleteRelationship).toHaveBeenCalledWith(
-          "dangling1"
-        );
       });
 
       it("should handle cleanup task failures gracefully", async () => {
@@ -190,7 +189,7 @@ describe("MaintenanceService", () => {
 
       it("should handle empty cleanup results", async () => {
         // Mock no orphaned entities or relationships
-        (mockDbService as any).falkordbQuery.mockResolvedValue([]);
+        (mockDbService as any).falkordbQuery.mockResolvedValue({ data: [] });
 
         const result = await maintenanceService.runMaintenanceTask("cleanup");
 
@@ -267,8 +266,8 @@ describe("MaintenanceService", () => {
           .mockResolvedValueOnce(undefined) // REINDEX TABLE users
           .mockResolvedValueOnce(undefined); // REINDEX TABLE projects
 
-        // Mock FalkorDB command
-        (mockDbService as any).falkordbQuery.mockResolvedValue(undefined);
+        // Mock graph command (legacy Falkor alias)
+        (mockDbService as any).falkordbQuery.mockResolvedValue({ data: [[1]] });
 
         const result = await maintenanceService.runMaintenanceTask("reindex");
 
@@ -613,8 +612,8 @@ describe("MaintenanceService", () => {
           });
 
         (mockDbService as any).falkordbQuery
-          .mockResolvedValueOnce([{ id: "orphan1" }, { id: "orphan2" }])
-          .mockResolvedValueOnce([]);
+          .mockResolvedValueOnce({ data: [{ id: "orphan1" }, { id: "orphan2" }] })
+          .mockResolvedValueOnce({ data: [[0]] });
 
         const result = await maintenanceService.runMaintenanceTask("cleanup");
 
@@ -691,8 +690,8 @@ describe("MaintenanceService", () => {
         }));
 
         (mockDbService as any).falkordbQuery
-          .mockResolvedValueOnce(largeOrphanedList)
-          .mockResolvedValueOnce([]);
+          .mockResolvedValueOnce({ data: largeOrphanedList })
+          .mockResolvedValueOnce({ data: [[0]] });
 
         const result = await maintenanceService.runMaintenanceTask("cleanup");
 
@@ -751,8 +750,8 @@ describe("MaintenanceService", () => {
       it("should execute complete cleanup workflow", async () => {
         // Setup realistic data
         (mockDbService as any).falkordbQuery
-          .mockResolvedValueOnce([{ id: "orphan1" }]) // Orphaned entities
-          .mockResolvedValueOnce([{ id: "dangling1" }]); // Dangling relationships
+          .mockResolvedValueOnce({ data: [{ id: "orphan1" }] }) // Orphaned entities
+          .mockResolvedValueOnce({ data: [[1]] }); // Dangling relationships
 
         const result = await maintenanceService.runMaintenanceTask("cleanup");
 
@@ -763,9 +762,6 @@ describe("MaintenanceService", () => {
 
         // Verify cleanup operations were called
         expect(mockKgService.deleteEntity).toHaveBeenCalledWith("orphan1");
-        expect(mockKgService.deleteRelationship).toHaveBeenCalledWith(
-          "dangling1"
-        );
       });
 
       it("should execute complete optimization workflow", async () => {

@@ -5,8 +5,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { Entity } from '@memento/shared-types.js';
-import { GraphRelationship } from '@memento/shared-types.js';
+import { Entity } from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
 import {
   BatchConfig,
   BatchMetadata,
@@ -20,8 +20,8 @@ import {
   BatchProcessingError,
   IngestionError,
   IngestionEvents,
-} from './types.js';
-import { KnowledgeGraphServiceIntegration } from './pipeline.js';
+} from './types';
+import { KnowledgeGraphServiceIntegration } from './pipeline';
 
 export interface BatchProcessorConfig extends BatchConfig {
   streaming: StreamingWriteConfig;
@@ -659,24 +659,13 @@ export class HighThroughputBatchProcessor
     // Validate and normalize relationship endpoints
     return relationships.filter((rel) => {
       // Ensure both endpoints exist
-      const hasFromId = rel.fromEntityId || (rel.from && (rel.from as any).id);
-      const hasToId = rel.toEntityId || (rel.to && (rel.to as any).id);
-
-      if (!hasFromId || !hasToId) {
+      if (!rel.fromEntityId || !rel.toEntityId) {
         console.warn(
           `[BatchProcessor] Skipping relationship with missing endpoints: ${JSON.stringify(
             rel
           )}`
         );
         return false;
-      }
-
-      // Normalize IDs if needed
-      if (!rel.fromEntityId && rel.from) {
-        rel.fromEntityId = (rel.from as any).id;
-      }
-      if (!rel.toEntityId && rel.to) {
-        rel.toEntityId = (rel.to as any).id;
       }
 
       return true;

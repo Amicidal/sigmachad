@@ -1,10 +1,4 @@
-import { QdrantClient } from '@qdrant/js-client-rest';
-import type {
-  PerformanceHistoryOptions,
-  PerformanceHistoryRecord,
-  SCMCommitRecord,
-} from '@memento/shared-types';
-import type { PerformanceRelationship } from '@memento/shared-types';
+// (no direct imports needed here)
 import type {
   HealthStatus,
   HealthComponentStatus,

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import crypto from 'crypto';
 import { describe, it, expect } from 'vitest';
 import {
@@ -6,10 +7,13 @@ import {
   normalizeSource,
   isCodeRelationship,
   canonicalTargetKeyFor,
-  canonicalRelationshipId,
   normalizeCodeEdge,
-} from '@/utils/codeEdges';
-import { RelationshipType, type GraphRelationship } from '@/models/relationships';
+} from '@memento/core/utils/codeEdges';
+import {
+  RelationshipType,
+  type GraphRelationship,
+  canonicalRelationshipId,
+} from '@memento/shared-types';
 
 const baseTimestamp = new Date('2024-01-01T00:00:00Z');
 

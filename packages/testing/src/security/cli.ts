@@ -16,9 +16,9 @@ import { SecurityScanRequest, SecurityScanOptions } from './types.js';
 
 // Mock database and knowledge graph service for CLI usage
 const mockDb = {
-  falkordbQuery: async () => [],
-  falkordbCommand: async () => undefined,
-  getConfig: () => ({ falkordb: { graphKey: 'cli' } }),
+  graphQuery: async () => [],
+  graphCommand: async () => undefined,
+  getConfig: () => ({ neo4j: { graphKey: 'cli' } }),
 };
 
 const mockKgService = {

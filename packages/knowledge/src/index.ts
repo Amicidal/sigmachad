@@ -1,57 +1,83 @@
 // Main exports
-export * from './KnowledgeGraphService.js';
-export * from './types.js';
-export * from './queries.js';
-export * from './utils.js';
-export * from './ISearchService.js';
+export * from './orchestration/KnowledgeGraphService';
+export * from './types';
+export * from './queries';
+export * from './utils';
+export * from './ISearchService';
 
-// Parsing exports
-export * from './parsing/ASTParser.js';
-export * from './parsing/ASTParserCore.js';
-export * from './parsing/IncrementalParser.js';
-export * from './parsing/SymbolExtractor.js';
-export * from './parsing/ModuleIndexer.js';
-export * from './parsing/ModuleResolver.js';
-export * from './parsing/TypeCheckerBudget.js';
-export * from './parsing/DirectoryHandler.js';
+// Parsing exports (explicit re-exports to avoid conflicts with types.ts)
+export { ASTParser } from './parsing/ASTParser';
+export { ASTParserCore } from './parsing/ASTParserCore';
+export { IncrementalParser } from './parsing/IncrementalParser';
+export { SymbolExtractor } from './parsing/SymbolExtractor';
+export { ModuleIndexer } from './parsing/ModuleIndexer';
+export { ModuleResolver } from './parsing/ModuleResolver';
+export { TypeCheckerBudget } from './parsing/TypeCheckerBudget';
+export { DirectoryHandler } from './parsing/DirectoryHandler';
 
 // Graph exports
-export * from './graph/Neo4jService.js';
-export * from './graph/NeogmaService.js';
-export * from './graph/CypherExecutor.js';
-export * from './graph/GdsService.js';
-export * from './graph/TemporalQueryService.js';
-export * from './graph/GraphInitializer.js';
-export * from './graph/HistoryService.js';
-export * from './graph/RelationshipBuilder.js';
-export * from './graph/EntityServiceOGM.js';
-export * from './graph/RelationshipServiceOGM.js';
-export * from './graph/SearchServiceOGM.js';
+export * from './graph/Neo4jService';
+export * from './graph/NeogmaService';
+export * from './graph/CypherExecutor';
+export * from './graph/GdsService';
+export * from './graph/TemporalQueryService';
+export * from './graph/GraphInitializer';
+export * from './graph/HistoryService';
+export * from './graph/RelationshipBuilder';
+export * from './graph/EntityServiceOGM';
+export * from './graph/RelationshipServiceOGM';
+export * from './graph/SearchServiceOGM';
 
-// Analysis exports
-export * from './analysis/AnalysisService.js';
-export * from './analysis/DependencyAnalyzer.js';
-export * from './analysis/ImpactAnalyzer.js';
-export * from './analysis/PathAnalyzer.js';
-export * from './analysis/IntentExtractor.js';
+// Analysis exports (explicit class exports, types from AnalysisService only)
+export { AnalysisService } from './analysis/AnalysisService';
+export type {
+  ImpactAnalysis,
+  ImpactAnalysisRequest,
+  DependencyAnalysis,
+  PathQuery,
+  EntityEdgeStats,
+  ImpactMetrics,
+  DependencyMetrics,
+} from './analysis/AnalysisService';
+export { DependencyAnalyzer } from './analysis/DependencyAnalyzer';
+export { ImpactAnalyzer } from './analysis/ImpactAnalyzer';
+export { PathAnalyzer } from './analysis/PathAnalyzer';
+export type { PathResult } from './analysis/PathAnalyzer';
+export * from './analysis/IntentExtractor';
 
-// Embedding exports
-export * from './embeddings/EmbeddingService.js';
-export * from './embeddings/VectorService.js';
-export * from './embeddings/DocTokenizer.js';
-export * from './embeddings/DocumentationParser.js';
-export * from './embeddings/DocumentationIntelligenceProvider.js';
+// Embedding exports (explicit to avoid SearchResult conflicts)
+export { EmbeddingService } from './embeddings/EmbeddingService';
+export type {
+  EmbeddingOptions,
+  SearchOptions,
+  EmbeddingResult,
+  SearchResult as EmbeddingSearchResult,
+} from './embeddings/EmbeddingService';
+export * from './embeddings/VectorService';
+export * from './embeddings/DocTokenizer';
+export { DocumentationParser } from './embeddings/DocumentationParser';
+export type {
+  ParsedDocument,
+  DomainExtraction,
+  SyncResult,
+  SearchResult as DocSearchResult,
+} from './embeddings/DocumentationParser';
+export * from './embeddings/DocumentationIntelligenceProvider';
 
 // Orchestration exports
-export * from './orchestration/KnowledgeGraphService.js';
-export * from './orchestration/SyncOrchestrator.js';
-export * from './orchestration/EventOrchestrator.js';
-export * from './orchestration/CheckpointService.js';
-export * from './orchestration/VersionManager.js';
-export * from './orchestration/ServiceRegistry.js';
-export * from './orchestration/CacheManager.js';
-export * from './orchestration/PerformanceOptimizer.js';
-export * from './orchestration/StatsCollector.js';
+export * from './orchestration/KnowledgeGraphService';
+export { SyncOrchestrator } from './orchestration/SyncOrchestrator';
+export type {
+  SyncResult as DocSyncResult,
+  SearchResult as DocSyncSearchResult,
+} from './orchestration/SyncOrchestrator';
+export * from './orchestration/EventOrchestrator';
+export * from './orchestration/CheckpointService';
+export * from './orchestration/VersionManager';
+export * from './orchestration/ServiceRegistry';
+export * from './orchestration/CacheManager';
+export * from './orchestration/PerformanceOptimizer';
+export * from './orchestration/StatsCollector';
 
 // High-Throughput Ingestion Pipeline exports
-export * from './ingestion/index.js';
+export * from './ingestion/index';

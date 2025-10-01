@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "sync",
+  "sourceRoot": "packages/sync/src",
+  "projectType": "library",
+  "targets": {
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": [
+          "packages/sync/**/*.ts"
+        ]
+      }
+    }
+  },
+  "tags": []
+}
+

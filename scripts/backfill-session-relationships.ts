@@ -424,7 +424,7 @@ const main = async (): Promise<void> => {
   const config = createDatabaseConfig();
   const db = new DatabaseService(config);
   await db.initialize();
-  const graph = db.getFalkorDBService();
+  const graph = db.getGraphService();
 
   let skip = 0;
   let scanned = 0;
@@ -697,7 +697,7 @@ const main = async (): Promise<void> => {
   const configApply = createDatabaseConfig();
   const dbApply = new DatabaseService(configApply);
   await dbApply.initialize();
-  const graphApply = dbApply.getFalkorDBService();
+  const graphApply = dbApply.getGraphService();
   try {
     for (const fix of updates) {
       await graphApply.query(UPDATE_QUERY, {

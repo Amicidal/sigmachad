@@ -136,51 +136,7 @@ export interface ComponentHealth {
   message?: string;
 }
 
-export interface ValidationIssue {
-  file: string;
-  line: number;
-  column: number;
-  rule: string;
-  severity: 'error' | 'warning' | 'info';
-  message: string;
-  suggestion?: string;
-}
-
-export interface ValidationResult {
-  overall: {
-    passed: boolean;
-    score: number;
-    duration: number;
-  };
-  typescript: {
-    errors: number;
-    warnings: number;
-    issues: ValidationIssue[];
-  };
-  eslint: {
-    errors: number;
-    warnings: number;
-    issues: ValidationIssue[];
-  };
-  security: {
-    critical: number;
-    high: number;
-    medium: number;
-    low: number;
-    issues: any[];
-  };
-  tests: {
-    passed: number;
-    failed: number;
-    skipped: number;
-    coverage: any;
-  };
-  coverage: any;
-  architecture: {
-    violations: number;
-    issues: ValidationIssue[];
-  };
-}
+export type { ValidationResult, ValidationIssue } from './core-types.js';
 
 // API Gateway and Middleware Types
 export interface APIGatewayConfig {
@@ -200,10 +156,10 @@ export interface APIGatewayConfig {
 }
 
 export interface SynchronizationServices {
-  syncCoordinator?: SynchronizationCoordinator;
-  syncMonitor?: SynchronizationMonitoring;
-  conflictResolver?: ConflictResolution;
-  rollbackCapabilities?: RollbackCapabilities;
+  syncCoordinator?: ISynchronizationCoordinator;
+  syncMonitor?: ISynchronizationMonitoring;
+  conflictResolver?: IConflictResolution;
+  rollbackCapabilities?: IRollbackCapabilities;
 }
 
 export interface ErrorContext {
@@ -274,36 +230,88 @@ interface VerificationSuccess {
 export type ApiKeyVerification = VerificationFailure | VerificationSuccess;
 
 export interface ScopeRequirement {
-  path: string;
-  method: string;
-  requiredScopes: string[];
+  scopes: string[];
+  mode?: 'all' | 'any';
+  description?: string;
 }
 
 export interface ScopeRule {
-  pattern: string;
+  matcher: RegExp;
+  method?: string;
   scopes: string[];
   description?: string;
 }
 
-// Type definitions for synchronization services
-interface SynchronizationCoordinator {
-  startSync(sessionId: string): Promise<void>;
-  stopSync(sessionId: string): Promise<void>;
-  getSyncStatus(sessionId: string): Promise<any>;
+// Synchronization Event Bus Interfaces
+// Minimal EventEmitter-like interfaces to avoid circular dependencies with @memento/sync
+
+/**
+ * Event listener function type for synchronization events
+ */
+export type SyncEventListener = (...args: any[]) => void;
+
+/**
+ * Minimal EventEmitter interface for synchronization coordinator
+ * Extends the EventEmitter contract used by SynchronizationCoordinator
+ */
+export interface ISynchronizationCoordinator {
+  // EventEmitter methods (structural subset)
+  on(event: string | symbol, listener: SyncEventListener): this;
+  addListener?(event: string | symbol, listener: SyncEventListener): this;
+  once?(event: string | symbol, listener: SyncEventListener): this;
+  off?(event: string | symbol, listener: SyncEventListener): this;
+  removeListener(event: string | symbol, listener: SyncEventListener): this;
+  removeAllListeners?(event?: string | symbol): this;
+  emit?(event: string | symbol, ...args: any[]): boolean;
+  setMaxListeners?(n: number): this;
+  getMaxListeners?(): number;
+  listenerCount?(event: string | symbol): number;
+  listeners?(event: string | symbol): Function[];
+
+  // Coordinator-specific methods
+  getCheckpointMetrics?(): {
+    metrics: any;
+    deadLetters: any[];
+  };
+  getQueueLength?(): number;
+  startFullSynchronization?(options: Record<string, unknown>): Promise<string>;
 }
 
-interface SynchronizationMonitoring {
-  getMetrics(): Promise<any>;
-  getHealth(): Promise<any>;
+/**
+ * Minimal interface for synchronization monitoring service
+ */
+export interface ISynchronizationMonitoring {
+  getCheckpointMetricsSnapshot?(): {
+    event: string;
+    metrics: any;
+    deadLetters: any[];
+    context?: Record<string, unknown>;
+    timestamp: Date;
+  } | null;
+  getSyncMetrics?(): any;
+  getHealthMetrics?(): any;
+  getActiveOperations?(): any[];
 }
 
-interface ConflictResolution {
-  resolveConflicts(conflicts: any[]): Promise<any>;
+/**
+ * Minimal interface for conflict resolution service
+ */
+export interface IConflictResolution {
+  // Align with service methods
+  resolveConflict?(conflictId: string, resolution: any): Promise<boolean>;
+  detectConflicts?(
+    incomingEntities: any[],
+    incomingRelationships: any[]
+  ): Promise<any[]>;
 }
 
-interface RollbackCapabilities {
-  rollback(sessionId: string): Promise<void>;
-  getRollbackStatus(sessionId: string): Promise<any>;
+/**
+ * Minimal interface for rollback capabilities
+ */
+export interface IRollbackCapabilities {
+  createRollbackPoint?(operationId: string, description: string): Promise<string>;
+  listRollbackPoints?(entityId: string): Promise<any[]>;
+  getSessionCheckpointHistory?(sessionId: string, options?: { limit?: number }): any[];
 }
 
 // API Key Registry Types

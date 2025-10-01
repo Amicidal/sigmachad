@@ -4,10 +4,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { ASTParser } from '../../../src/services/knowledge/ASTParser';
-import type { ParseResult } from '../../../src/services/knowledge/ASTParser';
-import { Entity, File, FunctionSymbol, ClassSymbol, InterfaceSymbol, TypeAliasSymbol } from '@/models/entities';
-import { GraphRelationship, RelationshipType } from '@/models/relationships';
+import { ASTParser } from '@memento/knowledge';
+import type { ParseResult } from '@memento/knowledge';
+import { Entity, File, FunctionSymbol, ClassSymbol, InterfaceSymbol, TypeAliasSymbol } from '@memento/shared-types';
+import { GraphRelationship, RelationshipType } from '@memento/shared-types';
 import path from 'path';
 import fs from 'fs/promises';
 

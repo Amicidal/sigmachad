@@ -5,12 +5,10 @@
   "projectType": "library",
   "targets": {
     "build": {
-      "executor": "@nx/js:tsc",
-      "outputs": ["{options.outputPath}"],
+      "executor": "nx:run-commands",
+      "outputs": [],
       "options": {
-        "outputPath": "packages/knowledge/dist",
-        "main": "packages/knowledge/src/index.ts",
-        "tsConfig": "packages/knowledge/tsconfig.json"
+        "command": "tsc -p packages/knowledge/tsconfig.json --noEmit"
       }
     },
     "lint": {
@@ -27,12 +25,9 @@
       }
     },
     "dev": {
-      "executor": "@nx/js:tsc",
+      "executor": "nx:run-commands",
       "options": {
-        "outputPath": "packages/knowledge/dist",
-        "main": "packages/knowledge/src/index.ts",
-        "tsConfig": "packages/knowledge/tsconfig.json",
-        "watch": true
+        "command": "tsc -p packages/knowledge/tsconfig.json --noEmit --watch"
       }
     }
   }

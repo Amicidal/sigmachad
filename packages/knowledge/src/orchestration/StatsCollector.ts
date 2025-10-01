@@ -4,8 +4,8 @@
  */
 
 import { EventEmitter } from "events";
-import { Neo4jService } from "../Neo4jService.js";
-import { buildEntityStatsQueries } from "./queries.js";
+import { Neo4jService } from "@memento/knowledge/graph/Neo4jService";
+import { buildEntityStatsQueries } from "@memento/knowledge/queries";
 
 export interface EntityEdgeStats {
   byType: Record<string, number>;

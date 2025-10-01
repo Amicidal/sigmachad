@@ -17,9 +17,9 @@ export class SecurityAgentCoordinationTest {
 
   constructor() {
     this.mockDb = {
-      falkordbQuery: async () => [],
-      falkordbCommand: async () => undefined,
-      getConfig: () => ({ falkordb: { graphKey: 'test' } }),
+      graphQuery: async () => [],
+      graphCommand: async () => undefined,
+      getConfig: () => ({ neo4j: { graphKey: 'test' } }),
     };
 
     this.mockKgService = {

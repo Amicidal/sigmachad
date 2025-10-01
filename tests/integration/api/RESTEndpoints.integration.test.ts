@@ -8,9 +8,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import { expectSuccess } from '../../test-utils/assertions';
 import { FastifyInstance } from 'fastify';
-import { APIGateway } from '../../../src/api/APIGateway.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { DatabaseService } from '../../../src/services/core/DatabaseService.js';
+import { APIGateway } from '@memento/api/APIGateway';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database/DatabaseService';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -19,7 +19,7 @@ import {
   checkDatabaseHealth,
   TEST_FIXTURE_IDS,
 } from '../../test-utils/database-helpers.js';
-import { RelationshipType } from '../../../src/models/relationships.js';
+import { RelationshipType } from '@memento/shared-types';
 
 describe('REST API Endpoints Integration', () => {
   let dbService: DatabaseService;
@@ -178,7 +178,7 @@ describe('REST API Endpoints Integration', () => {
       it('should return usage examples for existing entity', async () => {
         const response = await app.inject({
           method: 'GET',
-          url: `/api/v1/graph/examples/${TEST_FIXTURE_IDS.falkorEntities.typescriptFile}`,
+          url: `/api/v1/graph/examples/${TEST_FIXTURE_IDS.graphEntities.typescriptFile}`,
         });
 
         expect(response.statusCode).toBe(200);
@@ -215,7 +215,7 @@ describe('REST API Endpoints Integration', () => {
       it('should return dependency analysis for entity', async () => {
         const response = await app.inject({
           method: 'GET',
-          url: `/api/v1/graph/dependencies/${TEST_FIXTURE_IDS.falkorEntities.typescriptFile}`,
+          url: `/api/v1/graph/dependencies/${TEST_FIXTURE_IDS.graphEntities.typescriptFile}`,
         });
 
         expect(response.statusCode).toBe(200);

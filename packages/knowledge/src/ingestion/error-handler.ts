@@ -11,7 +11,8 @@ import {
   QueueOverflowError,
   TaskPayload,
   IngestionEvents
-} from './types.js';
+} from './types';
+import type { TypedEventEmitter } from '@memento/shared-types';
 
 export interface RetryConfig {
   maxAttempts: number;
@@ -253,7 +254,10 @@ class DeadLetterQueue {
 /**
  * Main error handler for the ingestion pipeline
  */
-export class IngestionErrorHandler extends EventEmitter<IngestionEvents> {
+export class IngestionErrorHandler
+  extends EventEmitter
+  implements TypedEventEmitter<IngestionEvents>
+{
   private config: ErrorHandlingConfig;
   private retryHandler: RetryHandler;
   private circuitBreaker: CircuitBreaker;
@@ -512,7 +516,26 @@ export class IngestionErrorHandler extends EventEmitter<IngestionEvents> {
   private startMetricsCollection(): void {
     setInterval(() => {
       this.updateErrorRate();
-      this.emit('metrics:updated', this.metrics);
+      // Emit a minimal PipelineMetrics snapshot derived from error metrics
+      this.emit('metrics:updated', {
+        totalEvents: 0,
+        eventsPerSecond: 0,
+        averageLatency: 0,
+        p95Latency: 0,
+        queueMetrics: {
+          queueDepth: 0,
+          oldestEventAge: 0,
+          partitionLag: {},
+          throughputPerSecond: 0,
+          errorRate: this.metrics.errorRate,
+        },
+        workerMetrics: [],
+        batchMetrics: {
+          activeBatches: 0,
+          completedBatches: 0,
+          failedBatches: 0,
+        },
+      });
     }, 10000); // Every 10 seconds
   }
 

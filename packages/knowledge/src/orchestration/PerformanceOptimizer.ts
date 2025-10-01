@@ -6,8 +6,8 @@
 import {
   Entity,
   Symbol as SymbolEntity,
-} from '@memento/shared-types.js';
-import { GraphRelationship } from '@memento/shared-types.js';
+} from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
 
 /**
  * Configuration for performance optimizations
@@ -172,67 +172,56 @@ export class PerformanceOptimizer {
    */
   createLRUCache<K, V>(
     maxSize: number = this.config.maxCacheSize
-  ): Map<K, V> & {
-    delete: (key: K) => boolean;
-    clear: () => void;
-    has: (key: K) => boolean;
-    get: (key: K) => V | undefined;
-    set: (key: K, value: V) => this;
-  } {
-    const cache = new Map<K, V>();
+  ): Map<K, V> {
     const usage = new Map<K, number>();
     let counter = 0;
 
-    const lruCache = {
-      delete: (key: K): boolean => {
+    class LRUCache extends Map<K, V> {
+      override delete(key: K): boolean {
         usage.delete(key);
-        return cache.delete(key);
-      },
-      clear: (): void => {
-        cache.clear();
+        return super.delete(key);
+      }
+
+      override clear(): void {
         usage.clear();
         counter = 0;
-      },
-      has: (key: K): boolean => cache.has(key),
-      get: (key: K): V | undefined => {
-        if (cache.has(key)) {
+        super.clear();
+      }
+
+      override has(key: K): boolean {
+        return super.has(key);
+      }
+
+      override get(key: K): V | undefined {
+        if (super.has(key)) {
           usage.set(key, ++counter);
-          return cache.get(key);
+          return super.get(key);
         }
         return undefined;
-      },
-      set: (key: K, value: V): typeof lruCache => {
-        // Evict least recently used item if cache is full
-        if (cache.size >= maxSize && !cache.has(key)) {
+      }
+
+      override set(key: K, value: V): this {
+        if (super.size >= maxSize && !super.has(key)) {
           let lruKey: K | undefined;
           let lruTime = Infinity;
-
           for (const [k, time] of usage) {
             if (time < lruTime) {
               lruTime = time;
               lruKey = k;
             }
           }
-
           if (lruKey !== undefined) {
-            cache.delete(lruKey);
+            super.delete(lruKey);
             usage.delete(lruKey);
           }
         }
-
-        cache.set(key, value);
+        const result = super.set(key, value);
         usage.set(key, ++counter);
-        return lruCache;
-      },
-    } as Map<K, V> & {
-      delete: (key: K) => boolean;
-      clear: () => void;
-      has: (key: K) => boolean;
-      get: (key: K) => V | undefined;
-      set: (key: K, value: V) => typeof lruCache;
-    };
+        return result;
+      }
+    }
 
-    return lruCache;
+    return new LRUCache();
   }
 
   /**
@@ -243,9 +232,9 @@ export class PerformanceOptimizer {
   compressEntity(entity: Entity): Entity {
     const compressed = { ...entity };
 
-    // Remove or compress large metadata fields
-    if (compressed.metadata) {
-      const metadata = compressed.metadata as any;
+    // Remove or compress large metadata fields (narrow via in-guard)
+    if ('metadata' in compressed && (compressed as any).metadata) {
+      const metadata = (compressed as any).metadata as any;
       if (metadata.sourceCode && metadata.sourceCode.length > 1000) {
         metadata.sourceCode = metadata.sourceCode.substring(0, 500) + '...';
       }

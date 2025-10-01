@@ -17,7 +17,7 @@ import {
   searchQuerySchema,
   type MockFastifyRequest,
   type MockFastifyReply
-} from '../../../src/api/middleware/validation.js';
+} from '@memento/api/middleware/validation';
 
 import {
   createMockRequest,

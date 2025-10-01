@@ -333,11 +333,26 @@ spec:
         env:
         - name: NODE_ENV
           value: "production"
-        - name: FALKORDB_URL
+        - name: NEO4J_URI
           valueFrom:
             secretKeyRef:
               name: memento-secrets
-              key: falkordb-url
+              key: neo4j-uri
+        - name: NEO4J_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: memento-secrets
+              key: neo4j-username
+        - name: NEO4J_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: memento-secrets
+              key: neo4j-password
+        - name: NEO4J_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: memento-secrets
+              key: neo4j-database
         resources:
           requests:
             memory: "512Mi"

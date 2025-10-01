@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { RelationshipType } from '../../../src/models/relationships.js';
-import type { GraphRelationship } from '../../../src/models/relationships.js';
+import { RelationshipType } from '@memento/shared-types';
+import type { GraphRelationship } from '@memento/shared-types';
 import {
   createKnowledgeGraphTestHarness,
   type KnowledgeGraphTestDependencies,
 } from '../../test-utils/knowledge-graph-test-helpers.js';
 
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
+import { KnowledgeGraphService } from '@memento/knowledge';
 
 describe('KnowledgeGraphService relationship delegation', () => {
   let service: KnowledgeGraphService;

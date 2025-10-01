@@ -7,69 +7,76 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from '../../../src/services/core/DatabaseService';
+} from '@memento/database/DatabaseService';
 import {
-  RealisticFalkorDBMock,
+  RealisticNeo4jMock,
   RealisticPostgreSQLMock,
-  RealisticQdrantMock,
   RealisticRedisMock,
 } from '../../test-utils/realistic-mocks';
 
-type MockToggles = {
-  falkor?: Partial<MockConfig>;
-  qdrant?: Partial<MockConfig>;
-  postgres?: Partial<MockConfig>;
-  redis?: Partial<MockConfig>;
-};
-
-type MockConfig = {
+interface MockConfig {
   failureRate: number;
   latencyMs: number;
   connectionFailures: boolean;
   transactionFailures: boolean;
   dataCorruption: boolean;
   seed: number;
+}
+
+type MockToggles = {
+  neo4j?: Partial<MockConfig>;
+  postgres?: Partial<MockConfig>;
+  redis?: Partial<MockConfig>;
 };
 
 function createService(overrides: MockToggles = {}) {
   const config = createTestDatabaseConfig();
 
-  const falkor = new RealisticFalkorDBMock({ seed: 11, failureRate: 0, ...overrides.falkor });
-  const qdrant = new RealisticQdrantMock({ seed: 29, failureRate: 0, ...overrides.qdrant });
+  const neo4j = new RealisticNeo4jMock({
+    seed: 11,
+    failureRate: 0,
+    ...overrides.neo4j,
+  });
   const postgres = new RealisticPostgreSQLMock({
     seed: 47,
     failureRate: 0,
     transactionFailures: false,
     ...overrides.postgres,
   });
-  const redis = new RealisticRedisMock({ seed: 73, failureRate: 0, ...overrides.redis });
+  const redis = new RealisticRedisMock({
+    seed: 73,
+    failureRate: 0,
+    ...overrides.redis,
+  });
 
   const service = new DatabaseService(config, {
-    falkorFactory: () => falkor as any,
-    qdrantFactory: () => qdrant as any,
+    neo4jFactory: () => neo4j as any,
     postgresFactory: () => postgres as any,
     redisFactory: () => redis as any,
   });
 
-  return { service, mocks: { falkor, qdrant, postgres, redis } };
+  return { service, mocks: { neo4j, postgres, redis } };
 }
 
 describe('DatabaseService Error Scenarios', () => {
   it('cleans up earlier services when a later dependency fails to initialize', async () => {
-    const { service, mocks } = createService();
+    const { service, mocks } = createService({
+      postgres: { connectionFailures: true, failureRate: 100 },
+    });
 
-    const falkorInit = vi
-      .spyOn(mocks.falkor, 'initialize')
-      .mockResolvedValueOnce();
-    const falkorClose = vi.spyOn(mocks.falkor, 'close').mockResolvedValueOnce();
-    vi.spyOn(mocks.qdrant, 'initialize').mockRejectedValueOnce(
-      new Error('qdrant init failed'),
-    );
+    const neo4jInit = vi.spyOn(mocks.neo4j, 'initialize');
+    const neo4jClose = vi.spyOn(mocks.neo4j, 'close');
+    const postgresInit = vi
+      .spyOn(mocks.postgres, 'initialize')
+      .mockRejectedValueOnce(new Error('postgres init failed'));
+    const redisClose = vi.spyOn(mocks.redis, 'close');
 
     await service.initialize();
 
-    expect(falkorInit).toHaveBeenCalledTimes(1);
-    expect(falkorClose).toHaveBeenCalledTimes(1);
+    expect(neo4jInit).toHaveBeenCalledTimes(1);
+    expect(postgresInit).toHaveBeenCalledTimes(1);
+    expect(neo4jClose).toHaveBeenCalledTimes(1);
+    expect(redisClose).toHaveBeenCalledTimes(1);
     expect(service.isInitialized()).toBe(false);
   });
 
@@ -77,21 +84,21 @@ describe('DatabaseService Error Scenarios', () => {
     const { service, mocks } = createService();
     await service.initialize();
 
-    const falkorError = new Error('Cypher syntax error');
+    const graphError = new Error('Cypher syntax error');
     const postgresError = new Error('duplicate key value violates unique constraint');
     const setupError = new Error('Schema migration failed');
 
-    vi.spyOn(mocks.falkor, 'query').mockRejectedValueOnce(falkorError);
+    vi.spyOn(mocks.neo4j, 'query').mockRejectedValueOnce(graphError);
     vi.spyOn(mocks.postgres, 'query').mockRejectedValueOnce(postgresError);
     vi.spyOn(mocks.postgres, 'setupSchema').mockRejectedValueOnce(setupError);
 
     const results = await Promise.allSettled([
-      service.falkordbQuery('MATCH (n) RETURN n'),
+      service.graphQuery('MATCH (n) RETURN n'),
       service.postgresQuery('SELECT 1'),
       service.setupDatabase(),
     ]);
 
-    expect(results[0]).toMatchObject({ status: 'rejected', reason: falkorError });
+    expect(results[0]).toMatchObject({ status: 'rejected', reason: graphError });
     expect(results[1]).toMatchObject({ status: 'rejected', reason: postgresError });
     expect(results[2]).toMatchObject({ status: 'rejected', reason: setupError });
   });
@@ -157,23 +164,20 @@ describe('DatabaseService Error Scenarios', () => {
 
   it('surfaces corrupted data from downstream services through health checks', async () => {
     const { service, mocks } = createService({
-      falkor: { dataCorruption: true },
+      neo4j: { dataCorruption: true },
       postgres: { failureRate: 0 },
     });
 
     await service.initialize();
 
-    vi.spyOn(mocks.falkor, 'healthCheck').mockResolvedValueOnce(false);
-    vi.spyOn(mocks.qdrant, 'healthCheck').mockResolvedValueOnce(true);
+    vi.spyOn(mocks.neo4j, 'healthCheck').mockResolvedValueOnce(false);
     vi.spyOn(mocks.postgres, 'healthCheck').mockResolvedValueOnce(true);
     vi.spyOn(mocks.redis, 'healthCheck').mockResolvedValueOnce(true);
 
     const health = await service.healthCheck();
 
-    expect(health.falkordb?.status).toBe('unhealthy');
-    expect(health.qdrant?.status).toBe('healthy');
-    expect(health.postgresql?.status).toBe('healthy');
+    expect(health.neo4j.status).toBe('unhealthy');
+    expect(health.postgresql.status).toBe('healthy');
     expect(health.redis?.status).toBe('healthy');
   });
 });
-

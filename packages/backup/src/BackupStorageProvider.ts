@@ -1,12 +1,12 @@
-import {
+import { BackupStorageProvider, BackupStorageRegistry } from '@memento/shared-types';
+// Re-export commonly used types for providers/tests that import via this module
+export type {
   BackupFileStat,
+  BackupStorageProvider,
   BackupStorageWriteOptions,
   BackupStorageReadOptions,
-  BackupStorageProvider,
-  BackupStorageFactoryOptions,
-  BackupStorageRegistry,
 } from '@memento/shared-types';
-import { Readable } from 'node:stream';
+// (no runtime imports needed)
 
 export class DefaultBackupStorageRegistry implements BackupStorageRegistry {
   private providers = new Map<string, BackupStorageProvider>();

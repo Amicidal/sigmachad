@@ -4,16 +4,16 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { FastifyInstance } from 'fastify';
-import { APIGateway } from '../../../src/api/APIGateway.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { DatabaseService } from '../../../src/services/core/DatabaseService.js';
+import { APIGateway } from '@memento/api/APIGateway';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database/DatabaseService';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
   checkDatabaseHealth,
 } from '../../test-utils/database-helpers.js';
-import { RelationshipType, type GraphRelationship } from '../../../src/models/relationships.js';
+import { RelationshipType, type GraphRelationship } from '@memento/shared-types';
 
 describe('History API (basic)', () => {
   let dbService: DatabaseService;

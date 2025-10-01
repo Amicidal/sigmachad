@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { SecurityScanner } from "../../../src/services/testing/SecurityScanner";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/core/DatabaseService";
+import { SecurityScanner } from "@memento/testing/security/scanner";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -15,7 +15,7 @@ import {
 } from "../../test-utils/database-helpers";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { CodebaseEntity, File } from "../../../src/models/entities";
+import { CodebaseEntity, File } from "@memento/shared-types";
 
 describe("SecurityScanner Integration", () => {
   let securityScanner: SecurityScanner;

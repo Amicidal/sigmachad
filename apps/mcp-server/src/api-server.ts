@@ -100,7 +100,7 @@ async function main() {
         if (pendingChanges.length > 0) {
           try {
             console.log(`🔄 Processing batch of ${pendingChanges.length} file changes`);
-            const operationId = await syncCoordinator.synchronizeFileChanges(pendingChanges);
+            await syncCoordinator.synchronizeFileChanges(pendingChanges);
             pendingChanges = [];
           } catch (error) {
             console.error(`❌ Error in batch sync:`, error);

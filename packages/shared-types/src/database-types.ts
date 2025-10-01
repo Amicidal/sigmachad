@@ -13,19 +13,29 @@ export interface HealthComponentStatus {
 }
 
 // Database service interfaces
-export interface IFalkorDBService {
+
+// Generic graph database service interface
+export interface IGraphService {
   initialize(): Promise<void>;
   close(): Promise<void>;
   isInitialized(): boolean;
-  getClient(): any;
+  getDriver(): any;
   query(
     query: string,
     params?: Record<string, any>,
-    graphKey?: string
+    options?: { database?: string }
   ): Promise<any>;
   command(...args: any[]): Promise<any>;
   setupGraph(): Promise<void>;
   healthCheck(): Promise<boolean>;
+}
+
+/**
+ * @deprecated Use IGraphService or INeo4jService instead
+ * Legacy interface for FalkorDB compatibility
+ */
+export interface IFalkorDBService extends IGraphService {
+  getClient(): any;
 }
 
 export interface IQdrantService {
@@ -223,11 +233,18 @@ export interface DatabaseQueryResult {
   fields?: unknown[];
 }
 
-export interface FalkorDBQueryResult {
+// Generic graph query result type
+export interface GraphQueryResult {
   headers?: string[];
   data?: unknown[][];
   statistics?: Record<string, unknown>;
 }
+
+/**
+ * @deprecated Use GraphQueryResult instead
+ * Legacy type for FalkorDB compatibility
+ */
+export interface FalkorDBQueryResult extends GraphQueryResult {}
 
 // Testing and analysis types
 export interface TestSuiteResult {

@@ -3,15 +3,15 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { registerImpactRoutes } from '../../../src/api/routes/impact.js';
+import { registerImpactRoutes } from '@memento/api/routes/impact';
 import {
   createMockRequest,
   createMockReply,
   type MockFastifyRequest,
   type MockFastifyReply,
 } from '../../test-utils.js';
-import type { ImpactAnalysis } from '../../../src/models/types.js';
-import { RelationshipType } from '../../../src/models/relationships.js';
+import type { ImpactAnalysis } from '@memento/shared-types';
+import { RelationshipType } from '@memento/shared-types';
 
 const baseEntity = {
   id: 'symbol-1',

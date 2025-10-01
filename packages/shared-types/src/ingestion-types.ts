@@ -238,6 +238,7 @@ export interface EnrichmentTask {
   entityId: string;
   priority: number;
   data: any;
+  metadata?: Record<string, any>;
   dependencies: string[];
   createdAt: Date;
   sla?: number;
@@ -343,18 +344,20 @@ export class QueueOverflowError extends IngestionError {
 // ========== Event Emitter Types ==========
 
 export interface IngestionEvents {
-  'pipeline:started': () => void;
-  'pipeline:stopped': () => void;
-  'pipeline:error': (error: Error) => void;
-  'event:received': (event: ChangeEvent) => void;
-  'event:processed': (event: ChangeEvent, duration: number) => void;
-  'batch:created': (batch: BatchMetadata) => void;
-  'batch:completed': (result: BatchResult) => void;
-  'batch:failed': (error: BatchProcessingError) => void;
-  'worker:started': (workerId: string) => void;
-  'worker:stopped': (workerId: string) => void;
-  'worker:error': (error: WorkerError) => void;
-  'queue:overflow': (error: QueueOverflowError) => void;
-  'metrics:updated': (metrics: PipelineMetrics) => void;
-  'alert:triggered': (alert: AlertConfig, value: number) => void;
+  'pipeline:started': [];
+  'pipeline:stopped': [];
+  'pipeline:error': [error: Error];
+  'event:received': [event: ChangeEvent];
+  'event:processed': [event: ChangeEvent, duration: number];
+  'batch:created': [batch: BatchMetadata];
+  'batch:completed': [result: BatchResult];
+  'batch:failed': [error: BatchProcessingError];
+  'worker:started': [workerId: string];
+  'worker:stopped': [workerId: string];
+  'worker:error': [error: WorkerError];
+  'queue:overflow': [error: QueueOverflowError];
+  // Queue-level metrics (narrow payload for internal aggregation)
+  'queue:metrics': [metrics: QueueMetrics];
+  'metrics:updated': [metrics: PipelineMetrics];
+  'alert:triggered': [alert: AlertConfig, value: number];
 }

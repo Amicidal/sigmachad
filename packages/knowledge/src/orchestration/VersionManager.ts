@@ -4,9 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { Neo4jService } from '../graph/Neo4jService.js';
-import { Entity } from '@memento/shared-types.js';
-import { TimeRangeParams } from '@memento/graph';
+import { Neo4jService } from '../graph/Neo4jService';
+import { Entity } from '@memento/shared-types';
 
 export interface VersionInfo {
   id: string;

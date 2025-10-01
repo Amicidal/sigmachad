@@ -14,7 +14,7 @@ import {
   TemporalConstants,
   TEMPORAL_VERSION
 } from '../index.js';
-import type { TestExecutionRecord } from '../TestTypes.js';
+import type { TestExecutionRecord } from '../temporal/TestTypes.js';
 
 describe('Temporal System Integration', () => {
   describe('System Creation and Configuration', () => {
@@ -51,9 +51,9 @@ describe('Temporal System Integration', () => {
       expect(age).toBe(30);
 
       const relationshipId = TemporalUtils.generateRelationshipId(
-        'test_1', 'entity_1', 'uses', 'suite_1'
+        'test_1', 'entity_1', 'EXERCISES', 'suite_1'
       );
-      expect(relationshipId).toBe('rel_test_1_entity_1_uses_suite_1');
+      expect(relationshipId).toBe('rel_test_1_entity_1_EXERCISES_suite_1');
     });
 
     it('should provide system constants', () => {
@@ -91,9 +91,13 @@ describe('Temporal System Integration', () => {
       await expect(system.tracker.trackExecution(testExecution)).resolves.not.toThrow();
 
       // Calculate metrics
-      const metrics = await system.metrics.calculateExecutionMetrics([testExecution]);
+      const metrics = await system.metrics.calculateExecutionMetrics(
+        testExecution.testId,
+        testExecution.entityId,
+        [testExecution]
+      );
       expect(metrics.averageDuration).toBe(150);
-      expect(metrics.passRate).toBe(1.0);
+      expect(metrics.successRate).toBe(1.0);
       expect(metrics.totalExecutions).toBe(1);
     });
 
@@ -102,10 +106,10 @@ describe('Temporal System Integration', () => {
         platform: 'github-actions',
         triggers: ['push'],
         testCommand: 'pnpm test',
-        buildCommand: 'pnpm build'
+        reportingEnabled: true,
       });
 
-      expect(config.success).toBe(true);
+      expect(config.platform).toBe('github-actions');
       expect(config.configuration).toContain('name:');
       expect(config.configuration).toContain('on:');
       expect(config.configuration).toContain('push');
@@ -149,15 +153,13 @@ describe('Temporal System Integration', () => {
         }
       }));
 
-      // Test timeline generation (with empty events array as expected)
-      const timeline = await system.visualization.generateTimeline('viz_test', []);
-      expect(timeline.success).toBe(true);
-      expect(timeline.visualization.type).toBe('timeline');
+      // Test timeline generation (with empty events and relationships arrays)
+      const timeline = await system.visualization.generateTimeline([], [], executions as any);
+      expect(Array.isArray(timeline.events)).toBe(true);
 
       // Test performance graph
-      const performance = await system.visualization.generatePerformanceGraph('viz_test', executions);
-      expect(performance.success).toBe(true);
-      expect(performance.visualization.type).toBe('performance');
+      const performance = await system.visualization.generatePerformanceGraph(executions as any, ['duration']);
+      expect(performance.metrics.duration.length).toBeGreaterThan(0);
     });
   });
 
@@ -166,18 +168,18 @@ describe('Temporal System Integration', () => {
       const system = await createDefaultTemporalSystem();
 
       // Test with empty arrays
-      const emptyMetrics = await system.metrics.calculateExecutionMetrics([]);
+      const emptyMetrics = await system.metrics.calculateExecutionMetrics('unknown', 'unknown', []);
       expect(emptyMetrics.totalExecutions).toBe(0);
-      expect(emptyMetrics.passRate).toBe(0);
+      expect(emptyMetrics.successRate).toBe(0);
 
       // Test CI configuration with minimal data
       const minimalConfig = await system.ciIntegration.generateCIConfiguration({
         platform: 'github-actions',
         triggers: [],
         testCommand: '',
-        buildCommand: ''
+        reportingEnabled: false
       });
-      expect(minimalConfig.success).toBe(true);
+      expect(minimalConfig.platform).toBe('github-actions');
     });
 
     it('should handle large datasets efficiently', async () => {
@@ -203,13 +205,13 @@ describe('Temporal System Integration', () => {
       const startTime = Date.now();
 
       // Calculate metrics on large dataset
-      const metrics = await system.metrics.calculateExecutionMetrics(largeDataset);
+      const metrics = await system.metrics.calculateExecutionMetrics('large_suite', 'entity_0', largeDataset);
 
       const endTime = Date.now();
       const processingTime = endTime - startTime;
 
       expect(metrics.totalExecutions).toBe(500);
-      expect(metrics.passRate).toBeGreaterThan(0.8); // Should be around 90%
+      expect(metrics.successRate).toBeGreaterThan(0.8); // Should be around 90%
       expect(processingTime).toBeLessThan(2000); // Should complete within 2 seconds
     });
   });
@@ -227,18 +229,15 @@ describe('Temporal System Integration', () => {
 
       // Generate JUnit XML report
       const junitReport = await system.ciIntegration.generateReport(testResults, 'junit');
-      expect(junitReport.success).toBe(true);
       expect(junitReport.content).toContain('<?xml version="1.0"');
       expect(junitReport.content).toContain('testsuite');
 
       // Generate JSON report
       const jsonReport = await system.ciIntegration.generateReport(testResults, 'json');
-      expect(jsonReport.success).toBe(true);
       expect(() => JSON.parse(jsonReport.content)).not.toThrow();
 
       // Generate HTML report
       const htmlReport = await system.ciIntegration.generateReport(testResults, 'html');
-      expect(htmlReport.success).toBe(true);
       expect(htmlReport.content).toContain('<!DOCTYPE html>');
     });
 
@@ -256,7 +255,6 @@ describe('Temporal System Integration', () => {
       };
 
       const result = await system.ciIntegration.handleWebhook('test_completed', webhookPayload);
-      expect(result.success).toBe(true);
       expect(result.processed).toBe(true);
     });
 
@@ -275,7 +273,7 @@ jobs:
 `;
 
       const validation = await system.ciIntegration.validateWorkflow(validWorkflow, 'github-actions');
-      expect(validation.valid).toBe(true);
+      expect(validation.isValid).toBe(true);
       expect(validation.errors).toHaveLength(0);
     });
   });

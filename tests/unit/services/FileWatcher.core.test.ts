@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { FileWatcher as FileWatcherType } from '../../../src/services/FileWatcher';
+import type { FileWatcher as FileWatcherType } from '@memento/core/services/FileWatcher';
 
 type Listener = (...args: any[]) => void;
 
@@ -42,7 +42,7 @@ describe('FileWatcher (core behavior)', () => {
   beforeEach(async () => {
     createdWatchers.length = 0;
     watchSpy.mockClear();
-    const module = await import('../../../src/services/FileWatcher');
+    const module = await import('@memento/core/services/FileWatcher');
     FileWatcher = module.FileWatcher;
   });
 

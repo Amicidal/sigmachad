@@ -74,25 +74,33 @@ export function createDefaultStoreOptions(): RollbackStoreOptions {
 // Conflict resolution presets
 export function createAbortOnConflictResolution(): ConflictResolution {
   return {
-    strategy: ConflictStrategy.ABORT
+    strategy: ConflictStrategy.MANUAL,
+    timestamp: new Date(),
+    resolvedBy: 'default'
   };
 }
 
 export function createOverwriteConflictResolution(): ConflictResolution {
   return {
-    strategy: ConflictStrategy.OVERWRITE
+    strategy: ConflictStrategy.OVERWRITE,
+    timestamp: new Date(),
+    resolvedBy: 'default'
   };
 }
 
 export function createSkipConflictResolution(): ConflictResolution {
   return {
-    strategy: ConflictStrategy.SKIP
+    strategy: ConflictStrategy.SKIP,
+    timestamp: new Date(),
+    resolvedBy: 'default'
   };
 }
 
 export function createMergeConflictResolution(): ConflictResolution {
   return {
-    strategy: ConflictStrategy.MERGE
+    strategy: ConflictStrategy.MERGE,
+    timestamp: new Date(),
+    resolvedBy: 'default'
   };
 }
 

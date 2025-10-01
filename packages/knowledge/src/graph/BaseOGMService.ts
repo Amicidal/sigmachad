@@ -3,7 +3,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { NeogmaService } from './NeogmaService.js';
+import { NeogmaService } from './NeogmaService';
 
 /**
  * Abstract base class that provides common functionality for all OGM services

@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { MaintenanceService, MaintenanceTask, MaintenanceResult } from '../../../src/services/MaintenanceService';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
-import { DatabaseService } from '../../../src/services/DatabaseService';
+import { MaintenanceService, MaintenanceTask, MaintenanceResult } from '@memento/core/services/MaintenanceService';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database/DatabaseService';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -14,8 +14,8 @@ import {
   TEST_DATABASE_CONFIG,
   insertTestFixtures
 } from '../../test-utils/database-helpers';
-import { Entity } from '../../../src/models/entities';
-import { GraphRelationship } from '../../../src/models/relationships';
+import { Entity } from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
 
 describe('MaintenanceService Integration', () => {
   let dbService: DatabaseService;

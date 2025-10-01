@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import type { ImpactAnalysisRequest } from '../../../src/models/types.js';
+import type { ImpactAnalysisRequest } from '@memento/shared-types';
 import {
   createKnowledgeGraphTestHarness,
   type KnowledgeGraphTestDependencies,
 } from '../../test-utils/knowledge-graph-test-helpers.js';
 
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
+import { KnowledgeGraphService } from '@memento/knowledge';
 
 describe('KnowledgeGraphService impact analysis', () => {
   let service: KnowledgeGraphService;

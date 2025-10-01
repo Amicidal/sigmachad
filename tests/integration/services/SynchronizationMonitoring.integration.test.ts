@@ -17,8 +17,8 @@ import {
   SyncMetrics,
   PerformanceMetrics,
   HealthMetrics,
-} from "../../../src/services/synchronization/SynchronizationMonitoring";
-import { SyncOperation } from "../../../src/services/synchronization/SynchronizationCoordinator";
+} from "@memento/sync/synchronization/SynchronizationMonitoring";
+import { SyncOperation } from "@memento/sync/synchronization/SynchronizationCoordinator";
 
 describe("SynchronizationMonitoring Integration", () => {
   let monitoring: SynchronizationMonitoring;

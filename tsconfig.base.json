@@ -3,41 +3,122 @@
   "compilerOptions": {
     "sourceMap": true,
     "declaration": true,
-    "moduleResolution": "node16",
+    "noEmit": true,
+    "moduleResolution": "bundler",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "target": "ES2020",
-    "module": "Node16",
-    "lib": ["ES2020"],
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": [
+      "ES2022"
+    ],
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@/api/*": ["src/api/*"],
-      "@/models/*": ["src/models/*"],
-      "@/services/*": ["src/services/*"],
-      "@/utils/*": ["src/utils/*"],
-      "@memento/api": ["packages/api/src"],
-      "@memento/api/*": ["packages/api/src/*"],
-      "@memento/core": ["packages/core/src"],
-      "@memento/sync": ["packages/sync/src"],
-      "@memento/sync/*": ["packages/sync/src/*"],
-      "@memento/backup": ["packages/backup/src"],
-      "@memento/backup/*": ["packages/backup/src/*"],
-      "@memento/core/*": ["packages/core/src/*"],
-      "@memento/database": ["packages/database/src"],
-      "@memento/database/*": ["packages/database/src/*"],
-      "@memento/knowledge": ["packages/knowledge/src"],
-      "@memento/knowledge/*": ["packages/knowledge/src/*"],
-      "@memento/testing": ["packages/testing/src"],
-      "@memento/testing/*": ["packages/testing/src/*"],
-      "@memento/shared-types": ["packages/shared-types/src"],
-      "@memento/shared-types/*": ["packages/shared-types/src/*"],
-      "@shared-types": ["packages/shared-types"],
-      "@shared-types/*": ["packages/shared-types/*"],
-      "@memento/utils": ["packages/utils/src"],
-      "@memento/utils/*": ["packages/utils/src/*"]
+      "@/*": [
+        "src/*"
+      ],
+      "@/api/*": [
+        "src/api/*"
+      ],
+      "@/models/*": [
+        "src/models/*"
+      ],
+      "@/services/*": [
+        "src/services/*"
+      ],
+      "@/utils/*": [
+        "src/utils/*"
+      ],
+      "@memento/agents": [
+        "packages/agents/src"
+      ],
+      "@memento/agents/*": [
+        "packages/agents/src/*"
+      ],
+      "@memento/api": [
+        "packages/api/src"
+      ],
+      "@memento/api/*": [
+        "packages/api/src/*"
+      ],
+      "@memento/backup": [
+        "packages/backup/src"
+      ],
+      "@memento/backup/*": [
+        "packages/backup/src/*"
+      ],
+      "@memento/core": [
+        "packages/core/src"
+      ],
+      "@memento/core/*": [
+        "packages/core/src/*"
+      ],
+      "@memento/database": [
+        "packages/database/src"
+      ],
+      "@memento/database/*": [
+        "packages/database/src/*"
+      ],
+      "@memento/graph": [
+        "packages/graph/src"
+      ],
+      "@memento/graph/*": [
+        "packages/graph/src/*"
+      ],
+      "@memento/jobs": [
+        "packages/jobs/src"
+      ],
+      "@memento/jobs/*": [
+        "packages/jobs/src/*"
+      ],
+      "@memento/knowledge": [
+        "packages/knowledge/src"
+      ],
+      "@memento/knowledge/*": [
+        "packages/knowledge/src/*"
+      ],
+      "@memento/parser": [
+        "packages/parser/src"
+      ],
+      "@memento/parser/*": [
+        "packages/parser/src/*"
+      ],
+      "@memento/shared-types": [
+        "packages/shared-types/src"
+      ],
+      "@memento/shared-types/*": [
+        "packages/shared-types/src/*"
+      ],
+      "@memento/sync": [
+        "packages/sync/src"
+      ],
+      "@memento/sync/*": [
+        "packages/sync/src/*"
+      ],
+      "@memento/testing": [
+        "packages/testing/src"
+      ],
+      "@memento/testing/*": [
+        "packages/testing/src/*"
+      ],
+      "@memento/utils": [
+        "packages/utils/src"
+      ],
+      "@memento/utils/*": [
+        "packages/utils/src/*"
+      ],
+      "@memento/main": [
+        "apps/main/src"
+      ],
+      "@memento/main/*": [
+        "apps/main/src/*"
+      ]
     }
   },
-  "exclude": ["node_modules", "dist", "coverage"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage"
+  ]
 }

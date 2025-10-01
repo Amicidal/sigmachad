@@ -11,9 +11,9 @@ import {
   Test,
   TestExecution,
   TestPerformanceMetrics,
-  CoverageMetrics,
   TestHistoricalData,
-} from '@memento/core';
+  CoverageMetrics,
+} from '@memento/shared-types';
 import {
   PerformanceRelationship,
   PerformanceMetricSample,
@@ -338,7 +338,7 @@ export class TestEngine {
       testEntity.executionHistory.push(execution);
     } else {
       // Update existing execution
-      // eslint-disable-next-line security/detect-object-injection
+       
       testEntity.executionHistory[existingExecutionIndex] = execution;
     }
 
@@ -606,7 +606,7 @@ export class TestEngine {
       : [];
 
     for (let idx = history.length - 1; idx >= 0; idx -= 1) {
-      // eslint-disable-next-line security/detect-object-injection
+       
       const execution = history[idx];
       const normalized = this.extractEnvironmentFromExecution(
         execution?.environment
@@ -636,7 +636,7 @@ export class TestEngine {
       ];
 
       for (const key of candidateKeys) {
-        // eslint-disable-next-line security/detect-object-injection
+         
         const candidate = (env as Record<string, any>)[key];
         if (typeof candidate === 'string') {
           const normalized = this.normalizeEnvironmentCandidate(candidate);
@@ -942,7 +942,7 @@ export class TestEngine {
 
       coverages.push(normalized);
       const bucketKey: Test['testType'] = testType ?? 'unit';
-      // eslint-disable-next-line security/detect-object-injection
+       
       breakdownBuckets[bucketKey].push(normalized);
       testCases.push({ testId: sourceId, testName, covers });
     };
@@ -1449,7 +1449,7 @@ export class TestEngine {
       const sorted = [...durationSamples].sort((a, b) => a - b);
       const p95Index = Math.floor(sorted.length * 0.95);
       testEntity.performanceMetrics.p95ExecutionTime =
-        // eslint-disable-next-line security/detect-object-injection
+         
         sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0;
     } else {
       testEntity.performanceMetrics.averageExecutionTime = 0;
@@ -1906,7 +1906,7 @@ export class TestEngine {
 
     let alternations = 0;
     for (let i = 1; i < results.length; i++) {
-      // eslint-disable-next-line security/detect-object-injection
+       
       if (results[i].status !== results[i - 1].status) {
         alternations++;
       }

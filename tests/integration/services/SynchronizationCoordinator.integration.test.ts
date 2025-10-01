@@ -4,20 +4,20 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { SynchronizationCoordinator, SyncOperation, SyncOptions, PartialUpdate } from '../../../src/services/SynchronizationCoordinator';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
-import { ASTParser } from '../../../src/services/ASTParser';
-import { DatabaseService } from '../../../src/services/DatabaseService';
-import { FileChange } from '../../../src/services/FileWatcher';
-import { ConflictResolution } from '../../../src/services/ConflictResolution';
+import { SynchronizationCoordinator, SyncOperation, SyncOptions, PartialUpdate } from '@memento/sync/synchronization/SynchronizationCoordinator';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { ASTParser } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database/DatabaseService';
+import { FileChange } from '@memento/core/services/FileWatcher';
+import { ConflictResolution } from '@memento/sync';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
   TEST_DATABASE_CONFIG
 } from '../../test-utils/database-helpers';
-import { Entity } from '../../../src/models/entities';
-import { GraphRelationship } from '../../../src/models/relationships';
+import { Entity } from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { tmpdir } from 'os';

@@ -4,16 +4,16 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { RollbackCapabilities, RollbackPoint, RollbackResult } from '../../../src/services/RollbackCapabilities';
-import { KnowledgeGraphService } from '../../../src/services/KnowledgeGraphService';
-import { DatabaseService } from '../../../src/services/DatabaseService';
+import { RollbackCapabilities, RollbackPoint, RollbackResult } from '@memento/sync';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database/DatabaseService';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData
 } from '../../test-utils/database-helpers';
-import { Entity } from '../../../src/models/entities';
-import { GraphRelationship } from '../../../src/models/relationships';
+import { Entity } from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
 
 describe('RollbackCapabilities Integration', () => {
   let dbService: DatabaseService;

@@ -1,3 +1,4 @@
+// TODO(2025-09-30.35): Validate event payload keys before indexing.
 /**
  * Session Bridge
  *
@@ -64,8 +65,8 @@ export class SessionBridge extends EventEmitter implements ISessionBridge {
     const transitions: TransitionResult[] = [];
 
     for (let i = 1; i < events.length; i++) {
-      const prev = events[i - 1];
-      const curr = events[i];
+      const prev = events.at(i - 1)!;
+      const curr = events.at(i)!;
 
       // Detect state transitions
       if (this.isSignificantTransition(prev, curr)) {
@@ -117,7 +118,7 @@ export class SessionBridge extends EventEmitter implements ISessionBridge {
         MATCH (start:CodebaseEntity {id: $entityId})
         MATCH path = (start)-[:IMPACTS|IMPLEMENTS_CLUSTER|PERFORMS_FOR*0..2]-(related)
         WHERE start.id IN $affectedIds
-        RETURN start.id,
+        RETURN start.id as startId,
                collect(DISTINCT {
                  specTitle: coalesce((related:Spec).title, null),
                  clusterName: coalesce((related:SemanticCluster).name, null),
@@ -131,7 +132,7 @@ export class SessionBridge extends EventEmitter implements ISessionBridge {
       // Assign context to transitions
       transitions.forEach(transition => {
         const match = kgResults.find((r: any) =>
-          transition.changeInfo.entityIds.includes(r['start.id'])
+          transition.changeInfo.entityIds.includes(r.startId)
         );
         if (match && match.context.length > 0) {
           transition.kgContext = match.context[0];
@@ -444,14 +445,15 @@ export class SessionBridge extends EventEmitter implements ISessionBridge {
       const totalSessions = uniqueSessions.length;
       const activeAgents = [...new Set(uniqueSessions.flatMap(s => s.agentIds))];
 
-      const recentOutcomes: Record<string, number> = {};
+      const recentOutcomesMap = new Map<string, number>();
       const perfImpacts: number[] = [];
 
       uniqueSessions.forEach(session => {
         // Count outcomes from recent events
         session.events.forEach(event => {
           if (event.stateTransition?.to) {
-            recentOutcomes[event.stateTransition.to] = (recentOutcomes[event.stateTransition.to] || 0) + 1;
+            const key = event.stateTransition.to;
+            recentOutcomesMap.set(key, (recentOutcomesMap.get(key) || 0) + 1);
           }
           if (event.impact?.perfDelta) {
             perfImpacts.push(event.impact.perfDelta);
@@ -488,7 +490,7 @@ export class SessionBridge extends EventEmitter implements ISessionBridge {
       return {
         totalSessions,
         activeAgents,
-        recentOutcomes,
+        recentOutcomes: Object.fromEntries(recentOutcomesMap),
         performanceImpact,
         entityBreakdown,
       };
@@ -569,3 +571,5 @@ export class SessionBridge extends EventEmitter implements ISessionBridge {
     }
   }
 }
+ 
+// TODO(2025-09-30.35): Validate event payload keys before indexing.

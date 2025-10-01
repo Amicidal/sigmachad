@@ -4,9 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { Neo4jService } from '../Neo4jService.js';
-import { Entity } from '@memento/shared-types.js';
-import { TimeRangeParams } from '../../../models/types.js';
+import { Neo4jService } from '../graph/Neo4jService';
+import { Entity, TimeRangeParams } from '@memento/shared-types';
 
 export interface CheckpointOptions {
   reason: 'daily' | 'incident' | 'manual';

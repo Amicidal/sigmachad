@@ -8,9 +8,9 @@ import {
   TestEngine,
   TestResult,
   TestSuiteResult,
-} from "../../../src/services/testing/TestEngine";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/core/DatabaseService";
+} from "@memento/testing/TestEngine";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

@@ -14,12 +14,21 @@
         "main": "apps/main/src/index.ts",
         "tsConfig": "apps/main/tsconfig.json"
       },
+      "configurations": {
+        "development": {
+          "tsConfig": "apps/main/tsconfig.json"
+        },
+        "production": {
+          "tsConfig": "apps/main/tsconfig.json"
+        }
+      },
+      "defaultConfiguration": "development",
       "dependsOn": [
         "^build"
       ]
     },
     "serve": {
-      "executor": "@nx/node:node",
+      "executor": "@nx/js:node",
       "defaultConfiguration": "development",
       "options": {
         "buildTarget": "memento:build"
@@ -58,7 +67,7 @@
     "docker:up": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "docker compose up -d falkordb qdrant postgres redis"
+        "command": "docker compose up -d neo4j postgres redis"
       }
     },
     "docker:down": {
@@ -70,13 +79,13 @@
     "docker:test-up": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "docker-compose -f docker-compose.test.yml up -d"
+        "command": "docker compose -f docker-compose.test.yml up -d"
       }
     },
     "docker:test-down": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "docker-compose -f docker-compose.test.yml down -v"
+        "command": "docker compose -f docker-compose.test.yml down -v"
       }
     },
     "sync": {

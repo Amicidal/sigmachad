@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { TemporalHistoryValidator } from '../../../src/jobs/TemporalHistoryValidator.js';
-import type { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import type { EntityTimelineResult } from '../../../src/models/types.js';
+import { TemporalHistoryValidator } from '@memento/jobs/TemporalHistoryValidator';
+import type { KnowledgeGraphService } from '@memento/knowledge';
+import type { EntityTimelineResult } from '@memento/shared-types';
 
 describe('TemporalHistoryValidator', () => {
   const buildTimeline = (

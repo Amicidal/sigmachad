@@ -4,12 +4,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { PostgreSQLService } from "../../../src/services/database/PostgreSQLService";
+import { PostgreSQLService } from "@memento/database/postgres/PostgreSQLService";
 import { v4 as uuidv4 } from "uuid";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/core/DatabaseService";
+} from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { registerDocsRoutes } from '../../../src/api/routes/docs.js';
-import { RelationshipType } from '../../../src/models/relationships.js';
+import { registerDocsRoutes } from '@memento/api/routes/docs';
+import { RelationshipType } from '@memento/shared-types';
 import { createMockRequest, createMockReply } from '../../test-utils.js';
 
 describe('Docs linking heuristics', () => {

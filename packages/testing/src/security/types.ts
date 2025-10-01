@@ -11,6 +11,7 @@ export type {
   ScanStatus,
   IssueStatus,
   SecurityScanOptions,
+  SecurityScanRequest,
   SecurityIssue,
   Vulnerability,
   SecurityScanResult,
@@ -34,5 +35,3 @@ export type {
   SecretMatch,
   SecurityMetrics,
 } from '@memento/shared-types';
-
-export type { SecurityScanRequest };

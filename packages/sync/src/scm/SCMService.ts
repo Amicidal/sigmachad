@@ -1,6 +1,6 @@
 import { GitService } from './GitService.js';
 import { KnowledgeGraphService } from '@memento/knowledge';
-import { DatabaseService } from '@memento/core';
+import { DatabaseService } from '@memento/database';
 import type {
   CommitPRRequest,
   CommitPRResponse,
@@ -11,10 +11,10 @@ import type {
   SCMCommitLogEntry,
   ValidationResult,
   CommitValidation,
-} from '@memento/core';
+} from '@memento/shared-types';
 import { RelationshipType } from '@memento/graph';
-import type { GraphRelationship } from '@memento/graph';
-import type { Change, Entity, Test, Spec } from '@memento/graph';
+import type { GraphRelationship } from '@memento/shared-types';
+import type { Change, Entity, Test, Spec } from '@memento/shared-types';
 import {
   SCMProvider,
   SCMProviderResult,
@@ -31,6 +31,13 @@ export class ValidationError extends Error {
     this.details = details;
   }
 }
+
+// Serialized shape for provider errors captured during retries
+type SerializedProviderError = {
+  message: string;
+  code?: string;
+  lastAttempt?: number;
+};
 
 export class SCMService {
   constructor(
@@ -634,14 +641,14 @@ export class SCMService {
     attempts: number;
     errorHistory: Array<{
       attempt: number;
-      error: ReturnType<typeof this.serializeProviderError>;
+      error: SerializedProviderError;
     }>;
   }> {
     const maxAttempts = Math.max(1, this.getProviderRetryLimit());
     const delayMs = this.getProviderRetryDelay();
     const errorHistory: Array<{
       attempt: number;
-      error: ReturnType<typeof this.serializeProviderError>;
+      error: SerializedProviderError;
     }> = [];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -679,11 +686,7 @@ export class SCMService {
   private serializeProviderError(
     error: unknown,
     attempt?: number
-  ): {
-    message: string;
-    code?: string;
-    lastAttempt?: number;
-  } {
+  ): SerializedProviderError {
     if (error instanceof Error) {
       return {
         message: error.message,

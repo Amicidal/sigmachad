@@ -227,13 +227,17 @@ export interface ConfigurationValidationResult {
   score: number;
 }
 
+type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
+};
+
 export interface EnvironmentProfile {
   /** Profile name */
   name: string;
   /** Profile description */
   description: string;
   /** Base configuration */
-  baseConfig: Partial<ProductionConfiguration>;
+  baseConfig: DeepPartial<ProductionConfiguration>;
   /** Environment-specific overrides */
   overrides: Record<string, any>;
   /** Validation rules */
@@ -496,11 +500,9 @@ export class ProductionConfig implements IProductionConfig {
       throw new Error(`Unknown environment: ${environment}`);
     }
 
-    const config: ProductionConfiguration = {
-      ...this.getDefaultConfiguration(),
-      ...profile.baseConfig,
-      ...profile.overrides
-    };
+    const config: ProductionConfiguration = this.getDefaultConfiguration();
+    this.deepMerge(config, profile.baseConfig || {});
+    this.deepMerge(config, profile.overrides || {});
 
     config.environment.name = environment as any;
 
@@ -568,12 +570,12 @@ export class ProductionConfig implements IProductionConfig {
     const errors: string[] = [];
 
     // Calculate cutoff dates
-    const executionCutoff = new Date(now.getTime() - this.currentConfig.retention.executions * 24 * 60 * 60 * 1000);
-    const eventCutoff = new Date(now.getTime() - this.currentConfig.retention.events * 24 * 60 * 60 * 1000);
-    const relationshipCutoff = new Date(now.getTime() - this.currentConfig.retention.relationships * 24 * 60 * 60 * 1000);
-    const monitoringCutoff = new Date(now.getTime() - this.currentConfig.retention.monitoring * 24 * 60 * 60 * 1000);
-    const snapshotCutoff = new Date(now.getTime() - this.currentConfig.retention.snapshots * 24 * 60 * 60 * 1000);
-    const logCutoff = new Date(now.getTime() - this.currentConfig.retention.logs * 24 * 60 * 60 * 1000);
+    const _executionCutoff = new Date(now.getTime() - this.currentConfig.retention.executions * 24 * 60 * 60 * 1000);
+    const _eventCutoff = new Date(now.getTime() - this.currentConfig.retention.events * 24 * 60 * 60 * 1000);
+    const _relationshipCutoff = new Date(now.getTime() - this.currentConfig.retention.relationships * 24 * 60 * 60 * 1000);
+    const _monitoringCutoff = new Date(now.getTime() - this.currentConfig.retention.monitoring * 24 * 60 * 60 * 1000);
+    const _snapshotCutoff = new Date(now.getTime() - this.currentConfig.retention.snapshots * 24 * 60 * 60 * 1000);
+    const _logCutoff = new Date(now.getTime() - this.currentConfig.retention.logs * 24 * 60 * 60 * 1000);
 
     try {
       // Mock deletion counts - in production, would perform actual cleanup

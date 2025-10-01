@@ -12,24 +12,26 @@ import {
   Entity,
   File,
   Symbol as SymbolEntity,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 import {
   GraphRelationship,
   RelationshipType,
-} from '@memento/shared-types.js';
-import { normalizeCodeEdge } from '@memento/core/utils/codeEdges.js';
-import { noiseConfig } from '@memento/core/config/noise.js';
+} from '@memento/shared-types';
+import { normalizeCodeEdge } from '@memento/core/utils/codeEdges';
+import { noiseConfig } from '@memento/core/config/noise';
 
 import {
   CallRelationshipBuilder,
-  RelationshipBuilderOptions as CallBuilderOptions,
   TypeRelationshipBuilder,
-  TypeRelationshipBuilderOptions,
   ImportExportBuilder,
-  ImportExportBuilderOptions,
   ReferenceRelationshipBuilder,
-  ReferenceRelationshipBuilderOptions,
 } from '@memento/parser/builders';
+import type {
+  RelationshipBuilderOptions as CallBuilderOptions,
+  TypeRelationshipBuilderOptions,
+  ImportExportBuilderOptions,
+  ReferenceRelationshipBuilderOptions,
+} from '@memento/shared-types';
 
 export interface RelationshipBuilderOptions {
   tsProject: Project;
@@ -101,7 +103,7 @@ export class RelationshipBuilder {
     this.normalizeRelPath = options.normalizeRelPath;
 
     // Initialize specialized builders
-    const sharedOptions = {
+    const sharedOptions: CallBuilderOptions = {
       tsProject: this.tsProject,
       globalSymbolIndex: this.globalSymbolIndex,
       nameIndex: this.nameIndex,
@@ -114,26 +116,30 @@ export class RelationshipBuilder {
         this.resolveImportedMemberToFileAndName,
       normalizeRelPath: this.normalizeRelPath,
       createRelationship: this.createRelationship.bind(this),
+      includeConfidence: true,
+      maxDepth: 3,
+      batchSize: 1000,
     };
 
     this.callBuilder = new CallRelationshipBuilder(sharedOptions);
     this.typeBuilder = new TypeRelationshipBuilder({
       ...sharedOptions,
-      stopNames: this.stopNames,
+      includeInheritance: true,
+      includeImplementations: true,
+      includeTypeAliases: true,
     } as TypeRelationshipBuilderOptions);
     this.importBuilder = new ImportExportBuilder({
+      ...sharedOptions,
+      includeFileImports: true,
+      includePackageImports: true,
+      includeDynamicImports: true,
       getModuleExportMap: this.getModuleExportMap,
-    });
+    } as ImportExportBuilderOptions);
     this.referenceBuilder = new ReferenceRelationshipBuilder({
-      globalSymbolIndex: this.globalSymbolIndex,
-      nameIndex: this.nameIndex,
-      stopNames: this.stopNames,
-      shouldUseTypeChecker: this.shouldUseTypeChecker,
-      takeTcBudget: this.takeTcBudget,
-      resolveWithTypeChecker: this.resolveWithTypeChecker,
-      resolveImportedMemberToFileAndName:
-        this.resolveImportedMemberToFileAndName,
-      createRelationship: this.createRelationship.bind(this),
+      ...sharedOptions,
+      includeImports: true,
+      includeExports: true,
+      includeReferences: true,
     } as ReferenceRelationshipBuilderOptions);
   }
 
@@ -234,7 +240,7 @@ export class RelationshipBuilder {
           md.source = 'type-checker';
         else md.source = 'ast';
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
     // Deterministic relationship id using canonical target key for stable identity across resolutions
     const rid = this.canonicalRelationshipId(fromId, {
       toEntityId: toId,
@@ -290,7 +296,7 @@ export class RelationshipBuilder {
           }
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Attach a basic fromRef to aid coordinator context (file resolution, etc.)
     try {
@@ -298,7 +304,7 @@ export class RelationshipBuilder {
         // We don't attempt to decode file/symbol here; coordinator can fetch entity by id
         (rel as any).fromRef = { kind: 'entity', id: fromId };
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Normalize code-edge evidence and fields consistently
     return normalizeCodeEdge(rel as GraphRelationship);
@@ -329,7 +335,7 @@ export class RelationshipBuilder {
           }
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
     return localIndex;
   }
 

@@ -10,7 +10,7 @@ import { Project, Node, SourceFile } from "ts-morph";
 import * as ts from "typescript";
 import * as path from "path";
 import * as fsSync from "fs";
-import { TypeCheckerBudget } from "./TypeCheckerBudget.js";
+import { TypeCheckerBudget } from "./TypeCheckerBudget";
 
 /**
  * Represents a resolved re-export mapping

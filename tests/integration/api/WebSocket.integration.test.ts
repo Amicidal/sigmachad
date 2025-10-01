@@ -8,14 +8,14 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { FastifyInstance } from "fastify";
 import { WebSocket } from "ws";
 import { EventEmitter } from "events";
-import { APIGateway } from "../../../src/api/APIGateway.js";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../../src/services/core/DatabaseService.js";
-import { FileWatcher } from "../../../src/services/core/FileWatcher.js";
+import { APIGateway } from "@memento/api/APIGateway";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
+import { FileWatcher } from "@memento/core/services/FileWatcher";
 import type {
   SessionStreamEvent,
   SynchronizationCoordinator,
-} from "../../../src/services/synchronization/SynchronizationCoordinator.js";
+} from "@memento/sync/synchronization/SynchronizationCoordinator";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

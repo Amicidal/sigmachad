@@ -7,7 +7,7 @@ This directory contains comprehensive integration tests for the Memento models s
 The integration tests are designed to validate the complete functionality of the models system across all database layers:
 
 - **PostgreSQL**: Relational data storage and complex queries
-- **FalkorDB**: Graph database for relationship modeling and traversal
+- **Neo4j**: Graph database for relationship modeling and traversal (legacy FalkorDB command wrappers delegate here)
 - **Qdrant**: Vector database for semantic search and embeddings
 - **Redis**: Caching and high-performance data access
 
@@ -49,21 +49,21 @@ Tests API types, validation, and data integrity:
 Before running the integration tests, ensure all database services are running:
 
 ```bash
-# Start all database services
-docker-compose up -d falkordb qdrant postgres redis
+# Start all test database services (recommended)
+docker compose -f docker-compose.test.yml up -d
 
-# Or start all services
-docker-compose up -d
+# Or start individual services
+docker compose -f docker-compose.test.yml up -d neo4j-test qdrant-test postgres-test redis-test
 ```
 
 ### Database Configuration
 
-The tests expect the following database connections:
+The test compose file exposes the following endpoints:
 
-- **FalkorDB**: `redis://localhost:6379`
-- **Qdrant**: `http://localhost:6333`
-- **PostgreSQL**: `postgresql://memento:memento@localhost:5432/memento`
-- **Redis**: `redis://localhost:6379` (different database)
+- **Neo4j**: `bolt://localhost:7688` (user: `neo4j`, pass: `password`, db: `memento_test`)
+- **Qdrant**: `http://localhost:6335`
+- **PostgreSQL**: `postgresql://memento_test:memento_test@localhost:5433/memento_test`
+- **Redis**: `redis://localhost:6381`
 
 ## Running the Tests
 
@@ -151,13 +151,14 @@ The integration tests require the following database tables to be created:
 - `changes` - Change tracking
 - `sessions` - Session management
 
-### FalkorDB Graph Structure
-- `Entity` nodes for all codebase entities
+### Neo4j Graph Structure
+- `Entity` nodes for all codebase entities (Neo4j 5.x)
 - Relationship types: `BELONGS_TO`, `CONTAINS`, `DEFINES`, `USES`, `CALLS`, `DEPENDS_ON`, `IMPLEMENTS`, `EXTENDS`, `TESTS`, `VALIDATES`, `REQUIRES`
+- Constraints and indexes are ensured at startup by the service (see `Neo4jService.setupGraph()`)
 
-### Qdrant Collections
-- `entities` - Entity embeddings for semantic search
-- `code_embeddings` - Code snippet embeddings
+### Vector Storage (Qdrant or Neo4j)
+- Logical collections used by tests: `code_embeddings`, `documentation_embeddings`, `integration_test`
+- In integration runs, `DatabaseService.qdrant.*` is provided by a Qdrant-compatible shim that maps to Neo4j vector indexes. If a real Qdrant is available, the native client is used.
 
 ## Test Data Management
 

@@ -1,4 +1,4 @@
-import type { BackpressureConfig } from "./types.js";
+import type { BackpressureConfig } from "@memento/shared-types";
 
 export class BackpressureManager {
   private attempts = new Map<string, number>();

@@ -6,21 +6,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TRPCError } from '@trpc/server';
 import { adminRouter } from '../src/routes/trpc-admin.js';
 import { createTestContext } from '../src/trpc/base.js';
+import { createMockKnowledgeGraphService, createMockDatabaseService } from './mock-factories.js';
 
 describe('TRPC Admin Router', () => {
   let mockContext: any;
 
   beforeEach(() => {
     mockContext = createTestContext({
-      kgService: {
-        getHistoryMetrics: vi.fn(),
-        ensureGraphIndexes: vi.fn(),
-        getIndexHealth: vi.fn(),
-        runBenchmarks: vi.fn(),
-      },
-      dbService: {
-        getConfig: vi.fn(),
-      },
+      kgService: createMockKnowledgeGraphService(),
+      dbService: createMockDatabaseService(),
       authContext: {
         scopes: ['admin'],
         tokenType: 'jwt',
@@ -371,7 +365,11 @@ describe('TRPC Admin Router', () => {
       const result = await caller.runBenchmarks();
 
       expect(result).toEqual(mockBenchmarks);
-      expect(mockContext.kgService.runBenchmarks).toHaveBeenCalledWith({ mode: 'quick' });
+      expect(mockContext.kgService.runBenchmarks).toHaveBeenCalledWith({
+        includeWrites: false,
+        sampleSize: 10,
+        timeout: 5000,
+      });
     });
 
     it('should run full benchmarks when specified', async () => {
@@ -386,7 +384,11 @@ describe('TRPC Admin Router', () => {
       const result = await caller.runBenchmarks({ mode: 'full' });
 
       expect(result).toEqual(mockBenchmarks);
-      expect(mockContext.kgService.runBenchmarks).toHaveBeenCalledWith({ mode: 'full' });
+      expect(mockContext.kgService.runBenchmarks).toHaveBeenCalledWith({
+        includeWrites: true,
+        sampleSize: 50,
+        timeout: 10000,
+      });
     });
   });
 });

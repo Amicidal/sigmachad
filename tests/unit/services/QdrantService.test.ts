@@ -9,8 +9,8 @@
 declare const process: any;
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
-import { QdrantService } from '../../../src/services/database/QdrantService';
-import { IQdrantService } from '../../../src/services/database/interfaces';
+import { QdrantService } from '@memento/database/qdrant/QdrantService';
+import { IQdrantService } from '@memento/database/interfaces';
 
 // Mock the Qdrant client
 vi.mock('@qdrant/js-client-rest', () => ({

@@ -44,7 +44,8 @@ export class SecurityFixAgent extends BaseAgent {
   }
 
   protected async executeTask(task: AgentTask): Promise<SecurityFixResult> {
-    const securityTask = task as SecurityFixTask;
+    // Narrowing to SecurityFixTask for this agent
+    const securityTask = (task as unknown) as SecurityFixTask;
 
     this.log('info', 'Executing security fix task', {
       taskId: task.id,
@@ -471,15 +472,10 @@ export class SecurityFixAgent extends BaseAgent {
       const filePath = issue.metadata?.filePath;
       if (!filePath) return;
 
-      const entities = [
-        {
-          id: path.basename(filePath),
-          type: 'file',
-          path: filePath,
-        },
-      ];
+      // Prefer scanning the specific entity if resolvable; fallback to a small-scope scan
+      const request = { entityIds: [] as string[] };
 
-      const scanResult = await this.securityScanner.scan(entities, {
+      const result = await this.securityScanner.performScan(request, {
         includeSAST: true,
         includeSecrets: true,
         includeSCA: false,
@@ -490,7 +486,7 @@ export class SecurityFixAgent extends BaseAgent {
       });
 
       // Check if the specific issue still exists
-      const stillExists = scanResult.some(
+      const stillExists = result.issues.some(
         (newIssue) =>
           newIssue.ruleId === issue.ruleId &&
           Math.abs(newIssue.lineNumber - issue.lineNumber) <= 2

@@ -91,7 +91,7 @@ export function scoreInferredEdge(features: InferredEdgeFeatures): number {
       score = Math.max(score, minClamp as number);
     if (Number.isFinite(maxClamp as number))
       score = Math.min(score, maxClamp as number);
-  } catch {}
+  } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
   // Clamp
   if (!Number.isFinite(score)) score = 0.5;

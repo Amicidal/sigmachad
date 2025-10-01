@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { RelationshipType } from '../../src/models/relationships';
+import { RelationshipType } from '@memento/shared-types';
 
 export function makeRealisticKgService(overrides: Partial<any> = {}) {
   const now = new Date();

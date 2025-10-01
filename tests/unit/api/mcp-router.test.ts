@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { MCPRouter } from '../../../src/api/mcp-router.js';
+import { MCPRouter } from '@memento/api/mcp-router';
 import {
   createMockRequest,
   createMockReply,
@@ -13,18 +13,18 @@ import {
 } from '../../test-utils.js';
 
 // Mock external dependencies
-vi.mock('../../../src/services/knowledge/KnowledgeGraphService.js');
-vi.mock('../../../src/services/core/DatabaseService.js');
-vi.mock('../../../src/services/knowledge/ASTParser.js');
-vi.mock('../../../src/services/testing/TestEngine.js');
-vi.mock('../../../src/services/testing/SecurityScanner.js');
+vi.mock('@memento/knowledge');
+vi.mock('@memento/database/DatabaseService');
+vi.mock('@memento/knowledge');
+vi.mock('@memento/testing/TestEngine');
+vi.mock('@memento/testing/security/scanner');
 
 // Import mocked services
-import type { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import type { DatabaseService } from '../../../src/services/core/DatabaseService.js';
-import type { ASTParser } from '../../../src/services/knowledge/ASTParser.js';
-import type { TestEngine } from '../../../src/services/testing/TestEngine.js';
-import type { SecurityScanner } from '../../../src/services/testing/SecurityScanner.js';
+import type { KnowledgeGraphService } from '@memento/knowledge';
+import type { DatabaseService } from '@memento/database/DatabaseService';
+import type { ASTParser } from '@memento/knowledge';
+import type { TestEngine } from '@memento/testing/TestEngine';
+import type { SecurityScanner } from '@memento/testing/security/scanner';
 import { makeRealisticKgService } from '../../test-utils/kg-realistic';
 
 describe('MCPRouter', () => {

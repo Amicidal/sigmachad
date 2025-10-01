@@ -5,6 +5,7 @@
 
 import { Entity } from '@memento/core';
 import { GraphSearchRequest } from '@memento/core';
+import type { SearchStats } from '@memento/shared-types';
 
 interface SearchService {
   search(request: GraphSearchRequest): Promise<any[]>;
@@ -17,6 +18,7 @@ interface SearchService {
     options?: any
   ): Promise<Entity[]>;
   getEntityExamples(entityId: string): Promise<any>;
+  getSearchStats(): Promise<SearchStats>;
   clearCache(): void;
   invalidateCache(pattern?: any): void;
 }
@@ -59,6 +61,10 @@ export class SearchManager {
 
   async getEntityExamples(entityId: string): Promise<any> {
     return this.searchService.getEntityExamples(entityId);
+  }
+
+  async getSearchStats(): Promise<SearchStats> {
+    return this.searchService.getSearchStats();
   }
 
   async clearSearchCache(): Promise<void> {

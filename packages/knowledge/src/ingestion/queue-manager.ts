@@ -9,11 +9,11 @@ import {
   TaskPayload,
   QueueConfig,
   QueueMetrics,
-  ChangeEvent,
   IngestionError,
   QueueOverflowError,
   IngestionEvents
-} from './types.js';
+} from './types';
+import type { TypedEventEmitter } from '@memento/shared-types';
 
 export interface QueueManagerConfig extends QueueConfig {
   enableBackpressure: boolean;
@@ -22,7 +22,10 @@ export interface QueueManagerConfig extends QueueConfig {
   metricsInterval: number;
 }
 
-export class QueueManager extends EventEmitter<IngestionEvents> {
+export class QueueManager
+  extends EventEmitter
+  implements TypedEventEmitter<IngestionEvents>
+{
   private queues: Map<string, TaskPayload[]> = new Map();
   private partitionMap: Map<string, string> = new Map();
   private metrics: QueueMetrics;
@@ -298,23 +301,29 @@ export class QueueManager extends EventEmitter<IngestionEvents> {
     // Apply partitioning strategy
     switch (this.config.partitionStrategy) {
       case 'hash':
-        const hash = this.hashString(task.id);
-        const partitionIndex = hash % this.config.partitionCount;
-        return `partition-${partitionIndex}`;
+        {
+          const hash = this.hashString(task.id);
+          const partitionIndex = hash % this.config.partitionCount;
+          return `partition-${partitionIndex}`;
+        }
 
       case 'priority':
-        // High priority tasks go to earlier partitions
-        const priorityIndex = Math.min(
-          Math.floor((10 - task.priority) / 2),
-          this.config.partitionCount - 1
-        );
-        return `partition-${priorityIndex}`;
+        {
+          // High priority tasks go to earlier partitions
+          const priorityIndex = Math.min(
+            Math.floor((10 - task.priority) / 2),
+            this.config.partitionCount - 1
+          );
+          return `partition-${priorityIndex}`;
+        }
 
       case 'round_robin':
       default:
-        const rrIndex = this.nextPartitionIndex % this.config.partitionCount;
-        this.nextPartitionIndex++;
-        return `partition-${rrIndex}`;
+        {
+          const rrIndex = this.nextPartitionIndex % this.config.partitionCount;
+          this.nextPartitionIndex++;
+          return `partition-${rrIndex}`;
+        }
     }
   }
 
@@ -382,8 +391,8 @@ export class QueueManager extends EventEmitter<IngestionEvents> {
    * Setup metrics collection
    */
   private setupMetricsCollection(): void {
-    const lastProcessedCount = 0;
-    const lastErrorCount = 0;
+    const _lastProcessedCount = 0;
+    const _lastErrorCount = 0;
     let lastUpdateTime = Date.now();
 
     this.metricsTimer = setInterval(() => {
@@ -397,7 +406,8 @@ export class QueueManager extends EventEmitter<IngestionEvents> {
       this.metrics.errorRate = this.calculateErrorRate();
 
       lastUpdateTime = now;
-      this.emit('metrics:updated', this.metrics);
+      // Emit queue-only metrics; pipeline aggregates into PipelineMetrics
+      this.emit('queue:metrics', { ...this.metrics });
     }, this.config.metricsInterval);
   }
 
@@ -445,7 +455,7 @@ export class QueueManager extends EventEmitter<IngestionEvents> {
     const now = new Date();
     const readyTasks: TaskPayload[] = [];
 
-    for (const [partitionId, queue] of this.queues) {
+    for (const [_partitionId, queue] of this.queues) {
       for (let i = queue.length - 1; i >= 0; i--) {
         const task = queue[i];
         if (task.scheduledAt && task.scheduledAt <= now) {

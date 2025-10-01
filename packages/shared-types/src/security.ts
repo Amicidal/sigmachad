@@ -38,6 +38,16 @@ export interface SecurityScanOptions {
   includePatterns?: string[];
 }
 
+// Security scan request
+export interface SecurityScanRequest {
+  // Knowledge Graph entity ids to include; when omitted, scanner will choose defaults
+  entityIds?: string[];
+  // Optional scan type filter
+  scanTypes?: Array<Extract<SecurityCategory, 'sast' | 'secrets' | 'dependency' | 'compliance'>>;
+  // Optional severity filter
+  severity?: SecuritySeverity[];
+}
+
 // Security issue interface
 export interface SecurityIssue {
   id: string;
@@ -298,7 +308,7 @@ export interface SecurityReport {
   id: string;
   type: 'scan' | 'audit' | 'compliance' | 'trend';
   format: 'json' | 'html' | 'markdown' | 'pdf' | 'csv';
-  // eslint-disable-next-line security/detect-object-injection
+   
   data: any;
   generatedAt: Date;
   metadata?: Record<string, any>;
@@ -345,9 +355,5 @@ export interface VulnerabilityReport {
     planned: string[];
     monitoring: string[];
   };
-  trends?: {
-    newVulnerabilities: number;
-    resolvedVulnerabilities: number;
-    trend: 'improving' | 'degrading' | 'stable';
-  };
+  trends?: SecurityTrends;
 }

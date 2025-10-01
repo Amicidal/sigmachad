@@ -4,14 +4,14 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TestHistory } from '../TestHistory.js';
+import { TestHistory } from '../temporal/TestHistory.js';
 import {
   TestExecutionRecord,
   TestConfiguration,
   TestStatus,
   TestType,
   TestMetadata
-} from '../TestTypes.js';
+} from '../temporal/TestTypes.js';
 
 describe('TestHistory', () => {
   let history: TestHistory;

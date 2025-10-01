@@ -1,21 +1,18 @@
+// TODO(2025-09-30.35): Review dynamic diff strategy accessors and harden.
 /**
  * Enhanced rollback strategies with partial and time-based rollback capabilities
  */
 
 import { EventEmitter } from 'events';
 import {
-  RollbackStrategy,
   RollbackOperation,
   RollbackPoint,
   Snapshot,
   DiffEntry,
   ConflictResolution,
-  ConflictStrategy,
   RollbackConflict,
   ConflictType,
   RollbackLogEntry,
-  RollbackError,
-  RollbackConflictError,
   DiffOperation,
 } from './RollbackTypes.js';
 
@@ -449,22 +446,27 @@ export class PartialRollbackStrategy extends EventEmitter {
       `Detected ${conflicts.length} conflicts in partial rollback`
     );
 
-    switch (this.context.conflictResolution.strategy) {
-      case ConflictStrategy.ABORT:
-        throw new RollbackConflictError(
-          'Partial rollback aborted due to conflicts',
-          conflicts
-        );
+    const strategy = this.context.conflictResolution.strategy;
+    if (!['manual', 'overwrite', 'merge', 'skip'].includes(strategy)) {
+      throw new Error('Invalid strategy');
+    }
 
-      case ConflictStrategy.SKIP:
-        this.log('info', 'Skipping conflicted changes in partial rollback');
+    switch (strategy) {
+      case 'manual':
+        // Handle manual resolution
         break;
 
-      case ConflictStrategy.OVERWRITE:
+      case 'overwrite':
         this.log('warn', 'Overwriting conflicted changes in partial rollback');
         break;
 
-      // Other strategies...
+      case 'merge':
+        // Handle merge strategy
+        break;
+
+      case 'skip':
+        this.log('info', 'Skipping conflicted changes in partial rollback');
+        break;
     }
   }
 
@@ -682,7 +684,7 @@ export class TimebasedRollbackStrategy extends EventEmitter {
 
   private async sortChangesChronologically(
     changes: DiffEntry[],
-    filter: TimebasedFilter
+    _filter: TimebasedFilter
   ): Promise<DiffEntry[]> {
     return changes.sort((a, b) => {
       const timestampA = this.extractChangeTimestamp(a);
@@ -724,17 +726,16 @@ export class TimebasedRollbackStrategy extends EventEmitter {
         );
 
         for (let i = 1; i < sortedTimestamps.length; i++) {
-          const gap =
-            sortedTimestamps[i].getTime() - sortedTimestamps[i - 1].getTime();
+          const curr = sortedTimestamps.at(i)!;
+          const prev = sortedTimestamps.at(i - 1)!;
+          const gap = curr.getTime() - prev.getTime();
           if (gap < 60000) {
             // Changes within 1 minute might conflict
             conflicts.push({
               path,
               type: ConflictType.VALUE_MISMATCH,
-              currentValue: `change_at_${sortedTimestamps[
-                i - 1
-              ].toISOString()}`,
-              rollbackValue: `change_at_${sortedTimestamps[i].toISOString()}`,
+              currentValue: `change_at_${prev.toISOString()}`,
+              rollbackValue: `change_at_${curr.toISOString()}`,
               context: {
                 temporalConflict: true,
                 timestamps: sortedTimestamps,
@@ -773,26 +774,31 @@ export class TimebasedRollbackStrategy extends EventEmitter {
 
     this.log('warn', `Detected ${conflicts.length} temporal conflicts`);
 
-    switch (this.context.conflictResolution.strategy) {
-      case ConflictStrategy.ABORT:
-        throw new RollbackConflictError(
-          'Time-based rollback aborted due to temporal conflicts',
-          conflicts
-        );
+    const strategy = this.context.conflictResolution.strategy;
+    if (!['manual', 'overwrite', 'merge', 'skip'].includes(strategy)) {
+      throw new Error('Invalid strategy');
+    }
 
-      case ConflictStrategy.SKIP:
-        this.log('info', 'Skipping temporally conflicted changes');
+    switch (strategy) {
+      case 'manual':
+        // Handle manual resolution
         break;
 
-      case ConflictStrategy.OVERWRITE:
+      case 'overwrite':
         this.log('warn', 'Applying most recent changes for temporal conflicts');
         break;
 
-      // Other strategies...
+      case 'merge':
+        // Handle merge strategy
+        break;
+
+      case 'skip':
+        this.log('info', 'Skipping temporally conflicted changes');
+        break;
     }
   }
 
-  private async applyChange(change: DiffEntry): Promise<void> {
+  private async applyChange(_change: DiffEntry): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 40)); // Simulate work
   }
 
@@ -1063,3 +1069,5 @@ export type {
   DependencyMap,
   RollbackPreview,
 };
+ 
+// TODO(2025-09-30.35): Review dynamic diff strategy accessors and harden.

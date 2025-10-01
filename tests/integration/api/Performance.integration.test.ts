@@ -6,9 +6,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { performance } from "node:perf_hooks";
 import { FastifyInstance } from "fastify";
-import { APIGateway } from "../../../src/api/APIGateway.js";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../../src/services/core/DatabaseService.js";
+import { APIGateway } from "@memento/api/APIGateway";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

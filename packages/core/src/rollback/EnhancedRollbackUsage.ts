@@ -14,8 +14,9 @@ import {
   createDefaultStoreOptions,
   RollbackOperationType,
   RollbackStrategy,
-  ConflictStrategy
+  
 } from '../index.js';
+import type { ConflictResolution } from '../index.js';
 
 // Example interfaces for demonstration
 interface MockDatabaseService {
@@ -172,7 +173,11 @@ export async function partialRollbackExample() {
         newValue: { fromEntityId: 'user-service', toEntityId: 'auth-service', type: 'DEPENDS_ON' }
       }
     ],
-    conflictResolution: { strategy: ConflictStrategy.MERGE },
+    conflictResolution: {
+      strategy: 'merge',
+      timestamp: new Date(),
+      resolvedBy: 'system',
+    } as ConflictResolution,
     partialSelections: [
       {
         type: 'entity' as any,
@@ -251,7 +256,11 @@ export async function timebasedRollbackExample() {
         metadata: { timestamp: new Date(Date.now() - 23 * 60 * 60 * 1000) } // 23 hours ago
       }
     ],
-    conflictResolution: { strategy: ConflictStrategy.SKIP },
+    conflictResolution: {
+      strategy: 'skip',
+      timestamp: new Date(),
+      resolvedBy: 'system',
+    } as ConflictResolution,
     timebasedFilter: {
       rollbackToTimestamp: new Date(Date.now() - 10 * 60 * 1000), // 10 min ago
       maxChangeAge: 30 * 60 * 1000 // 30 minutes
@@ -358,8 +367,12 @@ export async function dryRunExample() {
       id: 'test-rollback',
       name: 'Test Rollback',
       timestamp: new Date(),
+      description: 'Dry run test rollback',
+      entities: [],
+      relationships: [],
       metadata: {},
-      sessionId: 'session-123'
+      sessionId: 'session-123',
+      operationId: 'op-dryrun-1',
     },
     snapshots: [],
     diff: [
@@ -382,7 +395,11 @@ export async function dryRunExample() {
         newValue: { from: 'service-a', to: 'service-b', type: 'DEPENDS_ON' }
       }
     ],
-    conflictResolution: { strategy: ConflictStrategy.MERGE },
+    conflictResolution: {
+      strategy: 'merge',
+      timestamp: new Date(),
+      resolvedBy: 'system',
+    } as ConflictResolution,
     dryRun: true
   };
 
@@ -432,26 +449,26 @@ export async function fullIntegrationExample() {
     restoreSessionCheckpoint: async (sessionId, checkpointId) => {
       console.log(`Restored checkpoint ${checkpointId} for session ${sessionId}`);
     },
-    on: (event, listener) => {
+    on: (_event, _listener) => {
       // Mock event listener registration
     }
   };
 
   // Mock audit logger
   const mockAuditLogger: MockAuditLogger = {
-    logRollbackCreation: async (rollbackPoint, context) => {
-      console.log('Audit: Rollback point created', { id: rollbackPoint.id, context });
+    logRollbackCreation: async (rollbackPoint, _context) => {
+      console.log('Audit: Rollback point created', { id: rollbackPoint.id, context: _context });
     },
-    logRollbackExecution: async (operation, result, context) => {
+    logRollbackExecution: async (operation, result, _context) => {
       console.log('Audit: Rollback executed', { operationId: operation.id, success: result.success });
     },
-    logConflictResolution: async (conflict, resolution, context) => {
+    logConflictResolution: async (conflict, resolution, _context) => {
       console.log('Audit: Conflict resolved', { path: conflict.path, strategy: resolution?.strategy });
     },
-    logSystemEvent: async (event, context) => {
+    logSystemEvent: async (event, _context) => {
       console.log('Audit: System event', { type: event.type, severity: event.severity });
     },
-    getAuditTrail: async (filters) => {
+    getAuditTrail: async (_filters) => {
       return []; // Mock empty audit trail
     }
   };
@@ -490,7 +507,7 @@ export async function fullIntegrationExample() {
     auditLogger: mockAuditLogger,
     metricsCollector: {
       recordRollbackCreation: (point, duration) => console.log(`Metrics: Rollback created in ${duration}ms`),
-      recordRollbackExecution: (op, result, duration) => console.log(`Metrics: Rollback executed in ${duration}ms`),
+      recordRollbackExecution: (op, result, _duration) => console.log(`Metrics: Rollback executed`),
       recordConflictResolution: (conflicts, resolved, duration) => console.log(`Metrics: ${resolved}/${conflicts} conflicts resolved`),
       recordSystemMetric: (name, value, tags) => console.log(`Metrics: ${name} = ${value}`, tags),
       incrementCounter: (name, tags) => console.log(`Metrics: Increment ${name}`, tags)

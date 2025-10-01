@@ -7,7 +7,7 @@ import { FastifyInstance } from "fastify";
 import { v4 as uuidv4 } from "uuid";
 import { KnowledgeGraphService } from "@memento/knowledge";
 import { DatabaseService } from "@memento/database";
-import { SpecService } from "@memento/testing";
+import { createRequire } from "module";
 import {
   CreateSpecRequest,
   UpdateSpecRequest,
@@ -19,7 +19,15 @@ export function registerDesignRoutes(
   kgService: KnowledgeGraphService,
   dbService: DatabaseService
 ): void {
-  const specService = new SpecService(kgService, dbService);
+  let specService: any;
+  try {
+    const require = createRequire(import.meta.url);
+    const mod = require('@memento/testing');
+    const SpecServiceCtor = mod?.SpecService;
+    specService = new SpecServiceCtor(kgService, dbService);
+  } catch {
+    specService = undefined;
+  }
 
   // Create specification
   app.post(

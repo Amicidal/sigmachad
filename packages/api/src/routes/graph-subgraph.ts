@@ -3,7 +3,7 @@
  */
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '@memento/knowledge';
-import { DatabaseService } from '@memento/core';
+import { DatabaseService } from '@memento/database';
 
 export async function registerGraphViewerRoutes(app: FastifyInstance, kg: KnowledgeGraphService, _db: DatabaseService) {
   // GET /api/v1/graph/subgraph?limit=2000&type=symbol
@@ -57,4 +57,3 @@ export async function registerGraphViewerRoutes(app: FastifyInstance, kg: Knowle
     }
   });
 }
-

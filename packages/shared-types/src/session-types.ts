@@ -539,16 +539,7 @@ export interface SessionMetadata {
 /**
  * Session statistics
  */
-export interface SessionStats {
-  totalEvents: number;
-  totalRelationships: number;
-  totalChanges: number;
-  duration?: number;
-  eventsPerMinute?: number;
-  changesPerEvent?: number;
-  byType: Record<string, number>;
-  bySeverity: Record<string, number>;
-}
+// Duplicate shape removed; canonical SessionStats is defined above with operational counters.
 
 /**
  * Session query options

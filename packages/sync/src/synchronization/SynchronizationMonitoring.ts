@@ -4,21 +4,21 @@
  */
 
 import { EventEmitter } from 'events';
-import {
+import type {
   SyncOperation,
   SyncError,
-  SyncConflict,
-  type CheckpointMetricsSnapshot,
-} from './SynchronizationCoordinator.js';
-import { RelationshipType } from '@memento/graph';
-import { Conflict } from '../scm/ConflictResolution.js';
+  CheckpointMetricsSnapshot,
+  Conflict,
+  SyncPerformanceMetrics,
+} from '@memento/shared-types';
+// import { RelationshipType } from '@memento/graph';
+// Conflict comes from shared-types; do not import from local module
 import type {
   SessionCheckpointJobMetrics,
   SessionCheckpointJobSnapshot,
 } from '@memento/shared-types';
 import type {
   SyncMetrics,
-  PerformanceMetrics,
   HealthMetrics,
   MonitoringAlert,
   SyncLogEntry,
@@ -28,7 +28,7 @@ import type {
 export class SynchronizationMonitoring extends EventEmitter {
   private operations = new Map<string, SyncOperation>();
   private metrics: SyncMetrics;
-  private performanceMetrics: PerformanceMetrics;
+  private performanceMetrics: SyncPerformanceMetrics;
   private alerts: MonitoringAlert[] = [];
   private logs: SyncLogEntry[] = [];
   private healthCheckInterval?: NodeJS.Timeout;
@@ -85,9 +85,16 @@ export class SynchronizationMonitoring extends EventEmitter {
       payload: { ...job.payload },
     }));
 
+    const m: any = snapshot.metrics || {};
+    const metrics: SessionCheckpointJobMetrics = {
+      enqueued: Number.isFinite(m.enqueued) ? Number(m.enqueued) : 0,
+      completed: Number.isFinite(m.completed) ? Number(m.completed) : 0,
+      failed: Number.isFinite(m.failed) ? Number(m.failed) : 0,
+      retries: Number.isFinite(m.retries) ? Number(m.retries) : 0,
+    };
     this.checkpointMetricsSnapshot = {
       event: snapshot.event,
-      metrics: { ...snapshot.metrics },
+      metrics,
       deadLetters: cloneDeadLetters,
       context: normalizedContext,
       timestamp: snapshot.timestamp ? new Date(snapshot.timestamp) : new Date(),
@@ -253,14 +260,14 @@ export class SynchronizationMonitoring extends EventEmitter {
    * Return current phases map for active operations
    */
   getOperationPhases(): Record<string, { phase: string; progress: number }> {
-    const out: Record<string, { phase: string; progress: number }> = {};
+    const entries: Array<[string, { phase: string; progress: number }]> = [];
     for (const [id, v] of this.opPhases.entries()) {
-      out[id] = { phase: v.phase, progress: v.progress };
+      entries.push([id, { phase: v.phase, progress: v.progress }]);
     }
-    return out;
+    return Object.fromEntries(entries);
   }
 
-  recordConflict(conflict: SyncConflict | Conflict): void {
+  recordConflict(conflict: any): void {
     const conflictId =
       'id' in conflict
         ? conflict.id
@@ -388,7 +395,7 @@ export class SynchronizationMonitoring extends EventEmitter {
     this.metrics.throughput = recentOps / 5; // operations per minute
   }
 
-  private updatePerformanceMetrics(operation: SyncOperation): void {
+  private updatePerformanceMetrics(_operation: SyncOperation): void {
     // Update performance metrics with actual measurements or placeholder values
     this.performanceMetrics.memoryUsage = process.memoryUsage().heapUsed;
 
@@ -405,7 +412,7 @@ export class SynchronizationMonitoring extends EventEmitter {
     return { ...this.metrics };
   }
 
-  getPerformanceMetrics(): PerformanceMetrics {
+  getPerformanceMetrics(): SyncPerformanceMetrics {
     return { ...this.performanceMetrics };
   }
 
@@ -559,23 +566,23 @@ export class SynchronizationMonitoring extends EventEmitter {
     this.emit('healthCheck', health);
   }
 
-  private handleOperationStarted(operation: SyncOperation): void {
+  private handleOperationStarted(_operation: SyncOperation): void {
     // Additional handling for operation start
   }
 
-  private handleOperationCompleted(operation: SyncOperation): void {
+  private handleOperationCompleted(_operation: SyncOperation): void {
     // Additional handling for operation completion
   }
 
-  private handleOperationFailed(operation: SyncOperation, error: Error): void {
+  private handleOperationFailed(_operation: SyncOperation, _error: Error): void {
     // Additional handling for operation failure
   }
 
-  private handleConflictDetected(conflict: SyncConflict | Conflict): void {
+  private handleConflictDetected(_conflict: any): void {
     // Additional handling for conflicts
   }
 
-  private handleAlertTriggered(alert: MonitoringAlert): void {
+  private handleAlertTriggered(_alert: MonitoringAlert): void {
     // Additional handling for alerts
   }
 
@@ -614,7 +621,7 @@ export class SynchronizationMonitoring extends EventEmitter {
 
   generateReport(): {
     summary: SyncMetrics;
-    performance: PerformanceMetrics;
+    performance: SyncPerformanceMetrics;
     health: HealthMetrics;
     recentOperations: SyncOperation[];
     activeAlerts: MonitoringAlert[];

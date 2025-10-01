@@ -12,7 +12,7 @@ import {
   beforeEach,
   afterEach,
 } from "vitest";
-import { FileWatcher, FileChange } from "../../../src/services/core/FileWatcher";
+import { FileWatcher, FileChange } from "@memento/core/services/FileWatcher";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";

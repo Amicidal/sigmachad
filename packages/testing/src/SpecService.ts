@@ -11,8 +11,8 @@ import type {
   ListSpecsParams,
   UpdateSpecRequest,
   ValidationIssue,
-} from "@memento/core";
-import type { Spec } from "@memento/core";
+  Spec,
+} from "@memento/shared-types";
 
 export interface SpecListResult {
   specs: Spec[];
@@ -56,8 +56,8 @@ export class SpecService {
         spec.id,
         "spec",
         JSON.stringify(this.serializeSpec(spec)),
-        spec.created.toISOString(),
-        spec.updated.toISOString(),
+        this.ensureDate(spec.created).toISOString(),
+        this.ensureDate(spec.updated).toISOString(),
       ]
     );
 
@@ -101,8 +101,8 @@ export class SpecService {
         spec.id,
         "spec",
         JSON.stringify(this.serializeSpec(spec)),
-        spec.created.toISOString(),
-        spec.updated.toISOString(),
+        this.ensureDate(spec.created).toISOString(),
+        this.ensureDate(spec.updated).toISOString(),
       ]
     );
 
@@ -185,9 +185,7 @@ export class SpecService {
       ]
     );
 
-    await this.kgService.updateEntity(updatedSpec.id, updatedSpec, {
-      skipEmbedding: false,
-    });
+    await this.kgService.updateEntity(updatedSpec.id, updatedSpec);
 
     await this.refreshSpecRelationships(updatedSpec);
 
@@ -472,13 +470,14 @@ export class SpecService {
   private serializeSpec(spec: Spec): Record<string, any> {
     return {
       ...spec,
-      created: spec.created.toISOString(),
-      updated: spec.updated.toISOString(),
-      lastModified: spec.lastModified.toISOString(),
+      created: this.ensureDate(spec.created).toISOString(),
+      updated: this.ensureDate(spec.updated).toISOString(),
+      lastModified: this.ensureDate(spec.lastModified).toISOString(),
     };
   }
 
-  private ensureDate(value: Date | string): Date {
+  private ensureDate(value: Date | string | undefined): Date {
+    if (!value) return new Date();
     if (value instanceof Date) {
       return value;
     }

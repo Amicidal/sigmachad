@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./dist",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "./verify-task5.ts",
+    "../packages/agents/src/**/*.ts",
+    "../packages/testing/src/**/*.ts",
+    "../packages/shared-types/src/**/*.ts"
+  ],
+  "exclude": []
+}
+

@@ -1,16 +1,16 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
-import { registerHistoryRoutes } from '../../../src/api/routes/history.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { RelationshipType, type GraphRelationship } from '../../../src/models/relationships.js';
-import type { DatabaseService } from '../../../src/services/core/DatabaseService.js';
-import type { Entity, Session } from '../../../src/models/entities.js';
+import { registerHistoryRoutes } from '@memento/api/routes/history';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { RelationshipType, type GraphRelationship } from '@memento/shared-types';
+import type { DatabaseService } from '@memento/database/DatabaseService';
+import type { Entity, Session } from '@memento/shared-types';
 import {
   cleanupTestDatabase,
   clearTestData,
   setupTestDatabase,
 } from '../../test-utils/database-helpers.js';
-import { canonicalRelationshipId } from '../../../src/utils/codeEdges.js';
+import { canonicalRelationshipId } from '@memento/core/utils/codeEdges';
 
 const asDate = (iso: string): Date => new Date(iso);
 

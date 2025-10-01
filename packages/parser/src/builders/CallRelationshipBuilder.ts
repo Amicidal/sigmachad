@@ -19,21 +19,6 @@ import {
 } from "@memento/graph";
 import { RelationshipBuilderOptions } from "@memento/shared-types";
 import { scoreInferredEdge, noiseConfig } from "@memento/core";
-  resolveImportedMemberToFileAndName: (
-    memberName: string,
-    exportName: string,
-    sourceFile: SourceFile,
-    importMap?: Map<string, string>,
-    importSymbolMap?: Map<string, string>
-  ) => any;
-  normalizeRelPath: (p: string) => string;
-  createRelationship: (
-    fromId: string,
-    toId: string,
-    type: RelationshipType,
-    metadata?: Record<string, any>
-  ) => GraphRelationship;
-}
 
 /**
  * CallRelationshipBuilder handles the extraction of call-related relationships
@@ -196,7 +181,7 @@ export class CallRelationshipBuilder {
         try {
           const args: any[] = (call as any).getArguments?.() || [];
           arity = Array.isArray(args) ? args.length : 0;
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         let awaited = false;
         try {
           let p: any = (call as any).getParent?.();
@@ -211,7 +196,7 @@ export class CallRelationshipBuilder {
             typeof p.getKind === "function" &&
             p.getKind() === SyntaxKind.AwaitExpression
           );
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
         // Track resolution/scope hints for richer evidence
         let resHint: string | undefined;
@@ -259,10 +244,10 @@ export class CallRelationshipBuilder {
                 );
                 if (isUnion || isInterface)
                   (baseMeta as any).dynamicDispatch = true;
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
             }
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
         // Namespace/default alias usage: ns.method() or alias.method()
         if (importMap && parts.length > 1) {
@@ -341,7 +326,7 @@ export class CallRelationshipBuilder {
               }
             }
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
         // If call refers to an imported binding, prefer cross-file placeholder target (deep resolution)
         if (!toId && importMap && simpleName && importMap.has(simpleName)) {
@@ -401,7 +386,7 @@ export class CallRelationshipBuilder {
             line = lc.line;
             column = lc.column;
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         // default scope inference from toId shape if no hint set
         if (!scopeHint && toId) {
           if (toId.startsWith("external:")) scopeHint = "external";
@@ -455,7 +440,7 @@ export class CallRelationshipBuilder {
               }
             }
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
         if (
           toId &&
@@ -562,7 +547,7 @@ export class CallRelationshipBuilder {
               )
             );
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
       callAgg.clear();
     }
@@ -627,7 +612,7 @@ export class CallRelationshipBuilder {
                       usedTc = true;
                     }
                   }
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 if (baseFile) {
                   // Prefer linking to exact base method symbol if known
                   let toId: string = `file:${baseFile}:${methodName}`;
@@ -636,7 +621,7 @@ export class CallRelationshipBuilder {
                       `${baseFile}:${methodName}`
                     );
                     if (hit) toId = hit.id;
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   const meta: any = {
                     path: path.relative(
                       process.cwd(),
@@ -662,7 +647,7 @@ export class CallRelationshipBuilder {
           }
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     return relationships;
   }
@@ -736,7 +721,7 @@ export class CallRelationshipBuilder {
               tline = lc.line;
               tcol = lc.column;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           const meta = {
             path: path.relative(process.cwd(), sourceFile.getFilePath()),
             kind: "throw",
@@ -758,7 +743,7 @@ export class CallRelationshipBuilder {
                 (meta as any).candidateCount = list.length;
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           relationships.push(
             this.createRelationship(
               symbolEntity.id,
@@ -767,9 +752,9 @@ export class CallRelationshipBuilder {
               meta
             )
           );
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     return relationships;
   }

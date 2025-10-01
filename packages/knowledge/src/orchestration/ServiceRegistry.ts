@@ -3,8 +3,8 @@
  * Manages dependency injection and service wiring for the Knowledge Graph
  */
 
-import { Neo4jService, Neo4jConfig } from '../graph/Neo4jService';
-import { NeogmaService } from '../graph/NeogmaService';
+import { Neo4jService, Neo4jConfig } from '../graph/Neo4jService.js';
+import { NeogmaService } from '../graph/NeogmaService.js';
 import { EntityServiceOGM } from '../graph/EntityServiceOGM';
 import { RelationshipServiceOGM } from '../graph/RelationshipServiceOGM';
 import { SearchServiceOGM } from '../graph/SearchServiceOGM';
@@ -65,8 +65,7 @@ export class ServiceRegistry {
       overrides.searchService ??
       new SearchServiceOGM(this.neogma, this.embeddings);
     this.history = overrides.historyService ?? new HistoryService(this.neo4j);
-    this.analysis =
-      overrides.analysisService ?? new AnalysisService(this.neo4j);
+    this.analysis = overrides.analysisService ?? new AnalysisService();
 
     console.log('[ServiceRegistry] Initialized with OGM services only');
   }

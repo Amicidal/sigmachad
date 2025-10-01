@@ -4,25 +4,16 @@
  */
 
 import { EventEmitter } from 'events';
+import type { Entity } from '@memento/shared-types';
 
-// Local type definitions (temporarily until @memento/core is available)
-export interface Entity {
-  id: string;
-  type: string;
-  name?: string;
-  metadata?: Record<string, any>;
-}
-
-export interface PathQuery {
-  startEntityId: string;
-  endEntityId?: string;
-  relationshipTypes?: string[];
-  maxDepth?: number;
-}
+// Import shared type from AnalysisService to avoid duplication
+export type { PathQuery } from './AnalysisService.js';
+import type { PathQuery } from './AnalysisService.js';
 
 export interface PathResult {
   paths: Array<{
-    nodes: Entity[];
+    // Use a relaxed node typing for mock implementation
+    nodes: any[];
     relationships: any[];
     length: number;
     weight: number;
@@ -61,6 +52,5 @@ export class PathAnalyzer extends EventEmitter {
     };
   }
 }
-
 
 

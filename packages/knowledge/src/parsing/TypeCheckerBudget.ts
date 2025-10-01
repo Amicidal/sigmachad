@@ -3,7 +3,7 @@
  * Controls TypeScript type checker usage to manage performance
  */
 
-import { noiseConfig } from "../../../config/noise.js";
+import { noiseConfig } from '@memento/core/config/noise';
 
 /**
  * Manages TypeScript type checker budget to prevent performance degradation
@@ -44,7 +44,7 @@ export class TypeCheckerBudget {
     this.tcBudgetRemaining -= 1;
     try {
       this.tcBudgetSpent += 1;
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     return true;
   }

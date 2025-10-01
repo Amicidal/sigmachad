@@ -62,7 +62,15 @@ export const codeRouter = router({
     }))
     .query(async ({ input, ctx }) => {
       try {
-        const suggestions = [];
+        type RefactorKind = 'extract-function' | 'split-module' | 'remove-duplication' | 'general' | 'error';
+        type RefactorImpact = 'low' | 'medium' | 'high';
+        type RefactorSuggestion = {
+          file: string;
+          type: RefactorKind;
+          message: string;
+          impact: RefactorImpact;
+        };
+        const suggestions: RefactorSuggestion[] = [];
 
         // Analyze each file to provide refactoring suggestions
         for (const file of input.files) {
@@ -149,7 +157,8 @@ export const codeRouter = router({
     .query(async ({ input, ctx }) => {
       const result = await ctx.astParser.parseFile(input.filePath);
 
-      let symbols = result.entities;
+      // Default to returning only symbol entities
+      let symbols = result.entities.filter(e => e.type === 'symbol');
 
       if (input.symbolType) {
         // Filter by symbol type

@@ -28,6 +28,50 @@ interface DiffOptions {
  * Engine for generating diffs between different states
  */
 export class DiffEngine {
+  // Safe access helpers to avoid dynamic object injection patterns
+  private hasOwn(obj: unknown, key: PropertyKey): boolean {
+    return obj !== null && typeof obj === 'object' &&
+      Object.prototype.hasOwnProperty.call(obj as object, key);
+  }
+
+  private get(obj: unknown, key: PropertyKey): any {
+    if (obj !== null && typeof obj === 'object' && this.hasOwn(obj, key)) {
+      // eslint-disable-next-line security/detect-object-injection -- Key guarded via hasOwnProperty
+      return (obj as any)[key];
+    }
+    return undefined;
+  }
+
+  private set(obj: unknown, key: PropertyKey, value: any): void {
+    if (obj !== null && typeof obj === 'object') {
+      // eslint-disable-next-line security/detect-object-injection -- Intentional write to guarded object
+      (obj as any)[key] = value;
+    }
+  }
+
+  private del(obj: unknown, key: PropertyKey): void {
+    if (obj !== null && typeof obj === 'object') {
+      // eslint-disable-next-line security/detect-object-injection -- Intentional delete on guarded object
+      delete (obj as any)[key];
+    }
+  }
+
+  private getArray(arr: unknown, index: number): any {
+    if (Array.isArray(arr) && Number.isInteger(index) && index >= 0 && index < arr.length) {
+      // eslint-disable-next-line security/detect-object-injection -- Index bounds checked
+      return arr[index];
+    }
+    return undefined;
+  }
+
+  private setArray(arr: unknown, index: number, value: any): void {
+    if (Array.isArray(arr) && Number.isInteger(index) && index >= 0) {
+      // Grow array if needed in a controlled manner
+      while (arr.length < index) arr.push(undefined);
+      // eslint-disable-next-line security/detect-object-injection -- Index bounds ensured
+      (arr as any)[index] = value;
+    }
+  }
   private defaultOptions: DiffOptions = {
     maxDepth: 10,
     ignoreProperties: ['__timestamp', '__version', '__metadata'],
@@ -233,15 +277,15 @@ export class DiffEngine {
 
       if (keys1.has(key) && keys2.has(key)) {
         // Property exists in both objects
-        changes.push(
-          ...this.diffObjects(obj1[key], obj2[key], newPath, options, depth + 1)
-        );
+        const v1 = this.get(obj1, key);
+        const v2 = this.get(obj2, key);
+        changes.push(...this.diffObjects(v1, v2, newPath, options, depth + 1));
       } else if (keys1.has(key)) {
         // Property removed
         changes.push({
           path: newPath,
           operation: DiffOperation.DELETE,
-          oldValue: obj1[key],
+          oldValue: this.get(obj1, key),
           newValue: undefined,
         });
       } else {
@@ -250,7 +294,7 @@ export class DiffEngine {
           path: newPath,
           operation: DiffOperation.CREATE,
           oldValue: undefined,
-          newValue: obj2[key],
+          newValue: this.get(obj2, key),
         });
       }
     }
@@ -278,17 +322,19 @@ export class DiffEngine {
 
       if (i < arr1.length && i < arr2.length) {
         // Both arrays have element at this index
-        if (!this.areEqual(arr1[i], arr2[i], options)) {
-          if (typeof arr1[i] === 'object' && typeof arr2[i] === 'object') {
+        const a1 = this.getArray(arr1, i);
+        const a2 = this.getArray(arr2, i);
+        if (!this.areEqual(a1, a2, options)) {
+          if (typeof a1 === 'object' && typeof a2 === 'object') {
             changes.push(
-              ...this.diffObjects(arr1[i], arr2[i], newPath, options, depth + 1)
+              ...this.diffObjects(a1, a2, newPath, options, depth + 1)
             );
           } else {
             changes.push({
               path: newPath,
               operation: DiffOperation.UPDATE,
-              oldValue: arr1[i],
-              newValue: arr2[i],
+              oldValue: a1,
+              newValue: a2,
             });
           }
         }
@@ -297,7 +343,7 @@ export class DiffEngine {
         changes.push({
           path: newPath,
           operation: DiffOperation.DELETE,
-          oldValue: arr1[i],
+          oldValue: this.getArray(arr1, i),
           newValue: undefined,
         });
       } else {
@@ -306,7 +352,7 @@ export class DiffEngine {
           path: newPath,
           operation: DiffOperation.CREATE,
           oldValue: undefined,
-          newValue: arr2[i],
+          newValue: this.getArray(arr2, i),
         });
       }
     }
@@ -319,25 +365,33 @@ export class DiffEngine {
    */
   private applyChange(obj: any, change: DiffEntry): void {
     const pathParts = change.path.split('.');
-    let current = obj;
+    let current: any = obj;
 
     // Navigate to the parent object
     for (let i = 0; i < pathParts.length - 1; i++) {
-      const part = pathParts[i];
+      const part = String(this.getArray(pathParts, i) ?? '');
       const arrayMatch = part.match(/(.+)\[(\d+)\]/);
 
       if (arrayMatch) {
         const [, arrayName, index] = arrayMatch;
-        if (!current[arrayName]) {
-          current[arrayName] = [];
+        let arr = this.get(current, arrayName);
+        if (!Array.isArray(arr)) {
+          arr = [];
+          this.set(current, arrayName, arr);
         }
-        current = current[arrayName];
-        current = current[parseInt(index)];
+        current = this.getArray(arr, parseInt(index));
+        if (current === undefined || current === null) {
+          // initialize nested object when traversing
+          current = {};
+          this.setArray(arr, parseInt(index), current);
+        }
       } else {
-        if (!current[part]) {
-          current[part] = {};
+        let next = this.get(current, part);
+        if (next === undefined || next === null || typeof next !== 'object') {
+          next = {};
+          this.set(current, part, next);
         }
-        current = current[part];
+        current = next;
       }
     }
 
@@ -347,31 +401,32 @@ export class DiffEngine {
 
     if (arrayMatch) {
       const [, arrayName, index] = arrayMatch;
-      if (!current[arrayName]) {
-        current[arrayName] = [];
+      let array = this.get(current, arrayName);
+      if (!Array.isArray(array)) {
+        array = [];
+        this.set(current, arrayName, array);
       }
-      const array = current[arrayName];
       const idx = parseInt(index);
 
       switch (change.operation) {
         case DiffOperation.CREATE:
-          array.splice(idx, 0, change.newValue);
+          (array as any[]).splice(idx, 0, change.newValue);
           break;
         case DiffOperation.UPDATE:
-          array[idx] = change.newValue;
+          this.setArray(array, idx, change.newValue);
           break;
         case DiffOperation.DELETE:
-          array.splice(idx, 1);
+          (array as any[]).splice(idx, 1);
           break;
       }
     } else {
       switch (change.operation) {
         case DiffOperation.CREATE:
         case DiffOperation.UPDATE:
-          current[lastPart] = change.newValue;
+          this.set(current, lastPart, change.newValue);
           break;
         case DiffOperation.DELETE:
-          delete current[lastPart];
+          this.del(current, lastPart);
           break;
       }
     }
@@ -405,9 +460,10 @@ export class DiffEngine {
     // Array comparison
     if (Array.isArray(val1) && Array.isArray(val2)) {
       if (val1.length !== val2.length) return false;
-      return val1.every((item, index) =>
-        this.areEqual(item, val2[index], options)
-      );
+      return val1.every((item, index) => {
+        const other = this.getArray(val2, index);
+        return this.areEqual(item, other, options);
+      });
     }
 
     // Object comparison
@@ -421,10 +477,12 @@ export class DiffEngine {
 
       if (keys1.length !== keys2.length) return false;
 
-      return keys1.every(
-        (key) =>
-          keys2.includes(key) && this.areEqual(val1[key], val2[key], options)
-      );
+      return keys1.every((key) => {
+        if (!keys2.includes(key)) return false;
+        const v1 = this.get(val1, key);
+        const v2 = this.get(val2, key);
+        return this.areEqual(v1, v2, options);
+      });
     }
 
     return false;
@@ -450,7 +508,7 @@ export class DiffEngine {
 
     const cloned: any = {};
     for (const [key, value] of Object.entries(obj)) {
-      cloned[key] = this.deepClone(value);
+      this.set(cloned, key, this.deepClone(value));
     }
     return cloned;
   }

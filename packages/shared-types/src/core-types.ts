@@ -3,23 +3,16 @@
  * Common types extracted from core package that are used across multiple packages
  */
 
-// Note: Node.js types are imported from the global types
+// Import concrete types directly from leaf modules to avoid circular imports via index.ts
+import type { SecurityIssue } from './security.js';
+import type { CoverageMetrics, Change, Spec, Test, Entity } from './entities.js';
 import type {
-  SecurityIssue,
-  Vulnerability,
-  CoverageMetrics,
-  Change,
-  Spec,
-  Test,
-  Entity,
   RelationshipType as RelationshipTypeEnum,
   GraphRelationship,
-  SessionRelationship,
-  RedisConfig,
-  SessionDocument,
-  SessionState,
-  TimeRangeParams,
-} from './index.js';
+} from './relationships.js';
+import type { RedisConfig, SessionDocument, SessionState } from './session-types.js';
+import type { TimeRangeParams } from './api-types.js';
+import type { PerformanceSeverity, PerformanceTrend } from './performance-types.js';
 
 // Note: Types are imported from individual modules for use within this file
 // They are re-exported from the main index.ts file
@@ -133,9 +126,8 @@ export interface SessionsAffectingEntityResult {
   hasMore: boolean;
 }
 
-// Performance Types
-export type PerformanceSeverity = 'critical' | 'high' | 'medium' | 'low';
-export type PerformanceTrend = 'improving' | 'stable' | 'degrading';
+// Performance Types come from a dedicated module
+export type { PerformanceSeverity, PerformanceTrend } from './performance-types.js';
 
 export interface PerformanceMetricSample {
   timestamp?: Date;
@@ -453,39 +445,7 @@ export interface SCMCommitLogEntry {
   refs?: string[];
 }
 
-// Security Types
-export interface SecurityScanRequest {
-  entityIds?: string[];
-  scanTypes?: ('sast' | 'sca' | 'secrets' | 'dependency')[];
-  severity?: ('critical' | 'high' | 'medium' | 'low')[];
-}
-
-export interface SecurityScanResult {
-  issues: SecurityIssue[];
-  vulnerabilities: Vulnerability[];
-  summary: {
-    totalIssues: number;
-    bySeverity: Record<string, number>;
-    byType: Record<string, number>;
-  };
-}
-
-export interface VulnerabilityReport {
-  summary: {
-    total: number;
-    critical: number;
-    high: number;
-    medium: number;
-    low: number;
-  };
-  vulnerabilities: Vulnerability[];
-  byPackage: Record<string, Vulnerability[]>;
-  remediation: {
-    immediate: string[];
-    planned: string[];
-    monitoring: string[];
-  };
-}
+// Security types are defined in `security.ts` and re-exported via index.ts
 
 // Administration Types
 export interface SyncStatus {
@@ -504,12 +464,7 @@ export interface SyncStatus {
   };
 }
 
-export interface SyncOptions {
-  force?: boolean;
-  includeEmbeddings?: boolean;
-  includeTests?: boolean;
-  includeSecurity?: boolean;
-}
+// Deprecated: use the unified SyncOptions defined in the Synchronization section below
 
 export interface SystemAnalytics {
   usage: {
@@ -1130,15 +1085,19 @@ export interface Conflict {
 
 export interface ConflictResolution {
   strategy: 'overwrite' | 'merge' | 'skip' | 'manual';
-  resolvedValue?: any;
-  manualResolution?: string;
   timestamp: Date;
   resolvedBy: string;
+  manualResolution?: string;
+  resolvedValue?: any;
 }
 
 export interface ConflictResolutionResult {
   strategy: 'overwrite' | 'merge' | 'skip' | 'manual';
   resolvedValue?: any;
+  // Optional metadata fields used by sync conflict resolution flows
+  manualResolution?: string;
+  resolvedBy?: string;
+  timestamp?: Date;
 }
 
 // Sync-specific Types
@@ -1248,12 +1207,21 @@ export interface RestoreOptions {
   dryRun: boolean;
   parallelRestores: number;
   validateAfterRestore: boolean;
+  // Additional optional flags used by admin routes
+  validateIntegrity?: boolean;
+  restoreToken?: string;
+  destination?: string;
+  storageProviderId?: string;
+  requestedBy?: string;
 }
 
 export interface RestorePreviewToken {
   token: string;
   expiresAt: Date;
   restoreOptions: RestoreOptions;
+  // Enrichment fields surfaced by admin flows
+  approvedAt?: Date;
+  approvedBy?: string;
 }
 
 export interface RestorePreviewResult {
@@ -1275,11 +1243,20 @@ export interface RestoreApprovalPolicy {
 }
 
 export interface BackupServiceOptions {
-  defaultRetentionDays: number;
-  compressionEnabled: boolean;
-  encryptionEnabled: boolean;
-  parallelUploads: number;
-  chunkSize: number;
+  // legacy tunables (optional in current implementation)
+  defaultRetentionDays?: number;
+  compressionEnabled?: boolean;
+  encryptionEnabled?: boolean;
+  parallelUploads?: number;
+  chunkSize?: number;
+  // runtime wiring options used by BackupService
+  loggingService?: {
+    info: (component: string, message: string, data?: Record<string, unknown>) => void;
+    error: (component: string, message: string, data?: Record<string, unknown>) => void;
+  };
+  storageRegistry?: BackupStorageRegistry;
+  storageProvider?: BackupStorageProvider | null;
+  restorePolicy?: RestoreApprovalPolicy;
 }
 
 export interface RestoreApprovalRequest {
@@ -1291,6 +1268,9 @@ export interface RestoreApprovalRequest {
   }>;
   userId: string;
   reason: string;
+  // Optional token supplied by clients
+  token?: string;
+  approvedBy?: string;
 }
 
 // Backup Storage Types
@@ -1378,6 +1358,33 @@ export class OperationCancelledError extends Error {
     super(`Operation ${operationId} cancelled`);
     this.name = 'OperationCancelledError';
   }
+}
+
+// Note: RollbackError runtime class is defined in rollback-types.ts and exported from there
+
+// Update RollbackPoint to include compatibility props
+export interface RollbackPoint {
+  id: string;
+  operationId?: string;
+  entities: string[];
+  relationships: string[];
+  description: string;
+  timestamp: Date;
+  // Temporary compatibility fields for core migration
+  name?: string;
+  expiresAt?: Date;
+  sessionId?: string;
+  metadata?: Record<string, any>;
+}
+
+// (Duplicate ConflictResolution interface removed; canonical definition lives above in this file.)
+
+// Export RollbackStoreOptions
+export interface RollbackStoreOptions {
+  maxItems?: number;
+  autoCleanup?: boolean;
+  cleanupInterval?: number;
+  // Extend as needed based on core usage
 }
 
 // Synchronization State Types
@@ -1512,14 +1519,7 @@ function isPerformanceRelationshipType(type: string): boolean {
   );
 }
 
-function isDocumentationRelationshipType(type: string): boolean {
-  return (
-    type === 'DESCRIBES_DOMAIN' ||
-    type === 'BELONGS_TO_DOMAIN' ||
-    type === 'DOCUMENTS' ||
-    type === 'DOCUMENTED_BY'
-  );
-}
+// (Removed unused helper isDocumentationRelationshipType – lives in relationships.ts)
 
 function isCodeRelationship(type: string): boolean {
   // Handle legacy USES type by converting to equivalent type
@@ -1582,16 +1582,7 @@ function canonicalTargetKeyFor(rel: GraphRelationship): string {
   return `RAW:${t}`;
 }
 
-function canonicalDocumentationTargetKey(rel: GraphRelationship): string {
-  const anyRel: any = rel as any;
-  const md =
-    anyRel.metadata && typeof anyRel.metadata === 'object'
-      ? anyRel.metadata
-      : {};
-  const section = md.section || md.anchor || '';
-  const target = String(rel.toEntityId || '');
-  return section ? `DOC:${target}#${section}` : `DOC:${target}`;
-}
+// (Removed unused helper canonicalDocumentationTargetKey – canonicalization handled elsewhere)
 
 function canonicalCodeTargetKey(rel: GraphRelationship): string {
   // This is a simplified version - in the original it was the same as canonicalTargetKeyFor
@@ -1610,7 +1601,7 @@ export interface SyncMetrics {
   throughput: number; // operations per minute
 }
 
-export interface PerformanceMetrics {
+export interface SyncPerformanceMetrics {
   averageParseTime: number;
   averageGraphUpdateTime: number;
   averageEmbeddingTime: number;
@@ -1863,8 +1854,8 @@ export interface SessionTrendAnalysis {
   }>;
 }
 
-// Validation types
-export interface ValidationResult {
+// Configuration validation types (renamed to avoid collision with the metrics-oriented ValidationResult above)
+export interface ConfigValidationResult {
   valid: boolean;
   errors: ValidationError[];
   warnings: ValidationWarning[];

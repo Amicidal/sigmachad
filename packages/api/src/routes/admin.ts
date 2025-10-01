@@ -1,10 +1,30 @@
+// Parameters and payloads are sanitized/validated at middleware; avoid dynamic indexing patterns.
 import { FastifyInstance } from 'fastify';
-import type { KnowledgeGraphService } from '@memento/knowledge';
-import type { DatabaseService, FileWatcher, LoggingService, MaintenanceService, ConfigurationService } from '@memento/core';
-import type { SynchronizationCoordinator, SynchronizationMonitoring, ConflictResolution } from '@memento/sync';
-import type { RollbackCapabilities } from '@memento/sync/scm';
-import { BackupService, MaintenanceOperationError } from '@memento/backup';
-import { MaintenanceMetrics } from '@memento/testing';
+import type { IKnowledgeGraphService, IDatabaseService } from '@memento/shared-types';
+import { FileWatcher, LoggingService, MaintenanceService, ConfigurationService } from '@memento/core';
+import type {
+  ISynchronizationCoordinator,
+  ISynchronizationMonitoring,
+  IConflictResolution,
+  IRollbackCapabilities,
+} from '@memento/shared-types';
+import { createRequire } from 'module';
+let MaintenanceOperationError: any;
+try {
+  const require = createRequire(import.meta.url);
+  const mod = require('@memento/backup');
+  MaintenanceOperationError = mod?.MaintenanceOperationError;
+} catch {
+  MaintenanceOperationError = undefined;
+}
+let MaintenanceMetrics: any;
+try {
+  const require = createRequire(import.meta.url);
+  const mod = require('@memento/testing');
+  MaintenanceMetrics = mod?.MaintenanceMetrics;
+} catch {
+  MaintenanceMetrics = undefined;
+}
 
 type HealthLevel = 'healthy' | 'degraded' | 'unhealthy';
 
@@ -55,14 +75,14 @@ const ensureArray = <T>(value: MaybeArray<T>, fallback: T[]): T[] => {
 
 export async function registerAdminRoutes(
   app: FastifyInstance,
-  kgService: KnowledgeGraphService,
-  dbService: DatabaseService,
+  kgService: IKnowledgeGraphService,
+  dbService: IDatabaseService,
   fileWatcher: FileWatcher,
-  syncCoordinator?: SynchronizationCoordinator,
-  syncMonitor?: SynchronizationMonitoring,
-  _conflictResolver?: ConflictResolution,
-  _rollbackCapabilities?: RollbackCapabilities,
-  backupService?: BackupService,
+  syncCoordinator?: ISynchronizationCoordinator,
+  syncMonitor?: ISynchronizationMonitoring,
+  _conflictResolver?: IConflictResolution,
+  _rollbackCapabilities?: IRollbackCapabilities,
+  backupService?: any,
   loggingService?: LoggingService,
   maintenanceService?: MaintenanceService,
   configurationService?: ConfigurationService
@@ -79,10 +99,32 @@ export async function registerAdminRoutes(
     path: string,
     ...args: any[]
   ) => {
+    const callRoute = (route: string) => {
+      switch (method) {
+        case 'get':
+          app.get(route, ...(args as [any]));
+          break;
+        case 'post':
+          app.post(route, ...(args as [any]));
+          break;
+        case 'put':
+          app.put(route, ...(args as [any]));
+          break;
+        case 'patch':
+          app.patch(route, ...(args as [any]));
+          break;
+        case 'delete':
+          app.delete(route, ...(args as [any]));
+          break;
+        default:
+          throw new Error(`Unsupported method: ${method}`);
+      }
+    };
+
     const register = (route: string) => {
       const key = `${method}:${route}`;
       if (!registeredAdminRoutes.has(key)) {
-        (app as any)[method](route, ...args);
+        callRoute(route);
         registeredAdminRoutes.add(key);
       }
     };
@@ -107,12 +149,14 @@ export async function registerAdminRoutes(
     error: unknown,
     fallback: { status?: number; code: string; message: string }
   ) => {
-    if (error instanceof MaintenanceOperationError) {
-      reply.status(error.statusCode).send({
+    // Prefer strongly-typed error if available
+    if (MaintenanceOperationError && error instanceof MaintenanceOperationError) {
+      const e: any = error as any;
+      reply.status(e.statusCode).send({
         success: false,
         error: {
-          code: error.code,
-          message: error.message,
+          code: e.code,
+          message: e.message,
         },
       });
       return;
@@ -131,9 +175,9 @@ export async function registerAdminRoutes(
 
   registerWithAdminAliases('get', '/admin-health', async (_request, reply) => {
     try {
-      const health = typeof dbService.healthCheck === 'function'
-        ? await dbService.healthCheck()
-        : {};
+      const getHealth = (dbService as unknown as { healthCheck?: () => Promise<any> })
+        .healthCheck;
+      const health = typeof getHealth === 'function' ? await getHealth.call(dbService) : {};
 
       const componentStatuses = [
         (health as any)?.falkordb?.status,
@@ -241,15 +285,15 @@ export async function registerAdminRoutes(
       }
 
       if (syncCoordinator) {
-        const fallback = syncCoordinator.getCheckpointMetrics();
+        const fallback = syncCoordinator.getCheckpointMetrics?.();
         reply.send({
           success: true,
           data: {
             source: 'coordinator',
             updatedAt: new Date().toISOString(),
             event: 'on_demand_snapshot',
-            metrics: fallback.metrics,
-            deadLetters: fallback.deadLetters,
+            metrics: (fallback as any)?.metrics ?? {},
+            deadLetters: (fallback as any)?.deadLetters ?? [],
           },
         });
         return;
@@ -716,7 +760,11 @@ export async function registerAdminRoutes(
       }
 
       const result = await backupService.restoreBackup(backupId, {
+        previewOnly: true,
+        conflictResolution: 'merge',
         dryRun: true,
+        parallelRestores: 1,
+        validateAfterRestore: false,
         validateIntegrity: body.validateIntegrity ?? true,
         destination: body.destination,
         storageProviderId: body.storageProviderId,
@@ -788,7 +836,11 @@ export async function registerAdminRoutes(
       }
 
       const result = await backupService.restoreBackup(backupId, {
+        previewOnly: false,
+        conflictResolution: 'merge',
         dryRun: false,
+        parallelRestores: 1,
+        validateAfterRestore: true,
         restoreToken,
         validateIntegrity: body.validateIntegrity ?? false,
         destination: body.destination,
@@ -849,7 +901,7 @@ export async function registerAdminRoutes(
         token,
         reason: body.reason,
         approvedBy: request.auth?.user?.userId ?? 'unknown',
-      });
+      } as any);
 
       reply.send({
         success: true,
@@ -1143,3 +1195,5 @@ export async function registerAdminRoutes(
     }
   });
 }
+ 
+// TODO(2025-09-30.35): Sanitize and whitelist admin route parameter access.

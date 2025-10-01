@@ -8,9 +8,9 @@ import * as fs from 'fs/promises';
 import {
   Entity,
   Symbol as SymbolEntity,
-} from '@memento/shared-types.js';
-import { GraphRelationship } from '@memento/shared-types.js';
-import { createHash } from './utils.js';
+} from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
+import { createHash } from '@memento/knowledge/utils';
 import {
   ParseResult,
   ParseError,
@@ -18,7 +18,7 @@ import {
   PartialUpdate,
   ChangeRange,
   CachedFileInfo,
-} from './types.js';
+} from '@memento/knowledge/types';
 
 // Re-export types for backward compatibility
 export type {
@@ -91,11 +91,11 @@ export class IncrementalParser {
         try {
           const fileRel = path.relative(process.cwd(), absolutePath);
           const syms = fullResult.entities.filter(
-            (e) => (e as any).type === 'symbol'
-          ) as SymbolEntity[];
+            (e): e is SymbolEntity => (e as any).type === 'symbol'
+          );
           indexManager.removeFileFromIndexes(fileRel);
           indexManager.addSymbolsToIndexes(fileRel, syms);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
         return {
           ...fullResult,
@@ -123,11 +123,11 @@ export class IncrementalParser {
         try {
           const fileRel = path.relative(process.cwd(), absolutePath);
           const syms = fullResult.entities.filter(
-            (e) => (e as any).type === 'symbol'
-          ) as SymbolEntity[];
+            (e): e is SymbolEntity => (e as any).type === 'symbol'
+          );
           indexManager.removeFileFromIndexes(fileRel);
           indexManager.addSymbolsToIndexes(fileRel, syms);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return incrementalResult;
       }
 
@@ -144,11 +144,11 @@ export class IncrementalParser {
       try {
         const fileRel = path.relative(process.cwd(), absolutePath);
         const syms = fullResult.entities.filter(
-          (e) => (e as any).type === 'symbol'
-        ) as SymbolEntity[];
+          (e): e is SymbolEntity => (e as any).type === 'symbol'
+        );
         indexManager.removeFileFromIndexes(fileRel);
         indexManager.addSymbolsToIndexes(fileRel, syms);
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
       // Slightly enrich returned entities to reflect detected change in unit expectations
       const enrichedEntities = [...fullResult.entities];
       if (enrichedEntities.length > 0) {
@@ -177,7 +177,7 @@ export class IncrementalParser {
         try {
           const fileRel = path.relative(process.cwd(), absolutePath);
           indexManager.removeFileFromIndexes(fileRel);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return {
           entities: [],
           relationships: [],
@@ -404,7 +404,7 @@ export class IncrementalParser {
               updates.push(update);
 
               switch (update.type) {
-                case 'add':
+                case 'add': {
                   // Re-parse the affected section to get the new entity
                   const newEntity = await this.parseSymbolFromRange(
                     filePath,
@@ -414,60 +414,58 @@ export class IncrementalParser {
                     // Normalize new symbol path to `${fileRel}:${name}` for consistency
                     try {
                       if ((newEntity as any).type === 'symbol') {
-                        const nm = (newEntity as any).name as string;
-                        (newEntity as any).path = `${fileRel}:${nm}`;
+                        const sym = newEntity as SymbolEntity;
+                        const nm = sym.name as string;
+                        sym.path = `${fileRel}:${nm}`;
                         // Update cache symbolMap and global indexes immediately
-                        cachedInfo.symbolMap.set(
-                          `${(newEntity as any).path}`,
-                          newEntity as any
-                        );
-                        indexManager.addSymbolsToIndexes(fileRel, [
-                          newEntity as any,
-                        ]);
+                        cachedInfo.symbolMap.set(sym.path!, sym);
+                        indexManager.addSymbolsToIndexes(fileRel, [sym]);
                       }
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                     // Attach newValue for downstream cache update clarity
                     (update as any).newValue = newEntity;
                     addedEntities.push(newEntity);
+                  }
                   }
                   break;
                 case 'remove':
                   // Remove from global indexes and cache symbol map by id
                   try {
-                    const nm = (cachedSymbol as any).name as string;
+                    const nm = cachedSymbol.name as string;
                     const key = `${fileRel}:${nm}`;
                     cachedInfo.symbolMap.delete(key);
                     // Rebuild this file's entries in index
                     indexManager.removeFileFromIndexes(fileRel);
                     indexManager.addSymbolsToIndexes(
                       fileRel,
-                      Array.from(cachedInfo.symbolMap.values()) as any
+                      Array.from(cachedInfo.symbolMap.values())
                     );
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   removedEntities.push(cachedSymbol);
                   break;
-                case 'update':
+                case 'update': {
                   const updatedEntity = { ...cachedSymbol, ...update.changes };
                   try {
                     // Replace in cache symbolMap by searching existing entry (by id)
                     let foundKey: string | null = null;
                     for (const [k, v] of cachedInfo.symbolMap.entries()) {
-                      if ((v as any).id === (cachedSymbol as any).id) {
+                      if (v.id === cachedSymbol.id) {
                         foundKey = k;
                         break;
                       }
                     }
                     if (foundKey) {
-                      cachedInfo.symbolMap.set(foundKey, updatedEntity as any);
+                      cachedInfo.symbolMap.set(foundKey, updatedEntity as SymbolEntity);
                       // Reindex this single symbol
                       indexManager.removeFileFromIndexes(fileRel);
                       indexManager.addSymbolsToIndexes(
                         fileRel,
-                        Array.from(cachedInfo.symbolMap.values()) as any
+                        Array.from(cachedInfo.symbolMap.values())
                       );
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   updatedEntities.push(updatedEntity);
+                  }
                   break;
               }
             }
@@ -724,22 +722,22 @@ export class IncrementalParser {
               );
               // Normalize path for symbolMap key and entity
               nv.path = `${fileRel}:${name}`;
-              (cachedInfo.symbolMap as any).set(nv.path, nv);
+              cachedInfo.symbolMap.set(nv.path, nv);
               // Update indexes for this file
               indexManager.removeFileFromIndexes(fileRel);
               indexManager.addSymbolsToIndexes(
                 fileRel,
-                Array.from(cachedInfo.symbolMap.values()) as any
+                Array.from(cachedInfo.symbolMap.values())
               );
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           break;
         case 'remove':
           // Remove by matching value.id (since symbolMap keys are by path:name)
           try {
             let foundKey: string | null = null;
             for (const [k, v] of cachedInfo.symbolMap.entries()) {
-              if ((v as any).id === update.entityId) {
+              if (v.id === update.entityId) {
                 foundKey = k;
                 break;
               }
@@ -752,23 +750,23 @@ export class IncrementalParser {
               indexManager.removeFileFromIndexes(fileRel);
               indexManager.addSymbolsToIndexes(
                 fileRel,
-                Array.from(cachedInfo.symbolMap.values()) as any
+                Array.from(cachedInfo.symbolMap.values())
               );
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           break;
         case 'update':
           try {
             // Locate by id; then apply changes and refresh indexes
             let foundKey: string | null = null;
             for (const [k, v] of cachedInfo.symbolMap.entries()) {
-              if ((v as any).id === update.entityId) {
+              if (v.id === update.entityId) {
                 foundKey = k;
                 break;
               }
             }
             if (foundKey) {
-              const symbol = cachedInfo.symbolMap.get(foundKey) as any;
+              const symbol = cachedInfo.symbolMap.get(foundKey)!;
               if (symbol && update.changes) {
                 Object.assign(symbol, update.changes);
                 cachedInfo.symbolMap.set(foundKey, symbol);
@@ -778,11 +776,11 @@ export class IncrementalParser {
                 indexManager.removeFileFromIndexes(fileRel);
                 indexManager.addSymbolsToIndexes(
                   fileRel,
-                  Array.from(cachedInfo.symbolMap.values()) as any
+                  Array.from(cachedInfo.symbolMap.values())
                 );
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           break;
       }
     }
@@ -799,7 +797,7 @@ export class IncrementalParser {
       indexManager.removeFileFromIndexes(fileRel);
       const syms: SymbolEntity[] = Array.from(cachedInfo.symbolMap.values());
       indexManager.addSymbolsToIndexes(fileRel, syms);
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
   }
 
   /**

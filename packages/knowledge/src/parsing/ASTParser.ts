@@ -17,14 +17,12 @@ import {
   InterfaceSymbol,
   TypeAliasSymbol,
   Symbol as SymbolEntity,
-} from '@memento/shared-types.js';
-import { GraphRelationship, RelationshipType } from '@memento/shared-types.js';
-import {
-  normalizeCodeEdge,
-  canonicalRelationshipId,
-} from '../../utils/codeEdges.js';
-import { noiseConfig } from '../../config/noise.js';
-import { scoreInferredEdge } from '../../utils/confidence.js';
+} from '@memento/shared-types';
+import { GraphRelationship, RelationshipType } from '@memento/shared-types';
+import { normalizeCodeEdge } from '@memento/core/utils/codeEdges';
+import { canonicalRelationshipId } from '@memento/shared-types';
+import { noiseConfig } from '@memento/core/config/noise';
+import { scoreInferredEdge } from '@memento/core/utils/confidence';
 import {
   ParseResult,
   ParseError,
@@ -32,7 +30,7 @@ import {
   IncrementalParseResult,
   PartialUpdate,
   ChangeRange,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 type ReexportResolution = { fileRel: string; exportedName: string };
 
@@ -91,7 +89,7 @@ export class ASTParser {
     this.tcBudgetRemaining -= 1;
     try {
       this.tcBudgetSpent += 1;
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
     return true;
   }
 
@@ -198,7 +196,7 @@ export class ASTParser {
           if (getNameNode && typeof getNameNode.getText === 'function')
             name = getNameNode.getText();
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       if (!fileRel || !name) return null;
       return { fileRel, name };
@@ -277,7 +275,7 @@ export class ASTParser {
           this.globalSymbolIndex.delete(key);
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
   }
 
   private addSymbolsToIndexes(
@@ -296,7 +294,7 @@ export class ASTParser {
           this.nameIndex.set(nm, arr);
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
   }
 
   // Resolve a module specifier using TS module resolution (supports tsconfig paths)
@@ -328,7 +326,7 @@ export class ASTParser {
       if (!sf) {
         try {
           sf = this.tsProject.addSourceFileAtPath(prefer);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
       return sf || null;
     } catch {
@@ -660,7 +658,7 @@ export class ASTParser {
           ) as SymbolEntity[];
           this.removeFileFromIndexes(fileRel);
           this.addSymbolsToIndexes(fileRel, syms);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
         return {
           ...fullResult,
@@ -690,7 +688,7 @@ export class ASTParser {
           ) as SymbolEntity[];
           this.removeFileFromIndexes(fileRel);
           this.addSymbolsToIndexes(fileRel, syms);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return incrementalResult;
       }
 
@@ -711,7 +709,7 @@ export class ASTParser {
         ) as SymbolEntity[];
         this.removeFileFromIndexes(fileRel);
         this.addSymbolsToIndexes(fileRel, syms);
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
       // Slightly enrich returned entities to reflect detected change in unit expectations
       const enrichedEntities = [...fullResult.entities];
       if (enrichedEntities.length > 0) {
@@ -740,7 +738,7 @@ export class ASTParser {
         try {
           const fileRel = path.relative(process.cwd(), absolutePath);
           this.removeFileFromIndexes(fileRel);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return {
           entities: [],
           relationships: [],
@@ -949,7 +947,7 @@ export class ASTParser {
       // Conservative cache invalidation to avoid stale re-export data after file edits
       try {
         this.exportMapCache.clear();
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       // Build import map: importedName -> resolved file relative path
       const importMap = new Map<string, string>();
@@ -1007,7 +1005,7 @@ export class ASTParser {
             }
           }
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       // CommonJS require() mapping: const X = require('mod'); const {A, B: Alias} = require('mod')
       try {
@@ -1054,13 +1052,13 @@ export class ASTParser {
                   importMap.set(propName, relTarget);
                   importSymbolMap.set(propName, propName);
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
             }
             continue;
           }
           // Array destructuring not mapped
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       // Parse file entity
       const fileEntity = await this.createFileEntity(filePath, content);
@@ -1073,13 +1071,13 @@ export class ASTParser {
             this.createDirectoryHierarchy(fileEntity.path, fileEntity.id);
           entities.push(...dirEntities);
           relationships.push(...dirRelationships);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
 
       // Before extracting symbols, clear old index entries for this file
       try {
         this.removeFileFromIndexes(fileEntity.path);
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       // Extract symbols and relationships
       const symbols = sourceFile
@@ -1113,7 +1111,7 @@ export class ASTParser {
                 arr.push(symbolEntity);
                 this.nameIndex.set(nm, arr);
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
             // Create relationship between file and symbol
             relationships.push(
@@ -1169,7 +1167,7 @@ export class ASTParser {
                   }
                 }
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
             // If symbol is exported, record EXPORTS relationship
             if (symbolEntity.isExported) {
@@ -1272,7 +1270,7 @@ export class ASTParser {
             `[ast-tc] ${rel} used ${this.tcBudgetSpent}/${noiseConfig.AST_MAX_TC_LOOKUPS_PER_FILE}`
           );
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     }
 
     return { entities, relationships, errors };
@@ -1305,7 +1303,7 @@ export class ASTParser {
             this.createDirectoryHierarchy(fileEntity.path, fileEntity.id);
           entities.push(...dirEntities);
           relationships.push(...dirRelationships);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
 
       // Walk the AST and extract symbols and code edges
@@ -1348,7 +1346,7 @@ export class ASTParser {
         );
         entities.push(...dirEntities);
         relationships.push(...dirRelationships);
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     }
 
     return { entities, relationships, errors: [] };
@@ -1388,7 +1386,7 @@ export class ASTParser {
         try {
           if (functionEntity.name)
             ctx?.locals.set(functionEntity.name, functionEntity.id);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         // Update owner for nested traversal
         for (const child of node.children || []) {
           this.walkJavaScriptAST(
@@ -1430,7 +1428,7 @@ export class ASTParser {
         try {
           if (classEntity.name)
             ctx?.locals.set(classEntity.name, classEntity.id);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         // Update owner for nested traversal
         for (const child of node.children || []) {
           this.walkJavaScriptAST(
@@ -1504,7 +1502,7 @@ export class ASTParser {
         relationships.push(
           this.createRelationship(fromId, toId, RelationshipType.CALLS, meta)
         );
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     }
 
     // READS/WRITES: simple assignment heuristic
@@ -1611,7 +1609,7 @@ export class ASTParser {
             }
           }
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     }
 
     // Recursively walk child nodes
@@ -1639,6 +1637,7 @@ export class ASTParser {
       id: `file:${relativePath}`,
       type: 'file',
       path: relativePath,
+      name: path.basename(filePath),
       hash: crypto.createHash('sha256').update(content).digest('hex'),
       language: this.detectLanguage(filePath),
       lastModified: stats.mtime,
@@ -1673,14 +1672,18 @@ export class ASTParser {
       .slice(0, 8);
     const id = `sym:${fileEntity.path}#${name}@${sigHash}`;
 
+    // Normalize dates to ensure required Date fields on Symbol
+    const created = fileEntity.created ?? new Date();
+    const lastModified = fileEntity.lastModified ?? created;
+
     const baseSymbol = {
       id,
       type: 'symbol' as const,
       path: `${fileEntity.path}:${name}`,
       hash: crypto.createHash('sha256').update(signature).digest('hex'),
       language: fileEntity.language,
-      lastModified: fileEntity.lastModified,
-      created: fileEntity.created,
+      lastModified,
+      created,
       name,
       kind: this.getSymbolKind(node) as any,
       signature,
@@ -1757,8 +1760,8 @@ export class ASTParser {
       path: `${fileEntity.path}:${name}`,
       hash: crypto.createHash('sha256').update(name).digest('hex'),
       language: 'javascript',
-      lastModified: fileEntity.lastModified,
-      created: fileEntity.created,
+      lastModified: fileEntity.lastModified ?? new Date(),
+      created: fileEntity.created ?? new Date(),
       metadata: {},
       name,
       kind: 'function' as any,
@@ -1789,8 +1792,8 @@ export class ASTParser {
       path: `${fileEntity.path}:${name}`,
       hash: crypto.createHash('sha256').update(name).digest('hex'),
       language: 'javascript',
-      lastModified: fileEntity.lastModified,
-      created: fileEntity.created,
+      lastModified: fileEntity.lastModified ?? new Date(),
+      created: fileEntity.created ?? new Date(),
       name,
       kind: 'class',
       signature: `class ${name}`,
@@ -1845,7 +1848,7 @@ export class ASTParser {
           }
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Extract function calls with best-effort resolution to local symbols first
     if (Node.isFunctionDeclaration(node) || Node.isMethodDeclaration(node)) {
@@ -1883,7 +1886,7 @@ export class ASTParser {
           try {
             const args: any[] = (call as any).getArguments?.() || [];
             arity = Array.isArray(args) ? args.length : 0;
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           let awaited = false;
           try {
             let p: any = (call as any).getParent?.();
@@ -1898,7 +1901,7 @@ export class ASTParser {
               typeof p.getKind === 'function' &&
               p.getKind() === SyntaxKind.AwaitExpression
             );
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
           // Track resolution/scope hints for richer evidence
           let resHint: string | undefined;
@@ -1946,10 +1949,10 @@ export class ASTParser {
                   );
                   if (isUnion || isInterface)
                     (baseMeta as any).dynamicDispatch = true;
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
           // Namespace/default alias usage: ns.method() or alias.method()
           if (importMap && parts.length > 1) {
@@ -2028,7 +2031,7 @@ export class ASTParser {
                 }
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
           // If call refers to an imported binding, prefer cross-file placeholder target (deep resolution)
           if (!toId && importMap && simpleName && importMap.has(simpleName)) {
@@ -2088,7 +2091,7 @@ export class ASTParser {
               line = lc.line;
               column = lc.column;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           // default scope inference from toId shape if no hint set
           if (!scopeHint && toId) {
             if (toId.startsWith('external:')) scopeHint = 'external';
@@ -2142,7 +2145,7 @@ export class ASTParser {
                 }
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
           if (
             toId &&
@@ -2227,7 +2230,7 @@ export class ASTParser {
                       if (hit) toId = hit.id;
                     }
                   }
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 relationships.push(
                   this.createRelationship(
                     symbolEntity.id,
@@ -2281,7 +2284,7 @@ export class ASTParser {
                     const list = this.nameIndex.get(nm) || [];
                     if (list.length === 1) placeholder = list[0].id;
                   }
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 relationships.push(
                   this.createRelationship(
                     symbolEntity.id,
@@ -2323,7 +2326,7 @@ export class ASTParser {
                       if (hit) toId = hit.id;
                     }
                   }
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 relationships.push(
                   this.createRelationship(
                     symbolEntity.id,
@@ -2371,7 +2374,7 @@ export class ASTParser {
                     const list = this.nameIndex.get(nm) || [];
                     if (list.length === 1) placeholder = list[0].id;
                   }
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 relationships.push(
                   this.createRelationship(
                     symbolEntity.id,
@@ -2432,7 +2435,7 @@ export class ASTParser {
               const tc = this.resolveWithTypeChecker(expr as any, sourceFile);
               if (tc) toId = `file:${tc.fileRel}:${tc.name}`;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           // Try import map using root of accessPath
           if (!toId && importMap) {
             const root = accessPath.split(/[.(]/)[0];
@@ -2452,7 +2455,7 @@ export class ASTParser {
               line = lc.line;
               column = lc.column;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           const meta = {
             kind: 'decorator',
             accessPath,
@@ -2468,9 +2471,9 @@ export class ASTParser {
               meta
             )
           );
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Method-level semantics: OVERRIDES, THROWS, RETURNS_TYPE, PARAM_TYPE
     if (Node.isMethodDeclaration(node) || Node.isFunctionDeclaration(node)) {
@@ -2518,7 +2521,7 @@ export class ASTParser {
                         usedTc = true;
                       }
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   if (baseFile) {
                     // Prefer linking to exact base method symbol if known
                     let toId: string = `file:${baseFile}:${methodName}`;
@@ -2527,7 +2530,7 @@ export class ASTParser {
                         `${baseFile}:${methodName}`
                       );
                       if (hit) toId = hit.id;
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                     const meta: any = {
                       path: path.relative(
                         process.cwd(),
@@ -2553,7 +2556,7 @@ export class ASTParser {
             }
           }
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       try {
         // THROWS: throw new ErrorType()
@@ -2611,7 +2614,7 @@ export class ASTParser {
                 tline = lc.line;
                 tcol = lc.column;
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             const meta = {
               path: path.relative(process.cwd(), sourceFile.getFilePath()),
               kind: 'throw',
@@ -2633,7 +2636,7 @@ export class ASTParser {
                   (meta as any).candidateCount = list.length;
                 }
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             relationships.push(
               this.createRelationship(
                 symbolEntity.id,
@@ -2642,9 +2645,9 @@ export class ASTParser {
                 meta
               )
             );
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       try {
         // RETURNS_TYPE
@@ -2676,7 +2679,7 @@ export class ASTParser {
                   // mark ambiguous in metadata (set below)
                 }
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             let line: number | undefined;
             let column: number | undefined;
             try {
@@ -2686,7 +2689,7 @@ export class ASTParser {
                 line = lc.line;
                 column = lc.column;
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             const meta: any = {
               inferred: true,
               kind: 'type',
@@ -2702,7 +2705,7 @@ export class ASTParser {
                   meta.candidateCount = list.length;
                 }
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             relationships.push(
               this.createRelationship(
                 symbolEntity.id,
@@ -2720,12 +2723,12 @@ export class ASTParser {
             let tname = '';
             try {
               tname = (t?.getSymbol?.()?.getName?.() || '').toString();
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             if (!tname) {
               try {
                 tname =
                   typeof t?.getText === 'function' ? String(t.getText()) : '';
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
             }
             if (tname) tname = String(tname).split(/[<|&]/)[0].trim();
             if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
@@ -2750,7 +2753,7 @@ export class ASTParser {
                   const list = this.nameIndex.get(nm) || [];
                   if (list.length === 1) toId = list[0].id;
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               const meta: any = {
                 inferred: true,
                 kind: 'type',
@@ -2766,9 +2769,9 @@ export class ASTParser {
                 )
               );
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       try {
         // PARAM_TYPE per parameter
@@ -2800,7 +2803,7 @@ export class ASTParser {
                   const list = this.nameIndex.get(nm) || [];
                   if (list.length === 1) toId = list[0].id;
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               let pline: number | undefined;
               let pcol: number | undefined;
               try {
@@ -2810,7 +2813,7 @@ export class ASTParser {
                   pline = lc.line;
                   pcol = lc.column;
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               const meta: any = { inferred: true, kind: 'type', param: pname };
               relationships.push(
                 this.createRelationship(
@@ -2851,12 +2854,12 @@ export class ASTParser {
               let tname = '';
               try {
                 tname = (t?.getSymbol?.()?.getName?.() || '').toString();
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               if (!tname) {
                 try {
                   tname =
                     typeof t?.getText === 'function' ? String(t.getText()) : '';
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
               }
               if (tname) tname = String(tname).split(/[<|&]/)[0].trim();
               if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
@@ -2881,7 +2884,7 @@ export class ASTParser {
                     const list = this.nameIndex.get(nm) || [];
                     if (list.length === 1) toId = list[0].id;
                   }
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 const meta: any = {
                   inferred: true,
                   kind: 'type',
@@ -2921,10 +2924,10 @@ export class ASTParser {
                   )
                 );
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
           }
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       // Flush aggregated CALLS for this symbol (if any were recorded)
       if (callAgg.size > 0) {
@@ -2973,7 +2976,7 @@ export class ASTParser {
                 )
               );
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
         }
         callAgg.clear();
       }
@@ -3044,7 +3047,7 @@ export class ASTParser {
             if (list.length === 1) toId = list[0].id;
           }
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       const key = `${fromId}|${type}|${toId}`;
       // For aggregated types, allow multiple observations to accumulate; otherwise de-duplicate
@@ -3077,7 +3080,7 @@ export class ASTParser {
             )
               return false;
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return true;
       };
       if (!gate()) return;
@@ -3091,7 +3094,7 @@ export class ASTParser {
           line = lc.line;
           column = lc.column;
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       // Assign confidence for inferred relationships via scorer, and gate low-confidence
       let metadata: Record<string, any> | undefined;
@@ -3161,7 +3164,7 @@ export class ASTParser {
             'df_' +
             crypto.createHash('sha1').update(dfBase).digest('hex').slice(0, 12);
           (metadata as any).dataFlowId = dfId;
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
 
       // Aggregate common code edges to reduce noise; non-aggregated types are pushed directly
@@ -3181,7 +3184,7 @@ export class ASTParser {
         try {
           if ((metadata as any).scope === 'imported')
             depAgg.set(aggKey, metadata);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return;
       }
       if (type === RelationshipType.READS) {
@@ -3199,7 +3202,7 @@ export class ASTParser {
         try {
           if ((metadata as any).scope === 'imported')
             depAgg.set(aggKey, metadata);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return;
       }
       if (type === RelationshipType.WRITES) {
@@ -3217,7 +3220,7 @@ export class ASTParser {
         try {
           if ((metadata as any).scope === 'imported')
             depAgg.set(aggKey, metadata);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return;
       }
 
@@ -3270,7 +3273,7 @@ export class ASTParser {
           const rtNode: any = (fnOwner as any).getReturnTypeNode?.();
           if (rtNode && rtNode === (tr as any)) continue;
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
       // Dedupe rule: skip when it's exactly the type annotation of a parameter
       try {
         const paramOwner = tr.getFirstAncestor(
@@ -3283,7 +3286,7 @@ export class ASTParser {
           const tn: any = (paramOwner as any).getTypeNode?.();
           if (tn && tn === (tr as any)) continue;
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
       const typeName = tr.getTypeName().getText();
       if (!typeName) continue;
       if (
@@ -3558,7 +3561,7 @@ export class ASTParser {
                 const tc = this.resolveWithTypeChecker(lhs as any, sourceFile);
                 if (tc) return `file:${tc.fileRel}:${tc.name}`;
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             return `external:${nm}`;
           };
 
@@ -3612,7 +3615,7 @@ export class ASTParser {
                       wrote = true;
                     }
                   }
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
                 // 2) Try import map for namespace/member: alias.prop
                 if (
@@ -3644,7 +3647,7 @@ export class ASTParser {
                         wrote = true;
                       }
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 }
 
                 // 3) Prefer same-file symbol with matching property name as fallback
@@ -3691,7 +3694,7 @@ export class ASTParser {
                       );
                       wrote = true;
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 }
 
                 // 4) Fallback to external:prop if nothing else resolved
@@ -3711,7 +3714,7 @@ export class ASTParser {
                   );
                   wrote = true;
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               // Destructuring assignment writes: ({a} = rhs) or ([x] = rhs)
               try {
                 const kind = (lhs as any).getKind && (lhs as any).getKind();
@@ -3733,7 +3736,7 @@ export class ASTParser {
                           { kindHint: 'write', operator: op }
                         );
                       }
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   }
                 } else if (kind === SyntaxKind.ArrayLiteralExpression) {
                   const elems: any[] = (lhs as any).getElements?.() || [];
@@ -3751,10 +3754,10 @@ export class ASTParser {
                           { kindHint: 'write', operator: op }
                         );
                       }
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   }
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
             }
           }
 
@@ -3780,7 +3783,7 @@ export class ASTParser {
                 ) {
                   accessPath = parent.getText();
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               if (local) {
                 addRel(fromId, local.entity.id, RelationshipType.READS, idn, {
                   kindHint: 'read',
@@ -3889,7 +3892,7 @@ export class ASTParser {
                         continue;
                       }
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
                   // 2) Import alias deep resolution for alias.prop
                   if (
@@ -3964,7 +3967,7 @@ export class ASTParser {
                       );
                       continue;
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
                   // 4) Fallback external
                   addRel(
@@ -3979,13 +3982,13 @@ export class ASTParser {
                       resolution: 'heuristic',
                     }
                   );
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Flush aggregations into final relationships with occurrences metadata
     if (refAgg.size > 0) {
@@ -4199,7 +4202,7 @@ export class ASTParser {
             resolvedMap.get(name) ||
             (alias ? resolvedMap.get(alias) : undefined);
           if (hit) resolved = hit;
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         if (!resolved && importMap) {
           const root = alias || name;
           const t = importMap.get(root);
@@ -4255,7 +4258,7 @@ export class ASTParser {
           md.source = 'type-checker';
         else md.source = 'ast';
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
     // Deterministic relationship id using canonical target key for stable identity across resolutions
     const rid = canonicalRelationshipId(fromId, {
       toEntityId: toId,
@@ -4313,7 +4316,7 @@ export class ASTParser {
           }
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Attach a basic fromRef to aid coordinator context (file resolution, etc.)
     try {
@@ -4321,7 +4324,7 @@ export class ASTParser {
         // We don't attempt to decode file/symbol here; coordinator can fetch entity by id
         (rel as any).fromRef = { kind: 'entity', id: fromId };
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Normalize code-edge evidence and fields consistently
     return normalizeCodeEdge(rel as GraphRelationship);
@@ -4730,7 +4733,7 @@ export class ASTParser {
               updates.push(update);
 
               switch (update.type) {
-                case 'add':
+                case 'add': {
                   // Re-parse the affected section to get the new entity
                   const newEntity = await this.parseSymbolFromRange(
                     filePath,
@@ -4749,12 +4752,13 @@ export class ASTParser {
                         );
                         this.addSymbolsToIndexes(fileRel, [newEntity as any]);
                       }
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                     // Attach newValue for downstream cache update clarity
                     (update as any).newValue = newEntity;
                     addedEntities.push(newEntity);
                   }
                   break;
+                }
                 case 'remove':
                   // Remove from global indexes and cache symbol map by id
                   try {
@@ -4767,10 +4771,10 @@ export class ASTParser {
                       fileRel,
                       Array.from(cachedInfo.symbolMap.values()) as any
                     );
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   removedEntities.push(cachedSymbol);
                   break;
-                case 'update':
+                case 'update': {
                   const updatedEntity = { ...cachedSymbol, ...update.changes };
                   try {
                     // Replace in cache symbolMap by searching existing entry (by id)
@@ -4790,9 +4794,10 @@ export class ASTParser {
                         Array.from(cachedInfo.symbolMap.values()) as any
                       );
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   updatedEntities.push(updatedEntity);
                   break;
+                }
               }
             }
           }
@@ -5030,7 +5035,7 @@ export class ASTParser {
                 Array.from(cachedInfo.symbolMap.values()) as any
               );
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           break;
         case 'remove':
           // Remove by matching value.id (since symbolMap keys are by path:name)
@@ -5053,7 +5058,7 @@ export class ASTParser {
                 Array.from(cachedInfo.symbolMap.values()) as any
               );
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           break;
         case 'update':
           try {
@@ -5080,7 +5085,7 @@ export class ASTParser {
                 );
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           break;
       }
     }
@@ -5100,7 +5105,7 @@ export class ASTParser {
       this.removeFileFromIndexes(fileRel);
       const syms: SymbolEntity[] = Array.from(cachedInfo.symbolMap.values());
       this.addSymbolsToIndexes(fileRel, syms);
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
   }
 
   /**

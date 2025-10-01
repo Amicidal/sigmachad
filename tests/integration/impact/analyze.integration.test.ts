@@ -1,16 +1,16 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
 import { v4 as uuid } from 'uuid';
-import { registerImpactRoutes } from '../../../src/api/routes/impact.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { RelationshipType } from '../../../src/models/relationships.js';
-import type { CodebaseEntity, DocumentationNode, Spec, Test } from '../../../src/models/entities.js';
+import { registerImpactRoutes } from '@memento/api/routes/impact';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { RelationshipType } from '@memento/shared-types';
+import type { CodebaseEntity, DocumentationNode, Spec, Test } from '@memento/shared-types';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
 } from '../../test-utils/database-helpers.js';
-import type { DatabaseService } from '../../../src/services/core/DatabaseService.js';
+import type { DatabaseService } from '@memento/database/DatabaseService';
 
 const now = () => new Date();
 

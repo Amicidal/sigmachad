@@ -6,15 +6,15 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 
 // Mock external dependencies
-vi.mock("../../../src/services/KnowledgeGraphService");
-vi.mock("../../../src/services/DatabaseService");
-vi.mock("../../../src/services/TestResultParser");
+vi.mock("@memento/knowledge");
+vi.mock("@memento/database/DatabaseService");
+vi.mock("@memento/testing/TestResultParser");
 vi.mock("fs/promises");
 
 // Import mocked dependencies first
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/core/DatabaseService";
-import { TestResultParser } from "../../../src/services/testing/TestResultParser";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
+import { TestResultParser } from "@memento/testing/TestResultParser";
 
 // Import the service after mocks are set up
 import {
@@ -23,16 +23,16 @@ import {
   TestSuiteResult,
   FlakyTestAnalysis,
   TestCoverageAnalysis,
-} from "../../../src/services/testing/TestEngine";
-import { normalizeMetricIdForId } from "../../../src/utils/codeEdges";
+} from "@memento/testing/TestEngine";
+import { normalizeMetricIdForId } from "@memento/core/utils/codeEdges";
 
 import {
   Test,
   TestExecution,
   TestPerformanceMetrics,
   CoverageMetrics,
-} from "../../../src/models/entities";
-import { RelationshipType } from "../../../src/models/relationships";
+} from "@memento/shared-types";
+import { RelationshipType } from "@memento/shared-types";
 import { readFile } from "fs/promises";
 
 // Mock implementations
@@ -352,7 +352,7 @@ describe("TestEngine", () => {
         coverage: { ...testEntity.coverage },
         performance: undefined,
         environment: "staging",
-      })) as TestExecution[];
+      })) as unknown as TestExecution[];
 
       testEntity.performanceMetrics = {
         averageExecutionTime: 0,

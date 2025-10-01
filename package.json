@@ -84,7 +84,8 @@
     "docs:fix": "tsx scripts/validate-blueprints.ts --fix",
     "docs:coupling": "tsx scripts/validate-doc-coupling.ts",
     "semgrep:check": "semgrep --config=.semgrep/rules/quality-indicators.yml packages/",
-    "repomix:package": "npx -y repomix packages/ --output Docs/summaries/full-codebase.md"
+    "repomix:package": "npx -y repomix packages/ --output Docs/summaries/full-codebase.md",
+    "security:secrets:check:file": "tsx scripts/security-secrets-check.ts"
   },
   "keywords": [
     "ai",

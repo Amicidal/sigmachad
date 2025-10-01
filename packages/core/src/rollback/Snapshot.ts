@@ -1,3 +1,4 @@
+// TODO(2025-09-30.35): Tighten snapshot property access and validation.
 /**
  * In-memory snapshot management for rollback capabilities
  */
@@ -268,11 +269,8 @@ export class SnapshotManager {
       return cloned;
     }
 
-    const cloned: any = {};
-    for (const [key, value] of Object.entries(obj)) {
-      cloned[key] = this.deepClone(value);
-    }
-    return cloned;
+    const entries = Object.entries(obj).map(([k, v]) => [k, this.deepClone(v)]);
+    return Object.fromEntries(entries);
   }
 
   /**
@@ -320,7 +318,7 @@ export class SnapshotManager {
    * Calculate size of serialized data
    */
   private calculateSize(data: any): number {
-    return new TextEncoder().encode(JSON.stringify(data)).length;
+    return Buffer.byteLength(JSON.stringify(data), 'utf8');
   }
 
   /**
@@ -339,3 +337,5 @@ export class SnapshotManager {
     return actualChecksum === expectedChecksum;
   }
 }
+ 
+// TODO(2025-09-30.35): Tighten snapshot property access and validation.

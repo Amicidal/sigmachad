@@ -3,10 +3,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { HighThroughputBatchProcessor, BatchProcessorConfig } from '../../src/ingestion/batch-processor.js';
-import { Entity } from '../../../models/entities.js';
-import { GraphRelationship } from '../../../models/relationships.js';
-import { ChangeFragment, BatchProcessingError } from '../../src/ingestion/types.js';
+import {
+  HighThroughputBatchProcessor,
+  BatchProcessorConfig,
+} from '@memento/knowledge/ingestion/batch-processor';
+import { Entity } from '@memento/shared-types/entities';
+import { GraphRelationship } from '@memento/shared-types/relationships';
+import { ChangeFragment } from '@memento/knowledge/ingestion/types';
 
 describe('HighThroughputBatchProcessor', () => {
   let batchProcessor: HighThroughputBatchProcessor;

@@ -222,7 +222,7 @@ const main = async (): Promise<void> => {
         remaining !== undefined ? Math.min(options.batchSize, remaining) : options.batchSize;
       if (limit <= 0) break;
 
-      const rows = (await dbService.falkordbQuery(STRUCTURAL_QUERY, {
+      const rows = (await dbService.graphQuery(STRUCTURAL_QUERY, {
         skip,
         limit,
       })) as any[];
@@ -257,7 +257,7 @@ const main = async (): Promise<void> => {
       }
 
       if (updates.length > 0) {
-        await dbService.falkordbQuery(UPDATE_QUERY, {
+        await dbService.graphQuery(UPDATE_QUERY, {
           rows: updates.map((entry) => entry.payload),
         });
         updated += updates.length;

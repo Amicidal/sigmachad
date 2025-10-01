@@ -17,7 +17,8 @@ import {
   WorkerError,
   IngestionError,
   IngestionEvents,
-} from './types.js';
+} from './types';
+import type { TypedEventEmitter } from '@memento/shared-types';
 
 export interface WorkerPoolConfig {
   maxWorkers: number;
@@ -51,7 +52,26 @@ export interface WorkerInstance {
 
 export type WorkerHandler = (task: TaskPayload) => Promise<any>;
 
-export class WorkerPool extends EventEmitter<IngestionEvents> {
+export class WorkerPool extends EventEmitter implements TypedEventEmitter<IngestionEvents> {
+  /**
+   * Update worker status consistently across both status fields
+   */
+  private setWorkerStatus(
+    worker: WorkerInstance,
+    status: WorkerInstance['status']
+  ): void {
+    worker.status = status;
+    const statusMap: Record<WorkerInstance['status'], WorkerMetrics['status']> =
+      {
+        starting: 'idle',
+        idle: 'idle',
+        busy: 'busy',
+        error: 'error',
+        stopping: 'shutdown',
+        stopped: 'shutdown',
+      };
+    worker.metrics.status = statusMap[status];
+  }
   private workers: Map<string, WorkerInstance> = new Map();
   private handlers: Map<string, WorkerHandler> = new Map();
   private config: WorkerPoolConfig;
@@ -116,7 +136,10 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
   /**
    * Register a task handler for a specific worker type
    */
-  registerHandler(workerType: string, handler: WorkerHandler): void {
+  registerHandler(
+    workerType: TaskPayload['type'],
+    handler: WorkerHandler
+  ): void {
     this.handlers.set(workerType, handler);
   }
 
@@ -156,7 +179,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
     const tasksByType = this.groupTasksByType(tasks);
     const promises: Promise<WorkerResult>[] = [];
 
-    for (const [workerType, typeTasks] of tasksByType) {
+    for (const [_workerType, typeTasks] of tasksByType) {
       for (const task of typeTasks) {
         promises.push(this.executeTask(task));
       }
@@ -230,7 +253,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
    * Get an available worker for a specific task type
    */
   private async getAvailableWorker(
-    taskType: string
+    taskType: TaskPayload['type']
   ): Promise<WorkerInstance | null> {
     // First try to find an idle worker of the right type
     for (const worker of this.workers.values()) {
@@ -266,7 +289,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
     task: TaskPayload
   ): Promise<WorkerResult> {
     const startTime = Date.now();
-    worker.status = 'busy';
+    this.setWorkerStatus(worker, 'busy');
     worker.currentTask = task;
 
     try {
@@ -307,61 +330,12 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
         task.id
       );
     } finally {
-      worker.status = 'idle';
+      this.setWorkerStatus(worker, 'idle');
       worker.currentTask = undefined;
     }
   }
 
-  /**
-   * Execute task in worker thread
-   */
-  private async executeTaskInWorkerThread(
-    worker: Worker,
-    task: TaskPayload
-  ): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(
-          new Error(`Worker timeout after ${this.config.workerTimeout}ms`)
-        );
-      }, this.config.workerTimeout);
-
-      const handleMessage = (message: unknown) => {
-        clearTimeout(timeout);
-        if (isWorkerTaskResult(message)) {
-          if (message.success) {
-            resolve(message.result);
-          } else {
-            reject(new Error(message.error ?? 'Worker task failed'));
-          }
-        } else if (
-          message &&
-          typeof message === 'object' &&
-          (message as { type?: string }).type === 'error'
-        ) {
-          reject(
-            new Error(
-              (message as { error?: string }).error ??
-                'Worker reported an unknown error'
-            )
-          );
-        } else {
-          reject(new Error('Received unexpected message from worker'));
-        }
-      };
-
-      worker.once('message', handleMessage);
-
-      worker.once('error', (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
-
-      worker.postMessage(
-        createWorkerTaskMessage(task.id, task, task.metadata || {})
-      );
-    });
-  }
+  
 
   /**
    * Add new workers to the pool
@@ -398,7 +372,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
 
     const config: WorkerConfig = {
       id: workerId,
-      type: 'generic', // Will be determined by task type
+      type: 'parser', // Initial type; tasks may drive behavior
       concurrency: 1,
       batchSize: 1,
       timeout: this.config.workerTimeout,
@@ -408,10 +382,10 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
     const worker: WorkerInstance = {
       id: workerId,
       config,
-      status: 'starting',
+      status: 'starting', // Will be updated via setWorkerStatus after creation
       metrics: {
         workerId,
-        status: 'idle',
+        status: 'idle', // Will be updated via setWorkerStatus
         tasksProcessed: 0,
         averageLatency: 0,
         errorCount: 0,
@@ -456,7 +430,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       });
 
       worker.worker = workerThread;
-      worker.status = 'idle';
+      this.setWorkerStatus(worker, 'idle');
 
       console.log(`[WorkerPool] Created worker thread ${workerId}`);
     } catch (error) {
@@ -469,7 +443,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       console.log(
         `[WorkerPool] Falling back to in-process mode for worker ${workerId}`
       );
-      worker.status = 'idle';
+      this.setWorkerStatus(worker, 'idle');
     }
 
     this.workers.set(workerId, worker);
@@ -522,7 +496,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
 
       case 'shutdown_complete':
         console.log(`[WorkerPool] Worker ${workerId} shutdown complete`);
-        worker.status = 'stopped';
+        this.setWorkerStatus(worker, 'stopped');
         break;
 
       default:
@@ -547,7 +521,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
 
     const worker = this.workers.get(workerId);
     if (worker) {
-      worker.status = 'idle';
+      this.setWorkerStatus(worker, 'idle');
       worker.metrics.tasksProcessed++;
       worker.metrics.lastActivity = new Date();
 
@@ -614,7 +588,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       return;
     }
 
-    worker.status = 'stopping';
+    this.setWorkerStatus(worker, 'stopping');
 
     if (worker.worker) {
       try {
@@ -633,7 +607,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       }
     }
 
-    worker.status = 'stopped';
+    this.setWorkerStatus(worker, 'stopped');
     worker.stoppedAt = new Date();
 
     this.workers.delete(workerId);
@@ -674,7 +648,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
       worker.errorCount++;
     }
 
-    metrics.status = worker.status;
+    // Status already synchronized via setWorkerStatus calls
   }
 
   /**
@@ -685,7 +659,7 @@ export class WorkerPool extends EventEmitter<IngestionEvents> {
     error: Error,
     task?: TaskPayload
   ): void {
-    worker.status = 'error';
+    this.setWorkerStatus(worker, 'error');
     worker.errorCount++;
     worker.metrics.errorCount++;
 

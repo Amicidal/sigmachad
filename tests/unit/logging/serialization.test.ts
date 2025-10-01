@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeData, serializeLogEntry } from '../../../src/services/logging/serialization.js';
-import type { LogEntry } from '../../../src/services/core/LoggingService.js';
+import { sanitizeData, serializeLogEntry } from '@memento/core/logging/serialization';
+import type { LogEntry } from '@memento/core/services/LoggingService';
 
 describe('logging serialization', () => {
   it('coerces bigint primitives into JSON-safe strings', () => {

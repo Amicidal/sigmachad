@@ -8,12 +8,12 @@ import {
   DocumentationParser,
   ParsedDocument,
   SearchResult,
-} from "../../../src/services/knowledge/DocumentationParser";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
+} from "@memento/knowledge";
+import { KnowledgeGraphService } from "@memento/knowledge";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/core/DatabaseService";
+} from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,

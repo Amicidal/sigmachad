@@ -4,14 +4,13 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { KnowledgeGraphService } from '@memento/knowledge';
-import { DatabaseService } from '@memento/database';
-import { VectorSearchRequest, VectorSearchResult } from '@memento/shared-types';
+import type { VectorSearchRequest, VectorSearchResult } from '@memento/shared-types/core-types';
+import { EmbeddingService as CoreEmbeddingService } from '@memento/core/utils/embedding';
 
 export async function registerVDBRoutes(
   app: FastifyInstance,
-  kgService: KnowledgeGraphService,
-  dbService: DatabaseService
+  kgService: any,
+  _dbService: any
 ): Promise<void> {
   // POST /api/vdb/vdb-search - Perform semantic search
   app.post(
@@ -50,16 +49,26 @@ export async function registerVDBRoutes(
         const params: VectorSearchRequest = request.body as VectorSearchRequest;
         const startTime = Date.now();
 
-        // Perform vector search via knowledge graph service
-        const searchResults = await kgService.performSemanticSearch({
+        // Perform semantic search via knowledge graph service (new API)
+        const searchResults = await kgService.searchEntities({
           query: params.query,
-          entityTypes: params.entityTypes,
+          entityTypes: params.entityTypes as any,
           limit: params.limit || 10,
-          similarity: params.similarity || 0.7,
+          searchType: 'semantic',
+          filters: params.filters,
         });
 
+        // Best-effort index size from embedding stats
+        let indexSize = 0;
+        try {
+          const stats = await kgService.getStats();
+          indexSize = stats?.embeddings?.indexed ?? 0;
+        } catch (_) {
+          indexSize = 0;
+        }
+
         const results: VectorSearchResult = {
-          results: searchResults.map((result) => ({
+          results: searchResults.map((result: any) => ({
             entity: result.entity,
             similarity: result.score,
             context: result.context || '',
@@ -68,7 +77,7 @@ export async function registerVDBRoutes(
           metadata: {
             totalResults: searchResults.length,
             searchTime: Date.now() - startTime,
-            indexSize: await kgService.getIndexSize(),
+            indexSize,
           },
         };
 
@@ -123,13 +132,13 @@ export async function registerVDBRoutes(
           metadata?: any[];
         };
 
-        // Generate embeddings using embedding service
-        const embeddingService = kgService.getEmbeddingService();
+        // Generate embeddings using core embedding utility (new API)
+        const embeddingService = new CoreEmbeddingService({ model });
         const embeddings = await Promise.all(
           texts.map(async (text, index) => ({
             text,
-            embedding: await embeddingService.generateEmbedding(text),
-            model: model || 'text-embedding-ada-002',
+            embedding: (await embeddingService.generateEmbedding(text)).embedding,
+            model: model || 'text-embedding-3-small',
             metadata: metadata?.[index] || {},
           }))
         );
@@ -138,11 +147,8 @@ export async function registerVDBRoutes(
           success: true,
           data: {
             embeddings,
-            model: model || 'text-embedding-ada-002',
-            totalTokens: texts.reduce(
-              (acc, text) => acc + text.split(' ').length,
-              0
-            ),
+            model: model || 'text-embedding-3-small',
+            totalTokens: 0,
           },
         });
       } catch (error) {
@@ -199,15 +205,10 @@ export async function registerVDBRoutes(
 
         for (const entity of entities) {
           try {
-            if (generateEmbeddings !== false) {
-              const embeddingService = kgService.getEmbeddingService();
-              const embedding = await embeddingService.generateEmbedding(
-                entity.content
-              );
-              entity.embedding = embedding;
-            }
-
-            await kgService.indexEntity(entity);
+            // Create or update entity; embeddings generated unless skipped
+            await kgService.createOrUpdateEntity(entity, {
+              skipEmbedding: generateEmbeddings === false,
+            });
             indexedCount++;
           } catch (entityError) {
             console.error(`Failed to index entity ${entity.id}:`, entityError);
@@ -257,7 +258,8 @@ export async function registerVDBRoutes(
       try {
         const { entityId } = request.params as { entityId: string };
 
-        await kgService.removeEntityFromIndex(entityId);
+        // Remove embedding vector for the entity (new API)
+        await kgService.deleteEmbedding(entityId);
 
         reply.send({
           success: true,
@@ -280,15 +282,20 @@ export async function registerVDBRoutes(
   // GET /api/vdb/stats - Get vector database statistics
   app.get('/stats', async (request, reply) => {
     try {
+      const overall = await kgService.getStats();
+      const searchStats = await kgService.getSearchStats();
+
+      // Metrics semantics:
+      // - totalVectors/indexSize: count of entities with embeddings indexed
+      // - totalEntities: total graph entities
+      // - searchStats.totalSearches: number of searches since service start
+      // - searchStats.averageResponseTime: rolling mean latency (ms) over recent queries
       const stats = {
-        totalVectors: await kgService.getVectorCount(),
-        totalEntities: await kgService.getEntityCount(),
-        indexSize: await kgService.getIndexSize(),
+        totalVectors: overall?.embeddings?.indexed ?? 0,
+        totalEntities: overall?.entities?.total ?? 0,
+        indexSize: overall?.embeddings?.indexed ?? 0,
         lastUpdated: new Date().toISOString(),
-        searchStats: {
-          totalSearches: await kgService.getSearchCount(),
-          averageResponseTime: await kgService.getAverageResponseTime(),
-        },
+        searchStats,
       };
 
       reply.send({
@@ -332,18 +339,17 @@ export async function registerVDBRoutes(
           threshold?: number;
         };
 
-        const similarEntities = await kgService.findSimilarEntities(
-          entityId,
-          limit || 10,
-          threshold || 0.7
-        );
+        const similarEntities = await kgService.findSimilar(entityId, {
+          limit: limit || 10,
+          minScore: threshold || 0.7,
+        });
 
         const similar = {
           entityId,
-          similarEntities: similarEntities.map((result) => ({
+          similarEntities: similarEntities.map((result: any) => ({
             entity: result.entity,
             similarity: result.score,
-            relationship: result.relationship,
+            relationship: (result as any).relationship,
           })),
           threshold: threshold || 0.7,
         };
@@ -406,9 +412,10 @@ export async function registerVDBRoutes(
         const results = await Promise.all(
           queries.map(async (queryObj) => {
             try {
-              const searchResults = await kgService.performSemanticSearch({
+              const searchResults = await kgService.searchEntities({
                 query: queryObj.query,
-                entityTypes: queryObj.entityTypes,
+                entityTypes: queryObj.entityTypes as any,
+                searchType: 'semantic',
                 limit: queryObj.limit || 5,
               });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { QdrantService } from '../../../src/services/database/QdrantService';
+import { QdrantService } from '@memento/database/qdrant/QdrantService';
 
 type Point = { id: string; vector: number[]; payload?: Record<string, unknown> };
 

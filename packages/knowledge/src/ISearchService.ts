@@ -4,7 +4,10 @@
  */
 
 import { EventEmitter } from 'events';
-import {
+import { ISearchService as IBaseSearchService } from '@memento/shared-types';
+
+// Re-export search-related types so consumers can import from '@memento/knowledge/ISearchService'
+export type {
   Entity,
   GraphSearchRequest,
   GraphExamples,
@@ -13,8 +16,7 @@ import {
   SemanticSearchOptions,
   PatternSearchOptions,
   SearchStats,
-  ISearchService as IBaseSearchService,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 /**
  * Common interface that both SearchService implementations should follow

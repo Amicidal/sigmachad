@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TestMetrics } from '../TestMetrics.js';
+import { TestMetrics } from '../temporal/TestMetrics.js';
 import {
   TestExecutionRecord,
   TestConfiguration,
@@ -12,7 +12,7 @@ import {
   TrendPeriod,
   TestStatus,
   TestType
-} from '../TestTypes.js';
+} from '../temporal/TestTypes.js';
 
 describe('TestMetrics', () => {
   let metrics: TestMetrics;

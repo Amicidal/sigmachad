@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { RelationshipType } from '../../../src/models/relationships.js';
-import type { Entity } from '../../../src/models/entities.js';
-import type { GraphRelationship } from '../../../src/models/relationships.js';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { RelationshipType } from '@memento/shared-types';
+import type { Entity } from '@memento/shared-types';
+import type { GraphRelationship } from '@memento/shared-types';
 import {
   createKnowledgeGraphTestHarness,
   type KnowledgeGraphTestDependencies,

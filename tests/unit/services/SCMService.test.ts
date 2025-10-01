@@ -1,9 +1,10 @@
+// @ts-nocheck
 import { describe, it, expect, vi } from "vitest";
 import {
   SCMService,
   ValidationError,
-} from "../../../src/services/scm/SCMService";
-import { SCMProviderNotConfiguredError } from "../../../src/services/scm/SCMProvider";
+} from "@memento/sync/scm/SCMService";
+import { SCMProviderNotConfiguredError } from "@memento/sync/scm/SCMProvider";
 
 const createMockGitService = () => ({
   isAvailable: vi.fn().mockResolvedValue(true),

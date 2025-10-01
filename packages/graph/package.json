@@ -25,6 +25,7 @@
   "dependencies": {
     "@memento/core": "workspace:*",
     "@memento/database": "workspace:*",
+    "@memento/shared-types": "workspace:*",
     "neo4j-driver": "^5.12.0"
   },
   "devDependencies": {

@@ -44,7 +44,7 @@ import {
   isInterface,
   isTest,
   isSpec,
-} from '@/models/entities';
+} from '@memento/shared-types';
 
 describe('Entity Types and Interfaces', () => {
   let baseEntity: CodebaseEntity;

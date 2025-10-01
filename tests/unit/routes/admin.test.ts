@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { registerAdminRoutes } from "../../../src/api/routes/admin.js";
-import { MaintenanceMetrics } from "../../../src/services/testing/metrics/MaintenanceMetrics.js";
+import { registerAdminRoutes } from "@memento/api/routes/admin";
+import { MaintenanceMetrics } from "@memento/testing/MaintenanceMetrics";
 import {
   createMockRequest,
   createMockReply,
@@ -14,34 +14,34 @@ import {
 } from "../../test-utils.js";
 
 // Mock services
-vi.mock("../../../src/services/knowledge/KnowledgeGraphService.js", () => ({
+vi.mock("@memento/knowledge", () => ({
   KnowledgeGraphService: vi.fn(),
 }));
-vi.mock("../../../src/services/core/DatabaseService.js", () => ({
+vi.mock("@memento/database/DatabaseService", () => ({
   DatabaseService: vi.fn(),
 }));
-vi.mock("../../../src/services/core/FileWatcher.js", () => ({
+vi.mock("@memento/core/services/FileWatcher", () => ({
   FileWatcher: vi.fn(),
 }));
 vi.mock(
-  "../../../src/services/synchronization/SynchronizationCoordinator.js",
+  "@memento/sync/synchronization/SynchronizationCoordinator",
   () => ({
     SynchronizationCoordinator: vi.fn(),
   })
 );
 vi.mock(
-  "../../../src/services/synchronization/SynchronizationMonitoring.js",
+  "@memento/sync/synchronization/SynchronizationMonitoring",
   () => ({
     SynchronizationMonitoring: vi.fn(),
   })
 );
-vi.mock("../../../src/services/scm/ConflictResolution.js", () => ({
+vi.mock("@memento/sync/scm/ConflictResolution", () => ({
   ConflictResolution: vi.fn(),
 }));
-vi.mock("../../../src/services/scm/RollbackCapabilities.js", () => ({
+vi.mock("@memento/sync/scm/RollbackCapabilities", () => ({
   RollbackCapabilities: vi.fn(),
 }));
-vi.mock("../../../src/services/backup/BackupService.js", () => ({
+vi.mock("@memento/backup/BackupService", () => ({
   BackupService: vi.fn(),
   MaintenanceOperationError: class MaintenanceOperationError extends Error {
     statusCode = 500;
@@ -52,13 +52,13 @@ vi.mock("../../../src/services/backup/BackupService.js", () => ({
     }
   },
 }));
-vi.mock("../../../src/services/core/LoggingService.js", () => ({
+vi.mock("@memento/core/services/LoggingService", () => ({
   LoggingService: vi.fn(),
 }));
-vi.mock("../../../src/services/core/MaintenanceService.js", () => ({
+vi.mock("@memento/core/services/MaintenanceService", () => ({
   MaintenanceService: vi.fn(),
 }));
-vi.mock("../../../src/services/core/ConfigurationService.js", () => ({
+vi.mock("@memento/core/services/ConfigurationService", () => ({
   ConfigurationService: vi.fn(),
 }));
 

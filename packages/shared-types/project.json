@@ -5,30 +5,11 @@
   "projectType": "library",
   "targets": {
     "build": {
-      "executor": "@nx/js:tsc",
-      "outputs": ["{options.outputPath}"],
+      "executor": "nx:run-commands",
+      "outputs": [],
       "options": {
-        "outputPath": "dist/packages/shared-types",
-        "main": "packages/shared-types/src/index.ts",
-        "tsConfig": "packages/shared-types/tsconfig.lib.json",
-        "assets": ["packages/shared-types/*.md"],
-        "updateBuildableProjectDeps": [
-          {
-            "project": "**",
-            "updateBuildableProjectDepsInPackageJson": true
-          }
-        ],
-        "verifyTypeScript": true
-      },
-      "configurations": {
-        "production": {
-          "tsConfig": "packages/shared-types/tsconfig.lib.prod.json"
-        },
-        "development": {
-          "tsConfig": "packages/shared-types/tsconfig.lib.json"
-        }
-      },
-      "defaultConfiguration": "production"
+        "command": "tsc -p packages/shared-types/tsconfig.json --noEmit"
+      }
     },
     "lint": {
       "executor": "@nx/eslint:lint",

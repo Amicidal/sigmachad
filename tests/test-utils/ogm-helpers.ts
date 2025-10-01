@@ -3,15 +3,14 @@
  * Helper functions specifically for testing OGM services and migration
  */
 
-import { DatabaseService } from "../../src/services/core/DatabaseService";
-import { NeogmaService } from "../../src/services/knowledge/ogm/NeogmaService";
-import { EntityServiceOGM } from "../../src/services/knowledge/ogm/EntityServiceOGM";
-import { RelationshipServiceOGM } from "../../src/services/knowledge/ogm/RelationshipServiceOGM";
-import { SearchServiceOGM } from "../../src/services/knowledge/ogm/SearchServiceOGM";
-import { EmbeddingService } from "../../src/services/knowledge/EmbeddingService";
-import { KnowledgeGraphService } from "../../src/services/knowledge/KnowledgeGraphService";
-import { CodebaseEntity, RelationshipType } from "../../src/models/entities";
-import { GraphRelationship } from "../../src/models/relationships";
+import { DatabaseService } from "@memento/database";
+import { NeogmaService } from "@memento/knowledge/graph/NeogmaService";
+import { EntityServiceOGM } from "@memento/knowledge/graph/EntityServiceOGM";
+import { RelationshipServiceOGM } from "@memento/knowledge/graph/RelationshipServiceOGM";
+import { SearchServiceOGM } from "@memento/knowledge/graph/SearchServiceOGM";
+import { EmbeddingService } from "@memento/knowledge/embeddings/EmbeddingService";
+import { KnowledgeGraphService } from "@memento/knowledge/orchestration/KnowledgeGraphService";
+import { CodebaseEntity, RelationshipType, GraphRelationship } from "@memento/shared-types";
 import { TestIsolationContext } from "./database-helpers";
 
 export interface OGMTestSetup {

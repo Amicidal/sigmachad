@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EventEmitter } from "events";
 import { WebSocket } from "ws";
-import { WebSocketRouter } from "../../../src/api/websocket-router.js";
+import { WebSocketRouter } from "@memento/api/websocket-router";
 import {
   createKnowledgeGraphTestHarness,
   type KnowledgeGraphTestDependencies,

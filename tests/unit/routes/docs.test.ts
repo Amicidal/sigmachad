@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { registerDocsRoutes } from '../../../src/api/routes/docs.js';
+import { registerDocsRoutes } from '@memento/api/routes/docs';
 import {
   createMockRequest,
   createMockReply,
@@ -13,15 +13,15 @@ import {
 } from '../../test-utils.js';
 
 // Mock external dependencies
-vi.mock('../../../src/services/knowledge/KnowledgeGraphService.js', () => ({
+vi.mock('@memento/knowledge', () => ({
   KnowledgeGraphService: vi.fn()
 }));
 
-vi.mock('../../../src/services/core/DatabaseService.js', () => ({
+vi.mock('@memento/database/DatabaseService', () => ({
   DatabaseService: vi.fn()
 }));
 
-vi.mock('../../../src/services/knowledge/DocumentationParser.js', () => ({
+vi.mock('@memento/knowledge', () => ({
   DocumentationParser: vi.fn()
 }));
 

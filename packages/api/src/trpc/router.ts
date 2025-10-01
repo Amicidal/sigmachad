@@ -9,11 +9,8 @@ import { DatabaseService } from '@memento/database';
 import { FileWatcher } from '@memento/core';
 import { router, publicProcedure, TRPCContext } from './base.js';
 import type { FastifyRequest } from 'fastify';
-import {
-  authenticateRequest,
-  authenticateHeaders,
-  type AuthContext,
-} from '../middleware/authentication.js';
+import { authenticateRequest, authenticateHeaders } from '../middleware/authentication.js';
+import type { AuthContext } from '@memento/shared-types';
 
 // Create tRPC context
 export const createTRPCContext = async (opts: {

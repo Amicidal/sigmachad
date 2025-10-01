@@ -615,7 +615,7 @@ export class ModuleManager${index} extends EventEmitter {
 
     // Set up monitoring
     this.pipeline.on('pipeline:error', (error: any) => {
-      // eslint-disable-line @typescript-eslint/no-explicit-any
+       
       this.metrics.errors.push({
         type: 'PIPELINE_ERROR',
         message: error.message,
@@ -623,12 +623,12 @@ export class ModuleManager${index} extends EventEmitter {
       });
     });
 
-    this.pipeline.on('parse:error', (error: any) => {
-      // eslint-disable-line @typescript-eslint/no-explicit-any
+    this.pipeline.on('pipeline:error', (error: any) => {
+       
       this.metrics.errors.push({
-        type: 'PARSE_ERROR',
-        message: error.error,
-        context: { filePath: error.filePath },
+        type: 'PIPELINE_ERROR',
+        message: error.message ?? String(error),
+        context: { stack: error.stack },
       });
     });
 

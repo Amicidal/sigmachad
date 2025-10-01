@@ -184,7 +184,7 @@ export async function registerAdminUIRoutes(
         async function post(url, body) {
           const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
           const txt = await res.text();
-          let json = null; try { json = JSON.parse(txt); } catch {}
+          let json = null; try { json = JSON.parse(txt); } catch (e) { /* intentional no-op: non-critical */ void 0; }
           return { ok: res.ok, status: res.status, json, raw: txt };
         }
 

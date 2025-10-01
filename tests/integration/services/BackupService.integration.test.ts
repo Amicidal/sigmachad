@@ -8,11 +8,11 @@ import {
   BackupService,
   BackupOptions,
   BackupMetadata,
-} from "../../../src/services/backup/BackupService";
+} from "@memento/backup/BackupService";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/core/DatabaseService";
+} from "@memento/database/DatabaseService";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";

@@ -5,20 +5,18 @@
 
 import { readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
-import { KnowledgeGraphService } from '../KnowledgeGraphService.js';
-import { DatabaseService } from '../../core/DatabaseService.js';
-import { DocTokenizer, ParsedDocument } from './DocTokenizer.js';
-import { IntentExtractor } from './IntentExtractor.js';
+import { KnowledgeGraphService } from '@memento/knowledge/orchestration/KnowledgeGraphService';
+import { DatabaseService } from '@memento/database/DatabaseService';
+import { DocTokenizer, ParsedDocument } from '@memento/knowledge/embeddings/DocTokenizer';
+import { IntentExtractor } from '@memento/knowledge/analysis/IntentExtractor';
 import {
   DocumentationNode,
   BusinessDomain,
   SemanticCluster,
-  Entity,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 import {
   RelationshipType,
-  DocumentationRelationship,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 export interface SyncResult {
   processedFiles: number;
@@ -135,11 +133,12 @@ export class SyncOrchestrator {
     const docEntity: DocumentationNode = {
       id: `doc_${document.docHash}`,
       name: document.title,
+      title: document.title,
       type: 'documentation',
       path: document.metadata?.filePath || '',
       content: document.content,
-      docType: document.docType,
-      docIntent: document.docIntent,
+      docType: this.mapDocType(document.docType),
+      docIntent: this.mapDocIntent(document.docIntent),
       docVersion: document.docVersion,
       docHash: document.docHash,
       docSource: document.docSource,
@@ -163,7 +162,7 @@ export class SyncOrchestrator {
   private async createOrUpdateDomainEntity(
     domainName: string,
     document: ParsedDocument,
-    content: string
+    _content: string
   ): Promise<void> {
     const domainPath = this.normalizeDomainPath(domainName);
     const domainEntity: BusinessDomain = {
@@ -172,9 +171,10 @@ export class SyncOrchestrator {
       type: 'business-domain',
       path: domainPath,
       description: `Business domain: ${domainName}`,
-      criticality: this.intentExtractor.inferDomainCriticality(
-        domainName,
-        content
+      criticality: this.mapDomainCriticality(
+        this.intentExtractor.inferDocIntent(document.metadata?.filePath || '', document.docType) === 'governance'
+          ? 'high'
+          : 'medium'
       ),
       stakeholders: document.stakeholders,
       keyProcesses: [], // Would be extracted from content
@@ -194,12 +194,12 @@ export class SyncOrchestrator {
       id: `rel_doc_domain_${document.docHash}_${domainPath}`,
       fromEntityId: docEntityId,
       toEntityId: domainEntity.id,
-      type: RelationshipType.DOCUMENTS,
-      properties: {
-        confidence: 0.8,
-        source: 'parser',
-        lastSeen: new Date(),
-      },
+      type: RelationshipType.BELONGS_TO_DOMAIN,
+      confidence: 0.8,
+      metadata: { source: 'parser', lastSeen: new Date() },
+      created: new Date(),
+      lastModified: new Date(),
+      version: 1,
     });
   }
 
@@ -219,6 +219,7 @@ export class SyncOrchestrator {
           .replace(/\s+/g, '_')}`,
         name: cluster.name,
         type: 'semantic-cluster',
+        path: `clusters/${document.docHash}/${cluster.name.replace(/\s+/g, '_')}`,
         description: cluster.description,
         concepts: cluster.concepts,
         confidence: cluster.confidence,
@@ -238,11 +239,11 @@ export class SyncOrchestrator {
         fromEntityId: `doc_${document.docHash}`,
         toEntityId: clusterEntity.id,
         type: RelationshipType.CONTAINS,
-        properties: {
-          confidence: cluster.confidence,
-          source: 'parser',
-          lastSeen: new Date(),
-        },
+        confidence: cluster.confidence,
+        metadata: { source: 'parser', lastSeen: new Date() },
+        created: new Date(),
+        lastModified: new Date(),
+        version: 1,
       });
     }
   }
@@ -264,14 +265,14 @@ export class SyncOrchestrator {
     // First, find documents matching the query
     const documents = await this.kgService.searchEntities({
       query,
-      types: ['documentation'],
-      limit: limit * 2, // Get more candidates for scoring
+      limit: limit * 2,
     });
 
     const results: SearchResult[] = [];
 
     for (const result of documents) {
       const document = result.entity as DocumentationNode;
+      if (!document || document.type !== 'documentation') continue;
       const relevanceScore = this.calculateRelevanceScore(query, document);
       const matchedSections = this.findMatchedSections(query, document.content);
 
@@ -328,7 +329,7 @@ export class SyncOrchestrator {
   /**
    * Update freshness tracking for documents
    */
-  private async updateFreshnessTracking(docsPath: string): Promise<void> {
+  private async updateFreshnessTracking(_docsPath: string): Promise<void> {
     const freshnessWindow = this.getFreshnessWindowDays();
 
     // Mark relationships as potentially stale if not seen recently
@@ -387,7 +388,8 @@ export class SyncOrchestrator {
     document: DocumentationNode
   ): number {
     const queryLower = query.toLowerCase();
-    const titleLower = document.name.toLowerCase();
+    // Prefer required title over optional name to avoid undefined access
+    const titleLower = document.title.toLowerCase();
     const contentLower = document.content.toLowerCase();
 
     let score = 0;
@@ -449,6 +451,44 @@ export class SyncOrchestrator {
    */
   private getFreshnessWindowDays(): number {
     return parseInt(process.env.DOC_FRESHNESS_WINDOW_DAYS || '30');
+  }
+
+  // Map ParsedDocument docType to shared DocumentationNodeType
+  private mapDocType(docType: ParsedDocument['docType']): DocumentationNode['docType'] {
+    switch (docType) {
+      case 'api-doc':
+        return 'api-docs';
+      case 'readme':
+      case 'architecture':
+      case 'user-guide':
+      case 'design-doc':
+        return docType as any;
+      case 'changelog':
+      case 'other':
+      default:
+        return 'user-guide';
+    }
+  }
+
+  // Map ParsedDocument docIntent to shared DocumentationIntent
+  private mapDocIntent(intent: ParsedDocument['docIntent']): DocumentationNode['docIntent'] {
+    switch (intent) {
+      case 'governance':
+      case 'ai-context':
+      case 'mixed':
+        return intent as any;
+      case 'reference':
+      case 'tutorial':
+      default:
+        return 'mixed';
+    }
+  }
+
+  // Map severity-style domain criticality to shared enum
+  private mapDomainCriticality(level: 'low' | 'medium' | 'high' | 'critical'): BusinessDomain['criticality'] {
+    if (level === 'high' || level === 'critical') return 'core';
+    if (level === 'medium') return 'supporting';
+    return 'utility';
   }
 
   /**

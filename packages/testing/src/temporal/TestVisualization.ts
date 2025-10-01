@@ -270,11 +270,16 @@ export class TestVisualization implements ITestVisualization {
     }));
 
     // Process relationships
-    const processedRelationships = relationships.map(rel => ({
+    const processedRelationships: Array<{
+      timestamp: Date;
+      action: 'added' | 'modified' | 'removed';
+      relationshipType: string;
+      confidence: number;
+    }> = relationships.map(rel => ({
       timestamp: rel.validFrom,
-      action: 'added' as const,
-      relationshipType: rel.type,
-      confidence: rel.confidence
+      action: 'added',
+      relationshipType: String(rel.type),
+      confidence: (rel as any).confidence ?? 1,
     }));
 
     // Add relationship end events
@@ -557,6 +562,9 @@ export class TestVisualization implements ITestVisualization {
 
       for (const exec of sortedExecutions) {
         let value: number | undefined;
+        const extraPerf = (exec as any)?.metadata?.additional?.performance as
+          | Record<string, any>
+          | undefined;
 
         switch (metricName) {
           case 'duration':
@@ -566,13 +574,13 @@ export class TestVisualization implements ITestVisualization {
             value = exec.coverage?.overall;
             break;
           case 'memory':
-            value = exec.performance?.memory;
+            value = (extraPerf?.memory ?? extraPerf?.memoryUsage) as number | undefined;
             break;
           case 'cpu':
-            value = exec.performance?.cpu;
+            value = (extraPerf?.cpu ?? extraPerf?.cpuUsage) as number | undefined;
             break;
           default:
-            value = exec.performance?.[metricName as keyof typeof exec.performance] as number;
+            value = typeof extraPerf?.[metricName] === 'number' ? (extraPerf?.[metricName] as number) : undefined;
         }
 
         if (value !== undefined) {

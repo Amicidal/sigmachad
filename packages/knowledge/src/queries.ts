@@ -2,7 +2,7 @@
  * Shared Cypher query utilities for analysis operations
  */
 
-import { RelationshipType } from '@memento/shared-types.js';
+// (no imports needed)
 
 export interface TraversalOptions {
   startNodeId: string;
@@ -20,14 +20,7 @@ export interface PathExpansionOptions extends TraversalOptions {
  * Build APOC path expansion query
  */
 export function buildPathExpansionQuery(options: PathExpansionOptions): string {
-  const {
-    startNodeId,
-    relationshipTypes,
-    maxDepth,
-    direction = 'OUTGOING',
-    nodeFilter,
-    uniqueness = 'NODE_GLOBAL',
-  } = options;
+  const { relationshipTypes, nodeFilter, uniqueness = 'NODE_GLOBAL' } = options;
 
   const relFilter =
     relationshipTypes.length > 0
@@ -157,7 +150,7 @@ export function buildCycleDetectionQuery(maxDepth: number): string {
 /**
  * Build entity statistics queries
  */
-export function buildEntityStatsQueries(entityId: string) {
+export function buildEntityStatsQueries(_entityId: string) {
   return {
     byType: `
       MATCH (e:Entity {id: $entityId})-[r]->()
@@ -185,7 +178,7 @@ export function buildEntityStatsQueries(entityId: string) {
 /**
  * Build impact analysis queries
  */
-export function buildImpactQueries(entityIds: string[], maxDepth: number) {
+export function buildImpactQueries(_entityIds: string[], _maxDepth: number) {
   return {
     directImpact: `
       UNWIND $entityIds AS entityId

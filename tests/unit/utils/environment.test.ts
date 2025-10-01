@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { sanitizeEnvironment } from '@/utils/environment';
+import { sanitizeEnvironment } from '@memento/core/utils/environment';
 
 describe('sanitizeEnvironment', () => {
   it('preserves production shard suffixes', () => {

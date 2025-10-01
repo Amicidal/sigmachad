@@ -6,9 +6,9 @@
  */
 
 import { EventEmitter } from 'events';
-import { Neo4jConfig } from '../graph/Neo4jService';
-import { RelationshipType } from '@memento/shared-types.js';
-import { ServiceRegistry } from './ServiceRegistry';
+import { Neo4jConfig } from '../graph/Neo4jService.js';
+import { RelationshipType } from '@memento/shared-types';
+import { ServiceRegistry } from './ServiceRegistry.js';
 import { EventOrchestrator } from './EventOrchestrator';
 import { GraphInitializer } from '../graph/GraphInitializer';
 import {
@@ -31,18 +31,18 @@ interface KnowledgeGraphDependencies {
 }
 
 // Import types
-import { Entity } from '@memento/shared-types.js';
+import { Entity } from '@memento/shared-types';
 import {
   GraphRelationship,
   RelationshipQuery,
   PathQuery,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 import {
   GraphSearchRequest,
   ImpactAnalysisRequest,
   ImpactAnalysis,
   DependencyAnalysis,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 export class KnowledgeGraphService extends EventEmitter {
   private registry: ServiceRegistry;
@@ -96,15 +96,15 @@ export class KnowledgeGraphService extends EventEmitter {
     this.relationshipManager = new RelationshipManager(this.relationships);
     this.searchManager = new SearchManager(this.searchService);
     this.historyManager = new HistoryManager(this.history, this.neo4j);
-    this.analysisManager = new AnalysisManager(this.analysis);
+    this.analysisManager = new AnalysisManager(this.analysis as any);
 
     // Initialize event orchestrator
     this.eventOrchestrator = new EventOrchestrator(
       this.entities,
       this.relationships,
       this.searchService,
-      this.analysis
-    );
+      this.analysis as any
+      );
 
     // Forward events from orchestrator
     this.eventOrchestrator.on('entity:created', (data) =>
@@ -181,7 +181,7 @@ export class KnowledgeGraphService extends EventEmitter {
 
   async listEntities(
     options?: any
-  ): Promise<{ entities?: Entity[]; items: Entity[]; total: number }> {
+  ): Promise<{ entities?: Entity[]; items: Entity[]; total: number; nextCursor?: string }> {
     return this.entityManager.listEntities(options);
   }
 
@@ -451,6 +451,10 @@ export class KnowledgeGraphService extends EventEmitter {
     return this.searchManager.getEntityExamples(entityId);
   }
 
+  async getSearchStats(): Promise<import('@memento/shared-types').SearchStats> {
+    return this.searchManager.getSearchStats();
+  }
+
   async upsertEdgeEvidenceBulk(updates: any[]): Promise<void> {
     return this.relationshipManager.upsertEdgeEvidenceBulk(updates);
   }
@@ -675,28 +679,42 @@ export class KnowledgeGraphService extends EventEmitter {
       const adapter = createKnowledgeGraphAdapter(this);
 
       // Configure the pipeline
-      const pipelineConfig = {
-        batchSize: options.batchSize || 100,
-        maxConcurrency: options.maxConcurrency || 4,
-        queueConfig: {
-          maxSize: 10000,
+      const pipelineConfig: import('@memento/shared-types').PipelineConfig = {
+        eventBus: {
+          type: 'memory',
           partitions: 4,
-          persistenceConfig: {
-            enabled: false, // In-memory for now
-          },
         },
-        workerConfig: {
-          poolSize: options.maxConcurrency || 4,
-          taskTimeout: 30000,
+        workers: {
+          parsers: Math.max(1, Math.floor((options.maxConcurrency || 4) / 2)),
+          entityWorkers: 1,
+          relationshipWorkers: 1,
+          embeddingWorkers: options.skipEmbeddings ? 0 : 1,
         },
-        batchConfig: {
-          maxBatchSize: options.batchSize || 100,
+        batching: {
+          entityBatchSize: options.batchSize || 100,
+          relationshipBatchSize: options.batchSize || 100,
+          embeddingBatchSize: 25,
+          timeoutMs: 1000,
+          maxConcurrentBatches: options.maxConcurrency || 4,
           flushInterval: 1000,
-          enableCompression: false,
         },
-        enrichmentConfig: {
-          enableEmbeddings: !options.skipEmbeddings,
-          batchSize: 25,
+        queues: {
+          maxSize: 10000,
+          partitionCount: 4,
+          batchSize: options.batchSize || 100,
+          batchTimeout: 1000,
+          retryAttempts: 3,
+          retryDelay: 1000,
+          persistenceConfig: { enabled: false, flushInterval: 2000 },
+        },
+        monitoring: {
+          metricsInterval: 5000,
+          healthCheckInterval: 10000,
+          alertThresholds: {
+            queueDepth: 1000,
+            latency: 30000,
+            errorRate: 0.05,
+          },
         },
       };
 
@@ -723,7 +741,7 @@ export class KnowledgeGraphService extends EventEmitter {
         }
       });
 
-      pipeline.on('error', (error: any) => {
+      pipeline.on('pipeline:error', (error: any) => {
         errors.push({
           file: error.context?.filePath || 'unknown',
           error: error.message || 'Unknown error',

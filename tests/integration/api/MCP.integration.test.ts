@@ -6,10 +6,10 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { FastifyInstance } from 'fastify';
-import { APIGateway } from '../../../src/api/APIGateway.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { DatabaseService } from '../../../src/services/core/DatabaseService.js';
-import { MCPRouter } from '../../../src/api/mcp-router.js';
+import { APIGateway } from '@memento/api/APIGateway';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database/DatabaseService';
+import { MCPRouter } from '@memento/api/mcp-router';
 import {
   setupTestDatabase,
   cleanupTestDatabase,

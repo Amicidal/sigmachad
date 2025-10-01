@@ -6,7 +6,7 @@
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '@memento/knowledge';
 import { DatabaseService } from '@memento/database';
-import { RelationshipType } from '@memento/core';
+import { RelationshipType } from '@memento/shared-types';
 import {
   GraphSearchRequest,
   GraphSearchResult,
@@ -14,26 +14,26 @@ import {
   DependencyAnalysis,
 } from '@memento/shared-types';
 
-const GRAPH_ENTITY_TYPE_LOOKUP: Record<string, string> = {
-  change: 'change',
-  directory: 'directory',
-  file: 'file',
-  module: 'module',
-  spec: 'spec',
-  symbol: 'symbol',
-  test: 'test',
-};
+const GRAPH_ENTITY_TYPE_LOOKUP = new Map<string, string>([
+  ['change', 'change'],
+  ['directory', 'directory'],
+  ['file', 'file'],
+  ['module', 'module'],
+  ['spec', 'spec'],
+  ['symbol', 'symbol'],
+  ['test', 'test'],
+]);
 
-const GRAPH_SYMBOL_KIND_LOOKUP: Record<string, string> = {
-  class: 'class',
-  function: 'function',
-  interface: 'interface',
-  method: 'method',
-  property: 'property',
-  typealias: 'typeAlias',
-  unknown: 'unknown',
-  variable: 'variable',
-};
+const GRAPH_SYMBOL_KIND_LOOKUP = new Map<string, string>([
+  ['class', 'class'],
+  ['function', 'function'],
+  ['interface', 'interface'],
+  ['method', 'method'],
+  ['property', 'property'],
+  ['typealias', 'typeAlias'],
+  ['unknown', 'unknown'],
+  ['variable', 'variable'],
+]);
 
 const parseBooleanParam = (value: unknown): boolean | undefined => {
   if (typeof value === 'boolean') return value;
@@ -880,6 +880,7 @@ export async function registerGraphRoutes(
         }
 
         // Perform the search using KnowledgeGraphService
+        const startedAt = Date.now();
         const entities = await kgService.search(params);
 
         // Get relationships if includeRelated is true
@@ -916,7 +917,10 @@ export async function registerGraphRoutes(
           relationships,
           clusters,
           relevanceScore,
-        };
+          query: params,
+          executionTime: Math.max(1, Date.now() - startedAt),
+          totalMatches: entities.length,
+        } as GraphSearchResult;
 
         reply.send({
           success: true,
@@ -1138,15 +1142,19 @@ export async function registerGraphRoutes(
 
         if (typeParam) {
           const lowerType = typeParam.toLowerCase();
-          if (GRAPH_ENTITY_TYPE_LOOKUP[lowerType]) {
-            entityTypeFilter = GRAPH_ENTITY_TYPE_LOOKUP[lowerType];
-          } else if (GRAPH_SYMBOL_KIND_LOOKUP[lowerType]) {
-            entityTypeFilter = 'symbol';
-            symbolKindFilter = GRAPH_SYMBOL_KIND_LOOKUP[lowerType];
+          const mappedEntityType = GRAPH_ENTITY_TYPE_LOOKUP.get(lowerType);
+          if (mappedEntityType) {
+            entityTypeFilter = mappedEntityType;
           } else {
-            // Fall back to treating unknown types as symbol kinds for forward compatibility
-            entityTypeFilter = 'symbol';
-            symbolKindFilter = typeParam;
+            const mappedSymbolKind = GRAPH_SYMBOL_KIND_LOOKUP.get(lowerType);
+            if (mappedSymbolKind) {
+              entityTypeFilter = 'symbol';
+              symbolKindFilter = mappedSymbolKind;
+            } else {
+              // Fall back to treating unknown types as symbol kinds for forward compatibility
+              entityTypeFilter = 'symbol';
+              symbolKindFilter = typeParam;
+            }
           }
         }
 

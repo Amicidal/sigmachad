@@ -7,10 +7,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { TestVisualization } from '../TestVisualization.js';
-import { TestPredictiveAnalytics } from '../TestPredictiveAnalytics.js';
-import { TestDataStorage } from '../TestDataStorage.js';
-import { TestCIIntegration } from '../TestCIIntegration.js';
+import { TestVisualization } from '../temporal/TestVisualization.js';
+import { TestPredictiveAnalytics } from '../temporal/TestPredictiveAnalytics.js';
+import { TestDataStorage } from '../temporal/TestDataStorage.js';
+import { TestCIIntegration } from '../temporal/TestCIIntegration.js';
 import {
   TestExecutionRecord,
   TestEvolutionEvent,
@@ -19,7 +19,7 @@ import {
   TestStatus,
   TestType,
   TestRelationshipType
-} from '../TestTypes.js';
+} from '../temporal/TestTypes.js';
 
 describe('Enhanced Temporal Tracking Features', () => {
   let config: TestConfiguration;
@@ -426,7 +426,7 @@ describe('Enhanced Temporal Tracking Features', () => {
       expect(models).toHaveProperty('maintenanceModel');
 
       // Validate model structure
-      Object.values(models).forEach(model => {
+      Object.values(models).forEach((model: any) => {
         expect(model).toHaveProperty('id');
         expect(model).toHaveProperty('name');
         expect(model).toHaveProperty('version');
@@ -460,8 +460,7 @@ describe('Enhanced Temporal Tracking Features', () => {
     beforeEach(() => {
       dataStorage = new TestDataStorage({
         enableCompression: true,
-        compressionLevel: 6,
-        enableEncryption: false
+        compressionLevel: 6
       });
     });
 
@@ -670,14 +669,16 @@ function generateMockExecutions(count: number): TestExecutionRecord[] {
         functions: Math.random() * 0.2 + 0.8,
         statements: Math.random() * 0.3 + 0.7
       },
-      performance: {
-        memory: Math.floor(Math.random() * 100) + 50,
-        cpu: Math.random() * 50 + 10
-      },
       metadata: {
         testType: 'unit' as TestType,
         suiteId: `suite_${Math.floor(i / 20) + 1}`,
-        confidence: Math.random() * 0.3 + 0.7
+        confidence: Math.random() * 0.3 + 0.7,
+        additional: {
+          performance: {
+            memory: Math.floor(Math.random() * 100) + 50,
+            cpu: Math.random() * 50 + 10
+          }
+        }
       }
     });
   }
@@ -714,7 +715,7 @@ function generateMockEvents(count: number): TestEvolutionEvent[] {
 
 function generateMockRelationships(count: number): TestRelationship[] {
   const relationships: TestRelationship[] = [];
-  const relationshipTypes: TestRelationshipType[] = ['TESTS', 'IMPORTS', 'CALLS', 'DEPENDS_ON'];
+  const relationshipTypes: TestRelationshipType[] = ['TESTS', 'VALIDATES', 'COVERS', 'EXERCISES'];
 
   for (let i = 0; i < count; i++) {
     relationships.push({

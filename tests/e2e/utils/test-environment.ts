@@ -107,7 +107,7 @@ export class TestEnvironment {
 
   private async startApiServer(): Promise<void> {
     // Import and start the main application
-    const { default: createApp } = await import('../../../src/index');
+    const { default: createApp } = await import('@memento/main/index');
 
     this.services.api = await createApp({
       logger: { level: 'error' },

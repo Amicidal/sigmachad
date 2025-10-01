@@ -1,3 +1,4 @@
+// TODO(2025-09-30.35): Migrate dynamic session key access to typed Maps.
 /**
  * Enhanced Session Store with Performance Optimizations
  *
@@ -11,11 +12,9 @@ import {
   SessionDocument,
   SessionEvent,
   SessionCreationOptions,
-  RedisConfig,
   SessionError,
   SessionNotFoundError,
   ISessionStore,
-  RedisSessionData,
   SessionStats,
   EnhancedSessionConfig,
   BatchOperation,
@@ -486,14 +485,16 @@ export class EnhancedSessionStore
           : undefined,
       };
 
-      const redisData: Record<string, string | number> = {};
-      Object.entries(sessionData).forEach(([key, value]) => {
-        if (value !== undefined) {
-          redisData[key] = value;
-        }
-      });
+      const redisData = Object.fromEntries(
+        (Object.entries(sessionData) as Array<[
+          string,
+          string | number | undefined
+        ]>)
+          .filter(([, value]) => value !== undefined)
+          .map(([k, v]) => [k, v as string | number])
+      );
 
-      await client.hSet(sessionKey, redisData);
+      await client.hSet(sessionKey, redisData as Record<string, string | number>);
       await client.expire(sessionKey, ttl);
       await client.zAdd(eventsKey, { score: 0, value: 'INIT' });
       await client.expire(eventsKey, ttl);
@@ -530,20 +531,22 @@ export class EnhancedSessionStore
         throw new SessionNotFoundError(sessionId);
       }
 
-      const updateData: Record<string, string> = {};
-
+      const updateEntries: Array<[string, string]> = [];
       if (updates.agentIds) {
-        updateData.agentIds = JSON.stringify(updates.agentIds);
+        updateEntries.push(['agentIds', JSON.stringify(updates.agentIds)]);
       }
       if (updates.state) {
-        updateData.state = updates.state;
+        updateEntries.push(['state', updates.state]);
       }
       if (updates.metadata) {
-        updateData.metadata = this.serializeData(updates.metadata);
+        updateEntries.push(['metadata', this.serializeData(updates.metadata)]);
       }
 
-      if (Object.keys(updateData).length > 0) {
-        await client.hSet(sessionKey, updateData);
+      if (updateEntries.length > 0) {
+        await client.hSet(
+          sessionKey,
+          Object.fromEntries(updateEntries) as Record<string, string>
+        );
       }
     }, 'write');
   }
@@ -690,7 +693,7 @@ export class EnhancedSessionStore
         }
         break;
 
-      case 'delete':
+      case 'delete': {
         const deletePromises = operations.map((op) =>
           Promise.all([
             client.del(this.getSessionKey(op.sessionId)),
@@ -699,6 +702,7 @@ export class EnhancedSessionStore
         );
         await Promise.all(deletePromises);
         break;
+      }
 
       case 'addEvent':
         for (const op of operations) {
@@ -859,7 +863,7 @@ export class EnhancedSessionStore
 
   async subscribeToSession(
     sessionId: string,
-    callback: (message: any) => void
+    _callback: (message: any) => void
   ): Promise<void> {
     // Implementation would depend on having a dedicated subscription client
     // This is a placeholder for the interface
@@ -867,7 +871,7 @@ export class EnhancedSessionStore
   }
 
   async getStats(): Promise<SessionStats> {
-    const poolStats = this.connectionPool.getStats();
+    const _poolStats = this.connectionPool.getStats();
 
     return {
       activeSessions: 0, // Would need to be calculated
@@ -926,3 +930,5 @@ export class EnhancedSessionStore
     await this.shutdown();
   }
 }
+ 
+// TODO(2025-09-30.35): Migrate dynamic session key access to typed Maps.

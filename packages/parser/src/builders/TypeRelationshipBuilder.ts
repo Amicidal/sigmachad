@@ -150,7 +150,7 @@ export class TypeRelationshipBuilder {
                     if (hit) toId = hit.id;
                   }
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               relationships.push(
                 this.createRelationship(
                   symbolEntity.id,
@@ -204,7 +204,7 @@ export class TypeRelationshipBuilder {
                   const list = this.nameIndex.get(nm) || [];
                   if (list.length === 1) placeholder = list[0].id;
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               relationships.push(
                 this.createRelationship(
                   symbolEntity.id,
@@ -246,7 +246,7 @@ export class TypeRelationshipBuilder {
                     if (hit) toId = hit.id;
                   }
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               relationships.push(
                 this.createRelationship(
                   symbolEntity.id,
@@ -294,7 +294,7 @@ export class TypeRelationshipBuilder {
                   const list = this.nameIndex.get(nm) || [];
                   if (list.length === 1) placeholder = list[0].id;
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               relationships.push(
                 this.createRelationship(
                   symbolEntity.id,
@@ -368,7 +368,7 @@ export class TypeRelationshipBuilder {
               const tc = this.resolveWithTypeChecker(expr as any, sourceFile);
               if (tc) toId = `file:${tc.fileRel}:${tc.name}`;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           // Try import map using root of accessPath
           if (!toId && importMap) {
             const root = accessPath.split(/[.(]/)[0];
@@ -388,7 +388,7 @@ export class TypeRelationshipBuilder {
               line = lc.line;
               column = lc.column;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           const meta = {
             kind: 'decorator',
             accessPath,
@@ -404,9 +404,9 @@ export class TypeRelationshipBuilder {
               meta
             )
           );
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     return relationships;
   }
@@ -454,7 +454,7 @@ export class TypeRelationshipBuilder {
                 // mark ambiguous in metadata (set below)
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           let line: number | undefined;
           let column: number | undefined;
           try {
@@ -464,7 +464,7 @@ export class TypeRelationshipBuilder {
               line = lc.line;
               column = lc.column;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           const meta: any = {
             inferred: true,
             kind: 'type',
@@ -480,7 +480,7 @@ export class TypeRelationshipBuilder {
                 meta.candidateCount = list.length;
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           relationships.push(
             this.createRelationship(
               symbolEntity.id,
@@ -498,12 +498,12 @@ export class TypeRelationshipBuilder {
           let tname = '';
           try {
             tname = (t?.getSymbol?.()?.getName?.() || '').toString();
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           if (!tname) {
             try {
               tname =
                 typeof t?.getText === 'function' ? String(t.getText()) : '';
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
           }
           if (tname) tname = String(tname).split(/[<|&]/)[0].trim();
           if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
@@ -528,7 +528,7 @@ export class TypeRelationshipBuilder {
                 const list = this.nameIndex.get(nm) || [];
                 if (list.length === 1) toId = list[0].id;
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             const meta: any = {
               inferred: true,
               kind: 'type',
@@ -544,9 +544,9 @@ export class TypeRelationshipBuilder {
               )
             );
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     try {
       // PARAM_TYPE per parameter
@@ -578,7 +578,7 @@ export class TypeRelationshipBuilder {
                 const list = this.nameIndex.get(nm) || [];
                 if (list.length === 1) toId = list[0].id;
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             let pline: number | undefined;
             let pcol: number | undefined;
             try {
@@ -588,7 +588,7 @@ export class TypeRelationshipBuilder {
                 pline = lc.line;
                 pcol = lc.column;
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             const meta: any = { inferred: true, kind: 'type', param: pname };
             relationships.push(
               this.createRelationship(
@@ -629,12 +629,12 @@ export class TypeRelationshipBuilder {
             let tname = '';
             try {
               tname = (t?.getSymbol?.()?.getName?.() || '').toString();
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             if (!tname) {
               try {
                 tname =
                   typeof t?.getText === 'function' ? String(t.getText()) : '';
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
             }
             if (tname) tname = String(tname).split(/[<|&]/)[0].trim();
             if (tname && tname.length >= noiseConfig.AST_MIN_NAME_LENGTH) {
@@ -659,7 +659,7 @@ export class TypeRelationshipBuilder {
                   const list = this.nameIndex.get(nm) || [];
                   if (list.length === 1) toId = list[0].id;
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               const meta: any = {
                 inferred: true,
                 kind: 'type',
@@ -699,10 +699,10 @@ export class TypeRelationshipBuilder {
                 )
               );
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     return relationships;
   }

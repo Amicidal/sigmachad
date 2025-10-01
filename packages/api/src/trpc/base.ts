@@ -2,8 +2,9 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { z } from 'zod';
 import { KnowledgeGraphService, ASTParser } from '@memento/knowledge';
-import { DatabaseService, FileWatcher } from '@memento/core';
-import type { AuthContext } from '../middleware/authentication.js';
+import { FileWatcher } from '@memento/core';
+import { DatabaseService } from '@memento/database';
+import type { AuthContext } from '@memento/shared-types';
 import { scopesSatisfyRequirement } from '../middleware/authentication.js';
 
 // tRPC context type shared across router and routes

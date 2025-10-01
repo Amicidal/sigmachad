@@ -7,10 +7,10 @@ import {
   ConflictResolution,
   Conflict,
   ConflictResolutionResult,
-} from "../../../src/services/scm/ConflictResolution";
-import { Entity } from "../../../src/models/entities";
-import { GraphRelationship, RelationshipType } from "../../../src/models/relationships";
-import { canonicalRelationshipId } from "../../../src/utils/codeEdges";
+} from "@memento/sync/scm/ConflictResolution";
+import { Entity } from "@memento/shared-types";
+import { GraphRelationship, RelationshipType } from "@memento/shared-types";
+import { canonicalRelationshipId } from "@memento/core/utils/codeEdges";
 
 class MockKnowledgeGraphService {
   entities = new Map<string, Entity>();

@@ -11,14 +11,14 @@ import {
   cleanupIsolatedServiceTest,
   IsolatedTestSetup,
 } from "../../test-utils/database-helpers";
-import { EntityServiceOGM } from "../../../src/services/knowledge/ogm/EntityServiceOGM";
-import { RelationshipServiceOGM } from "../../../src/services/knowledge/ogm/RelationshipServiceOGM";
-import { SearchServiceOGM } from "../../../src/services/knowledge/ogm/SearchServiceOGM";
-import { NeogmaService } from "../../../src/services/knowledge/ogm/NeogmaService";
-import { EmbeddingService } from "../../../src/services/knowledge/EmbeddingService";
-import { CodebaseEntity, RelationshipType } from "../../../src/models/entities";
-import { GraphRelationship } from "../../../src/models/relationships";
-import { GraphSearchRequest } from "../../../src/models/types";
+import { EntityServiceOGM } from "@memento/knowledge";
+import { RelationshipServiceOGM } from "@memento/knowledge";
+import { SearchServiceOGM } from "@memento/knowledge";
+import { NeogmaService } from "@memento/knowledge";
+import { EmbeddingService } from "@memento/knowledge";
+import { CodebaseEntity, RelationshipType } from "@memento/shared-types";
+import { GraphRelationship } from "@memento/shared-types";
+import { GraphSearchRequest } from "@memento/shared-types";
 
 const TEST_TIMEOUT = 60000; // 60 seconds for integration tests
 

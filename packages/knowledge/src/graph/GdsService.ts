@@ -1,3 +1,4 @@
+// security: avoid dynamic object indexing; map discriminated unions via switch
 /**
  * Graph Data Science Service
  * Handles GDS algorithms, path expansion, and graph analytics
@@ -15,6 +16,9 @@ export interface GdsAlgorithmConfig {
   similarityCutoff?: number;
   topK?: number;
   topN?: number;
+  // Additional creation helpers used by graph.create
+  nodeQuery?: string;
+  relationshipQuery?: string;
 }
 
 export interface PathExpandConfig {
@@ -216,13 +220,14 @@ export class GdsService extends EventEmitter {
   async calculateCentrality(
     algorithm: "degree" | "betweenness" | "closeness" = "degree"
   ): Promise<any> {
-    const algorithmMap = {
-      degree: "degree",
-      betweenness: "betweenness",
-      closeness: "closeness",
-    };
+    const algo =
+      algorithm === "degree"
+        ? "degree"
+        : algorithm === "betweenness"
+        ? "betweenness"
+        : "closeness";
 
-    return this.runGdsAlgorithm(algorithmMap[algorithm], {
+    return this.runGdsAlgorithm(algo, {
       nodeProjection: "*",
       relationshipProjection: "*",
       writeProperty: `${algorithm}Centrality`,

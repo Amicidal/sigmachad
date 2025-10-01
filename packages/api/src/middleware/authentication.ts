@@ -8,8 +8,6 @@ import jwt from 'jsonwebtoken';
 import { authenticateApiKey } from './api-key-registry.js';
 import { normalizeInputToArray, normalizeScopes } from './scopes.js';
 import type {
-  AuthTokenType,
-  AuthTokenError,
   AuthenticatedUser,
   AuthAuditContext,
   AuthContext,
@@ -180,8 +178,9 @@ export function authenticateHeaders(
 
     const verification = authenticateApiKey(apiKeyHeader);
     if (!verification.ok) {
-      context.tokenError = verification.errorCode;
-      context.tokenErrorDetail = verification.message;
+      const v: any = verification as any;
+      context.tokenError = v.errorCode;
+      context.tokenErrorDetail = v.message;
       return context;
     }
 

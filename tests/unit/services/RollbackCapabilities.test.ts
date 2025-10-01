@@ -4,37 +4,50 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { DatabaseService } from '../../../src/services/core/DatabaseService';
+import { DatabaseService, type DatabaseConfig } from '@memento/database/DatabaseService';
 import { InMemoryKnowledgeGraphMock } from '../../test-utils/in-memory-kg';
 // Service under test
-import { RollbackCapabilities, RollbackPoint, RollbackResult } from '../../../src/services/scm/RollbackCapabilities';
+import { RollbackCapabilities, RollbackPoint, RollbackResult } from '@memento/sync/scm/RollbackCapabilities';
 
-import { Entity, GraphRelationship } from '../../../src/models/entities';
-import { RelationshipType } from '../../../src/models/relationships';
-import { File } from '../../../src/models/entities';
+import { Entity, GraphRelationship } from '@memento/shared-types';
+import { RelationshipType } from '@memento/shared-types';
+import { File } from '@memento/shared-types';
+import { applyQdrantMock, createLightweightDatabaseMocks, type LightweightDatabaseMocks } from '../../test-utils/realistic-mocks';
 
 describe('RollbackCapabilities', () => {
   let rollbackCapabilities: RollbackCapabilities;
   let kg: InMemoryKnowledgeGraphMock;
   let dbService: DatabaseService;
+  let dbMocks: LightweightDatabaseMocks;
+  let dbConfig: DatabaseConfig;
 
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    // Use realistic database mocks with no failures/latency for determinism
-    const { RealisticFalkorDBMock, RealisticQdrantMock, RealisticPostgreSQLMock, RealisticRedisMock } = await import('../../test-utils/realistic-mocks');
-    dbService = new DatabaseService({
-      falkordb: { url: 'redis://test:6379', database: 1 },
-      qdrant: { url: 'http://qdrant:6333' },
-      postgresql: { connectionString: 'postgresql://user:pass@localhost:5432/db' },
+    // Use lightweight database mocks with deterministic behavior
+    dbMocks = createLightweightDatabaseMocks();
+    await dbMocks.qdrant.initialize();
+
+    dbConfig = {
+      neo4j: {
+        uri: 'bolt://localhost:7687',
+        username: 'neo4j',
+        password: 'password',
+        database: 'memento_test',
+      },
+      postgresql: {
+        connectionString: 'postgresql://user:pass@localhost:5432/db',
+      },
       redis: { url: 'redis://localhost:6379' },
-    } as any, {
-      falkorFactory: () => new RealisticFalkorDBMock({ failureRate: 0, latencyMs: 0, seed: 1 }),
-      qdrantFactory: () => new RealisticQdrantMock({ failureRate: 0, latencyMs: 0, seed: 1 }),
-      postgresFactory: () => new RealisticPostgreSQLMock({ failureRate: 0, latencyMs: 0, seed: 1 }),
-      redisFactory: () => new RealisticRedisMock({ failureRate: 0, latencyMs: 0, seed: 1 }),
+    };
+
+    dbService = new DatabaseService(dbConfig, {
+      neo4jFactory: () => dbMocks.neo4j,
+      postgresFactory: () => dbMocks.postgres,
+      redisFactory: () => dbMocks.redis,
     });
     await dbService.initialize();
+    applyQdrantMock(dbService, dbMocks.qdrant);
 
     // Use in-memory KG for deterministic entity/relationship behavior
     kg = new InMemoryKnowledgeGraphMock();

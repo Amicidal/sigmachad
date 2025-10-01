@@ -224,12 +224,20 @@ export class EmbeddingService {
       const results: EmbeddingResult[] = [];
       let totalTokens = 0;
 
-      for (let i = 0; i < inputs.length; i++) {
-        const input = inputs[i];
-        const embedding = response.data[i].embedding;
+      if (response.data.length !== inputs.length) {
+        throw new Error(
+          `Embedding response length (${response.data.length}) does not match inputs (${inputs.length}).`
+        );
+      }
+
+      for (const [i, input] of inputs.entries()) {
+        const dataItem = response.data.at(i);
+        if (!dataItem || !Array.isArray(dataItem.embedding)) {
+          throw new Error(`Missing embedding at index ${i}`);
+        }
 
         results.push({
-          embedding,
+          embedding: dataItem.embedding,
           content: input.content,
           entityId: input.entityId,
           model: this.config.model,
@@ -262,13 +270,16 @@ export class EmbeddingService {
    * Get cost per token for different models
    */
   private getCostPerToken(model: string): number {
-    const pricing: Record<string, number> = {
-      'text-embedding-3-small': 0.00002, // $0.02 per 1K tokens
-      'text-embedding-3-large': 0.00013, // $0.13 per 1K tokens
-      'text-embedding-ada-002': 0.0001,   // $0.10 per 1K tokens
-    };
-
-    return pricing[model] || 0.00002; // Default to smallest model pricing
+    switch (model) {
+      case 'text-embedding-3-small':
+        return 0.00002; // $0.02 per 1K tokens
+      case 'text-embedding-3-large':
+        return 0.00013; // $0.13 per 1K tokens
+      case 'text-embedding-ada-002':
+        return 0.0001; // $0.10 per 1K tokens
+      default:
+        return 0.00002; // Default to smallest model pricing
+    }
   }
 
   /**
@@ -301,17 +312,21 @@ export class EmbeddingService {
   generateEntityContent(entity: Entity): string {
     switch (entity.type) {
       case 'symbol':
-        const symbolEntity = entity as any;
-        if (symbolEntity.kind === 'function') {
-          return `${symbolEntity.path || ''} ${symbolEntity.signature || ''} ${symbolEntity.documentation || ''}`.trim();
-        } else if (symbolEntity.kind === 'class') {
-          return `${symbolEntity.path || ''} ${symbolEntity.name || ''} ${symbolEntity.documentation || ''}`.trim();
+        {
+          const symbolEntity = entity as any;
+          if (symbolEntity.kind === 'function') {
+            return `${symbolEntity.path || ''} ${symbolEntity.signature || ''} ${symbolEntity.documentation || ''}`.trim();
+          } else if (symbolEntity.kind === 'class') {
+            return `${symbolEntity.path || ''} ${symbolEntity.name || ''} ${symbolEntity.documentation || ''}`.trim();
+          }
+          return `${symbolEntity.path || ''} ${symbolEntity.signature || ''}`.trim();
         }
-        return `${symbolEntity.path || ''} ${symbolEntity.signature || ''}`.trim();
 
       case 'file':
-        const fileEntity = entity as any;
-        return `${fileEntity.path || ''} ${fileEntity.extension || ''} ${fileEntity.language || ''}`.trim();
+        {
+          const fileEntity = entity as any;
+          return `${fileEntity.path || ''} ${fileEntity.extension || ''} ${fileEntity.language || ''}`.trim();
+        }
 
       case 'documentation':
         return `${(entity as any).title || ''} ${(entity as any).content || ''}`.trim();

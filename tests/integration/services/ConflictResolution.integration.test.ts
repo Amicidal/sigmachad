@@ -7,17 +7,17 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   ConflictResolution,
   Conflict,
-} from "../../../src/services/scm/ConflictResolution";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/core/DatabaseService";
+} from "@memento/sync/scm/ConflictResolution";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
   checkDatabaseHealth,
 } from "../../test-utils/database-helpers";
-import { Entity } from "../../../src/models/entities";
-import { GraphRelationship, RelationshipType } from "../../../src/models/relationships";
+import { Entity } from "@memento/shared-types";
+import { GraphRelationship, RelationshipType } from "@memento/shared-types";
 
 describe("ConflictResolution Integration", () => {
   let dbService: DatabaseService;

@@ -665,7 +665,7 @@ export class TemporalMonitoring extends EventEmitter implements ITemporalMonitor
     };
   }
 
-  private async checkVisualizationHealth(): ComponentHealth {
+  private async checkVisualizationHealth(): Promise<ComponentHealth> {
     const responseTime = Math.random() * 100 + 50;
     const errorCount = Math.floor(Math.random() * 2);
 
@@ -681,7 +681,7 @@ export class TemporalMonitoring extends EventEmitter implements ITemporalMonitor
     };
   }
 
-  private async checkAnalyticsHealth(): ComponentHealth {
+  private async checkAnalyticsHealth(): Promise<ComponentHealth> {
     const responseTime = Math.random() * 200 + 100;
     const errorCount = Math.floor(Math.random() * 2);
 
@@ -697,7 +697,7 @@ export class TemporalMonitoring extends EventEmitter implements ITemporalMonitor
     };
   }
 
-  private async checkCIIntegrationHealth(): ComponentHealth {
+  private async checkCIIntegrationHealth(): Promise<ComponentHealth> {
     const responseTime = Math.random() * 80 + 20;
     const errorCount = Math.floor(Math.random() * 2);
 

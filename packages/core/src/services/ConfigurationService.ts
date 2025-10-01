@@ -1,24 +1,27 @@
+// TODO(2025-09-30.35): Validate config keys and avoid dynamic indexing.
 /**
  * Configuration Service for Memento
  * Manages system configuration, feature detection, and health monitoring
  */
 
-import type { IDatabaseService } from '@memento/shared-types';
-// Avoid a hard dependency on @memento/sync; use a minimal interface instead
-export interface ISynchronizationCoordinator {}
+import type { IDatabaseService, INeo4jService, ISynchronizationCoordinator } from '@memento/shared-types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
 const SYSTEM_CONFIG_DOCUMENT_ID = '00000000-0000-4000-8000-00000000c0f1';
 const SYSTEM_CONFIG_DOCUMENT_TYPE = 'system_config';
 
+type DatabaseComponentStatus = 'configured' | 'error' | 'unavailable';
+
 export interface SystemConfiguration {
   version: string;
   environment: string;
   databases: {
-    falkordb: 'configured' | 'error' | 'unavailable';
-    qdrant: 'configured' | 'error' | 'unavailable';
-    postgres: 'configured' | 'error' | 'unavailable';
+    neo4j: DatabaseComponentStatus;
+    qdrant: DatabaseComponentStatus;
+    postgres: DatabaseComponentStatus;
+    /** @deprecated Retained for backwards compatibility until consumers migrate */
+    falkordb?: DatabaseComponentStatus;
   };
   features: {
     websocket: boolean;
@@ -212,7 +215,7 @@ export class ConfigurationService {
     SystemConfiguration['databases']
   > {
     const status: SystemConfiguration['databases'] = {
-      falkordb: 'unavailable',
+      neo4j: 'unavailable',
       qdrant: 'unavailable',
       postgres: 'unavailable',
     };
@@ -220,16 +223,17 @@ export class ConfigurationService {
     // If database service is not available, return unavailable status
     const dbService = this.dbService;
     if (!dbService) {
+      status.falkordb = status.neo4j;
       return status;
     }
 
     try {
-      // Check FalkorDB
-      await dbService.falkordbQuery('MATCH (n) RETURN count(n) LIMIT 1');
-      status.falkordb = 'configured';
+      // Check Neo4j graph database availability
+      await dbService.graphQuery('MATCH (n) RETURN count(n) AS total LIMIT 1');
+      status.neo4j = 'configured';
     } catch (error) {
-      console.warn('FalkorDB connection check failed:', error);
-      status.falkordb = 'error';
+      console.warn('Neo4j connection check failed:', error);
+      status.neo4j = 'error';
     }
 
     try {
@@ -250,6 +254,9 @@ export class ConfigurationService {
       console.warn('PostgreSQL connection check failed:', error);
       status.postgres = 'error';
     }
+
+    // Maintain deprecated compatibility field during migration
+    status.falkordb = status.neo4j;
 
     return status;
   }
@@ -273,7 +280,7 @@ export class ConfigurationService {
 
     try {
       // Check graph search capability
-      await dbService.falkordbQuery('MATCH (n) RETURN count(n) LIMIT 1');
+      await dbService.graphQuery('MATCH (n) RETURN count(n) AS total LIMIT 1');
       // If query succeeds without throwing, graph search is available
       features.graphSearch = true;
     } catch (error) {
@@ -488,18 +495,20 @@ export class ConfigurationService {
     target: Partial<T>,
     source: Partial<T>
   ): Partial<T> {
-    const result: Record<string, unknown> = { ...(target || {}) };
+    const base: Record<string, unknown> = { ...(target || {}) };
 
     if (!source || typeof source !== 'object') {
-      return result as Partial<T>;
+      return base as Partial<T>;
     }
 
-    for (const [key, value] of Object.entries(source)) {
-      if (value === undefined) {
-        continue;
-      }
+    const mergedEntries: Array<[string, unknown]> = [];
 
-      const current = result[key];
+    for (const [key, value] of Object.entries(source)) {
+      if (value === undefined) continue;
+
+      const current = Object.prototype.hasOwnProperty.call(base, key)
+        ? Object.getOwnPropertyDescriptor(base, key)?.value
+        : undefined;
 
       if (
         value &&
@@ -511,13 +520,16 @@ export class ConfigurationService {
           current && typeof current === 'object' && !Array.isArray(current)
             ? (current as Record<string, unknown>)
             : {};
-        result[key] = this.deepMergeConfig(currentObject, value as any);
+        mergedEntries.push([
+          key,
+          this.deepMergeConfig(currentObject, value as any),
+        ]);
       } else {
-        result[key] = value;
+        mergedEntries.push([key, value]);
       }
     }
 
-    return result as Partial<T>;
+    return { ...base, ...Object.fromEntries(mergedEntries) } as Partial<T>;
   }
 
   private async persistConfiguration(
@@ -545,43 +557,57 @@ export class ConfigurationService {
   }
 
   async getDatabaseHealth(): Promise<{
-    falkordb: any;
+    neo4j: any;
     qdrant: any;
     postgres: any;
+    falkordb?: any;
   }> {
     const dbService = this.dbService;
     if (!dbService) {
+      const unavailable = {
+        status: 'unavailable',
+        error: 'Database service not configured',
+      };
       return {
-        falkordb: {
-          status: 'unavailable',
-          error: 'Database service not configured',
-        },
-        qdrant: {
-          status: 'unavailable',
-          error: 'Database service not configured',
-        },
-        postgres: {
-          status: 'unavailable',
-          error: 'Database service not configured',
-        },
+        neo4j: unavailable,
+        qdrant: unavailable,
+        postgres: unavailable,
+        falkordb: unavailable,
       };
     }
 
     const health = {
-      falkordb: null as any,
+      neo4j: null as any,
       qdrant: null as any,
       postgres: null as any,
     };
 
     try {
-      // Get FalkorDB stats
-      const falkordbStats = await dbService.falkordbQuery('INFO');
-      health.falkordb = {
-        status: 'healthy',
-        stats: falkordbStats,
-      };
+      // Prefer direct health check when exposed by the Neo4j service
+      const graphService = dbService.getGraphService() as INeo4jService;
+      const neo4jHealthy =
+        typeof graphService.healthCheck === 'function'
+          ? await graphService.healthCheck()
+          : true;
+
+      const countResult = await dbService.graphQuery(
+        'MATCH (n) RETURN count(n) AS total LIMIT 1'
+      );
+      const nodeCount = countResult.data?.[0]?.[0] ?? 0;
+
+      health.neo4j = neo4jHealthy
+        ? {
+            status: 'healthy',
+            nodes: nodeCount,
+            driver: graphService.getDriver?.(),
+          }
+        : {
+            status: 'error',
+            nodes: nodeCount,
+            error: 'Neo4j health check returned false',
+          };
     } catch (error) {
-      health.falkordb = {
+      health.neo4j = {
         status: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
       };
@@ -625,7 +651,11 @@ export class ConfigurationService {
       };
     }
 
-    return health;
+    // Populate deprecated field for consumers awaiting migration
+    return {
+      ...health,
+      falkordb: health.neo4j,
+    };
   }
 
   async getEnvironmentInfo(): Promise<{
@@ -703,11 +733,9 @@ export class ConfigurationService {
     // Check database configurations
     const dbStatus = await this.checkDatabaseStatus();
 
-    if (dbStatus.falkordb === 'error') {
-      issues.push('FalkorDB connection is failing');
-      recommendations.push(
-        'Check FalkorDB server status and connection string'
-      );
+    if (dbStatus.neo4j === 'error') {
+      issues.push('Neo4j connection is failing');
+      recommendations.push('Check Neo4j server status and connection string');
     }
 
     if (dbStatus.qdrant === 'error') {
@@ -722,12 +750,9 @@ export class ConfigurationService {
       );
     }
 
-    // Check environment variables
-    const requiredEnvVars = ['NODE_ENV'];
-    for (const envVar of requiredEnvVars) {
-      if (!process.env[envVar]) {
-        issues.push(`Required environment variable ${envVar} is not set`);
-      }
+    // Check environment variables (avoid dynamic indexing)
+    if (!process.env.NODE_ENV) {
+      issues.push('Required environment variable NODE_ENV is not set');
     }
 
     // Check memory usage
@@ -751,3 +776,5 @@ export class ConfigurationService {
     };
   }
 }
+ 
+// TODO(2025-09-30.35): Validate config keys and avoid dynamic indexing.

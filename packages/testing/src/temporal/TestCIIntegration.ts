@@ -372,7 +372,7 @@ export class TestCIIntegration implements ITestCIIntegration {
     configuration: string;
     steps: Array<{ name: string; action: string; parameters?: any }>;
   }> {
-    const steps = [
+    const steps: Array<{ name: string; action: string; parameters: Record<string, any> }> = [
       {
         name: 'Checkout code',
         action: 'actions/checkout@v3',
@@ -591,6 +591,18 @@ test_temporal:
         });
         break;
 
+      case 'test_completed':
+        processed = true;
+        actions.push({
+          type: 'ingest_results',
+          description: 'Ingested test results from webhook payload'
+        });
+        actions.push({
+          type: 'update_badges',
+          description: 'Updated status badges based on results'
+        });
+        break;
+
       default:
         processed = false;
     }
@@ -747,7 +759,7 @@ test_temporal:
     let color: string;
 
     switch (badgeType) {
-      case 'status':
+      case 'status': {
         const recentExecutions = executions.slice(-20);
         const passRate = recentExecutions.length > 0 ?
           recentExecutions.filter(exec => exec.status === 'pass').length / recentExecutions.length : 0;
@@ -767,8 +779,9 @@ test_temporal:
           color = '#e05d44';
         }
         break;
+      }
 
-      case 'coverage':
+      case 'coverage': {
         const coverageExecutions = executions.filter(exec => exec.coverage);
         const avgCoverage = coverageExecutions.length > 0 ?
           coverageExecutions.reduce((sum, exec) => sum + exec.coverage!.overall, 0) / coverageExecutions.length : 0;
@@ -786,8 +799,9 @@ test_temporal:
           color = '#e05d44';
         }
         break;
+      }
 
-      case 'flakiness':
+      case 'flakiness': {
         const windowSize = 20;
         const recentExecs = executions.slice(-windowSize);
         const failures = recentExecs.filter(exec => exec.status === 'fail').length;
@@ -806,8 +820,9 @@ test_temporal:
           color = '#e05d44';
         }
         break;
+      }
 
-      case 'performance':
+      case 'performance': {
         const durationData = executions
           .filter(exec => exec.duration)
           .map(exec => exec.duration!)
@@ -837,6 +852,7 @@ test_temporal:
           color = '#e05d44';
         }
         break;
+      }
 
       default:
         label = 'tests';

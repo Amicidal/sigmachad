@@ -138,7 +138,7 @@ export const PERFORMANCE_RELATIONSHIP_TYPES = [
   RelationshipType.PERFORMANCE_REGRESSION,
 ] as const;
 
-const PERFORMANCE_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
+export const PERFORMANCE_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
   PERFORMANCE_RELATIONSHIP_TYPES
 );
 
@@ -159,7 +159,7 @@ export const SESSION_RELATIONSHIP_TYPES = [
   RelationshipType.DEPENDS_ON_CHANGE,
 ] as const;
 
-const SESSION_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
+export const SESSION_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
   SESSION_RELATIONSHIP_TYPES
 );
 
@@ -228,7 +228,7 @@ export const DOCUMENTATION_RELATIONSHIP_TYPES = [
 export type DocumentationRelationshipType =
   (typeof DOCUMENTATION_RELATIONSHIP_TYPES)[number];
 
-const DOCUMENTATION_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
+export const DOCUMENTATION_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
   DOCUMENTATION_RELATIONSHIP_TYPES
 );
 

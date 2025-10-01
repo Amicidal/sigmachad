@@ -1,3 +1,4 @@
+// security: avoid dynamic object indexing in record mapping
 /**
  * Neogma Service - OGM wrapper for Neo4j
  * Provides Neogma instance management and base configuration
@@ -5,7 +6,7 @@
 
 import { Neogma } from 'neogma';
 import { EventEmitter } from 'events';
-import { Neo4jConfig } from '../Neo4jService.js';
+import { Neo4jConfig } from '@memento/knowledge/graph/Neo4jService';
 
 export class NeogmaService extends EventEmitter {
   private neogma: Neogma;
@@ -64,13 +65,9 @@ export class NeogmaService extends EventEmitter {
     try {
       await this.connectionReady;
       const result = await this.neogma.queryRunner.run(query, params);
-      return result.records.map((record) => {
-        const obj: any = {};
-        record.keys.forEach((key) => {
-          obj[key] = record.get(key);
-        });
-        return obj;
-      });
+      return result.records.map((record) =>
+        Object.fromEntries(record.keys.map((key) => [key, record.get(key)]))
+      );
     } catch (error) {
       this.emit('error', { query, params, error });
       throw error;
@@ -89,3 +86,4 @@ export class NeogmaService extends EventEmitter {
     return this.connectionReady;
   }
 }
+ 

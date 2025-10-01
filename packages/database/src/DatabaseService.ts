@@ -18,14 +18,15 @@ import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
   SCMCommitRecord,
-} from '@memento/core/types/types.js';
-import type { PerformanceRelationship } from '@memento/core/models/relationships.js';
+} from '@memento/shared-types';
+import type { PerformanceRelationship } from '@memento/shared-types';
 import { Neo4jService } from './neo4j/Neo4jService.js';
 import { PostgreSQLService } from './postgres/PostgreSQLService.js';
 import { QdrantService } from './qdrant/QdrantService.js';
 import { RedisService } from './redis/RedisService.js';
 import {
   DatabaseQueryResult,
+  GraphQueryResult,
   FalkorDBQueryResult,
   TestSuiteResult,
   TestResult,
@@ -78,12 +79,18 @@ export class DatabaseService implements IDatabaseService {
     return this.redisService;
   }
 
-  // Backward compatibility methods for migration
-  getFalkorDBService(): INeo4jService {
+  // Primary graph service accessor
+  getGraphService(): INeo4jService {
     if (!this.initialized) {
       throw new Error('Database not initialized');
     }
     return this.neo4jService;
+  }
+
+  // Backward compatibility methods for migration
+  /** @deprecated Use getGraphService() instead */
+  getFalkorDBService(): INeo4jService {
+    return this.getGraphService();
   }
 
   getQdrantService(): { getClient(): unknown } {
@@ -338,37 +345,129 @@ export class DatabaseService implements IDatabaseService {
     console.log('✅ All database connections closed');
   }
 
-  // Neo4j graph operations (backwards compatible with FalkorDB interface)
+  // Neo4j graph operations (generic graph interface)
+  async graphQuery(
+    query: string,
+    params?: Record<string, unknown>,
+    options: { graph?: string } = {}
+  ): Promise<GraphQueryResult> {
+    if (!this.initialized) {
+      throw new Error('Database not initialized');
+    }
+
+    const rawResult = await this.neo4jService.query(query, params ?? {}, {
+      database: options.graph,
+    });
+
+    // Handle native Neo4j driver responses (records + summary)
+    if (
+      rawResult &&
+      typeof rawResult === 'object' &&
+      Array.isArray((rawResult as { records?: unknown[] }).records)
+    ) {
+      const records = (rawResult as {
+        records: Array<{ toObject: () => Record<string, unknown> }>;
+        summary?: Record<string, unknown>;
+      }).records;
+
+      const headers =
+        records.length > 0
+          ? Object.keys(records[0].toObject())
+          : undefined;
+
+      const data = records.map((record) =>
+        Object.values(record.toObject())
+      );
+
+      return {
+        headers,
+        data,
+        statistics: (rawResult as { summary?: Record<string, unknown> }).summary,
+      };
+    }
+
+    // Allow mocks to return GraphQueryResult-like objects directly
+    if (
+      rawResult &&
+      typeof rawResult === 'object' &&
+      ('headers' in rawResult || 'data' in rawResult || 'statistics' in rawResult)
+    ) {
+      const resultObject = rawResult as GraphQueryResult;
+      return {
+        headers: Array.isArray(resultObject.headers)
+          ? resultObject.headers
+          : undefined,
+        data: Array.isArray(resultObject.data) ? resultObject.data : undefined,
+        statistics: resultObject.statistics,
+      };
+    }
+
+    // Support lightweight mock outputs: arrays of objects or primitives
+    if (Array.isArray(rawResult)) {
+      if (rawResult.length === 0) {
+        return { data: [] };
+      }
+
+      const firstRow = rawResult[0];
+      if (firstRow && typeof firstRow === 'object' && !Array.isArray(firstRow)) {
+        const headers = Array.from(
+          new Set(
+            rawResult.flatMap((row) =>
+              Object.keys(row as Record<string, unknown>)
+            )
+          )
+        );
+
+        const data = rawResult.map((row) =>
+          headers.map((header) => (row as Record<string, unknown>)[header])
+        );
+
+        return { headers, data };
+      }
+
+      return {
+        data: rawResult.map((row) =>
+          Array.isArray(row) ? (row as unknown[]) : [row as unknown]
+        ),
+      };
+    }
+
+    if (rawResult == null) {
+      return { data: [] };
+    }
+
+    // Fallback: wrap primitive/object into single-row dataset
+    return {
+      data: [[rawResult as unknown]],
+    };
+  }
+
+  async graphCommand(
+    command: string,
+    ...args: unknown[]
+  ): Promise<GraphQueryResult> {
+    if (!this.initialized) {
+      throw new Error('Database not initialized');
+    }
+    return this.neo4jService.command(command, ...args);
+  }
+
+  // Backward compatibility aliases (deprecated)
+  /** @deprecated Use graphQuery() instead */
   async falkordbQuery(
     query: string,
     params?: Record<string, unknown>,
     options: { graph?: string } = {}
   ): Promise<FalkorDBQueryResult> {
-    if (!this.initialized) {
-      throw new Error('Database not initialized');
-    }
-    const result = await this.neo4jService.query(query, params || {}, {
-      database: options.graph,
-    });
-    // Convert Neo4j result to FalkorDB format
-    return {
-      headers:
-        result.records.length > 0
-          ? Object.keys(result.records[0].toObject())
-          : [],
-      data: result.records.map((r) => Object.values(r.toObject())),
-      statistics: result.summary,
-    };
+    return this.graphQuery(query, params, options);
   }
 
+  /** @deprecated Use graphCommand() instead */
   async falkordbCommand(
     command: string,
     ...args: unknown[]
   ): Promise<FalkorDBQueryResult> {
-    if (!this.initialized) {
-      throw new Error('Database not initialized');
-    }
-    return this.neo4jService.command(command, ...args);
+    return this.graphCommand(command, ...args);
   }
 
   // Neo4j vector operations (replaces Qdrant)
@@ -417,6 +516,37 @@ export class DatabaseService implements IDatabaseService {
     }
     // Return a compatibility wrapper for Qdrant operations
     return {
+      createCollection: async (_collectionName: string, _config: unknown) => {
+        // Neo4j backend does not require explicit collection creation.
+        // Ensure vector indexes exist; treat as idempotent no-op.
+        try {
+          await this.neo4jService.setupVectorIndexes();
+        } catch (_) {
+          // ignore setup errors here; vector indexes may already exist
+        }
+        return { status: 'ok' } as const;
+      },
+      deleteCollection: async (collectionName: string) => {
+        // Delete all vectors in the given collection by scanning and removing.
+        let offset = 0;
+        const pageSize = 200;
+        // Best-effort cleanup; ignore errors to match Qdrant semantics.
+         
+        while (true) {
+          const page = await this.neo4jService.scrollVectors(
+            collectionName,
+            pageSize,
+            offset
+          );
+          if (!page.points.length) break;
+          for (const p of page.points) {
+            await this.neo4jService.deleteVector(collectionName, p.id);
+          }
+          offset += page.points.length;
+          if (offset >= page.total) break;
+        }
+        return { status: 'ok' } as const;
+      },
       upsert: async (collection: string, data: unknown) => {
         const dataObj = data as any;
         const { points } = dataObj;
@@ -448,10 +578,40 @@ export class DatabaseService implements IDatabaseService {
       },
       delete: async (collection: string, params: unknown) => {
         const paramsObj = params as any;
-        const ids = paramsObj.points || [];
+        if (Array.isArray(paramsObj.points) && paramsObj.points.length) {
+          for (const id of paramsObj.points) {
+            await this.neo4jService.deleteVector(collection, id);
+          }
+          return { status: 'ok' } as const;
+        }
+        // If a filter was provided (including empty filter {}), delete all
+        if (paramsObj.filter !== undefined) {
+          let offset = 0;
+          const pageSize = 200;
+           
+          while (true) {
+            const page = await this.neo4jService.scrollVectors(
+              collection,
+              pageSize,
+              offset
+            );
+            if (!page.points.length) break;
+            for (const p of page.points) {
+              await this.neo4jService.deleteVector(collection, p.id);
+            }
+            offset += page.points.length;
+            if (offset >= page.total) break;
+          }
+          return { status: 'ok' } as const;
+        }
+        return { status: 'ok' } as const;
+      },
+      deletePoints: async (collection: string, params: { points: string[] }) => {
+        const ids = Array.isArray(params?.points) ? params.points : [];
         for (const id of ids) {
           await this.neo4jService.deleteVector(collection, id);
         }
+        return { status: 'ok' } as const;
       },
       getCollections: async () => {
         // Return standard collections
@@ -544,6 +704,7 @@ export class DatabaseService implements IDatabaseService {
         neo4j: { status: 'unhealthy' },
         postgresql: { status: 'unhealthy' },
         redis: undefined,
+        qdrant: undefined,
       };
     }
 
@@ -552,6 +713,8 @@ export class DatabaseService implements IDatabaseService {
       this.neo4jService.healthCheck().catch(() => false),
       this.postgresqlService.healthCheck().catch(() => false),
       this.redisService?.healthCheck().catch(() => undefined) ??
+        Promise.resolve(undefined),
+      this.qdrantService?.healthCheck().catch(() => undefined) ??
         Promise.resolve(undefined),
     ];
 
@@ -578,6 +741,10 @@ export class DatabaseService implements IDatabaseService {
       redis:
         settledResults[2].status === 'fulfilled'
           ? toStatus(settledResults[2].value)
+          : undefined,
+      qdrant:
+        settledResults[3].status === 'fulfilled'
+          ? toStatus(settledResults[3].value)
           : undefined,
     };
   }

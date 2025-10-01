@@ -5,18 +5,20 @@
 
 import { vi } from "vitest";
 
+import type { DatabaseService } from "@memento/database/DatabaseService";
+
 import type {
-  IFalkorDBService,
+  INeo4jService,
   IQdrantService,
   IPostgreSQLService,
   IRedisService,
   BulkQueryMetrics,
-} from "../../src/services/database/interfaces";
+} from "@memento/shared-types";
 import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
-} from "../../src/models/types.js";
-import type { PerformanceRelationship } from "../../src/models/relationships.js";
+  PerformanceRelationship,
+} from "@memento/shared-types";
 
 interface MockConfig {
   failureRate?: number; // 0-100 percentage
@@ -28,7 +30,7 @@ interface MockConfig {
 }
 
 export interface LightweightDatabaseMocks {
-  falkor: IFalkorDBService;
+  neo4j: INeo4jService;
   qdrant: IQdrantService;
   postgres: IPostgreSQLService;
   redis: IRedisService;
@@ -41,19 +43,55 @@ export interface LightweightDatabaseMocks {
   };
 }
 
+export function applyQdrantMock(
+  service: DatabaseService,
+  qdrant: IQdrantService
+): void {
+  (service as any).qdrantService = qdrant;
+
+  (service as any).getQdrantService = () => ({
+    getClient: () => {
+      if (typeof (qdrant as { getClient?: () => unknown }).getClient === "function") {
+        const client = (qdrant as { getClient: () => unknown }).getClient();
+        if (!client) {
+          throw new Error("Qdrant mock did not return a client instance");
+        }
+        return client;
+      }
+      return qdrant;
+    },
+  });
+
+  if (typeof (qdrant as { getClient?: () => unknown }).getClient === "function") {
+    (service as any).getQdrantClient = () => (qdrant as { getClient: () => unknown }).getClient();
+  }
+}
+
 /**
  * Lightweight deterministic mocks for unit tests that only need happy-path behaviour.
  */
 export function createLightweightDatabaseMocks(): LightweightDatabaseMocks {
-  const falkor = {
+  const neo4j = {
     initialize: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
     isInitialized: vi.fn().mockReturnValue(true),
+    getDriver: vi.fn().mockReturnValue({ driver: "neo4j" }),
     query: vi.fn().mockResolvedValue([]),
     command: vi.fn().mockResolvedValue(undefined),
+    transaction: vi.fn().mockImplementation(async (callback) =>
+      callback({
+        run: vi.fn().mockResolvedValue([]),
+        commit: vi.fn().mockResolvedValue(undefined),
+        rollback: vi.fn().mockResolvedValue(undefined),
+      })
+    ),
     setupGraph: vi.fn().mockResolvedValue(undefined),
+    setupVectorIndexes: vi.fn().mockResolvedValue(undefined),
+    upsertVector: vi.fn().mockResolvedValue(undefined),
+    searchVector: vi.fn().mockResolvedValue([]),
+    scrollVectors: vi.fn().mockResolvedValue({ points: [], total: 0 }),
     healthCheck: vi.fn().mockResolvedValue(true),
-  } satisfies IFalkorDBService;
+  } satisfies INeo4jService;
 
   const qdrantClient = {
     getCollections: vi.fn().mockResolvedValue({ collections: [] }),
@@ -118,7 +156,7 @@ export function createLightweightDatabaseMocks(): LightweightDatabaseMocks {
   } satisfies IRedisService;
 
   return {
-    falkor,
+    neo4j,
     qdrant,
     postgres,
     redis,
@@ -127,14 +165,18 @@ export function createLightweightDatabaseMocks(): LightweightDatabaseMocks {
 }
 
 /**
- * Realistic FalkorDB mock with configurable failure scenarios
+ * Realistic Neo4j mock with configurable failure scenarios
  */
-export class RealisticFalkorDBMock implements IFalkorDBService {
+export class RealisticNeo4jMock implements INeo4jService {
   private initialized = false;
   private config: MockConfig;
   private queryCount = 0;
   private failureCount = 0;
   private rngState: number;
+  private vectorStore = new Map<
+    string,
+    Map<string, { vector: number[]; metadata?: Record<string, any> }>
+  >();
 
   private rng(): number {
     // Simple LCG for deterministic pseudo-random numbers
@@ -156,7 +198,7 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
 
   async initialize(): Promise<void> {
     if (this.config.connectionFailures && this.rng() * 100 < 50) {
-      throw new Error("FalkorDB connection failed: Connection refused");
+      throw new Error("Neo4j connection failed: Connection refused");
     }
 
     await this.simulateLatency();
@@ -166,26 +208,27 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
   async close(): Promise<void> {
     await this.simulateLatency();
     this.initialized = false;
+    this.vectorStore.clear();
   }
 
   isInitialized(): boolean {
     return this.initialized;
   }
 
-  getClient(): any {
+  getDriver(): any {
     if (!this.initialized) {
       return undefined;
     }
     return {
-      mockClient: true,
+      mockDriver: true,
       queryCount: this.queryCount,
-      sendCommand: vi.fn().mockResolvedValue("mock-command-result"),
+      close: vi.fn().mockResolvedValue(undefined),
     };
   }
 
   async query(query: string, params?: Record<string, any>): Promise<any> {
     if (!this.initialized) {
-      throw new Error("FalkorDB not initialized");
+      throw new Error("Neo4j not initialized");
     }
 
     await this.simulateLatency();
@@ -203,7 +246,6 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
 
     this.queryCount++;
 
-    // Simulate data corruption
     if (this.config.dataCorruption && this.rng() < 0.1) {
       return {
         corrupted: true,
@@ -212,21 +254,22 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
       };
     }
 
-    // Return realistic results based on query type
     if (query.includes("MATCH")) {
       return this.generateRealisticMatchResults();
-    } else if (query.includes("CREATE")) {
+    }
+    if (query.includes("CREATE")) {
       return { created: 1, properties: params };
-    } else if (query.includes("DELETE")) {
+    }
+    if (query.includes("DELETE")) {
       return { deleted: Math.floor(this.rng() * 10) };
     }
 
     return { query, params, result: "success" };
   }
 
-  async command(...args: any[]): Promise<any> {
+  async command(command: string, ...args: any[]): Promise<any> {
     if (!this.initialized) {
-      throw new Error("FalkorDB not initialized");
+      throw new Error("Neo4j not initialized");
     }
 
     await this.simulateLatency();
@@ -235,14 +278,132 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
       throw new Error("Command execution failed");
     }
 
-    return { args, result: "command-success" };
+    return { command, args, result: "command-success" };
+  }
+
+  async transaction<T>(
+    callback: (tx: {
+      run: (cypher: string, params?: Record<string, any>) => Promise<any>;
+      commit: () => Promise<void>;
+      rollback: () => Promise<void>;
+    }) => Promise<T>
+  ): Promise<T> {
+    if (!this.initialized) {
+      throw new Error("Neo4j not initialized");
+    }
+
+    await this.simulateLatency();
+
+    if (this.config.transactionFailures && this.rng() < 0.4) {
+      throw new Error("Neo4j transaction failed: deadlock detected");
+    }
+
+    const tx = {
+      run: (cypher: string, params?: Record<string, any>) =>
+        this.query(cypher, params),
+      commit: async () => {
+        await this.simulateLatency();
+      },
+      rollback: async () => {
+        await this.simulateLatency();
+      },
+    };
+
+    try {
+      const result = await callback(tx);
+      return result;
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   }
 
   async setupGraph(): Promise<void> {
     if (!this.initialized) {
-      throw new Error("FalkorDB not initialized");
+      throw new Error("Neo4j not initialized");
     }
     await this.simulateLatency();
+  }
+
+  async setupVectorIndexes(): Promise<void> {
+    if (!this.initialized) {
+      throw new Error("Neo4j not initialized");
+    }
+    await this.simulateLatency();
+  }
+
+  async upsertVector(
+    collection: string,
+    id: string,
+    vector: number[],
+    metadata?: Record<string, any>
+  ): Promise<void> {
+    if (!this.initialized) {
+      throw new Error("Neo4j not initialized");
+    }
+
+    await this.simulateLatency();
+    const store = this.ensureVectorCollection(collection);
+    store.set(id, { vector: [...vector], metadata: metadata ? { ...metadata } : undefined });
+  }
+
+  async searchVector(
+    collection: string,
+    vector: number[],
+    limit = 10,
+    filter?: Record<string, any>
+  ): Promise<Array<{ id: string; score: number; metadata?: any }>> {
+    if (!this.initialized) {
+      throw new Error("Neo4j not initialized");
+    }
+
+    await this.simulateLatency();
+    const store = this.ensureVectorCollection(collection);
+    const entries = Array.from(store.entries()).map(([id, entry]) => {
+      const score = this.calculateCosineSimilarity(entry.vector, vector);
+      return { id, score, metadata: entry.metadata };
+    });
+
+    const filtered = filter
+      ? entries.filter((item) =>
+          item.metadata
+            ? Object.entries(filter).every(
+                ([key, value]) => item.metadata?.[key] === value
+              )
+            : false
+        )
+      : entries;
+
+    return filtered
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((item) => ({ id: item.id, score: item.score, metadata: item.metadata }));
+  }
+
+  async scrollVectors(
+    collection: string,
+    limit = 10,
+    offset = 0
+  ): Promise<{
+    points: Array<{ id: string; vector: number[]; metadata?: any }>;
+    total: number;
+  }> {
+    if (!this.initialized) {
+      throw new Error("Neo4j not initialized");
+    }
+
+    await this.simulateLatency();
+    const store = this.ensureVectorCollection(collection);
+    const entries = Array.from(store.entries()).map(([id, entry]) => ({
+      id,
+      vector: [...entry.vector],
+      metadata: entry.metadata ? { ...entry.metadata } : undefined,
+    }));
+
+    return {
+      points: entries.slice(offset, offset + limit),
+      total: entries.length,
+    };
   }
 
   async healthCheck(): Promise<boolean> {
@@ -250,7 +411,6 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
       return false;
     }
 
-    // Simulate intermittent health check failures
     if (this.config.connectionFailures && this.rng() < 0.2) {
       return false;
     }
@@ -293,6 +453,28 @@ export class RealisticFalkorDBMock implements IFalkorDBService {
       });
     }
     return results;
+  }
+
+  private ensureVectorCollection(
+    collection: string
+  ): Map<string, { vector: number[]; metadata?: Record<string, any> }> {
+    if (!this.vectorStore.has(collection)) {
+      this.vectorStore.set(collection, new Map());
+    }
+    return this.vectorStore.get(collection)!;
+  }
+
+  private calculateCosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) {
+      return 0;
+    }
+    const dot = a.reduce((acc, val, index) => acc + val * b[index], 0);
+    const magA = Math.sqrt(a.reduce((acc, val) => acc + val * val, 0));
+    const magB = Math.sqrt(b.reduce((acc, val) => acc + val * val, 0));
+    if (magA === 0 || magB === 0) {
+      return 0;
+    }
+    return dot / (magA * magB);
   }
 }
 

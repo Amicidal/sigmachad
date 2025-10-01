@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SecurityScanner } from '../../../src/services/testing/SecurityScanner';
+import { SecurityScanner } from '@memento/testing/security/scanner';
 
 describe('SecurityScanner issue suppression', () => {
   let scanner: SecurityScanner;

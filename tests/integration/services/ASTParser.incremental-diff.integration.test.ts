@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import { ASTParser, ParseResult, IncrementalParseResult } from '../../../src/services/ASTParser';
+import { ASTParser, ParseResult, IncrementalParseResult } from '@memento/knowledge';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { tmpdir } from 'os';

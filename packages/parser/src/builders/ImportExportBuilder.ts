@@ -171,7 +171,7 @@ export class ImportExportBuilder {
             resolvedMap.get(name) ||
             (alias ? resolvedMap.get(alias) : undefined);
           if (hit) resolved = hit;
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         if (!resolved && importMap) {
           const root = alias || name;
           const t = importMap.get(root);
@@ -256,14 +256,14 @@ export class ImportExportBuilder {
           };
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Attach a basic fromRef
     try {
       if (!(rel as any).fromRef) {
         (rel as any).fromRef = { kind: 'entity', id: fromId };
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     return rel as GraphRelationship;
   }

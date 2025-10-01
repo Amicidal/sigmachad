@@ -13,14 +13,14 @@ import {
   InterfaceSymbol,
   TypeAliasSymbol,
   Symbol as SymbolEntity,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 import {
   createHash,
   createShortHash,
   detectLanguage,
   extractDependencies,
   calculateComplexity,
-} from './utils.js';
+} from '@memento/knowledge/utils';
 
 /**
  * Handles symbol extraction from AST nodes
@@ -43,14 +43,18 @@ export class SymbolExtractor {
     const sigHash = createShortHash(signature);
     const id = `sym:${fileEntity.path}#${name}@${sigHash}`;
 
+    // Normalize dates to always be concrete Date instances
+    const created = fileEntity.created ?? new Date();
+    const lastModified = fileEntity.lastModified ?? created;
+
     const baseSymbol = {
       id,
       type: 'symbol' as const,
       path: `${fileEntity.path}:${name}`,
       hash: createHash(signature),
       language: fileEntity.language,
-      lastModified: fileEntity.lastModified,
-      created: fileEntity.created,
+      lastModified,
+      created,
       name,
       kind: this.getSymbolKind(node) as any,
       signature,
@@ -133,8 +137,8 @@ export class SymbolExtractor {
       path: `${fileEntity.path}:${name}`,
       hash: createHash(name),
       language: 'javascript',
-      lastModified: fileEntity.lastModified,
-      created: fileEntity.created,
+      lastModified: fileEntity.lastModified ?? new Date(),
+      created: fileEntity.created ?? new Date(),
       metadata: {},
       name,
       kind: 'function' as any,
@@ -168,8 +172,8 @@ export class SymbolExtractor {
       path: `${fileEntity.path}:${name}`,
       hash: createHash(name),
       language: 'javascript',
-      lastModified: fileEntity.lastModified,
-      created: fileEntity.created,
+      lastModified: fileEntity.lastModified ?? new Date(),
+      created: fileEntity.created ?? new Date(),
       metadata: {},
       name,
       kind: 'class' as any,
@@ -483,6 +487,7 @@ export class SymbolExtractor {
       id: `file:${fileRelPath}`,
       type: 'file',
       path: fileRelPath,
+      name: path.basename(filePath),
       extension: path.extname(filePath),
       hash: fileHash,
       language,

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { scoreInferredEdge } from '@/utils/confidence';
-import { RelationshipType } from '@/models/relationships';
-import { noiseConfig } from '@/config/noise';
+import { scoreInferredEdge } from '@memento/core/utils/confidence';
+import { RelationshipType } from '@memento/shared-types';
+import { noiseConfig } from '@memento/core/config/noise';
 
 describe('scoreInferredEdge', () => {
   const save = { ...noiseConfig } as any;
@@ -47,4 +47,3 @@ describe('scoreInferredEdge', () => {
     expect(Number(score.toFixed(5))).toBe(0.75);
   });
 });
-

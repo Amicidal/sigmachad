@@ -4,22 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import type {
-  Entity,
-  FunctionSymbol,
-  ClassSymbol,
-} from '../../src/models/entities';
-import type {
-  GraphRelationship,
-  RelationshipQuery,
-  RelationshipType,
-} from '../../src/models/relationships';
-import type {
-  ModuleChildrenResult,
-  ListImportsResult,
-  DefinitionLookupResult,
-  StructuralNavigationEntry,
-} from '../../src/models/types';
+import type { Entity, FunctionSymbol, ClassSymbol, GraphRelationship, RelationshipType, ModuleChildrenResult, ListImportsResult, DefinitionLookupResult, StructuralNavigationEntry } from '@memento/shared-types';
+import type { RelationshipQuery } from '@memento/shared-types';
 
 type GraphSearchRequest = {
   query: string;

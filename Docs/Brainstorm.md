@@ -100,9 +100,9 @@
         - TypeScript-first via ts-morph for precise symbols/types.
         - Polyglot path via tree-sitter/LSP adapters.
     Storage
-        - Graph: FalkorDB; Vector: Qdrant with metadata keyed to graph node IDs.
+        - Graph: Neo4j (exposed via legacy FalkorDB command layer); Vector: Qdrant with metadata keyed to graph node IDs.
     Ops
-        - Docker Compose services: memento, falkordb, qdrant.
+        - Docker Compose services: memento, neo4j, qdrant.
         - File watcher to resync graph/vector on file changes.
         - CLI: memento validate, memento impact.
 

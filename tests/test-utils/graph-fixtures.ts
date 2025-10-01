@@ -1,5 +1,5 @@
 /**
- * Test helpers to generate FalkorDB-like graph rows
+ * Test helpers to generate Neo4j graph rows compatible with legacy FalkorDB command wrappers
  */
 
 export function makeNodeRow(props: Record<string, any>) {
@@ -36,4 +36,3 @@ export function makeRelationshipRow(rel: {
     toId: rel.toId,
   };
 }
-

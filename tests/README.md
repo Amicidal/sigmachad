@@ -37,7 +37,7 @@ pnpm run docker:test-down
 ### Manual Setup
 If you prefer to run databases manually, ensure these services are available:
 
-- **FalkorDB**: `redis://localhost:6380` (database 1)
+- **Neo4j**: `bolt://localhost:7688` (user `neo4j`, password `password`)
 - **Qdrant**: `http://localhost:6335`
 - **PostgreSQL**: `postgresql://memento_test:memento_test@localhost:5433/memento_test`
 - **Redis**: `redis://localhost:6381`
@@ -79,12 +79,11 @@ The tests cover:
 - ✅ Connection health checks
 - ✅ Schema setup and migrations
 
-### FalkorDB Operations
-- ✅ Basic Cypher queries
-- ✅ Parameterized queries
+### Neo4j Operations
+- ✅ Cypher queries (basic + parameterized)
 - ✅ Node/relationship creation and querying
 - ✅ Index management
-- ✅ Raw Redis commands
+- ✅ Vector index bootstrap
 
 ### Qdrant Operations
 - ✅ Collection creation and management
@@ -139,8 +138,10 @@ Following the user's requirements, these tests:
 The tests respect these environment variables for database configuration:
 
 ```bash
-# FalkorDB/Redis
-FALKORDB_URL=redis://localhost:6380
+# Neo4j
+NEO4J_URI=bolt://localhost:7688
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=password
 
 # Qdrant
 QDRANT_URL=http://localhost:6335

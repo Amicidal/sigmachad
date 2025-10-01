@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { registerGraphRoutes } from '@/api/routes/graph';
+import { registerGraphRoutes } from '@memento/api/routes/graph';
 
 describe('/graph/modules/children query coercion', () => {
   let app: ReturnType<typeof Fastify>;

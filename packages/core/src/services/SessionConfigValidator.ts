@@ -16,7 +16,7 @@ import {
   SessionCreationOptions,
 } from './SessionTypes.js';
 import type {
-  ValidationResult,
+  ConfigValidationResult,
   ValidationError,
   ValidationWarning,
   Recommendation,
@@ -100,8 +100,8 @@ export class SessionConfigValidator {
   /**
    * Validate session manager configuration
    */
-  async validateConfig(config: any): Promise<ValidationResult> {
-    const result: ValidationResult = {
+  async validateConfig(config: any): Promise<ConfigValidationResult> {
+    const result: ConfigValidationResult = {
       valid: true,
       errors: [],
       warnings: [],
@@ -148,8 +148,8 @@ export class SessionConfigValidator {
   /**
    * Validate session creation options
    */
-  validateSessionOptions(options: any): ValidationResult {
-    const result: ValidationResult = {
+  validateSessionOptions(options: any): ConfigValidationResult {
+    const result: ConfigValidationResult = {
       valid: true,
       errors: [],
       warnings: [],
@@ -282,8 +282,8 @@ export class SessionConfigValidator {
    */
   async validateRedisConnection(
     config: RedisConfig
-  ): Promise<ValidationResult> {
-    const result: ValidationResult = {
+  ): Promise<ConfigValidationResult> {
+    const result: ConfigValidationResult = {
       valid: true,
       errors: [],
       warnings: [],
@@ -375,8 +375,8 @@ export class SessionConfigValidator {
    */
   async validateProductionReadiness(
     config: SessionManagerConfig
-  ): Promise<ValidationResult> {
-    const result: ValidationResult = {
+  ): Promise<ConfigValidationResult> {
+    const result: ConfigValidationResult = {
       valid: true,
       errors: [],
       warnings: [],
@@ -457,7 +457,7 @@ export class SessionConfigValidator {
    */
   private async performRuntimeValidation(
     config: SessionManagerConfig,
-    result: ValidationResult
+    result: ConfigValidationResult
   ): Promise<void> {
     // Validate Redis connection if client is available
     if (this.redis) {
@@ -493,7 +493,7 @@ export class SessionConfigValidator {
    */
   private performPerformanceValidation(
     config: SessionManagerConfig,
-    result: ValidationResult
+    result: ConfigValidationResult
   ): void {
     // TTL recommendations
     const defaultTTL = config.defaultTTL;
@@ -538,7 +538,7 @@ export class SessionConfigValidator {
    */
   private performSecurityValidation(
     config: SessionManagerConfig,
-    result: ValidationResult
+    result: ConfigValidationResult
   ): void {
     // Redis security checks
     if (config.redis.host === '0.0.0.0') {
@@ -575,7 +575,7 @@ export class SessionConfigValidator {
    */
   private generateRecommendations(
     config: SessionManagerConfig,
-    result: ValidationResult
+    result: ConfigValidationResult
   ): void {
     // Performance recommendations
     const defaultTTL = config.defaultTTL;
@@ -622,7 +622,7 @@ export class SessionConfigValidator {
    */
   private async validateRedisConfiguration(
     client: RedisClientType,
-    result: ValidationResult
+    result: ConfigValidationResult
   ): Promise<void> {
     try {
       // Check Redis configuration
@@ -677,7 +677,7 @@ export class SessionConfigValidator {
    * Generate configuration report
    */
   async generateConfigurationReport(config: SessionManagerConfig): Promise<{
-    validation: ValidationResult;
+    validation: ConfigValidationResult;
     environment: EnvironmentValidation;
     recommendations: Recommendation[];
   }> {

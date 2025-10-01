@@ -5,7 +5,9 @@
 
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService, DocumentationParser } from '@memento/knowledge';
-import { DatabaseService, RelationshipType, noiseConfig } from '@memento/core';
+import { RelationshipType } from '@memento/shared-types';
+import { noiseConfig } from '@memento/core';
+import { DatabaseService } from '@memento/database';
 
 interface SyncDocumentationResponse {
   processedFiles: number;
@@ -138,11 +140,11 @@ export async function registerDocsRoutes(
                 pruned++;
               }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
         }
         (result as any).createdImplementsSpec = created;
         (result as any).prunedImplementsSpec = pruned;
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       reply.send({
         success: true,
@@ -364,13 +366,14 @@ export async function registerDocsRoutes(
         extractDomains?: boolean;
       };
 
-      // Parse content directly based on format
-      const parseMethod = format === 'markdown' ? 'parseMarkdown' : 
-                         format === 'plaintext' ? 'parsePlaintext' : 
-                         'parseMarkdown'; // default to markdown
-      
-      // Use reflection to call the appropriate parse method
-      const parsedDoc = await (docParser as any)[parseMethod](content);
+      // Parse content directly based on format using explicit selection
+      let parsedDoc;
+      if (format === 'plaintext') {
+        parsedDoc = await docParser.parseText(content);
+      } else {
+        // default to markdown; treat unsupported (e.g., 'html') as markdown
+        parsedDoc = await docParser.parseMarkdown(content);
+      }
       
       // Add metadata for the parsed content
       parsedDoc.metadata = {
@@ -432,8 +435,7 @@ export async function registerDocsRoutes(
 
       const searchResults = await docParser.searchDocumentation(query, {
         domain,
-        docType: type as any,
-        limit
+        limit,
       });
 
       const results = {

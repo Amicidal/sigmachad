@@ -1,9 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "composite": true,
     "declaration": true,
-    "declarationMap": true,
-    "outDir": "../../dist/out-tsc",
+    "declarationMap": false,
+    "outDir": "./dist",
+    "rootDir": "src",
     "types": [],
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true

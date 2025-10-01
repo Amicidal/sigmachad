@@ -6,21 +6,16 @@
 import { FastifyInstance } from 'fastify';
 import { KnowledgeGraphService } from '@memento/knowledge';
 import { DatabaseService } from '@memento/database';
-import { TestEngine } from '@memento/testing';
-import {
-  TestPlanningService,
-  SpecNotFoundError,
-  TestPlanningValidationError,
-} from '@memento/testing';
-import { RelationshipType } from '@memento/core';
-import type { TestPerformanceMetrics } from '@memento/core';
+import { createRequire } from 'module';
+import { RelationshipType } from '@memento/shared-types';
+import type { TestPerformanceMetrics } from '@memento/shared-types';
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestExecutionResult,
-  PerformanceHistoryOptions,
-} from '@memento/core';
+} from '@memento/shared-types';
 import { resolvePerformanceHistoryOptions } from '@memento/core';
+import { getErrorCode, getErrorMessage } from '../error-utils.js';
 
 const createEmptyPerformanceMetrics = (): TestPerformanceMetrics => ({
   averageExecutionTime: 0,
@@ -208,15 +203,38 @@ const generateTokenVariants = (token: string): string[] => {
   return Array.from(variants);
 };
 
-import { TestCoverage, PerformanceMetrics } from '@memento/shared-types';
+// (removed unused imports TestCoverage, PerformanceMetrics)
+
+type TestEngineLike = {
+  recordTestResults: (result: any) => Promise<void>;
+  parseAndRecordTestResults: (filePath: string, format: any) => Promise<void>;
+  getPerformanceMetrics: (entityId: string) => Promise<any>;
+  getCoverageAnalysis: (entityId: string) => Promise<any>;
+  getFlakyTestAnalysis: (entityId: string) => Promise<any>;
+};
+
+let TestPlanningServiceCtor: any;
+let SpecNotFoundErrorCtor: any;
+let TestPlanningValidationErrorCtor: any;
+try {
+  const require = createRequire(import.meta.url);
+  const mod = require('@memento/testing');
+  TestPlanningServiceCtor = mod?.TestPlanningService;
+  SpecNotFoundErrorCtor = mod?.SpecNotFoundError;
+  TestPlanningValidationErrorCtor = mod?.TestPlanningValidationError;
+} catch {
+  // leave undefined; handlers will not use instanceof checks if ctor missing
+}
 
 export async function registerTestRoutes(
   app: FastifyInstance,
   kgService: KnowledgeGraphService,
   dbService: DatabaseService,
-  testEngine: TestEngine
+  testEngine: TestEngineLike
 ): Promise<void> {
-  const testPlanningService = new TestPlanningService(kgService);
+  const testPlanningService = TestPlanningServiceCtor
+    ? new TestPlanningServiceCtor(kgService)
+    : undefined;
 
   // POST /api/tests/plan-and-generate - Plan and generate tests
   app.post(
@@ -256,23 +274,23 @@ export async function registerTestRoutes(
           data: planningResult satisfies TestPlanResponse,
         });
       } catch (error) {
-        if (error instanceof TestPlanningValidationError) {
+        if (TestPlanningValidationErrorCtor && error instanceof TestPlanningValidationErrorCtor) {
           return reply.status(400).send({
             success: false,
             error: {
-              code: error.code,
-              message: error.message,
+              code: getErrorCode(error, 'VALIDATION_ERROR'),
+              message: getErrorMessage(error, 'Validation failed'),
             },
             requestId: (request as any).id,
             timestamp: new Date().toISOString(),
           });
         }
 
-        if (error instanceof SpecNotFoundError) {
+        if (SpecNotFoundErrorCtor && error instanceof SpecNotFoundErrorCtor) {
           return reply.status(404).send({
             success: false,
             error: {
-              code: error.code,
+              code: getErrorCode(error, 'SPEC_NOT_FOUND'),
               message: 'Specification not found',
             },
             requestId: (request as any).id,
@@ -286,7 +304,7 @@ export async function registerTestRoutes(
           error: {
             code: 'TEST_PLANNING_FAILED',
             message: 'Failed to plan and generate tests',
-            details: error instanceof Error ? error.message : 'Unknown error',
+            details: getErrorMessage(error, 'Unknown error'),
           },
           requestId: (request as any).id,
           timestamp: new Date().toISOString(),
@@ -424,7 +442,7 @@ export async function registerTestRoutes(
           success: true,
           data: { recorded: results.length },
         });
-      } catch (error) {
+      } catch (_error) {
         reply.status(500).send({
           success: false,
           error: {
@@ -539,7 +557,7 @@ export async function registerTestRoutes(
           if (!metrics) {
             try {
               metrics = await testEngine.getPerformanceMetrics(entityId);
-            } catch (error) {
+            } catch (_error) {
               metrics = undefined;
             }
           }
@@ -644,7 +662,7 @@ export async function registerTestRoutes(
                     relatedTestIds.add(result.id);
                   }
                 }
-              } catch (error) {
+              } catch (_error) {
                 // Ignore search failures and continue with other tokens
               }
             }
@@ -677,7 +695,7 @@ export async function registerTestRoutes(
               return await testEngine
                 .getPerformanceMetrics(testId)
                 .catch(() => null);
-            } catch (error) {
+            } catch (_error) {
               return null;
             }
           })
@@ -733,7 +751,7 @@ export async function registerTestRoutes(
             history: combinedHistory,
           },
         });
-      } catch (error) {
+      } catch (_error) {
         reply.status(500).send({
           success: false,
           error: {
@@ -775,7 +793,7 @@ export async function registerTestRoutes(
         const coverage = await testEngine.getCoverageAnalysis(entityId);
 
         reply.send({ success: true, data: coverage });
-      } catch (error) {
+      } catch (_error) {
         reply.status(500).send({
           success: false,
           error: {
@@ -823,7 +841,7 @@ export async function registerTestRoutes(
           success: true,
           data: analysis,
         });
-      } catch (error) {
+      } catch (_error) {
         reply.status(500).send({
           success: false,
           error: {

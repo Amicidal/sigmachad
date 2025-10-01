@@ -294,12 +294,11 @@ export class S3StorageProvider implements BackupStorageProvider {
 
   private sanitizeMetadata(metadata?: Record<string, string>): Record<string, string> | undefined {
     if (!metadata) return undefined;
-    const clean: Record<string, string> = {};
-    for (const [key, value] of Object.entries(metadata)) {
-      if (value === undefined || value === null) continue;
-      clean[key] = String(value);
-    }
-    return Object.keys(clean).length > 0 ? clean : undefined;
+    const entries = Object.entries(metadata)
+      .filter(([_, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => [key, String(value!)] as [string, string]);
+    if (entries.length === 0) return undefined;
+    return Object.fromEntries(entries) as Record<string, string>;
   }
 
   private stripPrefix(fullKey: string): string {

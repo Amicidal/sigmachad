@@ -8,9 +8,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { v4 as uuidv4 } from "uuid";
 import { expectSuccess, expectError } from "../../test-utils/assertions";
 import { FastifyInstance } from "fastify";
-import { APIGateway } from "../../../src/api/APIGateway.js";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService.js";
-import { DatabaseService } from "../../../src/services/core/DatabaseService.js";
+import { APIGateway } from "@memento/api/APIGateway";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -18,7 +18,7 @@ import {
   insertTestFixtures,
   checkDatabaseHealth,
 } from "../../test-utils/database-helpers.js";
-import { CodebaseEntity } from "../../../src/models/entities.js";
+import { CodebaseEntity } from "@memento/shared-types";
 
 describe("Vector Database API Integration", () => {
   let dbService: DatabaseService;

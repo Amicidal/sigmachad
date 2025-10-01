@@ -4,20 +4,19 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  SynchronizationMonitoring,
-  SyncMetrics,
-  PerformanceMetrics,
+import { SynchronizationMonitoring } from '@memento/sync/synchronization/SynchronizationMonitoring';
+import type {
+  Conflict,
   HealthMetrics,
   MonitoringAlert,
-  SyncLogEntry
-} from '../../../src/services/synchronization/SynchronizationMonitoring';
-import {
-  SyncOperation,
+  PerformanceMetrics,
   SyncError,
-  SyncConflict
-} from '../../../src/services/synchronization/SynchronizationCoordinator';
-import { Conflict } from '../../../src/services/scm/ConflictResolution';
+  SyncLogEntry,
+  SyncMetrics,
+  SyncOperation,
+} from '@memento/shared-types';
+
+type SyncConflict = Conflict;
 
 // Mock Date for consistent testing
 const mockDate = new Date('2024-01-01T12:00:00Z');

@@ -4,25 +4,25 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { registerDesignRoutes } from '../../../src/api/routes/design.js';
+import { registerDesignRoutes } from '@memento/api/routes/design';
 import {
   createMockRequest,
   createMockReply,
   type MockFastifyRequest,
   type MockFastifyReply
 } from '../../test-utils.js';
-import type { Spec } from '../../../src/models/entities.js';
+import type { Spec } from '@memento/shared-types';
 import type {
   CreateSpecRequest,
   UpdateSpecRequest,
   ListSpecsParams
-} from '../../../src/models/types.js';
+} from '@memento/shared-types';
 import { makeRealisticKgService } from '../../test-utils/kg-realistic';
 import { makeRealisticDbService } from '../../test-utils/db-realistic';
 
 // Mock external dependencies
-vi.mock('../../../src/services/knowledge/KnowledgeGraphService.js');
-vi.mock('../../../src/services/core/DatabaseService.js');
+vi.mock('@memento/knowledge');
+vi.mock('@memento/database/DatabaseService');
 
 // Helper function to create mock Spec entities
 function createMockSpec(overrides: Partial<Spec> = {}): Spec {

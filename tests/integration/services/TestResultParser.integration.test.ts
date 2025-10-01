@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { TestResultParser, ParsedTestSuite, ParsedTestResult } from '../../../src/services/TestResultParser';
+import { TestResultParser, ParsedTestSuite, ParsedTestResult } from '@memento/testing/TestResultParser';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { tmpdir } from 'os';

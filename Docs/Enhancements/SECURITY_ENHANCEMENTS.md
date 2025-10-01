@@ -157,7 +157,7 @@ Enhanced detection rules for:
 - **Comprehensive Logging**: Detailed logging for debugging and monitoring
 
 ### Database Integration
-- **Neo4j/FalkorDB**: Integration with graph database for result storage
+- **Neo4j (via legacy FalkorDB command layer)**: Integration with graph database for result storage
 - **Query Optimization**: Efficient queries for result retrieval
 - **Relationship Mapping**: Security issues linked to affected entities
 

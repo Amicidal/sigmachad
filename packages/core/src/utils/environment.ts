@@ -9,7 +9,7 @@ export const sanitizeEnvironment = (value: unknown): string => {
   const raw = sanitizeString(value, 64) || "";
   const normalized = raw
     .toLowerCase()
-    .replace(/[^a-z0-9\-]+/g, "-")
+    .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-/g, "")
     .replace(/-$/g, "");

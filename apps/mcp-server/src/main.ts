@@ -18,6 +18,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { DatabaseService, createDatabaseConfig } from '@memento/database';
 import { KnowledgeGraphService, ASTParser, DocumentationParser } from '@memento/knowledge';
+import type { GraphSearchRequest } from '@memento/shared-types';
 import { FileWatcher } from '@memento/core';
 import { SecurityScanner } from '@memento/testing';
 import { SynchronizationCoordinator } from '@memento/sync/synchronization';
@@ -237,7 +238,10 @@ async function main() {
           case 'analyze_code': {
             const analysis = await astParser.parseFile(args.path as string);
             if (args.includeRelationships) {
-              const relationships = await kgService.getRelationships(args.path as string);
+              const relationships = await kgService.getRelationships({
+                fromEntityId: args.path as string,
+                limit: 100,
+              } as any);
               return {
                 content: [
                   {
@@ -265,9 +269,31 @@ async function main() {
           }
 
           case 'search_codebase': {
+            const allowedEntityTypes = [
+              'function',
+              'class',
+              'interface',
+              'file',
+              'module',
+              'spec',
+              'test',
+              'change',
+              'session',
+              'directory',
+            ] as const;
+            type EntityType = NonNullable<GraphSearchRequest['entityTypes']>[number];
+
+            const toEntityType = (value: unknown): EntityType | undefined =>
+              typeof value === 'string' && (allowedEntityTypes as readonly string[]).includes(value)
+                ? (value as EntityType)
+                : undefined;
+
+            const normalizedEntityTypes =
+              args.type && args.type !== 'all' ? toEntityType(args.type) : undefined;
+
             const results = await kgService.searchEntities({
-              query: args.query as string,
-              type: args.type as string,
+              query: String(args.query ?? ''),
+              entityTypes: normalizedEntityTypes ? [normalizedEntityTypes] : undefined,
             });
             return {
               content: [
@@ -280,9 +306,9 @@ async function main() {
           }
 
           case 'get_dependencies': {
-            const dependencies = await kgService.getDependencies(
+            const dependencies = await kgService.getEntityDependencies(
               args.path as string,
-              args.depth as number
+              { maxDepth: (args.depth as number) ?? 2 }
             );
             return {
               content: [
@@ -295,10 +321,18 @@ async function main() {
           }
 
           case 'security_scan': {
-            const results = await securityScanner.scanPath(
-              args.path as string,
-              args.scanType as string
-            );
+            const entityIds: string[] | undefined = Array.isArray(args.entityIds)
+              ? args.entityIds.map(String)
+              : typeof args.path === 'string'
+              ? [args.path]
+              : undefined;
+            const scanTypes = Array.isArray(args.scanTypes)
+              ? (args.scanTypes as any)
+              : undefined;
+            const results = await securityScanner.performScan({
+              entityIds,
+              scanTypes,
+            });
             return {
               content: [
                 {
@@ -310,9 +344,8 @@ async function main() {
           }
 
           case 'get_documentation': {
-            const docs = await docParser.parseDocumentation(
-              args.path as string,
-              args.format as string
+            const docs = await docParser.syncDocumentation(
+              args.path as string
             );
             return {
               content: [
@@ -490,8 +523,8 @@ async function waitForSync(operationId: string): Promise<any> {
   throw new Error('Sync operation timed out');
 }
 
-async function getCodebaseResources() {
-  const resources = [];
+async function getCodebaseResources(): Promise<Array<{uri: string, name: string, description: string, mimeType: string}>> {
+  const resources: Array<{uri: string, name: string, description: string, mimeType: string}> = [];
   const watchPaths = fileWatcher.getWatchedPaths();
 
   for (const watchPath of watchPaths) {

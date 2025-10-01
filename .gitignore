@@ -6,7 +6,12 @@ node_modules
 .env.*.local
 
 # Log files
-logs/
+logs/*
+!logs/.gitkeep
+!logs/sessions/
+!logs/sessions/SESSION_TEMPLATE.md
+!logs/todos/
+!logs/todos/*.md
 *.log
 
 # Nx
@@ -19,6 +24,15 @@ nx-graph.json
 dist/
 packages/**/dist/
 apps/**/dist/
+*.tsbuildinfo
+
+# TypeScript compiled outputs in packages (use dist/ for builds)
+packages/**/*.js
+packages/**/*.js.map
+packages/**/*.d.ts
+packages/**/*.d.ts.map
+!packages/**/src/**/*.js  # Allow source .js files if needed
+!packages/**/scripts/**/*.js  # Allow script files
 
 vite.config.*.timestamp*
 vitest.config.*.timestamp*

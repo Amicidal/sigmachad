@@ -394,7 +394,7 @@ export class ConflictResolutionEngine extends EventEmitter {
       // Try primary strategy first
       const primaryResult = await this.applyResolutionStrategy(
         conflict,
-        resolution.strategy,
+        this.toEnumStrategy(resolution.strategy),
         context
       );
 
@@ -404,7 +404,7 @@ export class ConflictResolutionEngine extends EventEmitter {
 
       // If primary strategy fails or low confidence, try smart merge
       let smartMergeResult: MergeResult | undefined;
-      if (resolution.strategy !== ConflictStrategy.MERGE) {
+      if (this.toEnumStrategy(resolution.strategy) !== ConflictStrategy.MERGE) {
         smartMergeResult = await this.smartMerge(conflict, context);
         if (
           smartMergeResult.success &&
@@ -440,6 +440,22 @@ export class ConflictResolutionEngine extends EventEmitter {
           merged: [] as string[],
         },
       };
+    }
+  }
+
+  private toEnumStrategy(
+    s: ConflictResolution['strategy']
+  ): ConflictStrategy {
+    switch (s) {
+      case 'merge':
+        return ConflictStrategy.MERGE;
+      case 'overwrite':
+        return ConflictStrategy.OVERWRITE;
+      case 'skip':
+        return ConflictStrategy.SKIP;
+      case 'manual':
+      default:
+        return ConflictStrategy.ASK_USER;
     }
   }
 

@@ -289,7 +289,8 @@ describe('DiffEngine', () => {
       const result = await engine.applyDiff(source, diff);
 
       expect(result).toEqual({ a: 1 });
-      expect(result.hasOwnProperty('b')).toBe(false);
+      // Avoid calling hasOwnProperty directly on the object under test
+      expect(Object.hasOwn(result, 'b')).toBe(false);
     });
 
     it('should apply operations in correct order', async () => {

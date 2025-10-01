@@ -1,16 +1,17 @@
 import { KnowledgeGraphService } from "@memento/knowledge";
-import { RelationshipType, type GraphRelationship } from "@memento/core";
+import { RelationshipType } from "@memento/core";
+import type { GraphRelationship } from "@memento/shared-types";
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestSpec,
-} from "@memento/core";
+} from "@memento/shared-types";
 import type {
   CoverageMetrics,
   Entity,
   Spec,
   Test,
-} from "@memento/core";
+} from "@memento/shared-types";
 
 export class SpecNotFoundError extends Error {
   public readonly code = "SPEC_NOT_FOUND";
@@ -126,16 +127,17 @@ export class TestPlanningService {
   }
 
   private resolveRequestedTypes(params: TestPlanRequest): Set<SupportedTestType> {
-    const base: SupportedTestType[] = ["unit", "integration", "e2e"];
+    const base = ["unit", "integration", "e2e"] as const;
+    type BaseTestType = typeof base[number];
 
     if (params.testTypes && params.testTypes.length > 0) {
       const filtered = params.testTypes
-        .map((type) => (base.includes(type) ? type : undefined))
-        .filter((value): value is SupportedTestType => Boolean(value));
-      return new Set(filtered.length > 0 ? filtered : base);
+        .map((type) => (base.includes(type as BaseTestType) ? (type as BaseTestType) : undefined))
+        .filter((value): value is BaseTestType => Boolean(value));
+      return new Set(filtered.length > 0 ? (filtered as SupportedTestType[]) : (base as unknown as SupportedTestType[]));
     }
 
-    return new Set(base);
+    return new Set(base as unknown as SupportedTestType[]);
   }
 
   private shouldIncludePerformance(

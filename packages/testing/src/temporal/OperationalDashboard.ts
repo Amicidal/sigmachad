@@ -12,8 +12,6 @@
 
 import type {
   TemporalMonitoring,
-  DashboardData,
-  HealthCheckResult,
   PerformanceMetrics,
   Alert,
   MonitoringReport
@@ -511,7 +509,7 @@ export class OperationalDashboard implements IOperationalDashboard {
    */
   async getAlertManagementView(timeRange = this.config.defaultTimeRange): Promise<AlertManagementView> {
     const endTime = new Date();
-    const startTime = this.calculateStartTime(endTime, timeRange);
+    // const startTime = this.calculateStartTime(endTime, timeRange); // unused for now
 
     const alerts = await this.monitoring.getActiveAlerts();
     const allAlerts = alerts; // In production, would get historical alerts too
@@ -586,7 +584,7 @@ export class OperationalDashboard implements IOperationalDashboard {
   /**
    * Get custom dashboard widgets
    */
-  async getCustomWidgets(dashboardId: string): Promise<DashboardWidget[]> {
+  async getCustomWidgets(_dashboardId: string): Promise<DashboardWidget[]> {
     // Mock implementation - would load from configuration
     return [
       {
@@ -692,24 +690,24 @@ export class OperationalDashboard implements IOperationalDashboard {
     return health;
   }
 
-  private calculateCostEfficiency(metrics: PerformanceMetrics[]): number {
+  private calculateCostEfficiency(_metrics: PerformanceMetrics[]): number {
     // Mock calculation - would be based on actual infrastructure costs
     return Math.round(85 + Math.random() * 10); // 85-95%
   }
 
-  private calculateTestCoverage(metrics: PerformanceMetrics[]): number {
+  private calculateTestCoverage(_metrics: PerformanceMetrics[]): number {
     return Math.round(78 + Math.random() * 15); // 78-93%
   }
 
-  private calculateDefectDetectionRate(metrics: PerformanceMetrics[]): number {
+  private calculateDefectDetectionRate(_metrics: PerformanceMetrics[]): number {
     return Math.round(88 + Math.random() * 10); // 88-98%
   }
 
-  private calculateProductivityGains(metrics: PerformanceMetrics[]): number {
+  private calculateProductivityGains(_metrics: PerformanceMetrics[]): number {
     return Math.round(25 + Math.random() * 15); // 25-40%
   }
 
-  private calculateCostSavings(metrics: PerformanceMetrics[]): number {
+  private calculateCostSavings(_metrics: PerformanceMetrics[]): number {
     return Math.round(5000 + Math.random() * 10000); // $5K-15K per month
   }
 
@@ -905,7 +903,7 @@ export class OperationalDashboard implements IOperationalDashboard {
     }));
   }
 
-  private generateAlertTrendChart(alerts: Alert[], period: string): ChartData {
+  private generateAlertTrendChart(_alerts: Alert[], _period: string): ChartData {
     return {
       type: 'line',
       title: 'Alert Trends',
@@ -966,7 +964,7 @@ export class OperationalDashboard implements IOperationalDashboard {
     };
   }
 
-  private generateResolutionTimeChart(alerts: Alert[]): ChartData {
+  private generateResolutionTimeChart(_alerts: Alert[]): ChartData {
     return {
       type: 'bar',
       title: 'Average Resolution Time',
@@ -1173,12 +1171,12 @@ export class OperationalDashboard implements IOperationalDashboard {
     return Buffer.from(csv);
   }
 
-  private convertToExcel(data: any): Buffer {
+  private convertToExcel(_data: any): Buffer {
     // Mock Excel conversion - would use a library like xlsx
     return Buffer.from('Excel export not implemented');
   }
 
-  private convertToPDF(data: any): Buffer {
+  private convertToPDF(_data: any): Buffer {
     // Mock PDF conversion - would use a library like puppeteer or jspdf
     return Buffer.from('PDF export not implemented');
   }

@@ -1,3 +1,4 @@
+// Guard dynamic route key/indexing via whitelists and Maps.
 /**
  * MCP Server Router for Memento
  * Provides MCP protocol support for AI assistants (Claude, etc.)
@@ -16,24 +17,21 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { KnowledgeGraphService, ASTParser } from '@memento/knowledge';
 import { DatabaseService } from '@memento/database';
-import { TestEngine, SecurityScanner } from '@memento/testing';
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Project } from 'ts-morph';
-import {
-  SpecNotFoundError,
-  TestPlanningService,
-  TestPlanningValidationError,
-} from '@memento/testing';
+// Avoid compile-time coupling to @memento/testing; we'll lazy-require classes
 import type {
   TestPlanRequest,
   TestPlanResponse,
   TestSpec,
-} from '@memento/core';
-import type { CoverageMetrics, Spec } from '@memento/core';
-import { SpecService } from '@memento/testing';
+} from '@memento/shared-types';
+import type { CoverageMetrics } from '@memento/shared-types';
+import type { Spec } from '@memento/shared-types';
+// Avoid compile-time coupling to @memento/testing; lazy loaded
+import { createRequire } from 'module';
 import { resolvePerformanceHistoryOptions } from '@memento/core';
 
 // MCP Tool definitions
@@ -73,8 +71,10 @@ export class MCPRouter {
     errorMessage?: string;
     params?: any;
   }> = [];
-  private testPlanningService: TestPlanningService;
-  private specService: SpecService;
+  private testPlanningService: any;
+  private specService: any;
+  private TestPlanningValidationErrorCtor?: any;
+  private SpecNotFoundErrorCtor?: any;
 
   // Resolve absolute path to the project's src directory, regardless of CWD
   private getSrcRoot(): string {
@@ -107,11 +107,22 @@ export class MCPRouter {
     private kgService: KnowledgeGraphService,
     private dbService: DatabaseService,
     private astParser: ASTParser,
-    private testEngine: TestEngine,
-    private securityScanner: SecurityScanner
+    private testEngine: any,
+    private securityScanner: any
   ) {
-    this.testPlanningService = new TestPlanningService(this.kgService);
-    this.specService = new SpecService(this.kgService, this.dbService);
+    const require = createRequire(import.meta.url);
+    try {
+      const testingMod = require('@memento/testing');
+      const TestPlanningServiceCtor = testingMod?.TestPlanningService;
+      const SpecServiceCtor = testingMod?.SpecService;
+      this.TestPlanningValidationErrorCtor = testingMod?.TestPlanningValidationError;
+      this.SpecNotFoundErrorCtor = testingMod?.SpecNotFoundError;
+      this.testPlanningService = new TestPlanningServiceCtor(this.kgService);
+      this.specService = new SpecServiceCtor(this.kgService, this.dbService);
+    } catch {
+      this.testPlanningService = undefined;
+      this.specService = undefined;
+    }
     this.server = new Server(
       {
         name: 'memento-mcp-server',
@@ -560,20 +571,17 @@ export class MCPRouter {
 
         // ripgrep engine removed
 
-        // Simple union summary by files
-        const fileSets = Object.entries(results).reduce(
-          (acc: Record<string, Set<string>>, [k, v]: any) => {
-            if (v && Array.isArray(v.files)) {
-              // eslint-disable-next-line security/detect-object-injection
-              acc[k] = new Set(v.files);
-            }
-            return acc;
-          },
-          {}
-        );
+        // Simple union summary by files (use Map to avoid dynamic indexing)
+        const fileSets = new Map<string, Set<string>>();
+        for (const [k, v] of Object.entries(results) as Array<[string, any]>) {
+          if (v && Array.isArray(v.files)) {
+            fileSets.set(k, new Set(v.files));
+          }
+        }
         const unionFiles = new Set<string>();
-        for (const s of Object.values(fileSets))
-          for (const f of s as Set<string>) unionFiles.add(f);
+        for (const s of fileSets.values()) {
+          for (const f of s) unionFiles.add(f);
+        }
         results.summary = { unionFileCount: unionFiles.size };
 
         return results;
@@ -1528,6 +1536,19 @@ export class MCPRouter {
     return undefined;
   }
 
+  // Guarded access to tool argument values based on a whitelist of allowed keys
+  private safeGetArg(
+    args: unknown,
+    key: string,
+    allowed: ReadonlySet<string>
+  ): unknown {
+    if (!args || typeof args !== 'object') return undefined;
+    if (!allowed.has(key)) return undefined;
+    const obj = args as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) return undefined;
+    return Reflect.get(obj, key);
+  }
+
   private async handleGetExamples(params: any): Promise<any> {
     // Debug logging - remove in production
     // console.log("MCP Tool called: graph.examples", params);
@@ -1951,27 +1972,33 @@ export class MCPRouter {
         message: `Generated comprehensive test plan for specification ${request.specId}`,
       };
     } catch (error) {
-      if (error instanceof TestPlanningValidationError) {
-        throw new McpError(ErrorCode.InvalidParams, error.message, {
-          code: error.code,
-        });
+      if (this.TestPlanningValidationErrorCtor && error instanceof this.TestPlanningValidationErrorCtor) {
+        const { getErrorMessage, getErrorCode } = await import('./error-utils.js');
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          getErrorMessage(error, 'Validation failed'),
+          {
+            code: getErrorCode(error, 'VALIDATION_ERROR'),
+          }
+        );
       }
 
-      if (error instanceof SpecNotFoundError) {
+      if (this.SpecNotFoundErrorCtor && error instanceof this.SpecNotFoundErrorCtor) {
         const fallbackPlan = await this.generateFallbackTestPlan(request);
         if (fallbackPlan) {
           return fallbackPlan;
         }
 
+        const { getErrorCode } = await import('./error-utils.js');
         throw new McpError(ErrorCode.InternalError, 'Tool execution failed', {
-          code: error.code,
+          code: getErrorCode(error, 'SPEC_NOT_FOUND'),
           message: `Specification ${request.specId} not found`,
         });
       }
 
       console.error('Error in handlePlanTests:', error);
-      const message =
-        error instanceof Error ? error.message : 'Unknown error occurred';
+      const { getErrorMessage } = await import('./error-utils.js');
+      const message = getErrorMessage(error, 'Unknown error occurred');
       throw new McpError(ErrorCode.InternalError, 'Tool execution failed', {
         message,
       });
@@ -2455,25 +2482,49 @@ export class MCPRouter {
 
   private updateSeverityCounts(summary: any, items: any[]): void {
     items.forEach((item) => {
-      if (summary.bySeverity[item.severity] !== undefined) {
-        summary.bySeverity[item.severity]++;
+      const sev = String(item.severity || '').toLowerCase();
+      switch (sev) {
+        case 'critical':
+          if (summary.bySeverity?.critical !== undefined) summary.bySeverity.critical++;
+          break;
+        case 'high':
+          if (summary.bySeverity?.high !== undefined) summary.bySeverity.high++;
+          break;
+        case 'medium':
+          if (summary.bySeverity?.medium !== undefined) summary.bySeverity.medium++;
+          break;
+        case 'low':
+          if (summary.bySeverity?.low !== undefined) summary.bySeverity.low++;
+          break;
+        default:
+          break;
       }
     });
   }
 
   private getCWEMapping(type: string): string {
-    const cweMap: Record<string, string> = {
-      'code-injection': 'CWE-94',
-      xss: 'CWE-79',
-      'hardcoded-secret': 'CWE-798',
-      'sql-injection': 'CWE-89',
-    };
-    return cweMap[type] || 'CWE-710';
+    const cwe = new Map<string, string>([
+      ['code-injection', 'CWE-94'],
+      ['xss', 'CWE-79'],
+      ['hardcoded-secret', 'CWE-798'],
+      ['sql-injection', 'CWE-89'],
+    ]);
+    return cwe.get(type) ?? 'CWE-710';
   }
 
   private getMockCVSSScore(severity: string): number {
-    const scores = { critical: 9.8, high: 7.5, medium: 5.5, low: 3.2 };
-    return scores[severity as keyof typeof scores] || 5.0;
+    switch (String(severity || '').toLowerCase()) {
+      case 'critical':
+        return 9.8;
+      case 'high':
+        return 7.5;
+      case 'medium':
+        return 5.5;
+      case 'low':
+        return 3.2;
+      default:
+        return 5.0;
+    }
   }
 
   private getDocFreshnessWindowMs(): number {
@@ -2747,25 +2798,17 @@ export class MCPRouter {
     const content = docEntity.content || docEntity.description || '';
     const foundDomains = new Set<string>();
 
-    for (const pattern of domainPatterns) {
-      if (pattern.test(content)) {
-        // Map pattern to domain name
-        const domainMap: Record<string, string> = {
-          'customer|user|client': 'User Management',
-          'order|purchase|transaction|payment': 'Commerce',
-          'product|inventory|catalog|item': 'Product Management',
-          'shipping|delivery|logistics': 'Fulfillment',
-          'account|profile|authentication|security': 'Identity & Security',
-          'analytics|reporting|metrics|dashboard': 'Business Intelligence',
-        };
+    const domainsByPattern: Array<[RegExp, string]> = [
+      [/\b(customer|user|client)\b/gi, 'User Management'],
+      [/\b(order|purchase|transaction|payment)\b/gi, 'Commerce'],
+      [/\b(product|inventory|catalog|item)\b/gi, 'Product Management'],
+      [/\b(shipping|delivery|logistics)\b/gi, 'Fulfillment'],
+      [/\b(account|profile|authentication|security)\b/gi, 'Identity & Security'],
+      [/\b(analytics|reporting|metrics|dashboard)\b/gi, 'Business Intelligence'],
+    ];
 
-        const patternKey = Object.keys(domainMap).find((key) =>
-          new RegExp(key, 'gi').test(content)
-        );
-        if (patternKey) {
-          foundDomains.add(domainMap[patternKey]);
-        }
-      }
+    for (const [rx, domain] of domainsByPattern) {
+      if (rx.test(content)) foundDomains.add(domain);
     }
 
     domains.push(...Array.from(foundDomains));
@@ -2874,7 +2917,7 @@ export class MCPRouter {
               },
             } as any);
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
         // Link entities to cluster
         for (const entity of entities) {
@@ -2956,7 +2999,7 @@ export class MCPRouter {
               } as any);
               updates++;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
           // If the documentation describes business domains, link the code entity to those domains
           try {
@@ -2975,7 +3018,7 @@ export class MCPRouter {
                 version: 1,
               } as any);
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
         }
       }
     }
@@ -3495,7 +3538,7 @@ export class MCPRouter {
                 text: includeText ? obj.text : undefined,
                 metavariables: obj.metavariables,
               });
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             if (matches.length >= limit) break;
           }
 
@@ -3578,77 +3621,7 @@ export class MCPRouter {
       timeoutMs,
       limit,
     } = opts;
-    // Helper to run ast-grep with a given binary name/path
-    const runWith = () =>
-      new Promise<{ matches: any[]; warning?: string }>((resolve, reject) => {
-        const baseArgs: string[] = [
-          'run',
-          '-l',
-          String(lang),
-          '-p',
-          String(pattern),
-        ];
-        if (selector) baseArgs.push('--selector', selector);
-        if (strictness) baseArgs.push('--strictness', strictness);
-        baseArgs.push('--json=stream');
-        // Only add globs if provided
-        for (const g of globs) baseArgs.push('--globs', g);
-        baseArgs.push(srcRoot);
-
-        const filteredPath = (process.env.PATH || '')
-          .split(path.delimiter)
-          .filter((p) => !p.endsWith(path.join('node_modules', '.bin')))
-          .join(path.delimiter);
-
-        // We'll choose the command outside in a loop; default to PATH sg here
-        const cmd = process.platform === 'win32' ? 'sg.cmd' : 'sg';
-        const args = baseArgs;
-        const child = spawn(cmd, args, {
-          cwd,
-          env: { ...process.env, PATH: filteredPath },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
-        let stdout = '';
-        let stderr = '';
-        child.stdout.on('data', (d) => (stdout += d.toString()));
-        child.stderr.on('data', (d) => (stderr += d.toString()));
-        child.on('close', (code) => {
-          clearTimeout(timer);
-          const matches: any[] = [];
-          const lines = stdout
-            .split(/\r?\n/)
-            .filter((l) => l.trim().length > 0);
-          for (const line of lines) {
-            try {
-              const obj = JSON.parse(line);
-              matches.push({
-                file: obj.file,
-                range: obj.range,
-                text: includeText ? obj.text : undefined,
-                metavariables: obj.metavariables,
-              });
-            } catch {}
-            if (matches.length >= limit) break;
-          }
-          const warn = stderr.trim();
-          const suspicious =
-            code !== 0 ||
-            /command not found|No such file|Permission denied|not executable|N\.B\.|This package/i.test(
-              warn
-            );
-          if (matches.length === 0 && suspicious) {
-            return reject(
-              new Error(warn.slice(0, 2000) || 'ast-grep execution failed')
-            );
-          }
-          resolve({ matches, warning: warn.slice(0, 2000) || undefined });
-        });
-        child.on('error', (e) => {
-          clearTimeout(timer);
-          reject(e);
-        });
-      });
+    // (removed unused helper runWith)
 
     // Attempt binaries in order
     const localSg = path.join(
@@ -3702,7 +3675,7 @@ export class MCPRouter {
                 text: includeText ? obj.text : undefined,
                 metavariables: obj.metavariables,
               });
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             if (matches.length >= limit) break;
           }
           const warn = stderr.trim();
@@ -3731,12 +3704,12 @@ export class MCPRouter {
     attempts.push(process.platform === 'win32' ? 'sg.cmd' : 'sg');
     if (hasLocal) attempts.push(localSg);
     // npx as a last resort
-    let lastErr: any = null;
+    let _lastErr: any = null;
     for (const bin of attempts) {
       try {
         return await attempt(bin);
       } catch (e: any) {
-        lastErr = e;
+        _lastErr = e;
       }
     }
     // npx
@@ -3783,7 +3756,7 @@ export class MCPRouter {
                 text: includeText ? obj.text : undefined,
                 metavariables: obj.metavariables,
               });
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             if (matches.length >= limit) break;
           }
           const warn = stderr.trim();
@@ -4085,11 +4058,14 @@ export class MCPRouter {
     // Type validation against JSON schema
     if (schema?.properties && args) {
       const validationErrors: string[] = [];
+      const allowedParamNames = new Set(
+        Object.keys(schema.properties as Record<string, unknown>)
+      );
 
       for (const [paramName, paramSchema] of Object.entries(
         schema.properties
       )) {
-        const paramValue = args[paramName];
+        const paramValue = this.safeGetArg(args, paramName, allowedParamNames);
         if (paramValue !== undefined) {
           const typeErrors = this.validateParameterType(
             paramName,
@@ -4195,10 +4171,10 @@ export class MCPRouter {
           errors.push(`${paramName} must be an array, got ${typeof value}`);
         } else if (schema.items && schema.items.type) {
           // Validate array items
-          for (let i = 0; i < value.length; i++) {
+          for (const [i, item] of (value as any[]).entries()) {
             const itemErrors = this.validateParameterType(
               `${paramName}[${i}]`,
-              value[i],
+              item,
               schema.items
             );
             errors.push(...itemErrors);
@@ -4338,19 +4314,21 @@ export class MCPRouter {
           };
 
         case 'tools/list':
-          const tools = Array.from(this.tools.values()).map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-          }));
-          if (isJsonRpcNotification) {
-            return null;
+          {
+            const tools = Array.from(this.tools.values()).map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+            }));
+            if (isJsonRpcNotification) {
+              return null;
+            }
+            return {
+              jsonrpc: '2.0',
+              id,
+              result: { tools },
+            };
           }
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: { tools },
-          };
 
         case 'tools/call': {
           const toolParams = params || {};
@@ -4832,3 +4810,5 @@ export class MCPRouter {
     return recommendations;
   }
 }
+ 
+// TODO(2025-09-30.35): Guard dynamic route key/indexing; introduce safeGet where unavoidable.

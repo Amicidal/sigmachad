@@ -3,92 +3,6 @@
  * Domain-specific types that are unique to the core package
  */
 
-import { Entity, Spec, Test } from './entities.js';
-import type {
-  SecurityIssue,
-  Vulnerability,
-  CoverageMetrics,
-  Change,
-  SessionRelationship,
-} from '@memento/shared-types';
-import {
-  GraphRelationship,
-  RelationshipType,
-  type PerformanceMetricSample,
-  type PerformanceSeverity,
-  type PerformanceTrend,
-} from './relationships.js';
-
-// Import common types from shared-types
-import type {
-  HistoryConfig,
-  CheckpointReason,
-  CheckpointCreateRequest,
-  TemporalGraphQuery,
-  SessionChangeSummary,
-  SessionChangesResult,
-  SessionTimelineEvent,
-  SessionTimelineSummary,
-  SessionTimelineResult,
-  SessionImpactEntry,
-  SessionImpactsResult,
-  SessionsAffectingEntityEntry,
-  SessionsAffectingEntityResult,
-  SessionMetadata,
-  SessionQueryOptions,
-  PerformanceHistoryOptions,
-  PerformanceHistoryRecord,
-  PerformanceMetrics,
-  ValidationRequest,
-  ValidationResult,
-  ValidationIssue,
-  ImpactAnalysisRequest,
-  ImpactAnalysisSpecImpact,
-  ImpactAnalysis,
-  VectorSearchRequest,
-  VectorSearchResult,
-  SCMCommitRecord,
-  SCMStatusSummary,
-  SCMBranchInfo,
-  SCMPushResult,
-  SCMCommitLogEntry,
-  SecurityScanRequest,
-  SecurityScanResult,
-  VulnerabilityReport,
-  SyncStatus,
-  SyncOptions,
-  SystemAnalytics,
-  CreateSpecRequest,
-  CreateSpecResponse,
-  GetSpecResponse,
-  UpdateSpecRequest,
-  ListSpecsParams,
-  TestCoverage,
-  TestPlanRequest,
-  TestPlanResponse,
-  TestSpec,
-  TestExecutionResult,
-  CodeChangeProposal,
-  CodeChangeAnalysis,
-  TraversalQuery,
-  EntityTimelineEntry,
-  EntityTimelineResult,
-  RelationshipTimelineSegment,
-  RelationshipTimeline,
-  StructuralNavigationEntry,
-  ModuleChildrenResult,
-  ModuleHistoryOptions,
-  ModuleHistoryEntitySummary,
-  ModuleHistoryRelationship,
-  ModuleHistoryResult,
-  ImportEntry,
-  ListImportsResult,
-  DefinitionLookupResult,
-  DependencyAnalysis,
-  CommitPRRequest,
-  CommitPRResponse,
-} from '@memento/shared-types';
-
 // Re-export types from shared-types for backward compatibility
 export type {
   HistoryConfig,
@@ -157,10 +71,6 @@ export type {
   DependencyAnalysis,
   CommitPRRequest,
   CommitPRResponse,
-};
-
-// Re-export graph types
-export type {
   GraphSearchRequest,
   GraphSearchResult,
   GraphExamples,

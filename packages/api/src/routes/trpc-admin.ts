@@ -12,24 +12,33 @@ export const adminRouter = router({
   getLogs: adminProcedure
     .input(z.object({
       level: z.enum(['error', 'warn', 'info', 'debug']).optional(),
-      component: z.string().optional(),
+      component: z.enum(['api', 'knowledge', 'database', 'sync', 'websocket']).optional(),
       since: z.string().optional(), // ISO date string
       limit: z.number().min(1).max(1000).default(100),
     }))
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input, ctx: _ctx }) => {
       try {
         // Mock log retrieval - in production this would integrate with actual logging service
-        const logs = [];
+        type SystemLog = {
+          id: string;
+          timestamp: string;
+          level: 'error' | 'warn' | 'info' | 'debug';
+          component: 'api' | 'knowledge' | 'database' | 'sync' | 'websocket';
+          message: string;
+          metadata: { requestId: string; duration: number };
+        };
+        const logs: SystemLog[] = [];
         const now = new Date();
         const sinceDate = input.since ? new Date(input.since) : new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
         // Generate sample logs based on request
-        const levels = ['error', 'warn', 'info', 'debug'];
-        const components = ['api', 'knowledge', 'database', 'sync', 'websocket'];
+        const levels = ['error', 'warn', 'info', 'debug'] as const;
+        const components = ['api', 'knowledge', 'database', 'sync', 'websocket'] as const;
+        const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
         for (let i = 0; i < Math.min(input.limit, 50); i++) {
-          const level = input.level || levels[Math.floor(Math.random() * levels.length)];
-          const component = input.component || components[Math.floor(Math.random() * components.length)];
+          const level: SystemLog['level'] = input.level ?? pick(levels);
+          const component: SystemLog['component'] = input.component ?? pick(components);
           const timestamp = new Date(sinceDate.getTime() + Math.random() * (now.getTime() - sinceDate.getTime()));
 
           logs.push({
@@ -37,7 +46,7 @@ export const adminRouter = router({
             timestamp: timestamp.toISOString(),
             level,
             component,
-            message: `${level.toUpperCase()}: Sample ${component} log message ${i + 1}`,
+            message: `${(level as string).toUpperCase()}: Sample ${component} log message ${i + 1}`,
             metadata: {
               requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
               duration: Math.floor(Math.random() * 1000),
@@ -93,17 +102,28 @@ export const adminRouter = router({
       paths: z.array(z.string()).optional(),
       force: z.boolean().default(false),
     }))
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input, ctx: _ctx }) => {
       try {
         const startTime = Date.now();
-        const syncResults = [];
+        type SyncResult = {
+          path: string;
+          status: 'synced' | 'error';
+          filesProcessed: number;
+          entitiesCreated: number;
+          entitiesUpdated: number;
+          relationshipsCreated: number;
+          errors: number;
+          duration: number;
+          error?: string;
+        };
+        const syncResults: SyncResult[] = [];
 
         const pathsToSync = input.paths || [process.cwd()];
 
         for (const path of pathsToSync) {
           try {
             // Mock filesystem sync - in production this would trigger actual sync
-            const result = {
+            const result: SyncResult = {
               path,
               status: 'synced',
               filesProcessed: Math.floor(Math.random() * 100) + 10,
@@ -160,9 +180,14 @@ export const adminRouter = router({
     .input(z.object({
       type: z.enum(['entities', 'relationships', 'search', 'all']).default('all'),
     }))
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input, ctx: _ctx }) => {
       try {
-        const clearedCaches = [];
+        type ClearedCache = {
+          type: 'entities' | 'relationships' | 'search';
+          itemsCleared: number;
+          sizeFreed: number; // MB
+        };
+        const clearedCaches: ClearedCache[] = [];
         const startTime = Date.now();
 
         // Mock cache clearing operations
@@ -217,10 +242,9 @@ export const adminRouter = router({
   getConfig: adminProcedure
     .query(async ({ ctx }) => {
       const cfg = ctx.dbService.getConfig?.();
-      const cfgAny = cfg
-        ? ((cfg as unknown) as Record<string, unknown>)
-        : undefined;
-      const version = typeof cfgAny?.version === 'string' ? (cfgAny.version as string) : 'unknown';
+      const cfgObj: Record<string, unknown> | undefined =
+        cfg && typeof cfg === 'object' ? ((cfg as unknown) as Record<string, unknown>) : undefined;
+      const version = typeof cfgObj?.version === 'string' ? (cfgObj.version as string) : 'unknown';
       return {
         version,
         environment: process.env.NODE_ENV || 'development',
@@ -327,6 +351,10 @@ export const adminRouter = router({
   runBenchmarks: adminProcedure
     .input(z.object({ mode: z.enum(['quick','full']).optional() }).optional())
     .query(async ({ input, ctx }) => {
-      return ctx.kgService.runBenchmarks({ mode: (input?.mode || 'quick') as any });
+      const mode = input?.mode ?? 'quick';
+      const options = mode === 'full'
+        ? { includeWrites: true, sampleSize: 50, timeout: 10_000 }
+        : { includeWrites: false, sampleSize: 10, timeout: 5_000 };
+      return ctx.kgService.runBenchmarks(options);
     }),
 });

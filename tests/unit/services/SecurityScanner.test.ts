@@ -42,13 +42,7 @@ import {
   SecurityRule,
   SecurityScanOptions,
   SecurityMonitoringConfig,
-} from "../../../src/services/testing/SecurityScanner";
-import {
-  DatabaseService,
-  IFalkorDBService,
-  IPostgreSQLService,
-} from "../../../src/services/core/DatabaseService";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
+} from "@memento/testing/security/scanner";
 import {
   SecurityIssue,
   Vulnerability,
@@ -57,14 +51,8 @@ import {
   SecurityScanRequest,
   SecurityScanResult,
   VulnerabilityReport,
-} from "../../../src/models/entities";
+} from "@memento/shared-types";
 import { EventEmitter } from "events";
-
-// Import realistic mocks
-import {
-  RealisticFalkorDBMock,
-  RealisticPostgreSQLMock,
-} from "../../test-utils/realistic-mocks";
 
 // Mock classes for testing
 class MockDatabaseService {
@@ -82,7 +70,7 @@ class MockDatabaseService {
     return this.initialized;
   }
 
-  async falkordbQuery(
+  async graphQuery(
     query: string,
     params?: Record<string, any>
   ): Promise<any> {
@@ -135,8 +123,12 @@ class MockDatabaseService {
     return [];
   }
 
-  async falkordbCommand(...args: any[]): Promise<any> {
+  async graphCommand(...args: any[]): Promise<any> {
     return { args, result: "mock-command-result" };
+  }
+
+  getConfig(): { neo4j: { graphKey: string } } {
+    return { neo4j: { graphKey: "memento" } };
   }
 }
 
@@ -343,7 +335,7 @@ describe("SecurityScanner", () => {
     });
 
     it("should set up security schema constraints", async () => {
-      const mockCommand = vi.spyOn(mockDb, "falkordbCommand");
+      const mockCommand = vi.spyOn(mockDb, "graphCommand");
 
       await securityScanner.initialize();
 
@@ -352,7 +344,7 @@ describe("SecurityScanner", () => {
       );
 
       const expectedGraphKey =
-        (mockDb as any).getConfig?.()?.falkordb?.graphKey ?? "memento";
+        (mockDb as any).getConfig?.()?.neo4j?.graphKey ?? "memento";
 
       expect(constraintCalls).toHaveLength(2);
       expect(constraintCalls).toEqual(
@@ -405,7 +397,7 @@ describe("SecurityScanner", () => {
     });
 
     it("should load monitoring configuration", async () => {
-      const mockQuery = vi.spyOn(mockDb, "falkordbQuery");
+      const mockQuery = vi.spyOn(mockDb, "graphQuery");
 
       await securityScanner.initialize();
 
@@ -416,7 +408,7 @@ describe("SecurityScanner", () => {
     });
 
     it("should handle initialization errors gracefully", async () => {
-      const mockQuery = vi.spyOn(mockDb, "falkordbQuery");
+      const mockQuery = vi.spyOn(mockDb, "graphQuery");
       mockQuery.mockRejectedValueOnce(new Error("Database connection failed"));
 
       await expect(securityScanner.initialize()).resolves.toBeUndefined();
@@ -883,7 +875,7 @@ describe("SecurityScanner", () => {
         entityIds: ["file1"],
       };
 
-      const mockQuery = vi.spyOn(mockDb, "falkordbQuery");
+      const mockQuery = vi.spyOn(mockDb, "graphQuery");
 
       await securityScanner.performScan(request);
 
@@ -900,7 +892,7 @@ describe("SecurityScanner", () => {
       };
 
       // Mock database to throw error
-      const mockQuery = vi.spyOn(mockDb, "falkordbQuery");
+      const mockQuery = vi.spyOn(mockDb, "graphQuery");
       mockQuery.mockRejectedValueOnce(new Error("Database error"));
 
       const eventSpy = vi.fn();
@@ -1234,7 +1226,7 @@ describe("SecurityScanner", () => {
 
   describe("Security Fix Generation", () => {
     it("should generate fix for SQL injection issue", async () => {
-      const mockQuery = vi.spyOn(mockDb, "falkordbQuery");
+      const mockQuery = vi.spyOn(mockDb, "graphQuery");
       mockQuery.mockResolvedValueOnce([
         {
           id: "issue1",
@@ -1253,7 +1245,7 @@ describe("SecurityScanner", () => {
     });
 
     it("should handle non-existent issue", async () => {
-      const mockQuery = vi.spyOn(mockDb, "falkordbQuery");
+      const mockQuery = vi.spyOn(mockDb, "graphQuery");
       mockQuery.mockResolvedValueOnce([]);
 
       await expect(
@@ -1292,7 +1284,7 @@ describe("SecurityScanner", () => {
 
   describe("Error Handling and Edge Cases", () => {
     it("should handle database connection failures during initialization", async () => {
-      const mockQuery = vi.spyOn(mockDb, "falkordbQuery");
+      const mockQuery = vi.spyOn(mockDb, "graphQuery");
       mockQuery.mockRejectedValue(new Error("Connection failed"));
 
       await expect(securityScanner.initialize()).resolves.toBeUndefined();

@@ -1,3 +1,4 @@
+// security: avoid dynamic object indexing (none present); keep code constrained
 /**
  * Document Tokenizer
  * Handles parsing and tokenization of documentation files
@@ -105,7 +106,7 @@ export class DocTokenizer {
    */
   async parseMarkdown(
     content: string,
-    filePath?: string
+    _filePath?: string
   ): Promise<ParsedDocument> {
     const tokens = marked.lexer(content);
     const title = this.extractTitle(tokens);
@@ -160,7 +161,7 @@ export class DocTokenizer {
    */
   async parsePlaintext(
     content: string,
-    filePath?: string
+    _filePath?: string
   ): Promise<ParsedDocument> {
     const lines = content.split(/\n/);
     const title = this.extractPlaintextTitle(lines);
@@ -190,7 +191,7 @@ export class DocTokenizer {
    */
   async parseRestructuredText(
     content: string,
-    filePath?: string
+    _filePath?: string
   ): Promise<ParsedDocument> {
     const lines = content.split(/\n/);
     const title = this.extractRstTitle(lines);
@@ -222,7 +223,7 @@ export class DocTokenizer {
    */
   async parseAsciiDoc(
     content: string,
-    filePath?: string
+    _filePath?: string
   ): Promise<ParsedDocument> {
     const lines = content.split(/\n/);
     const title = this.extractAsciiDocTitle(lines);
@@ -393,10 +394,12 @@ export class DocTokenizer {
    * Extract title from RST
    */
   private extractRstTitle(lines: string[]): string {
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].match(/^=+$/) && lines[i - 1].trim()) {
-        return lines[i - 1].trim();
+    let prev = "";
+    for (const curr of lines) {
+      if (/^=+$/.test(curr) && prev.trim()) {
+        return prev.trim();
       }
+      prev = curr;
     }
     return "Untitled Document";
   }
@@ -406,10 +409,13 @@ export class DocTokenizer {
    */
   private extractRstSections(lines: string[]): string[] {
     const sections: string[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].match(/^[-=~]+$/)) {
-        sections.push(lines[i - 1].trim());
+    let prev = "";
+    for (const curr of lines) {
+      if (/^[-=~]+$/.test(curr)) {
+        const title = prev.trim();
+        if (title) sections.push(title);
       }
+      prev = curr;
     }
     return sections;
   }
@@ -441,3 +447,4 @@ export class DocTokenizer {
       .trim();
   }
 }
+ 

@@ -1,9 +1,9 @@
-import type { IPostgreSQLService } from "@memento/database";
+import type { IPostgreSQLService } from "@memento/shared-types";
 import type {
   SessionCheckpointJobPersistence,
   SessionCheckpointJobRuntimeStatus,
   SessionCheckpointJobSnapshot,
-} from "../SessionCheckpointTypes.js";
+} from "@memento/shared-types";
 
 const TABLE_NAME = "session_checkpoint_jobs";
 const PENDING_STATUSES: SessionCheckpointJobRuntimeStatus[] = [

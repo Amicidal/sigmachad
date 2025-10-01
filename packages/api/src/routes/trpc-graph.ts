@@ -6,6 +6,13 @@
 import { z } from 'zod';
 import { router, publicProcedure } from '../trpc/base.js';
 import { TRPCError } from '@trpc/server';
+// Local minimal types to avoid cross-package compile coupling
+type GraphRelationship = {
+  id?: string;
+  fromEntityId: string;
+  toEntityId: string;
+  type: string;
+};
 
 // Entity and Relationship schemas
 const EntitySchema = z.object({
@@ -72,13 +79,12 @@ export const graphRouter = router({
       limit: z.number().min(1).max(1000).default(100),
     }))
     .query(async ({ input, ctx }) => {
-      const types = input.type ? [input.type] : undefined;
-      const collected: any[] = [];
+      const collected: GraphRelationship[] = [];
 
       if (input.direction === 'outgoing' || input.direction === 'both') {
         const outgoing = await ctx.kgService.getRelationships({
           fromEntityId: input.entityId,
-          type: types as any,
+          ...(input.type ? { type: (input.type as any) } : {}),
           limit: input.limit,
         });
         collected.push(...outgoing);
@@ -87,23 +93,22 @@ export const graphRouter = router({
       if (input.direction === 'incoming' || input.direction === 'both') {
         const incoming = await ctx.kgService.getRelationships({
           toEntityId: input.entityId,
-          type: types as any,
+          ...(input.type ? { type: (input.type as any) } : {}),
           limit: input.limit,
         });
         collected.push(...incoming);
       }
 
       const seen = new Set<string>();
-      const deduped = [] as any[];
+      const deduped: GraphRelationship[] = [];
       for (const rel of collected) {
-        const key = (rel as any).id || `${rel.fromEntityId}->${rel.toEntityId}:${rel.type}`;
+        const key = rel.id || `${rel.fromEntityId}->${rel.toEntityId}:${rel.type}`;
         if (!seen.has(key)) {
           seen.add(key);
           deduped.push(rel);
         }
-        if (deduped.length >= input.limit) {
-          break;
-        }
+        const limit: number = typeof input.limit === 'number' ? input.limit : 100;
+        if (deduped.length >= limit) break;
       }
 
       return deduped;
@@ -126,15 +131,16 @@ export const graphRouter = router({
       limit: z.number().min(1).max(100).default(20),
     }))
     .query(async ({ input, ctx }) => {
-      const entities = await ctx.kgService.search({
+      const request = {
         query: input.query,
-        entityTypes: input.entityTypes as any,
-        searchType: input.searchType as any,
-        filters: input.filters as any,
+        entityTypes: input.entityTypes,
+        searchType: input.searchType,
+        filters: input.filters,
         includeRelated: input.includeRelated,
         limit: input.limit,
-      } as any);
-      return { items: entities, total: entities.length };
+      };
+      const entities = await ctx.kgService.search(request);
+      return { items: entities as unknown[], total: entities.length };
     }),
 
   // Get entity dependencies
@@ -165,16 +171,17 @@ export const graphRouter = router({
         offset: 0,
       });
 
-      const filtered = (entities || []).filter((cluster: any) => {
+      const filtered = (entities as unknown[] | undefined)?.filter((cluster: any) => {
+        const c = cluster as { metadata?: Record<string, unknown>; memberEntities?: unknown[]; domain?: string };
         if (input.domain) {
-          const domain = (cluster?.domain || cluster?.metadata?.domain || '').toString();
+          const domain = (c?.domain || c?.metadata?.domain || '').toString();
           if (!domain.toLowerCase().includes(input.domain.toLowerCase())) {
             return false;
           }
         }
-        const members = Array.isArray((cluster as any).members) ? (cluster as any).members.length : 0;
+        const members = Array.isArray(c.memberEntities) ? c.memberEntities.length : 0;
         return members >= input.minSize;
-      });
+      }) ?? [];
 
       return filtered.slice(0, input.limit);
     }),
@@ -206,8 +213,20 @@ export const graphRouter = router({
 
         // Calculate impact based on change type and relationships
         const impactedEntities = new Set<string>();
-        const highRiskChanges = [];
-        const warnings = [];
+        type HighRiskChange = {
+          type: 'breaking_change';
+          message: string;
+          relatedEntity: string;
+          severity: 'high';
+        };
+        type ImpactWarning = {
+          type: 'refactor_warning';
+          message: string;
+          relatedEntity: string;
+          severity: 'medium' | 'low' | 'high';
+        };
+        const highRiskChanges: HighRiskChange[] = [];
+        const warnings: ImpactWarning[] = [];
 
         // Add directly connected entities
         for (const rel of [...outgoingRels, ...incomingRels]) {
@@ -215,7 +234,12 @@ export const graphRouter = router({
           impactedEntities.add(relatedId);
 
           // Check for high-risk relationships
-          if (['depends', 'extends', 'implements', 'calls'].includes(rel.type)) {
+          if ([
+            'DEPENDS_ON',
+            'EXTENDS',
+            'IMPLEMENTS',
+            'CALLS',
+          ].includes(String(rel.type))) {
             if (input.changeType === 'delete') {
               highRiskChanges.push({
                 type: 'breaking_change',

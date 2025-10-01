@@ -164,7 +164,7 @@ export class TestHistory implements ITestHistory {
     const key = `${execution.testId}:${execution.entityId}`;
 
     if (!this.executions.has(key)) {
-      this.executions.set(key, []);
+      this.executions.set(key, [] as TestExecutionRecord[]);
     }
 
     const executions = this.executions.get(key)!;
@@ -189,7 +189,7 @@ export class TestHistory implements ITestHistory {
     metadata: TestMetadata
   ): Promise<TestHistorySnapshot> {
     const key = `${testId}:${entityId}`;
-    const executions = this.executions.get(key) || [];
+    const executions: TestExecutionRecord[] = this.executions.get(key) || ([] as TestExecutionRecord[]);
     const latestExecution = executions[executions.length - 1];
 
     const metrics = this.calculateExecutionMetrics(executions);
@@ -199,14 +199,14 @@ export class TestHistory implements ITestHistory {
       timestamp: new Date(),
       testId,
       entityId,
-      status: latestExecution?.status || 'unknown',
+      status: latestExecution?.status || 'pending',
       coverage: latestExecution?.coverage,
       metadata,
       metrics
     };
 
     if (!this.snapshots.has(key)) {
-      this.snapshots.set(key, []);
+      this.snapshots.set(key, [] as TestHistorySnapshot[]);
     }
 
     this.snapshots.get(key)!.push(snapshot);
@@ -244,7 +244,7 @@ export class TestHistory implements ITestHistory {
     limit = 100
   ): Promise<TestExecutionRecord[]> {
     const key = `${testId}:${entityId}`;
-    const executions = this.executions.get(key) || [];
+    const executions: TestExecutionRecord[] = this.executions.get(key) || ([] as TestExecutionRecord[]);
 
     return executions
       .slice(-limit) // Get the most recent executions
@@ -365,7 +365,7 @@ export class TestHistory implements ITestHistory {
       for (const snapshot of parsedData.snapshots) {
         const key = `${snapshot.testId}:${snapshot.entityId}`;
         if (!this.snapshots.has(key)) {
-          this.snapshots.set(key, []);
+          this.snapshots.set(key, [] as TestHistorySnapshot[]);
         }
         this.snapshots.get(key)!.push(snapshot);
         importedCount++;
@@ -377,7 +377,7 @@ export class TestHistory implements ITestHistory {
       for (const event of parsedData.events) {
         const key = `${event.testId}:${event.entityId}`;
         if (!this.events.has(key)) {
-          this.events.set(key, []);
+          this.events.set(key, [] as TestEvolutionEvent[]);
         }
         this.events.get(key)!.push(event);
         importedCount++;
@@ -703,7 +703,7 @@ export class TestHistory implements ITestHistory {
     // Simplified CSV parsing - in practice would be more sophisticated
     const lines = data.split('\n');
     const headers = lines[0].split(',');
-    const executions = [];
+    const executions: TestExecutionRecord[] = [];
 
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;

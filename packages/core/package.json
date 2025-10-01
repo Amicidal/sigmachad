@@ -2,8 +2,56 @@
   "name": "@memento/core",
   "version": "0.1.0",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "default": "./index.js"
+    },
+    "./types/*": {
+      "types": "./types/*.d.ts",
+      "import": "./types/*.js",
+      "default": "./types/*.js"
+    },
+    "./utils/*": {
+      "types": "./utils/*.d.ts",
+      "import": "./utils/*.js",
+      "default": "./utils/*.js"
+    },
+    "./config/*": {
+      "types": "./config/*.d.ts",
+      "import": "./config/*.js",
+      "default": "./config/*.js"
+    },
+    "./models/*": {
+      "types": "./models/*.d.ts",
+      "import": "./models/*.js",
+      "default": "./models/*.js"
+    },
+    "./services/*": {
+      "types": "./services/*.d.ts",
+      "import": "./services/*.js",
+      "default": "./services/*.js"
+    },
+    "./logging/*": {
+      "types": "./logging/*.d.ts",
+      "import": "./logging/*.js",
+      "default": "./logging/*.js"
+    },
+    "./rollback/*": {
+      "types": "./rollback/*.d.ts",
+      "import": "./rollback/*.js",
+      "default": "./rollback/*.js"
+    },
+    "./*": {
+      "types": "./*.d.ts",
+      "import": "./*.js",
+      "default": "./*.js"
+    },
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

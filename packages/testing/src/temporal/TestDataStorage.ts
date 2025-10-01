@@ -6,7 +6,6 @@
  * and data export/import utilities for temporal test data.
  */
 
-import { DatabaseService } from '@memento/database';
 import {
   TestExecutionRecord,
   TestEvolutionEvent,
@@ -298,12 +297,12 @@ export interface ITestDataStorage {
  */
 export class TestDataStorage implements ITestDataStorage {
   private readonly config: StorageConfiguration;
-  private db?: DatabaseService;
+  private db?: any;
   private compressionCache = new Map<string, Buffer>();
 
   constructor(
     config: Partial<StorageConfiguration> = {},
-    databaseService?: DatabaseService
+    databaseService?: any
   ) {
     this.config = {
       enablePersistence: true,
@@ -1467,7 +1466,12 @@ export class TestDataStorage implements ITestDataStorage {
     originalSize: number;
     compressedSize: number;
   }>> {
-    const results = [];
+    const results: Array<{
+      success: boolean;
+      compressionRatio: number;
+      originalSize: number;
+      compressedSize: number;
+    }> = [];
 
     for (const data of dataSets) {
       try {

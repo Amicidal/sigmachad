@@ -4,8 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
-import type { Entity } from '../../src/models/entities';
-import type { GraphRelationship, RelationshipType } from '../../src/models/relationships';
+import type { Entity, GraphRelationship, RelationshipType } from '@memento/shared-types';
 
 type ListEntitiesOpts = {
   type?: string;
@@ -121,4 +120,3 @@ export class InMemoryKnowledgeGraphMock extends EventEmitter {
     return { relationships: slice, total };
   }
 }
-

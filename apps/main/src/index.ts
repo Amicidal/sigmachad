@@ -373,7 +373,10 @@ Environment Variables:
   PORT                         Server port (default: 3000)
   HOST                         Server host (default: 0.0.0.0)
   NODE_ENV                     Environment (development/production)
-  FALKORDB_URL                 FalkorDB connection URL
+  NEO4J_URI                    Neo4j Bolt URI
+  NEO4J_USERNAME               Neo4j username (default: neo4j)
+  NEO4J_PASSWORD               Neo4j password
+  NEO4J_DATABASE               Neo4j database name (default: neo4j)
   QDRANT_URL                   Qdrant connection URL
   DATABASE_URL                 PostgreSQL connection URL
   LOG_LEVEL                    Logging level (info/debug/warn/error)

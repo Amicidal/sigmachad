@@ -1,3 +1,4 @@
+// TODO(2025-09-30.35): Validate dynamic state key access; move to typed Maps.
 /**
  * Session Migration Service
  *
@@ -9,10 +10,8 @@ import { EventEmitter } from 'events';
 import type { RedisClientType } from 'redis';
 import {
   SessionDocument,
-  SessionEvent,
   RedisConfig,
   SessionError,
-  ISessionStore,
 } from './SessionTypes.js';
 
 export interface MigrationConfig {
@@ -531,7 +530,7 @@ export class SessionMigration extends EventEmitter {
   private async executeIncrementalMigration(
     task: MigrationTask,
     sinceTimestamp: string,
-    options: { validateAfter?: boolean }
+    _options: { validateAfter?: boolean }
   ): Promise<void> {
     task.status = 'running';
 
@@ -542,7 +541,7 @@ export class SessionMigration extends EventEmitter {
       const recentSessions: string[] = [];
 
       for (const sessionKey of sessionKeys) {
-        const sessionData = await this.sourceRedis.hGetAll(sessionKey);
+        const _sessionData = await this.sourceRedis.hGetAll(sessionKey);
         // Check if session has events newer than timestamp
         const eventsKey = sessionKey.replace('session:', 'events:');
         const recentEvents = await this.sourceRedis.zRangeByScore(
@@ -605,7 +604,7 @@ export class SessionMigration extends EventEmitter {
   private async executeSelectiveMigration(
     task: MigrationTask,
     sessionIds: string[],
-    options: { validateAfter?: boolean }
+    _options: { validateAfter?: boolean }
   ): Promise<void> {
     task.status = 'running';
 
@@ -670,14 +669,19 @@ export class SessionMigration extends EventEmitter {
       metadata: session.metadata ? JSON.stringify(session.metadata) : undefined,
     };
 
-    const redisData: Record<string, string | number> = {};
-    Object.entries(sessionData).forEach(([key, value]) => {
-      if (value !== undefined) {
-        redisData[key] = value;
-      }
-    });
+    const redisData = Object.fromEntries(
+      (Object.entries(sessionData) as Array<[
+        string,
+        string | number | undefined
+      ]>)
+        .filter(([, value]) => value !== undefined)
+        .map(([k, v]) => [k, v as string | number])
+    );
 
-    await this.targetRedis.hSet(sessionKey, redisData);
+    await this.targetRedis.hSet(
+      sessionKey,
+      redisData as Record<string, string | number>
+    );
 
     // Migrate events
     if (session.events.length > 0) {

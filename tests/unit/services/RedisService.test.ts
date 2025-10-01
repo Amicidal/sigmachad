@@ -10,8 +10,8 @@ declare const process: any;
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { createClient as createRedisClient, RedisClientType } from 'redis';
-import { RedisService } from '../../../src/services/database/RedisService';
-import { IRedisService } from '../../../src/services/database/interfaces';
+import { RedisService } from '@memento/database/redis/RedisService';
+import { IRedisService } from '@memento/database/interfaces';
 
 // Import realistic mocks
 import {

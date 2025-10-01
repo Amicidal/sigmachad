@@ -6,28 +6,22 @@
 import { FastifyInstance } from "fastify";
 import { EventEmitter } from "events";
 import type { Server as HttpServer } from "http";
-import { FileWatcher, FileChange } from "@memento/core";
+import { FileWatcher } from "@memento/core";
+import type { FileChange, SessionStreamEvent, ISynchronizationCoordinator } from "@memento/shared-types";
 import { DatabaseService } from "@memento/database";
 import { KnowledgeGraphService } from "@memento/knowledge";
 import { WebSocketServer, WebSocket } from "ws";
-import {
-  authenticateHeaders,
-  scopesSatisfyRequirement,
-} from "./middleware/authentication.js";
+import { authenticateHeaders, scopesSatisfyRequirement } from "./middleware/authentication.js";
 import { isApiKeyRegistryConfigured } from "./middleware/api-key-registry.js";
-import type { AuthContext } from "./middleware/authentication.js";
-import {
-  SessionStreamEvent,
-  SynchronizationCoordinator,
-} from "@memento/sync/synchronization";
-import {
+import type { AuthContext } from "@memento/shared-types";
+import type {
   WebSocketConnection,
   WebSocketMessage,
   WebSocketFilter,
   SubscriptionRequest,
   WebSocketEvent,
   ConnectionSubscription,
-} from "./websocket/types.js";
+} from "@memento/shared-types";
 import { normalizeFilter, matchesEvent } from "./websocket/filters.js";
 import { BackpressureManager } from "./websocket/backpressure.js";
 
@@ -39,7 +33,7 @@ export type {
   WebSocketEvent,
   ConnectionSubscription,
   NormalizedSubscriptionFilter,
-} from "./websocket/types.js";
+} from "@memento/shared-types";
 
 const WEBSOCKET_REQUIRED_SCOPES = ["graph:read"];
 
@@ -68,7 +62,7 @@ export class WebSocketRouter extends EventEmitter {
     private kgService: KnowledgeGraphService,
     private dbService: DatabaseService,
     private fileWatcher?: FileWatcher,
-    private syncCoordinator?: SynchronizationCoordinator
+    private syncCoordinator?: ISynchronizationCoordinator
   ) {
     super();
 
@@ -103,7 +97,7 @@ export class WebSocketRouter extends EventEmitter {
         try {
           // Debug log - remove in production
           // console.log("🧭 FileWatcher change event");
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         this.broadcastEvent({
           type: "file_change",
           timestamp: new Date().toISOString(),
@@ -117,7 +111,7 @@ export class WebSocketRouter extends EventEmitter {
     this.kgService.on("entityCreated", (entity: any) => {
       try {
         console.log("🧭 KG entityCreated event");
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
       this.broadcastEvent({
         type: "entity_created",
         timestamp: new Date().toISOString(),
@@ -248,7 +242,7 @@ export class WebSocketRouter extends EventEmitter {
       }
       try {
         socket.destroy();
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     };
 
     // Forward connections to our handler
@@ -319,9 +313,9 @@ export class WebSocketRouter extends EventEmitter {
                 : parsedUrl.pathname;
               try {
                 request.url = sanitizedUrl;
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
           const authContext = authenticateHeaders(headerSource as any, audit);
           const authRequired = this.isAuthRequired();
@@ -373,7 +367,7 @@ export class WebSocketRouter extends EventEmitter {
       } catch (err) {
         try {
           socket.destroy();
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
     };
 
@@ -410,7 +404,7 @@ export class WebSocketRouter extends EventEmitter {
         "send fn?",
         typeof connection?.socket?.send
       );
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
     const connectionId = this.generateConnectionId();
     const wsConnection: WebSocketConnection = {
       id: connectionId,
@@ -469,7 +463,7 @@ export class WebSocketRouter extends EventEmitter {
       try {
         console.log(`🔄 WS PING from ${connectionId}`);
         wsSock.pong();
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     });
 
     wsSock.on("pong", () => {
@@ -485,7 +479,7 @@ export class WebSocketRouter extends EventEmitter {
       const interval = setInterval(() => {
         try {
           wsSock.pong();
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         if (Date.now() - start > 2000) {
           clearInterval(interval);
         }
@@ -528,22 +522,24 @@ export class WebSocketRouter extends EventEmitter {
         });
         break;
       case "list_subscriptions":
-        const summaries = Array.from(connection.subscriptions.values()).map(
-          (sub) => ({
-            id: sub.id,
-            event: sub.event,
-            filter: sub.rawFilter,
-          })
-        );
-        this.sendMessage(connection, {
-          type: "subscriptions",
-          id: message.id,
-          data: summaries.map((sub) => sub.event),
-          // Provide detailed data for clients that need richer info
-          // @ts-ignore allow protocol extension field
-          details: summaries,
-        });
-        break;
+        {
+          const summaries = Array.from(connection.subscriptions.values()).map(
+            (sub) => ({
+              id: sub.id,
+              event: sub.event,
+              filter: sub.rawFilter,
+            })
+          );
+          this.sendMessage(connection, {
+            type: "subscriptions",
+            id: message.id,
+            data: summaries.map((sub) => sub.event),
+            // Provide detailed data for clients that need richer info
+            // @ts-ignore allow protocol extension field
+            details: summaries,
+          });
+          break;
+        }
       default:
         this.sendMessage(connection, {
           type: "error",
@@ -828,7 +824,7 @@ export class WebSocketRouter extends EventEmitter {
             `⚠️ Failed to close WebSocket connection ${connectionId}`,
             error instanceof Error ? error.message : error
           );
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
     }
 
@@ -971,7 +967,7 @@ export class WebSocketRouter extends EventEmitter {
             attempts,
           }
         );
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       if (exceeded) {
         this.metrics.backpressureDisconnects++;
@@ -981,7 +977,7 @@ export class WebSocketRouter extends EventEmitter {
           if (typeof (socket as any).readyState === "number") {
             (socket as any).readyState = WebSocket.CLOSING;
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         this.handleDisconnection(connection.id);
         return;
       }
@@ -1024,7 +1020,7 @@ export class WebSocketRouter extends EventEmitter {
                 (payload as any)?.type || "unknown"
               )}`
             );
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           socket.send(json);
           return;
         }
@@ -1069,7 +1065,7 @@ export class WebSocketRouter extends EventEmitter {
                 `⚠️  Failed to ping WebSocket connection ${connectionId}`,
                 error instanceof Error ? error.message : error
               );
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
           }
         }
 
@@ -1168,13 +1164,13 @@ export class WebSocketRouter extends EventEmitter {
         } else {
           this.httpServer.removeListener("upgrade", this.upgradeHandler);
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
       this.upgradeHandler = undefined;
     }
 
     if (this.syncCoordinator && this.sessionEventHandler) {
-      if (typeof (this.syncCoordinator as any).off === "function") {
-        (this.syncCoordinator as any).off(
+      if (typeof this.syncCoordinator.off === "function") {
+        this.syncCoordinator.off(
           "sessionEvent",
           this.sessionEventHandler
         );

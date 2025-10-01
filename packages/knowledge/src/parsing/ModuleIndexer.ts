@@ -6,8 +6,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { Module } from '@memento/shared-types.js';
+import { KnowledgeGraphService } from '@memento/knowledge/orchestration/KnowledgeGraphService';
+import { Module } from '@memento/shared-types';
 
 export class ModuleIndexer {
   constructor(private kg: KnowledgeGraphService) {}

@@ -52,6 +52,10 @@ export interface SearchStats {
   cacheSize: number;
   cacheHitRate: number;
   topSearches: Array<{ query: string; count: number }>;
+  // Total number of searches executed since service start
+  totalSearches: number;
+  // Rolling average response time in milliseconds (e.g., last 100 queries)
+  averageResponseTime: number;
 }
 
 /**
@@ -203,4 +207,6 @@ export interface GraphExamples {
     content: string;
     source: string;
   }[];
+  // Optional related patterns referenced by callers in SearchServiceOGM
+  relatedPatterns?: string[];
 }

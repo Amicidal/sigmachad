@@ -10,8 +10,8 @@ import {
   TestExecutionRecord,
   TestEvolutionEvent,
   TestRelationship,
-  TestConfiguration,
-  TestMetadata
+  
+  
 } from './TestTypes.js';
 
 export interface PredictionModel {
@@ -579,7 +579,7 @@ export class TestPredictiveAnalytics implements ITestPredictiveAnalytics {
       const batchResults = await Promise.all(batchPromises);
 
       // Process results
-      batchResults.forEach((testResults, index) => {
+      batchResults.forEach((testResults, _index) => {
         let resultIndex = 0;
 
         if (predictionTypes.includes('failure') && testResults[resultIndex]) {
@@ -872,7 +872,6 @@ export class TestPredictiveAnalytics implements ITestPredictiveAnalytics {
   }
 
   private calculateMaintenanceCosts(features: any, timeFrame: number) {
-    const baseCost = 2; // Base 2 hours per month
 
     const debugging = features.flakinessScore * 8 * (timeFrame / 30);
     const flakiness = features.flakinessScore * 4 * (timeFrame / 30);
@@ -926,7 +925,7 @@ export class TestPredictiveAnalytics implements ITestPredictiveAnalytics {
     return score;
   }
 
-  private calculatePredictionConfidence(executions: TestExecutionRecord[], features: any): number {
+  private calculatePredictionConfidence(executions: TestExecutionRecord[], _features: any): number {
     // Confidence based on data availability and consistency
     const dataPoints = executions.length;
     const dataConfidence = Math.min(dataPoints / this.config.minDataPoints, 1);

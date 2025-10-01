@@ -99,17 +99,17 @@ async function runDemo() {
 
   // Set up event listeners
   pipeline.on('pipeline:started', () => {
-    // eslint-disable-line @typescript-eslint/no-explicit-any
+     
     console.log('✅ Pipeline started successfully');
   });
 
   pipeline.on('event:received', (event: any) => {
-    // eslint-disable-line @typescript-eslint/no-explicit-any
+     
     console.log(`📥 Received event: ${event.id} (${event.filePath})`);
   });
 
   pipeline.on('metrics:updated', (metrics: any) => {
-    // eslint-disable-line @typescript-eslint/no-explicit-any
+     
     console.log(
       `📊 Metrics: ${
         metrics.totalEvents
@@ -120,7 +120,7 @@ async function runDemo() {
   });
 
   pipeline.on('pipeline:error', (error: any) => {
-    // eslint-disable-line @typescript-eslint/no-explicit-any
+     
     console.error('❌ Pipeline error:', error.message);
   });
 

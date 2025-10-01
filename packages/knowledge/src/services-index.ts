@@ -17,18 +17,15 @@
  */
 
 // Main parser facade
-export { ASTParserCore } from './ASTParserCore.js';
+export { ASTParserCore } from './parsing/ASTParserCore';
 
-// Core types
+// Core types (excluding CachedFileInfo, ExportMapEntry, ResolvedSymbol which are re-exported with aliases below)
 export type {
   ParseResult,
   ParseError,
   IncrementalParseResult,
   PartialUpdate,
   ChangeRange,
-  CachedFileInfo,
-  ExportMapEntry,
-  ResolvedSymbol,
   BudgetStats,
   CacheStats,
   PartialUpdateStats,
@@ -42,7 +39,7 @@ export type {
   SymbolEntityOptions,
   DirectoryEntityOptions,
   RelationshipOptions,
-} from './types.js';
+} from './types';
 
 // Shared utilities
 export {
@@ -58,38 +55,39 @@ export {
   isNoiseSymbol,
   createEntityId,
   processBatched,
-} from './utils.js';
+} from './utils';
 
 // Individual modules for advanced usage
-export { CacheManager } from './CacheManager.js';
-export type { CachedFileInfo, ExportMapEntry as CacheExportMapEntry } from './CacheManager.js';
+export { CacheManager } from './orchestration/CacheManager';
+// Re-export types from shared-types with aliases to avoid conflicts
+export type { CachedFileInfo, ExportMapEntry as CacheExportMapEntry } from '@memento/shared-types';
 
-export { DirectoryHandler } from './DirectoryHandler.js';
+export { DirectoryHandler } from './parsing/DirectoryHandler';
 
-export { TypeCheckerBudget } from './TypeCheckerBudget.js';
+export { TypeCheckerBudget } from './parsing/TypeCheckerBudget';
 
-export { SymbolExtractor } from './SymbolExtractor.js';
+export { SymbolExtractor } from './parsing/SymbolExtractor';
 
-export { ModuleResolver } from './ModuleResolver.js';
+export { ModuleResolver } from './parsing/ModuleResolver';
 export type {
   ResolvedSymbol,
   ExportMapEntry as ModuleExportMapEntry,
-  ModuleResolverOptions
-} from './ModuleResolver.js';
+} from '@memento/shared-types';
+export type { ModuleResolverOptions } from './parsing/ModuleResolver';
 
-export { RelationshipBuilder } from './RelationshipBuilder.js';
-export type { RelationshipBuilderOptions } from './RelationshipBuilder.js';
+export { RelationshipBuilder } from './graph/RelationshipBuilder';
+export type { RelationshipBuilderOptions } from './graph/RelationshipBuilder';
 
-export { IncrementalParser } from './IncrementalParser.js';
+export { IncrementalParser } from './parsing/IncrementalParser';
 export type {
   ParseResult as IncrementalParseResult_Type,
   ParseError as IncrementalParseError,
   IncrementalParseResult as IncrementalResult,
   PartialUpdate as IncrementalPartialUpdate,
   ChangeRange as IncrementalChangeRange
-} from './IncrementalParser.js';
+} from './parsing/IncrementalParser';
 
 /**
  * Default export is the main ASTParserCore for backward compatibility
  */
-export { ASTParserCore as default } from './ASTParserCore.js';
+export { ASTParserCore as default } from './parsing/ASTParserCore';

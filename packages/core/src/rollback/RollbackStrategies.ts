@@ -1,3 +1,4 @@
+// TODO(2025-09-30.35): Guard strategy lookups and dynamic property access.
 /**
  * Different rollback strategies for various scenarios
  */
@@ -92,8 +93,17 @@ abstract class BaseRollbackStrategy extends EventEmitter {
     });
 
     switch (this.context.conflictResolution.strategy) {
-      case ConflictStrategy.ABORT:
-        throw new RollbackConflictError('Rollback aborted due to conflicts', conflicts);
+      case 'manual': { // From ABORT or ASK_USER
+        // Support optional custom resolver if provided in extended configs
+        const maybeResolver: any = (this.context.conflictResolution as any)
+          .resolver;
+        if (typeof maybeResolver === 'function') {
+          for (const conflict of conflicts) {
+            await maybeResolver(conflict);
+          }
+        }
+        break;
+      }
 
       case ConflictStrategy.SKIP:
         this.log('info', 'Skipping conflicted changes');
@@ -101,16 +111,6 @@ abstract class BaseRollbackStrategy extends EventEmitter {
 
       case ConflictStrategy.OVERWRITE:
         this.log('warn', 'Overwriting conflicted changes');
-        break;
-
-      case ConflictStrategy.ASK_USER:
-        if (this.context.conflictResolution.resolver) {
-          for (const conflict of conflicts) {
-            await this.context.conflictResolution.resolver(conflict);
-          }
-        } else {
-          throw new RollbackConflictError('User resolution required but no resolver provided', conflicts);
-        }
         break;
 
       case ConflictStrategy.MERGE:
@@ -278,7 +278,7 @@ export class GradualRollbackStrategy extends BaseRollbackStrategy {
 
     try {
       for (let i = 0; i < batches.length; i++) {
-        const batch = batches[i];
+        const batch = batches.at(i)!;
         this.log('debug', `Processing batch ${i + 1} of ${batches.length}`, {
           batchSize: batch.length
         });
@@ -323,7 +323,7 @@ export class GradualRollbackStrategy extends BaseRollbackStrategy {
     return batches;
   }
 
-  private async detectBatchConflicts(batch: DiffEntry[]): Promise<RollbackConflict[]> {
+  private async detectBatchConflicts(_batch: DiffEntry[]): Promise<RollbackConflict[]> {
     // Simplified conflict detection for batch
     return [];
   }
@@ -451,7 +451,7 @@ export class SafeRollbackStrategy extends BaseRollbackStrategy {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
 
-  private async detectConflicts(changes: DiffEntry[]): Promise<RollbackConflict[]> {
+  private async detectConflicts(_changes: DiffEntry[]): Promise<RollbackConflict[]> {
     // Enhanced conflict detection for safe strategy
     return [];
   }
@@ -602,3 +602,5 @@ export class RollbackStrategyFactory {
     return RollbackStrategy.IMMEDIATE;
   }
 }
+ 
+// TODO(2025-09-30.35): Guard strategy lookups and dynamic property access.

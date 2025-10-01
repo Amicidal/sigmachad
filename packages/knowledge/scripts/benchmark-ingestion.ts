@@ -247,7 +247,7 @@ class IngestionBenchmark {
     let filesProcessed = 0;
     let entitiesCreated = 0;
     let relationshipsCreated = 0;
-    let embeddingsGenerated = 0;
+    const embeddingsGenerated = 0;
 
     try {
       // Create pipeline configuration
@@ -373,8 +373,10 @@ class IngestionBenchmark {
     latencies.sort((a, b) => a - b);
     const p95Index = Math.floor(latencies.length * 0.95);
     const p99Index = Math.floor(latencies.length * 0.99);
-    const p95LatencyMs = latencies[p95Index] || 0;
-    const p99LatencyMs = latencies[p99Index] || 0;
+    // Use safe array access to avoid dynamic property indexing warnings
+    // and to gracefully handle out-of-range indices.
+    const p95LatencyMs = latencies.at(p95Index) ?? 0;
+    const p99LatencyMs = latencies.at(p99Index) ?? 0;
     const avgLatencyMs =
       latencies.length > 0
         ? latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length

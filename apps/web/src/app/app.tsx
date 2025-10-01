@@ -14,7 +14,7 @@ export function App() {
         setHealth(data);
         setLoading(false);
       })
-      .catch(err => {
+      .catch(_err => {
         setError('Backend not available');
         setLoading(false);
       });

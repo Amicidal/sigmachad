@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { GitService } from "../../../src/services/scm/GitService";
+import { GitService } from "@memento/sync/scm/GitService";
 
 const commandLog: Array<{ cmd: string; args: string[] }> = [];
 

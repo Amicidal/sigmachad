@@ -104,7 +104,7 @@ function extractQuerySchema(schema: ZodSchema<any>): ZodSchema<any> | null {
     if (schema.constructor.name === "ZodObject") {
       const zodObjectSchema = schema as any;
       const shape = zodObjectSchema._def.shape();
-      const queryFields: Record<string, any> = {};
+      const entries: Array<[string, any]> = [];
 
       for (const [key, fieldSchema] of Object.entries(shape)) {
         if (
@@ -115,11 +115,22 @@ function extractQuerySchema(schema: ZodSchema<any>): ZodSchema<any> | null {
           key.includes("sort") ||
           key.includes("page")
         ) {
-          queryFields[key] = fieldSchema;
+          entries.push([key, fieldSchema]);
         }
       }
 
-      return Object.keys(queryFields).length > 0 ? z.object(queryFields) : null;
+      if (entries.length === 0) return null;
+      const queryFields = entries.reduce((acc, [k, v]) => {
+        Object.defineProperty(acc, k, {
+          value: v,
+          enumerable: true,
+          writable: true,
+          configurable: false,
+        });
+        return acc;
+      }, Object.create(null) as Record<string, any>);
+
+      return z.object(queryFields);
     }
   } catch (error) {
     // If schema introspection fails, return null
@@ -135,7 +146,7 @@ function extractParamsSchema(schema: ZodSchema<any>): ZodSchema<any> | null {
     if (schema.constructor.name === "ZodObject") {
       const zodObjectSchema = schema as any;
       const shape = zodObjectSchema._def.shape();
-      const paramFields: Record<string, any> = {};
+      const entries: Array<[string, any]> = [];
 
       for (const [key, fieldSchema] of Object.entries(shape)) {
         if (
@@ -145,11 +156,22 @@ function extractParamsSchema(schema: ZodSchema<any>): ZodSchema<any> | null {
           key === "file" ||
           key === "name"
         ) {
-          paramFields[key] = fieldSchema;
+          entries.push([key, fieldSchema]);
         }
       }
 
-      return Object.keys(paramFields).length > 0 ? z.object(paramFields) : null;
+      if (entries.length === 0) return null;
+      const paramFields = entries.reduce((acc, [k, v]) => {
+        Object.defineProperty(acc, k, {
+          value: v,
+          enumerable: true,
+          writable: true,
+          configurable: false,
+        });
+        return acc;
+      }, Object.create(null) as Record<string, any>);
+
+      return z.object(paramFields);
     }
   } catch (error) {
     // If schema introspection fails, return null
@@ -187,6 +209,15 @@ export function sanitizeInput() {
   };
 }
 
+function isSafeKey(key: string): boolean {
+  return (
+    key !== "__proto__" &&
+    key !== "constructor" &&
+    key !== "prototype" &&
+    /^[\w\-.[\]]{1,256}$/.test(key)
+  );
+}
+
 function sanitizeObject(obj: any): any {
   if (typeof obj !== "object" || obj === null) {
     return obj;
@@ -196,42 +227,53 @@ function sanitizeObject(obj: any): any {
     return obj.map(sanitizeObject);
   }
 
-  const sanitized: any = {};
+  const out: Record<string, any> = Object.create(null);
   for (const [key, value] of Object.entries(obj)) {
+    if (!isSafeKey(key)) continue;
+    let sanitizedValue: any = value;
     if (typeof value === "string") {
-      // Basic XSS prevention - only sanitize if there are actual HTML tags
       const hasScriptTags =
         /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi.test(value);
       const hasHtmlTags = /<[^>]*>/g.test(value);
-
-      if (hasScriptTags || hasHtmlTags) {
-        sanitized[key] = value
-          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-          .replace(/<[^>]*>/g, "")
-          .trim();
-      } else {
-        sanitized[key] = value.trim();
-      }
+      sanitizedValue = hasScriptTags || hasHtmlTags
+        ? value
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+            .replace(/<[^>]*>/g, "")
+            .trim()
+        : value.trim();
     } else if (typeof value === "object") {
-      sanitized[key] = sanitizeObject(value);
-    } else {
-      sanitized[key] = value;
+      sanitizedValue = sanitizeObject(value);
     }
+
+    Object.defineProperty(out, key, {
+      value: sanitizedValue,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
 
-  return sanitized;
+  return out;
 }
 
 // Rate limiting helper (will be used with rate limiting middleware)
 export function createRateLimitKey(request: FastifyRequest): string {
   // Prefer client IP from x-forwarded-for if present; fall back to Fastify's derived IP
-  const xff = (request.headers["x-forwarded-for"] as string | undefined)
-    ?.split(",")[0]
-    ?.trim();
+  const getHeader = (name: "x-forwarded-for" | "user-agent"): string | undefined => {
+    const raw = request.headers[name as keyof typeof request.headers] as
+      | string
+      | string[]
+      | undefined;
+    if (Array.isArray(raw)) return raw[0];
+    return raw;
+  };
+
+  const xff = getHeader("x-forwarded-for")?.split(",")[0]?.trim();
   const ip = xff || request.ip || "unknown";
-  const userAgent = request.headers["user-agent"] || "unknown";
+  const userAgent = getHeader("user-agent") || "unknown";
   const method = request.method;
   const url = request.url;
 
   return `${ip}:${userAgent}:${method}:${url}`;
 }
+ 

@@ -1,17 +1,15 @@
+// security: avoid dynamic object indexing; use Object.fromEntries and guarded accessors
 /**
  * Search Service OGM Implementation
  * Uses Neogma for structural searches while keeping embedding service for semantic search
  */
 
 import { EventEmitter } from 'events';
-import { NeogmaService } from './NeogmaService.js';
-import {
-  createEntityModels,
-  modelToEntity,
-} from '@memento/graph/models-ogm/EntityModels.js';
-import { EmbeddingService } from './EmbeddingService.js';
-import { Entity } from '@memento/shared-types.js';
-import { GraphSearchRequest, GraphExamples } from '../../models/types.js';
+import { NeogmaService } from '@memento/knowledge/graph/NeogmaService';
+import { createEntityModels } from '@memento/graph/models-ogm/EntityModels';
+import { modelToEntity } from '@memento/graph/models-ogm/BaseModels';
+import { EmbeddingService } from '@memento/knowledge/embeddings/EmbeddingService';
+import { Entity, GraphSearchRequest, GraphExamples } from '@memento/shared-types';
 import {
   ISearchService,
   StructuralSearchOptions,
@@ -19,7 +17,7 @@ import {
   SemanticSearchOptions,
   PatternSearchOptions,
   SearchStats,
-} from './ISearchService.js';
+} from '@memento/knowledge/ISearchService';
 
 // Simple cache for search results (reused from original)
 class SearchCache {
@@ -89,6 +87,13 @@ class SearchCache {
 export class SearchServiceOGM extends EventEmitter implements ISearchService {
   private models: ReturnType<typeof createEntityModels>;
   private searchCache: SearchCache;
+  private totalSearches = 0;
+  private totalResponseTimeMs = 0;
+  private recentDurations: number[] = [];
+  private recentWindow = 100;
+  private cacheHits = 0;
+  private cacheLookups = 0;
+  private queryTally = new Map<string, number>();
 
   constructor(
     private neogmaService: NeogmaService,
@@ -109,10 +114,15 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
    * Unified search combining structural and semantic
    */
   async search(request: GraphSearchRequest): Promise<SearchResult[]> {
+    const t0 = Date.now();
+    this.cacheLookups++;
     // Check cache
     const cached = this.searchCache.get(request);
     if (cached) {
-      this.emit('search:cache:hit', { query: request.query });
+      this.cacheHits++;
+      const duration = Date.now() - t0;
+      this.recordSearchMetrics(request.query, duration);
+      this.emit('search:cache:hit', { query: request.query, duration });
       return cached;
     }
 
@@ -142,16 +152,17 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
         break;
     }
 
-    // Apply post-processing (if needed)
-    // Note: sortBy and groupBy are not part of GraphSearchRequest interface
-    // These would be handled by the API layer if needed
-
     // Cache and return
     this.searchCache.set(request, results);
+
+    const duration = Date.now() - t0;
+    this.recordSearchMetrics(request.query, duration);
+
     this.emit('search:completed', {
       query: request.query,
       strategy,
       count: results.length,
+      duration,
     });
 
     return results;
@@ -169,7 +180,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
 
     try {
       // Search across different entity types using their specific models
-      const searchPromises = [];
+      const searchPromises: Array<Promise<SearchResult[]>> = [];
 
       // Search in files
       if (!options.filter?.type || options.filter.type === 'file') {
@@ -579,7 +590,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
           signature: '',
           usageExamples: [],
           testExamples: [],
-          relatedPatterns: [],
+          documentationExamples: [],
         };
       }
 
@@ -598,8 +609,9 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
 
       const usageExamples = usageResults.map((row) => {
         const caller = this.parseEntity(row.caller);
+        const callerName = (caller as any)?.name ?? (caller as any)?.id ?? 'unknown';
         return {
-          context: `Used in ${caller.type}: ${caller.name}`,
+          context: `Used in ${caller.type}: ${callerName}`,
           code: (caller as any).content || '',
           file: (caller as any).path || 'unknown',
           line: (caller as any).line || 0,
@@ -611,7 +623,7 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
         signature: (entity as any).signature || '',
         usageExamples,
         testExamples: [], // TODO: Add test examples logic
-        relatedPatterns: [], // TODO: Add pattern analysis
+        documentationExamples: [], // TODO: Add documentation examples logic
       };
     } catch (error) {
       this.emit('error', { operation: 'getEntityExamples', error, entityId });
@@ -623,12 +635,24 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
    * Get search statistics
    */
   async getSearchStats(): Promise<SearchStats> {
-    // This would normally track actual metrics
-    // For now, return basic cache data
+    const recentAvg =
+      this.recentDurations.length === 0
+        ? 0
+        : this.recentDurations.reduce((a, b) => a + b, 0) /
+          this.recentDurations.length;
+
+    // Compute top 5 searches by count
+    const topSearches = Array.from(this.queryTally.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([query, count]) => ({ query, count }));
+
     return {
       cacheSize: this.searchCache.size,
-      cacheHitRate: 0.75, // Would track this
-      topSearches: [], // Would track this
+      cacheHitRate: this.cacheLookups > 0 ? this.cacheHits / this.cacheLookups : 0,
+      topSearches,
+      totalSearches: this.totalSearches,
+      averageResponseTime: Math.round(recentAvg),
     };
   }
 
@@ -679,6 +703,20 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
   }
 
   /**
+   * Record metrics for search execution
+   */
+  private recordSearchMetrics(query: string, durationMs: number) {
+    this.totalSearches += 1;
+    this.totalResponseTimeMs += durationMs;
+    this.recentDurations.push(durationMs);
+    if (this.recentDurations.length > this.recentWindow) {
+      this.recentDurations.shift();
+    }
+    const prev = this.queryTally.get(query) ?? 0;
+    this.queryTally.set(query, prev + 1);
+  }
+
+  /**
    * Build filter clause for Cypher queries
    */
   private buildFilterClause(filter?: Record<string, any>): string {
@@ -686,13 +724,14 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
       return '';
     }
 
-    const clauses = Object.entries(filter).map(([key, value]) => {
+    const clauses = Object.entries(filter).flatMap(([key, value]) => {
+      if (!SearchServiceOGM.isSafePropertyName(key)) return [] as string[];
       if (value === null) {
-        return `n.${key} IS NULL`;
+        return [`n.${key} IS NULL`];
       } else if (typeof value === 'object' && value.$ne !== undefined) {
-        return `n.${key} <> $filter_${key}_ne`;
+        return [`n.${key} <> $filter_${key}_ne`];
       } else {
-        return `n.${key} = $filter_${key}`;
+        return [`n.${key} = $filter_${key}`];
       }
     });
 
@@ -703,19 +742,17 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
    * Build filter parameters for Cypher queries
    */
   private buildFilterParams(filter?: Record<string, any>): Record<string, any> {
-    const params: Record<string, any> = {};
-
-    if (!filter) return params;
-
-    Object.entries(filter).forEach(([key, value]) => {
-      if (typeof value === 'object' && value.$ne !== undefined) {
-        params[`filter_${key}_ne`] = value.$ne;
+    if (!filter) return {};
+    const pairs: Array<[string, any]> = [];
+    for (const [key, value] of Object.entries(filter)) {
+      if (!SearchServiceOGM.isSafePropertyName(key)) continue;
+      if (typeof value === 'object' && (value as any).$ne !== undefined) {
+        pairs.push([`filter_${key}_ne`, (value as any).$ne]);
       } else {
-        params[`filter_${key}`] = value;
+        pairs.push([`filter_${key}`, value]);
       }
-    });
-
-    return params;
+    }
+    return Object.fromEntries(pairs);
   }
 
   /**
@@ -723,9 +760,11 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
    */
   private sortResults(results: SearchResult[], sortBy: string): SearchResult[] {
     return results.sort((a, b) => {
-      const aVal = (a.entity as any)[sortBy];
-      const bVal = (b.entity as any)[sortBy];
-
+      const aVal = SearchServiceOGM.getEntityField(a.entity as any, sortBy);
+      const bVal = SearchServiceOGM.getEntityField(b.entity as any, sortBy);
+      if (aVal == null && bVal == null) return b.score - a.score;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
       if (aVal < bVal) return -1;
       if (aVal > bVal) return 1;
       return b.score - a.score; // Fall back to score
@@ -742,11 +781,13 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
     const grouped = new Map<string, SearchResult[]>();
 
     results.forEach((result) => {
-      const key = (result.entity as any)[groupBy] || 'unknown';
-      if (!grouped.has(key)) {
-        grouped.set(key, []);
-      }
-      grouped.get(key)!.push(result);
+      const key =
+        (SearchServiceOGM.getEntityField(result.entity as any, groupBy) as
+          | string
+          | undefined) || 'unknown';
+      const bucket = grouped.get(key) ?? [];
+      bucket.push(result);
+      grouped.set(key, bucket);
     });
 
     // Flatten groups, keeping best from each
@@ -764,27 +805,53 @@ export class SearchServiceOGM extends EventEmitter implements ISearchService {
    */
   private parseEntity(node: any): Entity {
     const properties = node.properties || node;
-    const entity: any = {};
-
+    const entries: Array<[string, unknown]> = [];
     for (const [key, value] of Object.entries(properties)) {
       if (value === null || value === undefined) continue;
-
       if (key === 'created' || key === 'lastModified' || key.endsWith('At')) {
-        entity[key] = new Date(value as string);
+        entries.push([key, new Date(value as string)]);
       } else if (
         typeof value === 'string' &&
         ((value as string).startsWith('[') || (value as string).startsWith('{'))
       ) {
         try {
-          entity[key] = JSON.parse(value as string);
+          entries.push([key, JSON.parse(value as string)]);
         } catch {
-          entity[key] = value;
+          entries.push([key, value]);
         }
       } else {
-        entity[key] = value;
+        entries.push([key, value]);
       }
     }
+    return Object.fromEntries(entries) as unknown as Entity;
+  }
 
-    return entity as Entity;
+  private static isSafePropertyName(name: string): boolean {
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+  }
+
+  private static getEntityField(entity: any, key: string): any {
+    switch (key) {
+      case 'id':
+        return entity.id;
+      case 'name':
+        return entity.name;
+      case 'type':
+        return entity.type;
+      case 'path':
+        return entity.path;
+      case 'filePath':
+        return entity.filePath ?? entity.path;
+      case 'line':
+        return entity.line;
+      case 'created':
+        return entity.created;
+      case 'lastModified':
+        return entity.lastModified;
+      default:
+        return undefined;
+    }
   }
 }
+ 
+// TODO(2025-09-30.35): Audit dynamic cypher param access; funnel through safe helpers.

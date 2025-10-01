@@ -40,7 +40,7 @@ export class PostgreSQLRollbackStore extends EventEmitter {
 
   constructor(
     private config: RollbackConfig,
-    private options: RollbackStoreOptions,
+    private options: RollbackStoreOptions, // Now from shared-types
     private pgConfig: PostgreSQLConfig
   ) {
     super();
@@ -92,6 +92,9 @@ export class PostgreSQLRollbackStore extends EventEmitter {
           expires_at TIMESTAMPTZ,
           session_id TEXT,
           metadata JSONB DEFAULT '{}',
+          operation_id UUID,
+          entities JSONB DEFAULT '[]',
+          relationships JSONB DEFAULT '[]',
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
@@ -170,16 +173,19 @@ export class PostgreSQLRollbackStore extends EventEmitter {
       // Insert into PostgreSQL
       await client.query(`
         INSERT INTO ${this.rollbackPointsTable}
-        (id, name, description, timestamp, expires_at, session_id, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        (id, name, description, timestamp, expires_at, session_id, metadata, operation_id, entities, relationships)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       `, [
         rollbackPoint.id,
-        rollbackPoint.name,
-        rollbackPoint.description,
+        rollbackPoint.name || 'Unnamed Rollback', // Use compatibility prop or default
+        rollbackPoint.description || '',
         rollbackPoint.timestamp,
         rollbackPoint.expiresAt,
         rollbackPoint.sessionId,
-        JSON.stringify(rollbackPoint.metadata)
+        JSON.stringify(rollbackPoint.metadata || {}),
+        rollbackPoint.operationId || null,
+        JSON.stringify(rollbackPoint.entities || []),
+        JSON.stringify(rollbackPoint.relationships || [])
       ]);
 
       await client.query('COMMIT');
@@ -220,7 +226,7 @@ export class PostgreSQLRollbackStore extends EventEmitter {
       const client = await this.pool.connect();
       try {
         const result = await client.query(`
-          SELECT id, name, description, timestamp, expires_at, session_id, metadata
+          SELECT id, name, description, timestamp, expires_at, session_id, metadata, operation_id, entities, relationships
           FROM ${this.rollbackPointsTable}
           WHERE id = $1
         `, [id]);
@@ -233,11 +239,14 @@ export class PostgreSQLRollbackStore extends EventEmitter {
         rollbackPoint = {
           id: row.id,
           name: row.name,
-          description: row.description,
+          description: row.description || row.description, // Fallback to new field
           timestamp: new Date(row.timestamp),
           expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
           sessionId: row.session_id,
-          metadata: row.metadata || {}
+          metadata: row.metadata || {},
+          operationId: row.operation_id,
+          entities: row.entities ? JSON.parse(row.entities) : [],
+          relationships: row.relationships ? JSON.parse(row.relationships) : []
         };
 
         // Cache it for future requests
@@ -264,7 +273,7 @@ export class PostgreSQLRollbackStore extends EventEmitter {
     const client = await this.pool.connect();
     try {
       const result = await client.query(`
-        SELECT id, name, description, timestamp, expires_at, session_id, metadata
+        SELECT id, name, description, timestamp, expires_at, session_id, metadata, operation_id, entities, relationships
         FROM ${this.rollbackPointsTable}
         WHERE expires_at IS NULL OR expires_at > NOW()
         ORDER BY timestamp DESC
@@ -273,11 +282,14 @@ export class PostgreSQLRollbackStore extends EventEmitter {
       const points: RollbackPoint[] = result.rows.map(row => ({
         id: row.id,
         name: row.name,
-        description: row.description,
+        description: row.description || row.description, // Fallback to new field
         timestamp: new Date(row.timestamp),
         expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
         sessionId: row.session_id,
-        metadata: row.metadata || {}
+        metadata: row.metadata || {},
+        operationId: row.operation_id,
+        entities: row.entities ? JSON.parse(row.entities) : [],
+        relationships: row.relationships ? JSON.parse(row.relationships) : []
       }));
 
       // Update memory cache with recent points
@@ -299,7 +311,7 @@ export class PostgreSQLRollbackStore extends EventEmitter {
     const client = await this.pool.connect();
     try {
       const result = await client.query(`
-        SELECT id, name, description, timestamp, expires_at, session_id, metadata
+        SELECT id, name, description, timestamp, expires_at, session_id, metadata, operation_id, entities, relationships
         FROM ${this.rollbackPointsTable}
         WHERE session_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
         ORDER BY timestamp DESC
@@ -308,11 +320,14 @@ export class PostgreSQLRollbackStore extends EventEmitter {
       return result.rows.map(row => ({
         id: row.id,
         name: row.name,
-        description: row.description,
+        description: row.description || row.description, // Fallback to new field
         timestamp: new Date(row.timestamp),
         expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
         sessionId: row.session_id,
-        metadata: row.metadata || {}
+        metadata: row.metadata || {},
+        operationId: row.operation_id,
+        entities: row.entities ? JSON.parse(row.entities) : [],
+        relationships: row.relationships ? JSON.parse(row.relationships) : []
       }));
 
     } finally {

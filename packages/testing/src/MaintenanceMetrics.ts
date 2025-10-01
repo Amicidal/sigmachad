@@ -402,9 +402,9 @@ export class MaintenanceMetrics {
     entry.count += 1;
     entry.sum += value;
     for (let i = 0; i < entry.buckets.length; i += 1) {
-      // eslint-disable-next-line security/detect-object-injection
+       
       if (value <= entry.buckets[i]) {
-        // eslint-disable-next-line security/detect-object-injection
+         
         entry.counts[i] += 1;
       }
     }
@@ -421,12 +421,12 @@ export class MaintenanceMetrics {
       define(metricName, 'histogram', help);
       let cumulative = 0;
       for (let i = 0; i < entry.buckets.length; i += 1) {
-        // eslint-disable-next-line security/detect-object-injection
+         
         cumulative += entry.counts[i];
         lines.push(
           `${metricName}_bucket${this.promLabels({
             ...entry.labels,
-            // eslint-disable-next-line security/detect-object-injection
+             
             le: String(entry.buckets[i]),
           })} ${cumulative}`
         );

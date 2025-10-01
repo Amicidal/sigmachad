@@ -5,12 +5,6 @@
  */
 
 import {
-  RollbackPoint as SharedRollbackPoint,
-  RollbackEntity as SharedRollbackEntity,
-  RollbackRelationship as SharedRollbackRelationship,
-  SessionCheckpointRecord as SharedSessionCheckpointRecord,
-  RollbackResult as SharedRollbackResult,
-  RollbackError as SharedRollbackError,
   RollbackPointCore,
   Snapshot,
   DiffEntry,
@@ -22,7 +16,7 @@ import {
   RollbackConflict,
   RollbackMetrics,
   RollbackEvents,
-  RollbackError as SharedRollbackErrorClass,
+  RollbackError, // Class from shared-types
   RollbackConflictError,
   RollbackNotFoundError,
   RollbackExpiredError,
@@ -42,12 +36,10 @@ import {
 
 // Re-export shared types for backward compatibility
 export type {
-  RollbackPoint,
   RollbackEntity,
   RollbackRelationship,
   SessionCheckpointRecord,
   RollbackResult,
-  RollbackError,
 } from '@memento/shared-types';
 
 // Re-export core-specific types
@@ -65,9 +57,22 @@ export type {
   RollbackEvents,
 };
 
+// Provide an augmented RollbackPoint type that includes core compatibility fields
+export type RollbackPoint = import('@memento/shared-types').RollbackPoint &
+  Partial<import('@memento/shared-types').RollbackPointCore>;
+
+// Local options type used by RollbackStore within core
+export type RollbackStoreOptions = {
+  maxItems: number;
+  defaultTTL?: number;
+  enableLRU?: boolean;
+  enablePersistence?: boolean;
+};
+
 // Re-export error classes and enum values
 export {
-  RollbackError,
+  RollbackError, // Class re-export
+  // Additional error classes
   RollbackConflictError,
   RollbackNotFoundError,
   RollbackExpiredError,
@@ -99,4 +104,3 @@ export interface RollbackPointLegacy {
   /** Expiry time for automatic cleanup */
   expiresAt?: Date;
 }
-

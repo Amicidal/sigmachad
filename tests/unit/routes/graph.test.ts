@@ -4,15 +4,15 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { registerGraphRoutes } from '../../../src/api/routes/graph.js';
+import { registerGraphRoutes } from '@memento/api/routes/graph';
 import {
   createMockRequest,
   createMockReply,
   type MockFastifyRequest,
   type MockFastifyReply
 } from '../../test-utils.js';
-import type { Entity, FunctionSymbol, ClassSymbol } from '../../../src/models/entities.js';
-import type { GraphRelationship } from '../../../src/models/relationships.js';
+import type { Entity, FunctionSymbol, ClassSymbol } from '@memento/shared-types';
+import type { GraphRelationship } from '@memento/shared-types';
 import { RealisticKnowledgeGraphMock } from '../../test-utils/realistic-kg';
 
 // Use realistic KG mock instead of simple vi.fn object mocks

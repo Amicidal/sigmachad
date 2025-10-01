@@ -44,11 +44,13 @@ export interface RollbackResult {
   success: boolean;
   rolledBackEntities: number;
   rolledBackRelationships: number;
-  errors: RollbackError[];
+  // Structured rollback issues captured during processing
+  errors: RollbackIssue[];
   partialSuccess: boolean;
 }
 
-export interface RollbackError {
+// Structured record describing a rollback issue (not the Error class below)
+export interface RollbackIssue {
   type: 'entity' | 'relationship';
   id: string;
   action: string;
@@ -213,9 +215,14 @@ export interface ConflictResolution {
   strategy: ConflictStrategy;
   /** Custom resolver function */
   resolver?: (conflict: RollbackConflict) => Promise<ConflictResolution>;
+  /** Timestamp when resolution decision was made */
+  timestamp?: Date;
+  /** Actor or system that resolved the conflict */
+  resolvedBy?: string;
 }
 
 export enum ConflictStrategy {
+  MANUAL = 'manual',
   ABORT = 'abort',
   SKIP = 'skip',
   OVERWRITE = 'overwrite',

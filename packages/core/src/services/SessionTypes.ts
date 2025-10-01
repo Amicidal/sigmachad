@@ -25,7 +25,6 @@ import {
   SessionCreationOptions,
   SessionEventOptions,
   CheckpointOptions,
-  HandoffContext,
   IsolationResult,
   RedisSessionData,
   RedisEventData,
@@ -63,7 +62,6 @@ export type {
   SessionCreationOptions,
   SessionEventOptions,
   CheckpointOptions,
-  HandoffContext,
   IsolationResult,
   RedisSessionData,
   RedisEventData,
@@ -86,7 +84,10 @@ export type {
   SessionEvent as RedisEvent,
   SessionAnchor as RedisAnchor,
   SessionQuery as RedisQuery,
-  HandoffContext as RedisHandoff,
   IsolationResult as RedisIsolation,
   TransitionResult as RedisTransition,
 };
+
+// Ensure HandoffContext type resolves to the session-specific definition
+export type { HandoffContext } from '@memento/shared-types';
+export type RedisHandoff = import('@memento/shared-types').HandoffContext;

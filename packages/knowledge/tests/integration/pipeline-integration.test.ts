@@ -9,11 +9,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 
-import { HighThroughputIngestionPipeline } from '../../src/ingestion/pipeline.js';
-import { createKnowledgeGraphAdapter } from '../../src/ingestion/knowledge-graph-adapter.js';
-import { PipelineConfig } from '../../src/ingestion/types.js';
-import { Entity } from '../../../models/entities.js';
-import { GraphRelationship } from '../../../models/relationships.js';
+import { HighThroughputIngestionPipeline } from '@memento/knowledge/ingestion/pipeline';
+import { createKnowledgeGraphAdapter } from '@memento/knowledge/ingestion/knowledge-graph-adapter';
+import { PipelineConfig } from '@memento/knowledge/ingestion/types';
+import { Entity } from '@memento/shared-types/entities';
+import { GraphRelationship } from '@memento/shared-types/relationships';
 
 // Test utilities
 const __filename = fileURLToPath(import.meta.url);
@@ -118,7 +118,7 @@ describe('Pipeline Integration Tests', () => {
     // Clean up test directory
     try {
       await fs.rm(testDir, { recursive: true, force: true });
-    } catch (error) {
+    } catch (_error) {
       console.warn('Failed to clean up test directory:', error);
     }
   });
@@ -292,7 +292,7 @@ export const CONSTANT_VALUE = 'test';
 
     const events: any[] = [];
     pipeline.on('batch:completed', (data) => events.push({ type: 'batch:completed', data }));
-    pipeline.on('parse:error', (error) => events.push({ type: 'parse:error', error }));
+    pipeline.on('pipeline:error', (error) => events.push({ type: 'pipeline:error', error }));
 
     await pipeline.start();
 
@@ -345,7 +345,7 @@ export class InvalidClass {
 
     const events: any[] = [];
     pipeline.on('batch:completed', (data) => events.push({ type: 'batch:completed', data }));
-    pipeline.on('parse:error', (error) => events.push({ type: 'parse:error', error }));
+    pipeline.on('pipeline:error', (error) => events.push({ type: 'pipeline:error', error }));
 
     await pipeline.start();
 
@@ -360,7 +360,7 @@ export class InvalidClass {
     expect(mockService.createdEntities.length).toBeGreaterThan(0);
 
     // Should have recorded parse errors
-    const parseErrors = events.filter(e => e.type === 'parse:error');
+    const parseErrors = events.filter(e => e.type === 'pipeline:error');
     expect(parseErrors.length).toBeGreaterThan(0);
 
     await pipeline.stop();
@@ -546,7 +546,7 @@ export class ShutdownTest {
     // Process promise should still resolve/reject gracefully
     try {
       await processPromise;
-    } catch (error) {
+    } catch (_error) {
       // It's okay if processing was interrupted
     }
 
@@ -651,7 +651,7 @@ describe('Pipeline Performance Tests', () => {
   afterEach(async () => {
     try {
       await fs.rm(testDir, { recursive: true, force: true });
-    } catch (error) {
+    } catch (_error) {
       console.warn('Failed to clean up test directory:', error);
     }
   });

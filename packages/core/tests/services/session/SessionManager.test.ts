@@ -5,18 +5,18 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { SessionManager } from '../../../src/services/SessionManager.js';
-import { SessionStore } from '../../../src/services/SessionStore.js';
+import { SessionManager } from '@memento/core/services/SessionManager';
+import { SessionStore } from '@memento/core/services/SessionStore';
 import {
   SessionDocument,
   SessionEvent,
   SessionCreationOptions,
   SessionManagerConfig,
   SessionNotFoundError,
-} from '../../../src/services/SessionTypes.js';
+} from '@memento/core/services/SessionTypes';
 
 // Mock SessionStore
-vi.mock('../../../src/services/SessionStore.js');
+vi.mock('@memento/core/services/SessionStore');
 
 // Mock UUID
 vi.mock('uuid', () => ({

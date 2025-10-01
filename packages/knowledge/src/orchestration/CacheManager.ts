@@ -6,11 +6,11 @@
 import {
   Entity,
   Symbol as SymbolEntity,
-} from '@memento/shared-types.js';
-import { GraphRelationship } from '@memento/shared-types.js';
-import { createHash } from './utils.js';
-import { CachedFileInfo, ExportMapEntry } from './types.js';
-import { PerformanceOptimizer } from './PerformanceOptimizer.js';
+} from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
+import { createHash } from '@memento/knowledge/utils';
+import { CachedFileInfo, ExportMapEntry } from '@memento/knowledge/types';
+import { PerformanceOptimizer } from './PerformanceOptimizer';
 
 // Re-export types for backward compatibility
 export type { CachedFileInfo, ExportMapEntry };
@@ -24,7 +24,7 @@ export class CacheManager {
   private optimizer: PerformanceOptimizer;
 
   // File-level cache storing parsed entities and relationships (now with LRU eviction)
-  private fileCache: ReturnType<PerformanceOptimizer['createLRUCache']>;
+  private fileCache: Map<string, CachedFileInfo>;
 
   // Cache for module export maps to speed up resolution
   private exportMapCache: Map<string, Map<string, ExportMapEntry>> = new Map();
@@ -176,10 +176,10 @@ export class CacheManager {
         if (key.startsWith(`${fileRelPath}:`)) {
           const sym = this.globalSymbolIndex.get(key);
           if (sym && 'name' in sym) {
-            const nm = sym.name as string;
+            const nm = sym.name;
             if (nm && this.hasSymbolName(nm)) {
               const arr = this.getSymbolsByName(nm).filter(
-                (s) => (s as any).id !== (sym as any).id
+                (s) => s.id !== sym.id
               );
               this.setSymbolsByName(nm, arr);
             }
@@ -187,7 +187,7 @@ export class CacheManager {
           this.deleteGlobalSymbol(key);
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
   }
 
   /**
@@ -199,19 +199,19 @@ export class CacheManager {
     try {
       for (const sym of symbols) {
         if (!sym || !('name' in sym)) continue;
-        const nm = sym.name as string;
+        const nm = sym.name;
         if (!nm) continue;
         const key = `${fileRelPath}:${nm}`;
         this.setGlobalSymbol(key, sym);
         if (nm) {
           const arr = this.getSymbolsByName(nm);
-          if (!arr.find((s) => (s as any).id === (sym as any).id)) {
+          if (!arr.find((s) => s.id === sym.id)) {
             arr.push(sym);
           }
           this.setSymbolsByName(nm, arr);
         }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
   }
 
   /**

@@ -1,8 +1,13 @@
 {
   "name": "@memento/jobs",
-  "version": "1.0.0",
-  "type": "module",
-  "main": "src/index.ts",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/**/*.ts"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": "./src/index.ts",
     "./persistence": "./src/persistence/index.ts"
@@ -10,6 +15,7 @@
   "dependencies": {
     "@memento/core": "workspace:*",
     "@memento/database": "workspace:*",
+    "@memento/shared-types": "workspace:*",
     "node-cron": "^3.0.3"
   },
   "devDependencies": {

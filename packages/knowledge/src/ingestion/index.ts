@@ -3,32 +3,31 @@
  * Entry point for the ingestion pipeline components
  */
 
+import type { PipelineConfig, ChangeEvent, ChangeFragment } from '@memento/shared-types';
+
 // Main pipeline orchestrator
-export { HighThroughputIngestionPipeline } from './pipeline.js';
-export type {
-  KnowledgeGraphServiceIntegration,
-  IngestionEvents,
-} from './pipeline.js';
+export { HighThroughputIngestionPipeline } from './pipeline';
+export type { KnowledgeGraphServiceIntegration } from './pipeline';
 
 // Knowledge Graph Adapter
-export { createKnowledgeGraphAdapter } from './knowledge-graph-adapter.js';
+export { createKnowledgeGraphAdapter } from './knowledge-graph-adapter';
 
 // Core components
-export { QueueManager } from './queue-manager.js';
-export type { QueueManagerConfig } from './queue-manager.js';
+export { QueueManager } from './queue-manager';
+export type { QueueManagerConfig } from './queue-manager';
 
-export { WorkerPool } from './worker-pool.js';
+export { WorkerPool } from './worker-pool';
 export type {
   WorkerPoolConfig,
   WorkerInstance,
   WorkerHandler,
-} from './worker-pool.js';
+} from './worker-pool';
 
-export { HighThroughputBatchProcessor } from './batch-processor.js';
+export { HighThroughputBatchProcessor } from './batch-processor';
 export type {
   BatchProcessor,
   BatchProcessorConfig,
-} from './batch-processor.js';
+} from './batch-processor';
 
 // Type definitions
 export type {
@@ -74,7 +73,7 @@ export type {
 
   // Event Emitter Types
   IngestionEvents,
-} from './types.js';
+} from '@memento/shared-types';
 
 // Error classes
 export {
@@ -82,7 +81,7 @@ export {
   BatchProcessingError,
   WorkerError,
   QueueOverflowError,
-} from './types.js';
+} from '@memento/shared-types';
 
 // Utility functions and constants
 export const INGESTION_DEFAULTS = {
@@ -308,11 +307,19 @@ export function createMockChangeFragment(
     operation: 'add',
     data: {
       id: 'test-entity',
-      type: 'function',
+      type: 'symbol',
+      path: '/test/file.ts',
       name: 'testFunction',
-      properties: {},
-      metadata: { createdAt: new Date() },
-    },
+      kind: 'function',
+      signature: 'function testFunction(): void',
+      docstring: '',
+      visibility: 'public',
+      isExported: false,
+      isDeprecated: false,
+      hash: 'hash',
+      language: 'ts',
+      lastModified: new Date(),
+    } as any,
     dependencyHints: [],
     confidence: 0.9,
     ...overrides,

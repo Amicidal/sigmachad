@@ -1,3 +1,4 @@
+// security: avoid dynamic object indexing; prefer switch-based model resolution and Object.fromEntries
 /**
  * Relationship Service OGM Implementation
  * Migrated version using Neogma OGM instead of custom Cypher queries
@@ -5,21 +6,21 @@
 
 import { EventEmitter } from 'events';
 import { createHash } from 'crypto';
-import { NeogmaService } from './NeogmaService.js';
-import { createRelationshipModels } from '@memento/graph/models-ogm/RelationshipModels.js';
-import { createEntityModels } from '@memento/graph/models-ogm/EntityModels.js';
+import { NeogmaService } from './NeogmaService';
+import { createRelationshipModels } from '@memento/graph/models-ogm/RelationshipModels';
+import { createEntityModels } from '@memento/graph/models-ogm/EntityModels';
 import {
   GraphRelationship,
   RelationshipType,
   RelationshipQuery,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 import {
   normalizeCodeEdge,
-  canonicalRelationshipId,
   isCodeRelationship,
   mergeEdgeEvidence,
   mergeEdgeLocations,
-} from '../../utils/codeEdges.js';
+} from '@memento/core/utils/codeEdges';
+import { canonicalRelationshipId } from '@memento/shared-types';
 import { getNeo4jNumericField, normalizeNeo4jValue } from '@memento/utils';
 
 export interface BulkRelationshipOptions {
@@ -102,44 +103,59 @@ export class RelationshipServiceOGM
    * Get the appropriate relationship model based on relationship type
    */
   private getRelationshipModel(type: RelationshipType) {
-    const modelMap: Record<string, any> = {
+    switch (type) {
       // Structural
-      [RelationshipType.CONTAINS]: this.relationshipModels.ContainsRelation,
-      [RelationshipType.DEFINES]: this.relationshipModels.DefinesRelation,
-      [RelationshipType.EXPORTS]: this.relationshipModels.ExportsRelation,
-      [RelationshipType.IMPORTS]: this.relationshipModels.ImportsRelation,
+      case RelationshipType.CONTAINS:
+        return this.relationshipModels.ContainsRelation;
+      case RelationshipType.DEFINES:
+        return this.relationshipModels.DefinesRelation;
+      case RelationshipType.EXPORTS:
+        return this.relationshipModels.ExportsRelation;
+      case RelationshipType.IMPORTS:
+        return this.relationshipModels.ImportsRelation;
       // Code
-      [RelationshipType.CALLS]: this.relationshipModels.CallsRelation,
-      [RelationshipType.REFERENCES]: this.relationshipModels.ReferencesRelation,
-      [RelationshipType.IMPLEMENTS]: this.relationshipModels.ImplementsRelation,
-      [RelationshipType.EXTENDS]: this.relationshipModels.ExtendsRelation,
-      [RelationshipType.DEPENDS_ON]: this.relationshipModels.DependsOnRelation,
+      case RelationshipType.CALLS:
+        return this.relationshipModels.CallsRelation;
+      case RelationshipType.REFERENCES:
+        return this.relationshipModels.ReferencesRelation;
+      case RelationshipType.IMPLEMENTS:
+        return this.relationshipModels.ImplementsRelation;
+      case RelationshipType.EXTENDS:
+        return this.relationshipModels.ExtendsRelation;
+      case RelationshipType.DEPENDS_ON:
+        return this.relationshipModels.DependsOnRelation;
       // Type Usage
-      [RelationshipType.TYPE_USES]: this.relationshipModels.TypeUsesRelation,
-      [RelationshipType.RETURNS_TYPE]:
-        this.relationshipModels.ReturnsTypeRelation,
-      [RelationshipType.PARAM_TYPE]: this.relationshipModels.ParamTypeRelation,
+      case RelationshipType.TYPE_USES:
+        return this.relationshipModels.TypeUsesRelation;
+      case RelationshipType.RETURNS_TYPE:
+        return this.relationshipModels.ReturnsTypeRelation;
+      case RelationshipType.PARAM_TYPE:
+        return this.relationshipModels.ParamTypeRelation;
       // Test
-      [RelationshipType.TESTS]: this.relationshipModels.TestsRelation,
-      [RelationshipType.VALIDATES]: this.relationshipModels.ValidatesRelation,
+      case RelationshipType.TESTS:
+        return this.relationshipModels.TestsRelation;
+      case RelationshipType.VALIDATES:
+        return this.relationshipModels.ValidatesRelation;
       // Spec
-      [RelationshipType.REQUIRES]: this.relationshipModels.RequiresRelation,
-      [RelationshipType.IMPACTS]: this.relationshipModels.ImpactsRelation,
-      [RelationshipType.IMPLEMENTS_SPEC]:
-        this.relationshipModels.ImplementsSpecRelation,
+      case RelationshipType.REQUIRES:
+        return this.relationshipModels.RequiresRelation;
+      case RelationshipType.IMPACTS:
+        return this.relationshipModels.ImpactsRelation;
+      case RelationshipType.IMPLEMENTS_SPEC:
+        return this.relationshipModels.ImplementsSpecRelation;
       // Documentation
-      [RelationshipType.DOCUMENTED_BY]:
-        this.relationshipModels.DocumentedByRelation,
-      [RelationshipType.DOCUMENTS_SECTION]:
-        this.relationshipModels.DocumentsSectionRelation,
+      case RelationshipType.DOCUMENTED_BY:
+        return this.relationshipModels.DocumentedByRelation;
+      case RelationshipType.DOCUMENTS_SECTION:
+        return this.relationshipModels.DocumentsSectionRelation;
       // Temporal
-      [RelationshipType.PREVIOUS_VERSION]:
-        this.relationshipModels.PreviousVersionRelation,
-      [RelationshipType.MODIFIED_BY]:
-        this.relationshipModels.ModifiedByRelation,
-    };
-
-    return modelMap[type] || null;
+      case RelationshipType.PREVIOUS_VERSION:
+        return this.relationshipModels.PreviousVersionRelation;
+      case RelationshipType.MODIFIED_BY:
+        return this.relationshipModels.ModifiedByRelation;
+      default:
+        return null;
+    }
   }
 
   /**
@@ -575,12 +591,16 @@ export class RelationshipServiceOGM
         queries.map((q) => this.neogmaService.executeCypher(q.query))
       );
 
-      const byType: Record<string, number> = {};
+      const byTypeEntries: Array<[string, number]> = [];
       results[1].forEach((row: Record<string, unknown>) => {
         if (row.type) {
-          byType[String(row.type)] = getNeo4jNumericField(row, 'count', 0);
+          byTypeEntries.push([
+            String(row.type),
+            getNeo4jNumericField(row, 'count', 0),
+          ]);
         }
       });
+      const byType: Record<string, number> = Object.fromEntries(byTypeEntries);
 
       const total = getNeo4jNumericField(results[0]?.[0] ?? {}, 'count', 0);
       const active = getNeo4jNumericField(results[2]?.[0] ?? {}, 'count', 0);
@@ -697,7 +717,7 @@ export class RelationshipServiceOGM
    * Extract properties for Neo4j storage
    */
   private extractRelationshipProperties(rel: any): Record<string, any> {
-    const properties: Record<string, any> = {};
+    const pairs: Array<[string, any]> = [];
 
     // Skip complex objects and arrays for main properties
     const skipKeys = [
@@ -714,26 +734,26 @@ export class RelationshipServiceOGM
       }
 
       if (value instanceof Date) {
-        properties[key] = value.toISOString();
+        pairs.push([key, value.toISOString()]);
       } else if (typeof value === 'object') {
-        properties[key] = JSON.stringify(value);
+        pairs.push([key, JSON.stringify(value)]);
       } else {
-        properties[key] = value;
+        pairs.push([key, value]);
       }
     }
 
     // Handle evidence and locations as JSON strings
     if (rel.evidence) {
-      properties.evidence = JSON.stringify(rel.evidence);
+      pairs.push(['evidence', JSON.stringify(rel.evidence)]);
     }
     if (rel.locations) {
-      properties.locations = JSON.stringify(rel.locations);
+      pairs.push(['locations', JSON.stringify(rel.locations)]);
     }
     if (rel.metadata) {
-      properties.metadata = JSON.stringify(rel.metadata);
+      pairs.push(['metadata', JSON.stringify(rel.metadata)]);
     }
 
-    return properties;
+    return Object.fromEntries(pairs);
   }
 
   /**
@@ -747,35 +767,33 @@ export class RelationshipServiceOGM
     >;
     const fromNode = normalizeNeo4jValue(row.from ?? {}) as Record<string, any>;
     const toNode = normalizeNeo4jValue(row.to ?? {}) as Record<string, any>;
-    const parsed: any = {
+    const parsedBase: any = {
       type: (rel as Record<string, unknown>).type || row.type,
       fromEntityId:
         fromNode?.properties?.id ?? fromNode?.id ?? row.from?.properties?.id,
       toEntityId:
         toNode?.properties?.id ?? toNode?.id ?? row.to?.properties?.id,
     };
-
+    const extraPairs: Array<[string, unknown]> = [];
     for (const [key, value] of Object.entries(properties)) {
       if (value === null || value === undefined) continue;
-
-      // Parse dates
       if (key === 'created' || key === 'lastModified' || key.endsWith('At')) {
-        parsed[key] = new Date(value as string);
+        extraPairs.push([key, new Date(value as string)]);
       } else if (
         typeof value === 'string' &&
         (key === 'evidence' || key === 'locations' || key === 'metadata')
       ) {
         try {
-          parsed[key] = JSON.parse(value as string);
+          extraPairs.push([key, JSON.parse(value as string)]);
         } catch {
-          parsed[key] = value;
+          extraPairs.push([key, value]);
         }
       } else {
-        parsed[key] = value;
+        extraPairs.push([key, value]);
       }
     }
 
-    return parsed as GraphRelationship;
+    return { ...parsedBase, ...Object.fromEntries(extraPairs) } as GraphRelationship;
   }
 
   /**
@@ -963,3 +981,5 @@ export class RelationshipServiceOGM
     }
   }
 }
+ 
+// TODO(2025-09-30.35): Replace dynamic property indexing with guarded accessors.

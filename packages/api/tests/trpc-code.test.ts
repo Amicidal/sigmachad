@@ -6,15 +6,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TRPCError } from '@trpc/server';
 import { codeRouter } from '../src/routes/trpc-code.js';
 import { createTestContext } from '../src/trpc/base.js';
+import { createMockASTParser } from './mock-factories.js';
 
 describe('TRPC Code Router', () => {
   let mockContext: any;
 
   beforeEach(() => {
     mockContext = createTestContext({
-      astParser: {
-        parseFile: vi.fn(),
-      },
+      astParser: createMockASTParser(),
     });
   });
 

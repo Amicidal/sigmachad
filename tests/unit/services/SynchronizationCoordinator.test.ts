@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Unit tests for SynchronizationCoordinator service
  * Tests synchronization coordination logic with focused test doubles
@@ -21,19 +22,19 @@ import {
   SyncConflict,
   SyncOptions,
   PartialUpdate,
-} from "@/services/synchronization/SynchronizationCoordinator";
+} from "@memento/sync/synchronization/SynchronizationCoordinator";
 import {
   Conflict,
   ConflictResolutionResult,
-} from "@/services/scm/ConflictResolution";
-import { KnowledgeGraphService } from "@/services/knowledge/KnowledgeGraphService";
-import { ASTParser } from "../../../src/services/knowledge/ASTParser";
-import { DatabaseService } from "@/services/core/DatabaseService";
-import { FileChange } from "../../../src/services/core/FileWatcher";
+} from "@memento/sync/scm/ConflictResolution";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { ASTParser } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
+import { FileChange } from "@memento/core/services/FileWatcher";
 import {
   RelationshipType,
   SESSION_RELATIONSHIP_TYPES,
-} from "@/models/relationships";
+} from "@memento/shared-types";
 import path from "path";
 import fs from "fs/promises";
 

@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "jobs",
+  "sourceRoot": "packages/jobs/src",
+  "projectType": "library",
+  "targets": {
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": [
+          "packages/jobs/**/*.ts"
+        ]
+      }
+    }
+  },
+  "tags": []
+}
+

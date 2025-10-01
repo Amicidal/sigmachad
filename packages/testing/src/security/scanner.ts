@@ -4,11 +4,8 @@
  */
 
 import { EventEmitter } from "events";
-import * as fs from "fs";
-import * as path from "path";
-import { createHash } from "crypto";
+// (no direct fs/path/hash usage here)
 import {
-  SecurityRule,
   SecurityScanOptions,
   SecurityScanRequest,
   SecurityScanResult,
@@ -16,7 +13,6 @@ import {
   Vulnerability,
   SecurityMonitoringConfig,
   SecuritySeverity,
-  ScanStatus,
   SecurityScanSummary
 } from "./types.js";
 import { CodeScanner } from "./code-scanner.js";
@@ -26,6 +22,7 @@ import { VulnerabilityDatabase } from "./vulnerability-db.js";
 import { SecurityPolicies } from "./policies.js";
 import { SecurityReports } from "./reports.js";
 import { IncrementalScanner, IncrementalScanResult } from "./incremental-scanner.js";
+import { graphCommand, graphQuery, getGraphNamespace } from "./graph-utils.js";
 
 export interface SecurityScannerConfig {
   policies?: string;
@@ -443,7 +440,7 @@ export class SecurityScanner extends EventEmitter {
         query += ` LIMIT ${filters.limit}`;
       }
 
-      const results = await this.db.falkordbQuery(query, params);
+      const results = await graphQuery(this.db, query, params);
       const issues: SecurityIssue[] = results.map((result: any) =>
         this.validateSecurityIssue(this.extractIssueData(result))
       );
@@ -464,7 +461,7 @@ export class SecurityScanner extends EventEmitter {
 
       countQuery += ` RETURN count(i) as total`;
 
-      const countResult = await this.db.falkordbQuery(countQuery, params);
+      const countResult = await graphQuery(this.db, countQuery, params);
       const total = this.extractCountFromResult(countResult);
 
       return { issues, total };
@@ -492,7 +489,7 @@ export class SecurityScanner extends EventEmitter {
     this.monitoringConfig = config;
 
     // Store configuration in database
-    await this.db.falkordbQuery(
+    await graphQuery(this.db, 
       `
       MERGE (c:SecurityConfig {type: 'monitoring'})
       SET c.config = $config, c.updatedAt = $updatedAt
@@ -603,7 +600,7 @@ export class SecurityScanner extends EventEmitter {
       RETURN f
       LIMIT 100
     `;
-    const results = await this.db.falkordbQuery(query, {});
+    const results = await graphQuery(this.db, query, {});
     return results.map((result: any) => ({
       ...result.f,
       type: "file",
@@ -611,8 +608,7 @@ export class SecurityScanner extends EventEmitter {
   }
 
   private async ensureSecuritySchema(): Promise<void> {
-    const config = this.db.getConfig?.();
-    const graphKey = config?.falkordb?.graphKey ?? "memento";
+    const graphKey = getGraphNamespace(this.db);
 
     const constraints: Array<{ label: string; property: string }> = [
       { label: "SecurityIssue", property: "id" },
@@ -633,7 +629,7 @@ export class SecurityScanner extends EventEmitter {
     property: string
   ): Promise<void> {
     try {
-      await this.db.falkordbCommand(
+      await graphCommand(this.db, 
         "GRAPH.CONSTRAINT",
         graphKey,
         "CREATE",
@@ -658,7 +654,7 @@ export class SecurityScanner extends EventEmitter {
 
   private async loadMonitoringConfig(): Promise<void> {
     try {
-      const config = await this.db.falkordbQuery(
+      const config = await graphQuery(this.db, 
         `
         MATCH (c:SecurityConfig {type: 'monitoring'})
         RETURN c.config as config
@@ -676,7 +672,7 @@ export class SecurityScanner extends EventEmitter {
 
   private async storeScanResults(result: SecurityScanResult): Promise<void> {
     // Store scan metadata
-    await this.db.falkordbQuery(
+    await graphQuery(this.db, 
       `
       CREATE (s:SecurityScan {
         id: $scanId,
@@ -708,7 +704,7 @@ export class SecurityScanner extends EventEmitter {
   }
 
   private async storeSecurityIssue(issue: SecurityIssue, scanId: string): Promise<void> {
-    await this.db.falkordbQuery(
+    await graphQuery(this.db, 
       `
       MERGE (i:SecurityIssue { id: $id })
       SET i.tool = $tool,
@@ -740,7 +736,7 @@ export class SecurityScanner extends EventEmitter {
   }
 
   private async storeVulnerability(vuln: Vulnerability, scanId: string): Promise<void> {
-    await this.db.falkordbQuery(
+    await graphQuery(this.db, 
       `
       MERGE (v:Vulnerability { id: $id })
       SET v.packageName = $packageName,
@@ -794,9 +790,15 @@ export class SecurityScanner extends EventEmitter {
     return validSeverities.includes(severity) ? severity : "medium";
   }
 
-  private validateIssueStatus(status: any): string {
-    const validStatuses = ["open", "closed", "in_progress", "resolved"];
-    return validStatuses.includes(status) ? status : "open";
+  private validateIssueStatus(status: any): import('./types.js').IssueStatus {
+    const validStatuses: import('./types.js').IssueStatus[] = [
+      "open",
+      "closed",
+      "in_progress",
+      "resolved",
+      "suppressed",
+    ];
+    return (validStatuses as string[]).includes(status) ? (status as any) : "open";
   }
 
   private parseDate(dateValue: any): Date {

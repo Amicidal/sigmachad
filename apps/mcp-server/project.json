@@ -4,6 +4,14 @@
   "sourceRoot": "apps/mcp-server/src",
   "projectType": "application",
   "targets": {
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": [
+          "apps/mcp-server/src/**/*.ts"
+        ]
+      }
+    },
     "build": {
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],

@@ -193,7 +193,7 @@ File Event → Compare States → Find Affected → Apply Changes → Re-embed �
 
 ### Local Scaling Strategy
 - **Resource Allocation**: Adjust Docker container memory/CPU based on project size
-- **Database Optimization**: Configure FalkorDB/Qdrant for local hardware specs
+- **Database Optimization**: Configure Neo4j/PostgreSQL for local hardware specs
 - **Caching Strategy**: Optimize Redis caching for local performance
 - **Concurrent Processing**: Handle multiple AI assistant sessions efficiently
 
@@ -315,14 +315,17 @@ services:
       - .:/app
       - /app/node_modules
     depends_on:
-      - falkordb
-      - qdrant
+      - neo4j
       - postgres
+      - redis
 
-  falkordb:
-    image: falkordb/falkordb:latest
+  neo4j:
+    image: neo4j:5-community
     ports:
-      - "6379:6379"
+      - "7687:7687"
+      - "7474:7474"
+    environment:
+      - NEO4J_AUTH=neo4j/memento123
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -364,11 +367,26 @@ spec:
         env:
         - name: NODE_ENV
           value: "production"
-        - name: FALKORDB_URL
+        - name: NEO4J_URI
           valueFrom:
             secretKeyRef:
               name: memento-secrets
-              key: falkordb-url
+              key: neo4j-uri
+        - name: NEO4J_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: memento-secrets
+              key: neo4j-username
+        - name: NEO4J_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: memento-secrets
+              key: neo4j-password
+        - name: NEO4J_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: memento-secrets
+              key: neo4j-database
         resources:
           requests:
             memory: "512Mi"
@@ -441,17 +459,18 @@ memento/
 - **Ecosystem**: Rich library ecosystem and community support
 - **Node.js Compatibility**: Seamless integration with Node.js runtime
 
-### Why FalkorDB over Neo4j?
-- **Performance**: Redis-based architecture provides lower latency
-- **Resource Usage**: Lighter memory footprint
-- **Cypher Support**: Familiar query language
-- **Cloud-Native**: Better containerization support
+### Why Neo4j for Graph Database?
+- **Cypher Query Language**: Industry-standard graph query language
+- **Native Vector Support**: Built-in vector search capabilities (Neo4j 5+)
+- **ACID Compliance**: Full transactional support for data integrity
+- **Mature Ecosystem**: Rich tooling, extensive documentation, and community support
+- **Performance**: Optimized for complex graph traversals and pattern matching
 
-### Why Qdrant for Vector Search?
-- **Performance**: Optimized for high-dimensional vector search
-- **Metadata Filtering**: Advanced filtering capabilities
-- **Horizontal Scaling**: Distributed architecture
-- **API Compatibility**: REST and gRPC support
+### Why PostgreSQL for Metadata?
+- **Reliability**: Battle-tested RDBMS with ACID guarantees
+- **JSON Support**: Native JSONB for flexible metadata storage
+- **Performance**: Efficient indexing and query optimization
+- **Integration**: Seamless integration with Node.js ecosystem
 
 ### Why Fastify over Express?
 - **Performance**: Significantly faster than Express

@@ -5,16 +5,16 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
-import { APIGateway } from '../../../src/api/APIGateway.js';
-import { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import { DatabaseService } from '../../../src/services/core/DatabaseService.js';
+import { APIGateway } from '@memento/api/APIGateway';
+import { KnowledgeGraphService } from '@memento/knowledge';
+import { DatabaseService } from '@memento/database/DatabaseService';
 import {
   setupTestDatabase,
   cleanupTestDatabase,
   clearTestData,
   checkDatabaseHealth,
 } from '../../test-utils/database-helpers.js';
-import { __getRateLimitStoresForTests } from '../../../src/api/middleware/rate-limiting.js';
+import { __getRateLimitStoresForTests } from '@memento/api/middleware/rate-limiting';
 import { expectSuccess, expectError } from '../../test-utils/assertions';
 
 describe('Rate Limiting Integration', () => {

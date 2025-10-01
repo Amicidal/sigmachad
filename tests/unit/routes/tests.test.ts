@@ -7,15 +7,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   registerTestRoutes,
   aggregatePerformanceMetrics,
-} from "../../../src/api/routes/tests.js";
+} from "@memento/api/routes/tests";
 import {
   createMockRequest,
   createMockReply,
   type MockFastifyRequest,
   type MockFastifyReply,
 } from "../../test-utils.js";
-import type { TestPlanResponse } from "../../../src/models/types.js";
-import type { TestPerformanceMetrics } from "../../../src/models/entities.js";
+import type { TestPlanResponse } from "@memento/shared-types";
+import type { TestPerformanceMetrics } from "@memento/shared-types";
 
 const createPerformanceMetric = (
   overrides: Partial<TestPerformanceMetrics> = {}
@@ -30,13 +30,13 @@ const createPerformanceMetric = (
 });
 
 // Mock services
-vi.mock("../../../src/services/knowledge/KnowledgeGraphService.js", () => ({
+vi.mock("@memento/knowledge", () => ({
   KnowledgeGraphService: vi.fn(),
 }));
-vi.mock("../../../src/services/core/DatabaseService.js", () => ({
+vi.mock("@memento/database/DatabaseService", () => ({
   DatabaseService: vi.fn(),
 }));
-vi.mock("../../../src/services/testing/TestEngine.js", () => ({
+vi.mock("@memento/testing/TestEngine", () => ({
   TestEngine: vi.fn(),
 }));
 
@@ -76,10 +76,10 @@ describe("aggregatePerformanceMetrics", () => {
   });
 });
 
-vi.mock("../../../src/services/testing/TestPlanningService.js", async () => {
+vi.mock("@memento/testing/TestPlanningService", async () => {
   const actual = await vi.importActual<
-    typeof import("../../../src/services/testing/TestPlanningService.js")
-  >("../../../src/services/testing/TestPlanningService.js");
+    typeof import("@memento/testing/TestPlanningService")
+  >("@memento/testing/TestPlanningService");
 
   return {
     ...actual,
@@ -93,7 +93,7 @@ import {
   TestPlanningService,
   SpecNotFoundError,
   TestPlanningValidationError,
-} from "../../../src/services/testing/TestPlanningService.js";
+} from "@memento/testing/TestPlanningService";
 
 describe("Test Routes", () => {
   let mockApp: any;

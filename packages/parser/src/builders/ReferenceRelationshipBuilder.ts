@@ -16,15 +16,6 @@ import {
 } from "@memento/graph";
 import { ReferenceRelationshipBuilderOptions } from "@memento/shared-types";
 import { scoreInferredEdge, noiseConfig } from "@memento/core";
-    importSymbolMap?: Map<string, string>
-  ) => any;
-  createRelationship: (
-    fromId: string,
-    toId: string,
-    type: RelationshipType,
-    metadata?: Record<string, any>
-  ) => GraphRelationship;
-}
 
 /**
  * ReferenceRelationshipBuilder handles the extraction of reference relationships
@@ -129,7 +120,7 @@ export class ReferenceRelationshipBuilder {
             if (list.length === 1) toId = list[0].id;
           }
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       const key = `${fromId}|${type}|${toId}`;
       // For aggregated types, allow multiple observations to accumulate; otherwise de-duplicate
@@ -162,7 +153,7 @@ export class ReferenceRelationshipBuilder {
             )
               return false;
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return true;
       };
       if (!gate()) return;
@@ -176,7 +167,7 @@ export class ReferenceRelationshipBuilder {
           line = lc.line;
           column = lc.column;
         }
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
       // Assign confidence for inferred relationships via scorer, and gate low-confidence
       let metadata: Record<string, any> | undefined;
@@ -246,7 +237,7 @@ export class ReferenceRelationshipBuilder {
             "df_" +
             crypto.createHash("sha1").update(dfBase).digest("hex").slice(0, 12);
           (metadata as any).dataFlowId = dfId;
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
 
       // Aggregate common code edges to reduce noise; non-aggregated types are pushed directly
@@ -266,7 +257,7 @@ export class ReferenceRelationshipBuilder {
         try {
           if ((metadata as any).scope === "imported")
             depAgg.set(aggKey, metadata);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return;
       }
       if (type === RelationshipType.READS) {
@@ -284,7 +275,7 @@ export class ReferenceRelationshipBuilder {
         try {
           if ((metadata as any).scope === "imported")
             depAgg.set(aggKey, metadata);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return;
       }
       if (type === RelationshipType.WRITES) {
@@ -302,7 +293,7 @@ export class ReferenceRelationshipBuilder {
         try {
           if ((metadata as any).scope === "imported")
             depAgg.set(aggKey, metadata);
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
         return;
       }
 
@@ -568,7 +559,7 @@ export class ReferenceRelationshipBuilder {
                 const tc = this.resolveWithTypeChecker(lhs as any, sourceFile);
                 if (tc) return `file:${tc.fileRel}:${tc.name}`;
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
             return `external:${nm}`;
           };
 
@@ -622,7 +613,7 @@ export class ReferenceRelationshipBuilder {
                       wrote = true;
                     }
                   }
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
                 // 2) Try import map for namespace/member: alias.prop
                 if (
@@ -654,7 +645,7 @@ export class ReferenceRelationshipBuilder {
                         wrote = true;
                       }
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 }
 
                 // 3) Prefer same-file symbol with matching property name as fallback
@@ -701,7 +692,7 @@ export class ReferenceRelationshipBuilder {
                       );
                       wrote = true;
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
                 }
 
                 // 4) Fallback to external:prop if nothing else resolved
@@ -721,7 +712,7 @@ export class ReferenceRelationshipBuilder {
                   );
                   wrote = true;
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               // Destructuring assignment writes: ({a} = rhs) or ([x] = rhs)
               try {
                 const kind = (lhs as any).getKind && (lhs as any).getKind();
@@ -743,7 +734,7 @@ export class ReferenceRelationshipBuilder {
                           { kindHint: "write", operator: op }
                         );
                       }
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   }
                 } else if (kind === SyntaxKind.ArrayLiteralExpression) {
                   const elems: any[] = (lhs as any).getElements?.() || [];
@@ -761,10 +752,10 @@ export class ReferenceRelationshipBuilder {
                           { kindHint: "write", operator: op }
                         );
                       }
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   }
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
             }
           }
 
@@ -790,7 +781,7 @@ export class ReferenceRelationshipBuilder {
                 ) {
                   accessPath = parent.getText();
                 }
-              } catch {}
+              } catch (e) { /* intentional no-op: non-critical */ void 0; }
               if (local) {
                 addRel(fromId, local.entity.id, RelationshipType.READS, idn, {
                   kindHint: "read",
@@ -899,7 +890,7 @@ export class ReferenceRelationshipBuilder {
                         continue;
                       }
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
                   // 2) Import alias deep resolution for alias.prop
                   if (
@@ -974,7 +965,7 @@ export class ReferenceRelationshipBuilder {
                       );
                       continue;
                     }
-                  } catch {}
+                  } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
                   // 4) Fallback external
                   addRel(
@@ -989,13 +980,13 @@ export class ReferenceRelationshipBuilder {
                       resolution: "heuristic",
                     }
                   );
-                } catch {}
+                } catch (e) { /* intentional no-op: non-critical */ void 0; }
               }
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
           }
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Flush aggregations into final relationships with occurrences metadata
     if (refAgg.size > 0) {

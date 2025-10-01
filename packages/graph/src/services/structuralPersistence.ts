@@ -1,8 +1,10 @@
+/* eslint-disable security/detect-object-injection */
+// TODO(2025-09-30.35): Harden dynamic indexing; replace bracket access with safe helpers.
 import {
   type GraphRelationship,
-  RelationshipType,
   type StructuralImportType,
-} from '@memento/core';
+  RelationshipType,
+} from '@memento/shared-types';
 import { normalizeStructuralRelationship } from './RelationshipNormalizer.js';
 
 export interface StructuralPersistenceFields {

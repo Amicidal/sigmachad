@@ -1,14 +1,9 @@
 import { EventEmitter } from "events";
 import { vi } from "vitest";
 
-import { KnowledgeGraphService } from "../../src/services/knowledge/KnowledgeGraphService.js";
-import type { Neo4jConfig } from "../../src/services/knowledge/Neo4jService.js";
-import type { Entity } from "../../src/models/entities.js";
-import type { GraphRelationship } from "../../src/models/relationships.js";
-import type {
-  DependencyAnalysis,
-  ImpactAnalysis,
-} from "../../src/models/types.js";
+import { KnowledgeGraphService } from "@memento/knowledge/orchestration/KnowledgeGraphService";
+import type { Neo4jConfig } from "@memento/knowledge/graph/Neo4jService";
+import type { Entity, GraphRelationship, DependencyAnalysis, ImpactAnalysis } from "@memento/shared-types";
 
 class Neo4jServiceStub extends EventEmitter {
   createCommonIndexes = vi.fn().mockResolvedValue(undefined);

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { registerCodeRoutes } from '../../../src/api/routes/code.js';
+import { registerCodeRoutes } from '@memento/api/routes/code';
 import {
   createMockRequest,
   createMockReply,
@@ -13,22 +13,22 @@ import {
 } from '../../test-utils.js';
 import fs from 'fs/promises';
 import { makeRealisticKgService } from '../../test-utils/kg-realistic';
-import type { ParseResult } from '../../../src/services/knowledge/ASTParser.js';
+import type { ParseResult } from '@memento/knowledge';
 import type {
   FunctionSymbol,
   ClassSymbol
-} from '../../../src/models/entities.js';
+} from '@memento/shared-types';
 
 // Mock external dependencies
-vi.mock('../../../src/services/knowledge/KnowledgeGraphService.js', () => ({
+vi.mock('@memento/knowledge', () => ({
   KnowledgeGraphService: vi.fn()
 }));
 
-vi.mock('../../../src/services/core/DatabaseService.js', () => ({
+vi.mock('@memento/database/DatabaseService', () => ({
   DatabaseService: vi.fn()
 }));
 
-vi.mock('../../../src/services/knowledge/ASTParser.js', () => ({
+vi.mock('@memento/knowledge', () => ({
   ASTParser: vi.fn(),
   ParseResult: vi.fn()
 }));

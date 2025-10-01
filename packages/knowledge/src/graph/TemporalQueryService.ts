@@ -4,9 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { Neo4jService } from '../Neo4jService.js';
-import { RelationshipType } from '@memento/shared-types.js';
-import { TimeRangeParams, TraversalQuery } from '../../../models/types.js';
+import { Neo4jService } from './Neo4jService';
+import { RelationshipType, TimeRangeParams, TraversalQuery } from '@memento/shared-types';
 
 export interface HistoryMetrics {
   versions: number;

@@ -12,7 +12,7 @@ import {
   cleanupBuckets,
   getRateLimitStats,
   startCleanupInterval
-} from '../../../src/api/middleware/rate-limiting.js';
+} from '@memento/api/middleware/rate-limiting';
 
 // Define DEFAULT_CONFIGS locally for testing
 const DEFAULT_CONFIGS = {

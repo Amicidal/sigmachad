@@ -20,7 +20,9 @@ export class AgentCoordinator extends EventEmitter {
   private redisClient?: any; // Redis client for pub/sub (optional)
   private cleanupTimer?: NodeJS.Timeout;
 
-  private readonly config: Required<CoordinatorConfig>;
+  private readonly config: Omit<Required<CoordinatorConfig>, 'redis'> & {
+    redis?: NonNullable<CoordinatorConfig['redis']>;
+  };
 
   constructor(registry: AgentRegistry, config: CoordinatorConfig = {}) {
     super();

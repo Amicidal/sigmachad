@@ -5,8 +5,32 @@
 
 import { z } from 'zod';
 import { router, publicProcedure, type TRPCContext } from '../trpc/base.js';
-import { SpecService } from '@memento/testing';
-import type { Spec, ListSpecsParams } from '@memento/core';
+import { createRequire } from 'module';
+
+// Local DTO types inferred from zod schemas to avoid cross-package build coupling
+type SpecEntity = z.infer<typeof SpecOutputSchema>;
+type SpecListResponse = z.infer<typeof SpecListResponseSchema>;
+type ValidationResult = z.infer<typeof ValidationResultSchema>;
+type SpecDetail = z.infer<typeof SpecDetailSchema>;
+
+type ListSpecsParamsLike = {
+  status?: Array<'draft' | 'approved' | 'implemented' | 'deprecated'>;
+  priority?: Array<'low' | 'medium' | 'high' | 'critical'>;
+  assignee?: string;
+  tags?: string[];
+  search?: string;
+  limit?: number;
+  offset?: number;
+  sortBy?: 'created' | 'updated' | 'priority' | 'status' | 'title';
+  sortOrder?: 'asc' | 'desc';
+};
+
+interface SpecServiceLike {
+  validateDraft(spec: Record<string, unknown>): ValidationResult;
+  getSpec(id: string): Promise<SpecDetail>;
+  upsertSpec(entity: SpecEntity): Promise<{ spec: SpecEntity; created: boolean }>;
+  listSpecs(params: ListSpecsParamsLike): Promise<{ specs: SpecEntity[]; pagination: SpecListResponse['pagination'] }>;
+}
 
 const ValidationIssueSchema = z.object({
   message: z.string(),
@@ -117,10 +141,15 @@ const SpecDetailSchema = z.object({
   testCoverage: TestCoverageSchema,
 });
 
-const ensureSpecService = (ctx: TRPCContext): SpecService => {
-  const contextWithCache = ctx as TRPCContext & { __specService?: SpecService };
+const ensureSpecService = async (ctx: TRPCContext): Promise<SpecServiceLike> => {
+  const contextWithCache = ctx as TRPCContext & { __specService?: SpecServiceLike };
   if (!contextWithCache.__specService) {
-    contextWithCache.__specService = new SpecService(ctx.kgService, ctx.dbService);
+    const require = createRequire(import.meta.url);
+    const mod = require('@memento/testing') as unknown as {
+      SpecService: new (kg: unknown, db: unknown) => SpecServiceLike;
+    };
+    const SpecServiceCtor = mod.SpecService;
+    contextWithCache.__specService = new SpecServiceCtor(ctx.kgService, ctx.dbService);
   }
   return contextWithCache.__specService;
 };
@@ -132,7 +161,7 @@ const coerceDate = (value?: Date | string): Date | undefined => {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
-const buildSpecEntity = (input: z.infer<typeof SpecInputSchema>): Spec => {
+const buildSpecEntity = (input: z.infer<typeof SpecInputSchema>): SpecEntity => {
   const now = new Date();
   return {
     id: input.id,
@@ -162,7 +191,7 @@ export const designRouter = router({
     }))
     .output(ValidationResultSchema)
     .query(async ({ input, ctx }) => {
-      const specService = ensureSpecService(ctx);
+      const specService = await ensureSpecService(ctx);
       const result = specService.validateDraft(input.spec);
       return {
         isValid: result.isValid,
@@ -181,7 +210,7 @@ export const designRouter = router({
     }))
     .output(TestCoverageSchema)
     .query(async ({ input, ctx }) => {
-      const specService = ensureSpecService(ctx);
+      const specService = await ensureSpecService(ctx);
       const { testCoverage } = await specService.getSpec(input.entityId);
       if (input.includeTestCases !== true) {
         return { ...testCoverage, testCases: [] };
@@ -197,7 +226,7 @@ export const designRouter = router({
       spec: SpecOutputSchema,
     }))
     .mutation(async ({ input, ctx }) => {
-      const specService = ensureSpecService(ctx);
+      const specService = await ensureSpecService(ctx);
       const entity = buildSpecEntity(input);
       const { spec, created } = await specService.upsertSpec(entity);
       return {
@@ -211,7 +240,7 @@ export const designRouter = router({
     .input(z.object({ id: z.string() }))
     .output(SpecDetailSchema)
     .query(async ({ input, ctx }) => {
-      const specService = ensureSpecService(ctx);
+      const specService = await ensureSpecService(ctx);
       return specService.getSpec(input.id);
     }),
 
@@ -219,10 +248,10 @@ export const designRouter = router({
     .input(ListSpecsInputSchema.optional())
     .output(SpecListResponseSchema)
     .query(async ({ input, ctx }) => {
-      const specService = ensureSpecService(ctx);
-      const params: ListSpecsParams = {
+      const specService = await ensureSpecService(ctx);
+      const params: ListSpecsParamsLike = {
         ...(input ?? {}),
-      } as ListSpecsParams;
+      };
       const result = await specService.listSpecs(params);
       return {
         items: result.specs,
@@ -230,4 +259,3 @@ export const designRouter = router({
       };
     }),
 });
-

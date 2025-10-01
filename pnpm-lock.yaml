@@ -251,6 +251,9 @@ importers:
       '@memento/core':
         specifier: workspace:*
         version: link:../core
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       events:
         specifier: ^3.3.0
         version: 3.3.0
@@ -288,6 +291,9 @@ importers:
       '@memento/knowledge':
         specifier: workspace:*
         version: link:../knowledge
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@memento/sync':
         specifier: workspace:*
         version: link:../sync
@@ -331,6 +337,9 @@ importers:
       '@memento/database':
         specifier: workspace:*
         version: link:../database
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       tar:
         specifier: ^6.2.0
         version: 6.2.1
@@ -406,6 +415,9 @@ importers:
       '@memento/database':
         specifier: workspace:*
         version: link:../database
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       neo4j-driver:
         specifier: ^5.12.0
         version: 5.28.2
@@ -425,6 +437,9 @@ importers:
       '@memento/database':
         specifier: workspace:*
         version: link:../database
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       node-cron:
         specifier: ^3.0.3
         version: 3.0.3
@@ -447,6 +462,9 @@ importers:
       '@memento/database':
         specifier: workspace:*
         version: link:../database
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@memento/utils':
         specifier: workspace:*
         version: link:../utils
@@ -487,6 +505,9 @@ importers:
       '@memento/graph':
         specifier: workspace:*
         version: link:../graph
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       typescript:
         specifier: ^5.2.2
         version: 5.9.2
@@ -515,6 +536,9 @@ importers:
       '@memento/graph':
         specifier: workspace:*
         version: link:../graph
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       diff:
         specifier: ^5.1.0
         version: 5.2.0
@@ -543,6 +567,9 @@ importers:
       '@memento/knowledge':
         specifier: workspace:*
         version: link:../knowledge
+      '@memento/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       commander:
         specifier: ^12.0.0
         version: 12.1.0

@@ -12,6 +12,7 @@ import {
   SecurityIssue,
   Vulnerability
 } from "./types.js";
+import { graphQuery } from "./graph-utils.js";
 
 export interface FileChecksum {
   path: string;
@@ -202,8 +203,8 @@ export class IncrementalScanner {
       `;
 
       const [issueResults, vulnResults] = await Promise.all([
-        this.db.falkordbQuery(issuesQuery, { scanId: baselineScanId, paths: skippedPaths }),
-        this.db.falkordbQuery(vulnerabilitiesQuery, { scanId: baselineScanId, paths: skippedPaths })
+        graphQuery(this.db, issuesQuery, { scanId: baselineScanId, paths: skippedPaths }),
+        graphQuery(this.db, vulnerabilitiesQuery, { scanId: baselineScanId, paths: skippedPaths })
       ]);
 
       const issues = issueResults.map((result: any) => this.parseSecurityIssue(result.i));
@@ -270,7 +271,7 @@ export class IncrementalScanner {
       this.scanStateCache.set(scanId, scanState);
 
       // Save to database
-      await this.db.falkordbQuery(`
+      await graphQuery(this.db, `
         MERGE (state:ScanState {scanId: $scanId})
         SET state.lastScanTimestamp = $timestamp,
             state.fileChecksumsJson = $checksums,
@@ -289,7 +290,7 @@ export class IncrementalScanner {
 
   private async loadScanStates(): Promise<void> {
     try {
-      const results = await this.db.falkordbQuery(`
+      const results = await graphQuery(this.db, `
         MATCH (state:ScanState)
         RETURN state
       `, {});
@@ -312,7 +313,7 @@ export class IncrementalScanner {
 
   private async loadScanStateFromDb(scanId: string): Promise<IncrementalScanState | null> {
     try {
-      const results = await this.db.falkordbQuery(`
+      const results = await graphQuery(this.db, `
         MATCH (state:ScanState {scanId: $scanId})
         RETURN state
         LIMIT 1
@@ -390,7 +391,7 @@ export class IncrementalScanner {
 
     // Clean up from database
     try {
-      await this.db.falkordbQuery(`
+      await graphQuery(this.db, `
         MATCH (state:ScanState)
         WHERE datetime(state.lastScanTimestamp) < datetime($cutoff)
         DELETE state

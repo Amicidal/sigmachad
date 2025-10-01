@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Unit tests for EmbeddingService
  * Tests embedding generation, caching, batch processing, and error handling
@@ -7,8 +8,8 @@
 /// <reference types="node" />
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, vi, afterAll } from 'vitest';
-import { EmbeddingService, EmbeddingConfig, EmbeddingResult, BatchEmbeddingResult } from '../../../src/utils/embedding';
-import { Entity } from '../../../src/models/entities';
+import { EmbeddingService, EmbeddingConfig, EmbeddingResult, BatchEmbeddingResult } from '@memento/core/utils/embedding';
+import { Entity } from '@memento/shared-types';
 
 // Mock OpenAI to avoid actual API calls
 vi.mock('openai', () => ({

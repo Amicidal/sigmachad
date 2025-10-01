@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { QdrantService } from '../../../src/services/database/QdrantService';
+import { QdrantService } from '@memento/database/qdrant/QdrantService';
 
 // Gate running these integration tests via environment. When not enabled, the
 // whole suite is declared as skipped at definition time (no dummy assertions).

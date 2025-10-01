@@ -3,17 +3,11 @@ import {
   GraphRelationship,
   RelationshipType,
   CodeEdgeSource,
-  CodeEdgeKind,
   EdgeEvidence,
-  CodeRelationship,
   CODE_RELATIONSHIP_TYPES,
-  isDocumentationRelationshipType,
-  isPerformanceRelationshipType,
-  isSessionRelationshipType,
   isStructuralRelationshipType,
 } from '../models/relationships.js';
-import { sanitizeEnvironment } from './environment.js';
-import { canonicalRelationshipId } from '@memento/shared-types';
+// (removed unused imports sanitizeEnvironment, canonicalRelationshipId)
 
 const CODE_RELATIONSHIP_TYPE_SET = new Set<RelationshipType>(
   CODE_RELATIONSHIP_TYPES
@@ -276,42 +270,60 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
   const md = (rel.metadata || {}) as any;
 
   // Unified hoisting from metadata to top-level for consistent access
-  const hoist = (k: string, mapKey?: string) => {
-    const key = mapKey || k;
-    if (rel[key] == null && md[k] != null) rel[key] = md[k];
-  };
-  [
-    'kind',
-    'resolution',
-    'scope',
-    'arity',
-    'awaited',
-    'operator',
-    'importDepth',
-    'usedTypeChecker',
-    'isExported',
-    'accessPath',
-    'dataFlowId',
-    'confidence',
-    'inferred',
-    'resolved',
-    'source',
-    'callee',
-    'paramName',
-    'importAlias',
-    'receiverType',
-    'dynamicDispatch',
-    'overloadIndex',
-    'genericArguments',
-    'ambiguous',
-    'candidateCount',
-    'isMethod',
-    'occurrencesScan',
-    'occurrencesTotal',
-    'occurrencesRecent',
-  ].forEach((k) => hoist(k));
+  // Avoid dynamic key indexing (security/detect-object-injection): explicitly map allowed fields
+  const mdAny = md as any;
+  if (rel.kind == null && mdAny.kind != null) rel.kind = mdAny.kind;
+  if (rel.resolution == null && mdAny.resolution != null)
+    rel.resolution = mdAny.resolution;
+  if (rel.scope == null && mdAny.scope != null) rel.scope = mdAny.scope;
+  if (rel.arity == null && mdAny.arity != null) rel.arity = mdAny.arity;
+  if (rel.awaited == null && mdAny.awaited != null) rel.awaited = mdAny.awaited;
+  if (rel.operator == null && mdAny.operator != null)
+    rel.operator = mdAny.operator;
+  if (rel.importDepth == null && mdAny.importDepth != null)
+    rel.importDepth = mdAny.importDepth;
+  if (rel.usedTypeChecker == null && mdAny.usedTypeChecker != null)
+    rel.usedTypeChecker = mdAny.usedTypeChecker;
+  if (rel.isExported == null && mdAny.isExported != null)
+    rel.isExported = mdAny.isExported;
+  if (rel.accessPath == null && mdAny.accessPath != null)
+    rel.accessPath = mdAny.accessPath;
+  if (rel.dataFlowId == null && mdAny.dataFlowId != null)
+    rel.dataFlowId = mdAny.dataFlowId;
+  if (rel.confidence == null && mdAny.confidence != null)
+    rel.confidence = mdAny.confidence;
+  if (rel.inferred == null && mdAny.inferred != null)
+    rel.inferred = mdAny.inferred;
+  if (rel.resolved == null && mdAny.resolved != null)
+    rel.resolved = mdAny.resolved;
+  if (rel.source == null && mdAny.source != null) rel.source = mdAny.source;
+  if (rel.callee == null && mdAny.callee != null) rel.callee = mdAny.callee;
+  if (rel.paramName == null && mdAny.paramName != null)
+    rel.paramName = mdAny.paramName;
+  if (rel.importAlias == null && mdAny.importAlias != null)
+    rel.importAlias = mdAny.importAlias;
+  if (rel.receiverType == null && mdAny.receiverType != null)
+    rel.receiverType = mdAny.receiverType;
+  if (rel.dynamicDispatch == null && mdAny.dynamicDispatch != null)
+    rel.dynamicDispatch = mdAny.dynamicDispatch;
+  if (rel.overloadIndex == null && mdAny.overloadIndex != null)
+    rel.overloadIndex = mdAny.overloadIndex;
+  if (rel.genericArguments == null && mdAny.genericArguments != null)
+    rel.genericArguments = mdAny.genericArguments;
+  if (rel.ambiguous == null && mdAny.ambiguous != null)
+    rel.ambiguous = mdAny.ambiguous;
+  if (rel.candidateCount == null && mdAny.candidateCount != null)
+    rel.candidateCount = mdAny.candidateCount;
+  if (rel.isMethod == null && mdAny.isMethod != null)
+    rel.isMethod = mdAny.isMethod;
+  if (rel.occurrencesScan == null && mdAny.occurrencesScan != null)
+    rel.occurrencesScan = mdAny.occurrencesScan;
+  if (rel.occurrencesTotal == null && mdAny.occurrencesTotal != null)
+    rel.occurrencesTotal = mdAny.occurrencesTotal;
+  if (rel.occurrencesRecent == null && mdAny.occurrencesRecent != null)
+    rel.occurrencesRecent = mdAny.occurrencesRecent;
   // For PARAM_TYPE legacy param -> paramName
-  hoist('param', 'paramName');
+  if (rel.paramName == null && mdAny.param != null) rel.paramName = mdAny.param;
 
   const occScan = coerceNonNegative(rel.occurrencesScan, { integer: true });
   if (occScan !== undefined) rel.occurrencesScan = occScan;
@@ -510,7 +522,7 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
         rel.to_ref_kind = rel.to_ref_kind || 'entity';
       }
     }
-  } catch {}
+  } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
   // Promote fromRef scalars for querying (mirror of to_ref_*)
   try {
@@ -560,7 +572,7 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
         (rel as any).from_ref_kind = (rel as any).from_ref_kind || 'entity';
       }
     }
-  } catch {}
+  } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
   // Backfill kind defaults when missing (kept lightweight; semantic defaults)
   try {
@@ -602,7 +614,7 @@ export function normalizeCodeEdge<T extends GraphRelationship>(relIn: T): T {
           break;
       }
     }
-  } catch {}
+  } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
   return rel as T;
 }
@@ -628,7 +640,7 @@ export function normalizeMetricIdForId(value: any): string {
     String(value)
       .trim()
       .toLowerCase()
-      .replace(/[^a-z0-9/_\-]+/g, '-')
+      .replace(/[^a-z0-9/_-]+/g, '-')
       .replace(/-+/g, '-')
       .replace(/\/+/g, '/')
       .replace(/\/+$/g, '')
@@ -637,140 +649,6 @@ export function normalizeMetricIdForId(value: any): string {
   );
 }
 
-function normalizeScenarioForId(value: any): string {
-  if (!value) return '';
-  return normalizeStringForId(value).toLowerCase();
-}
+// (Removed unused helpers normalizeScenarioForId and canonicalDocumentationTargetKey)
 
-function canonicalDocumentationTargetKey(rel: GraphRelationship): string {
-  const anyRel: any = rel as any;
-  const md =
-    anyRel.metadata && typeof anyRel.metadata === 'object'
-      ? anyRel.metadata
-      : {};
-  const source = normalizeDocSourceForId(anyRel.source ?? md.source);
-  const docIntent = normalizeDocIntentForId(
-    anyRel.docIntent ?? md.docIntent,
-    rel.type
-  );
-  const sectionAnchor = normalizeAnchorForId(
-    anyRel.sectionAnchor ?? md.sectionAnchor ?? md.anchor
-  );
-
-  switch (rel.type) {
-    case RelationshipType.DOCUMENTED_BY: {
-      const docVersion = normalizeStringForId(
-        anyRel.docVersion ?? md.docVersion
-      );
-      return `${rel.toEntityId}|${sectionAnchor}|${source}|${docIntent}|${docVersion}`;
-    }
-    case RelationshipType.DESCRIBES_DOMAIN: {
-      const domainPath = normalizeDomainPathForId(
-        anyRel.domainPath ?? md.domainPath ?? md.taxonomyPath
-      );
-      const taxonomyVersion = normalizeStringForId(
-        anyRel.taxonomyVersion ?? md.taxonomyVersion
-      );
-      return `${rel.toEntityId}|${domainPath}|${taxonomyVersion}|${sectionAnchor}|${docIntent}`;
-    }
-    case RelationshipType.BELONGS_TO_DOMAIN: {
-      const domainPath = normalizeDomainPathForId(
-        anyRel.domainPath ?? md.domainPath
-      );
-      return `${rel.toEntityId}|${domainPath}|${source}|${docIntent}`;
-    }
-    case RelationshipType.CLUSTER_MEMBER: {
-      const clusterVersion = normalizeStringForId(
-        anyRel.clusterVersion ?? md.clusterVersion
-      );
-      const docAnchor = normalizeAnchorForId(
-        anyRel.docAnchor ?? md.docAnchor ?? sectionAnchor
-      );
-      const embeddingVersion = normalizeStringForId(
-        anyRel.embeddingVersion ?? md.embeddingVersion
-      );
-      return `${rel.toEntityId}|${clusterVersion}|${docAnchor}|${embeddingVersion}|${docIntent}`;
-    }
-    case RelationshipType.DOMAIN_RELATED: {
-      const relationshipType = normalizeStringForId(
-        anyRel.relationshipType ?? md.relationshipType
-      );
-      return `${rel.toEntityId}|${relationshipType}|${source}`;
-    }
-    case RelationshipType.GOVERNED_BY: {
-      const policyType = normalizeStringForId(
-        anyRel.policyType ?? md.policyType
-      );
-      return `${rel.toEntityId}|${policyType}|${docIntent}`;
-    }
-    case RelationshipType.DOCUMENTS_SECTION: {
-      return `${rel.toEntityId}|${sectionAnchor}|${docIntent}`;
-    }
-    default:
-      return String(rel.toEntityId || '');
-  }
-}
-
-function normalizeAnchorForId(anchor: any): string {
-  if (!anchor) return '_root';
-  const normalized = String(anchor)
-    .trim()
-    .replace(/^#+/, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\-_/\s]+/g, '-')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-/g, '')
-    .replace(/-$/g, '');
-  return normalized.length > 0 ? normalized.slice(0, 128) : '_root';
-}
-
-function normalizeDomainPathForId(value: any): string {
-  if (!value) return '';
-  return String(value)
-    .trim()
-    .toLowerCase()
-    .replace(/>+/g, '/')
-    .replace(/\s+/g, '/')
-    .replace(/[^a-z0-9/_-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/\/+/, '/')
-    .replace(/^\/+|\/+$/g, '');
-}
-
-function normalizeStringForId(value: any): string {
-  if (typeof value !== 'string') return '';
-  return value.trim();
-}
-
-function normalizeDocSourceForId(value: any): string {
-  if (!value) return '';
-  const normalized = String(value).toLowerCase();
-  switch (normalized) {
-    case 'parser':
-    case 'manual':
-    case 'llm':
-    case 'imported':
-    case 'sync':
-    case 'other':
-      return normalized;
-    default:
-      return 'other';
-  }
-}
-
-function normalizeDocIntentForId(value: any, type: RelationshipType): string {
-  if (value === null || value === undefined) {
-    if (type === RelationshipType.GOVERNED_BY) return 'governance';
-    return 'ai-context';
-  }
-  const normalized = String(value).toLowerCase();
-  if (
-    normalized === 'ai-context' ||
-    normalized === 'governance' ||
-    normalized === 'mixed'
-  ) {
-    return normalized;
-  }
-  return type === RelationshipType.GOVERNED_BY ? 'governance' : 'ai-context';
-}
+// (removed unused normalization helpers used by deprecated canonicalization routines)

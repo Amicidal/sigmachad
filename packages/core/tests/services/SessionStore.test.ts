@@ -5,13 +5,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { SessionStore } from '../../../src/services/SessionStore.js';
+import { SessionStore } from '@memento/core/services/SessionStore';
 import {
   SessionEvent,
   SessionCreationOptions,
   SessionNotFoundError,
   SessionError,
-} from '../../../src/services/SessionTypes.js';
+} from '@memento/core/services/SessionTypes';
 
 // Mock Redis
 const mockRedis = {
@@ -492,7 +492,7 @@ describe('SessionStore', () => {
 
       try {
         await sessionStore.exists('test-session');
-      } catch (error) {
+      } catch (_error) {
         // Expected to throw
       }
 

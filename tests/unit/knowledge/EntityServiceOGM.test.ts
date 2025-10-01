@@ -4,15 +4,15 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { EntityServiceOGM } from "../../../src/services/knowledge/ogm/EntityServiceOGM";
+import { EntityServiceOGM } from "@memento/knowledge";
 import {
   File,
   FunctionSymbol,
   ClassSymbol,
-} from "../../../src/models/entities";
+} from "@memento/shared-types";
 
 // Mock the models directly instead of trying to mock Neogma
-vi.mock("../../../src/services/knowledge/ogm/models/EntityModels", () => ({
+vi.mock("@memento/graph/models-ogm/EntityModels", () => ({
   createEntityModels: vi.fn(),
 }));
 

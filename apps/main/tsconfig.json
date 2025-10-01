@@ -1,29 +1,9 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tsconfig.json",
   "compilerOptions": {
     "composite": true,
     "rootDir": "./src",
     "outDir": "./dist"
   },
-  "include": ["src/**/*.ts"],
-  "references": [
-    {
-      "path": "../../packages/api"
-    },
-    {
-      "path": "../../packages/core"
-    },
-    {
-      "path": "../../packages/database"
-    },
-    {
-      "path": "../../packages/knowledge"
-    },
-    {
-      "path": "../../packages/testing"
-    },
-    {
-      "path": "../../packages/sync"
-    }
-  ]
+  "include": ["src/**/*.ts"]
 }

@@ -13,9 +13,9 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Run linter on all packages
-echo "📝 Running linter..."
-pnpm lint
+# Run linter only for affected (uncommitted) projects to keep commits fast
+echo "📝 Running linter (affected only)..."
+pnpm nx affected -t lint --uncommitted
 
 if [ $? -ne 0 ]; then
   echo ""
@@ -34,7 +34,8 @@ echo "🔒 Running security checks..."
 
 # Quick secrets scan on staged files
 echo "🔍 Scanning for secrets..."
-git diff --cached --name-only | xargs -I {} pnpm run security:secrets:check:file {}
+# Run a lightweight secrets scan only on staged files
+git diff --cached --name-only | xargs -I {} pnpm run -s security:secrets:check:file {}
 
 if [ $? -ne 0 ]; then
   echo ""

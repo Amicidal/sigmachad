@@ -1,6 +1,9 @@
 import { EventEmitter } from 'events';
 import { KnowledgeGraphService } from '@memento/knowledge';
-import { RollbackCapabilities } from '@memento/core';
+// Local minimal type to avoid circular dependency on @memento/sync
+interface RollbackCapabilitiesLike {
+  registerCheckpointLink?: (sessionId: string, link: any) => void;
+}
 import {
   SessionCheckpointJobPayload,
   SessionCheckpointJobPersistence,
@@ -67,7 +70,7 @@ export class SessionCheckpointJobRunner extends EventEmitter {
 
   constructor(
     private readonly kgService: KnowledgeGraphService,
-    private readonly rollbackCapabilities?: RollbackCapabilities,
+    private readonly rollbackCapabilities?: RollbackCapabilitiesLike,
     options: SessionCheckpointJobOptions = {}
   ) {
     super();

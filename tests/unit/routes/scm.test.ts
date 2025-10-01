@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { registerSCMRoutes } from "../../../src/api/routes/scm.js";
+import { registerSCMRoutes } from "@memento/api/routes/scm";
 import {
   createMockRequest,
   createMockReply,
@@ -29,7 +29,7 @@ const scmServiceMocks: {
 
 var ExportedValidationError: any;
 
-vi.mock("../../../src/services/scm/SCMService.js", () => {
+vi.mock("@memento/sync/scm/SCMService", () => {
   class MockValidationError extends Error {
     details: string[];
 

@@ -13,12 +13,26 @@ export interface RelationshipBuilderOptions {
   takeTcBudget: () => boolean;
   resolveWithTypeChecker: (node: any, sourceFile: any) => any;
   resolveCallTargetWithChecker: (call: any, sourceFile: any) => any;
+  /**
+   * Resolve an imported member to its source file (relative path) and export name.
+   * - importMap maps local import aliases to file relative paths
+   * - importSymbolMap maps local import aliases to the imported symbol name
+   * Returns the resolved file relative path, symbol name, and traversal depth when found.
+   */
   resolveImportedMemberToFileAndName: (
     memberName: string,
     exportName: string,
     sourceFile: any,
-    importMap?: Map<string, string>
-  ) => { file: string; name: string } | null;
+    importMap?: Map<string, string>,
+    importSymbolMap?: Map<string, string>
+  ) => { fileRel: string; name: string; depth: number } | null;
+  normalizeRelPath: (p: string) => string;
+  createRelationship: (
+    fromId: string,
+    toId: string,
+    type: RelationshipType,
+    metadata?: Record<string, any>
+  ) => GraphRelationship;
   includeConfidence: boolean;
   maxDepth: number;
   batchSize: number;
@@ -35,7 +49,7 @@ export interface TypeRelationshipBuilderOptions
     sourceFile: any,
     importMap?: Map<string, string>,
     importSymbolMap?: Map<string, string>
-  ) => any;
+  ) => { fileRel: string; name: string; depth: number } | null;
 }
 
 export interface ReferenceRelationshipBuilderOptions
@@ -49,7 +63,7 @@ export interface ReferenceRelationshipBuilderOptions
     sourceFile: any,
     importMap?: Map<string, string>,
     importSymbolMap?: Map<string, string>
-  ) => any;
+  ) => { fileRel: string; name: string; depth: number } | null;
 }
 
 export interface ImportExportBuilderOptions extends RelationshipBuilderOptions {
@@ -59,8 +73,8 @@ export interface ImportExportBuilderOptions extends RelationshipBuilderOptions {
   getModuleExportMap: (sourceFile?: any) => Map<string, any>;
 }
 
-import { Entity } from './entities.js';
-import { GraphRelationship } from './relationships.js';
+import { Entity, Symbol as SymbolEntity } from './entities.js';
+import { GraphRelationship, RelationshipType } from './relationships.js';
 
 /**
  * Result of parsing a file or set of files
@@ -129,7 +143,7 @@ export interface CachedFileInfo {
   entities: Entity[];
   relationships: GraphRelationship[];
   lastModified: Date;
-  symbolMap: Map<string, any>;
+  symbolMap: Map<string, SymbolEntity>;
 }
 
 /**
@@ -220,9 +234,9 @@ export type EntityType =
  * Index manager interface for symbol management
  */
 export interface IndexManager {
-  createSymbolMap: (entities: Entity[]) => Map<string, any>;
+  createSymbolMap: (entities: Entity[]) => Map<string, SymbolEntity>;
   removeFileFromIndexes: (fileRel: string) => void;
-  addSymbolsToIndexes: (fileRel: string, symbols: any[]) => void;
+  addSymbolsToIndexes: (fileRel: string, symbols: SymbolEntity[]) => void;
   normalizeRelPath?: (relPath: string) => string;
 }
 

@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 
+const packagesRoot = path.resolve(__dirname, '..', '..', '..');
+const knowledgeRoot = path.resolve(__dirname, '..', '..');
+
 export default defineConfig({
   test: {
     name: 'advanced-e2e',
@@ -110,12 +113,12 @@ export default defineConfig({
 
   resolve: {
     alias: {
-      '@memento/core': path.resolve(__dirname, '../../../core/src'),
-      '@memento/api': path.resolve(__dirname, '../../../api/src'),
-      '@memento/database': path.resolve(__dirname, '../../../database/src'),
-      '@memento/knowledge': path.resolve(__dirname, '../../src'),
-      '@memento/testing': path.resolve(__dirname, '../../../testing/src'),
-      '@memento/sync': path.resolve(__dirname, '../../../sync/src'),
+      '@memento/core': path.resolve(packagesRoot, 'core/src'),
+      '@memento/api': path.resolve(packagesRoot, 'api/src'),
+      '@memento/database': path.resolve(packagesRoot, 'database/src'),
+      '@memento/knowledge': path.resolve(knowledgeRoot, 'src'),
+      '@memento/testing': path.resolve(packagesRoot, 'testing/src'),
+      '@memento/sync': path.resolve(packagesRoot, 'sync/src'),
       '@e2e-utils': path.resolve(__dirname, './utils'),
     },
   },

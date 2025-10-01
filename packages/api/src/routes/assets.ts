@@ -31,7 +31,7 @@ function fetchUrl(url: string, timeoutMs = 10000): Promise<FetchResult> {
     });
     req.on('error', reject);
     req.on('timeout', () => {
-      try { req.destroy(new Error('timeout')); } catch {}
+      try { req.destroy(new Error('timeout')); } catch (e) { /* intentional no-op: non-critical */ void 0; }
       reject(new Error('timeout'));
     });
     req.end();

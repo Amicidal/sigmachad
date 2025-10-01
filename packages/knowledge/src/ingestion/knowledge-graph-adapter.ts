@@ -3,9 +3,9 @@
  * Bridges the high-throughput ingestion pipeline with the existing KnowledgeGraphService
  */
 
-import { Entity } from '@memento/shared-types.js';
-import { GraphRelationship } from '@memento/shared-types.js';
-import { KnowledgeGraphServiceIntegration } from './pipeline.js';
+import { Entity } from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
+import { KnowledgeGraphServiceIntegration } from './pipeline';
 
 export interface KnowledgeGraphServiceLike {
   createEntitiesBulk(entities: Entity[], options?: any): Promise<any>;
@@ -50,7 +50,12 @@ export class KnowledgeGraphAdapter implements KnowledgeGraphServiceIntegration {
         `[KnowledgeGraphAdapter] Falling back to individual entity creates for ${entities.length} entities`
       );
 
-      const results = [];
+      const results: Array<{
+        entity: Entity;
+        success: boolean;
+        result?: Entity;
+        error?: unknown;
+      }> = [];
       const batchSize = options.batchSize || 50;
 
       for (let i = 0; i < entities.length; i += batchSize) {
@@ -119,7 +124,12 @@ export class KnowledgeGraphAdapter implements KnowledgeGraphServiceIntegration {
         `[KnowledgeGraphAdapter] Falling back to individual relationship creates for ${relationships.length} relationships`
       );
 
-      const results = [];
+      const results: Array<{
+        relationship: GraphRelationship;
+        success: boolean;
+        result?: GraphRelationship;
+        error?: unknown;
+      }> = [];
       const batchSize = options.batchSize || 100;
 
       for (let i = 0; i < relationships.length; i += batchSize) {
@@ -186,7 +196,12 @@ export class KnowledgeGraphAdapter implements KnowledgeGraphServiceIntegration {
         `[KnowledgeGraphAdapter] Falling back to individual embedding creates for ${entities.length} entities`
       );
 
-      const results = [];
+      const results: Array<{
+        entity: Entity;
+        success: boolean;
+        result?: unknown;
+        error?: unknown;
+      }> = [];
       const batchSize = options.batchSize || 25; // Smaller batches for embeddings
 
       for (let i = 0; i < entities.length; i += batchSize) {
@@ -490,9 +505,7 @@ export class OptimizedKnowledgeGraphAdapter extends KnowledgeGraphAdapter {
   }
 
   private getRelationshipId(relationship: GraphRelationship): string {
-    return `${relationship.fromEntityId || relationship.from?.id}-${
-      relationship.type
-    }-${relationship.toEntityId || relationship.to?.id}`;
+    return `${relationship.fromEntityId}-${relationship.type}-${relationship.toEntityId}`;
   }
 }
 

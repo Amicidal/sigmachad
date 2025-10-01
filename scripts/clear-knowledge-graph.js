@@ -1,51 +1,27 @@
 #!/usr/bin/env node
 
 import 'dotenv/config';
-import { createClient } from 'redis';
-
-const GRAPH_KEY = process.env.FALKORDB_GRAPH_KEY || 'memento';
+import neo4j from 'neo4j-driver';
 
 async function main() {
-  const url = process.env.FALKORDB_URL || 'redis://localhost:6379';
-  const client = createClient({ url });
+  const uri = process.env.NEO4J_URI || 'bolt://localhost:7687';
+  const username = process.env.NEO4J_USERNAME || 'neo4j';
+  const password = process.env.NEO4J_PASSWORD || 'memento123';
+  const database = process.env.NEO4J_DATABASE || 'neo4j';
 
-  client.on('error', (err) => {
-    console.error('❌ Redis error:', err);
-  });
+  console.log(
+    `🧹 Clearing Neo4j knowledge graph at ${uri} (database: ${database})...`
+  );
 
-  console.log(`🧹 Clearing knowledge graph at ${url} (graph key: ${GRAPH_KEY})...`);
-
-  await client.connect();
+  const driver = neo4j.driver(uri, neo4j.auth.basic(username, password));
+  const session = driver.session({ database });
 
   try {
-    // Attempt to drop the graph entirely
-    try {
-      const response = await client.sendCommand(['GRAPH.DELETE', GRAPH_KEY]);
-      console.log('🗑️ GRAPH.DELETE response:', response ?? '(no response)');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('Unknown graph') || msg.includes('unknown graph')) {
-        console.log('ℹ️ Graph did not exist – nothing to delete.');
-      } else {
-        throw err;
-      }
-    }
-
-    // Also clear the keyspace that FalkorDB uses for metadata to be safe
-    const pattern = `${GRAPH_KEY}:*`;
-    const keys = [];
-    for await (const key of client.scanIterator({ MATCH: pattern })) {
-      keys.push(key);
-    }
-
-    if (keys.length > 0) {
-      await client.del(keys);
-      console.log(`🗂️ Removed ${keys.length} auxiliary graph keys`);
-    }
-
-    console.log('✅ Knowledge graph cleared successfully');
+    await session.run('MATCH (n) DETACH DELETE n');
+    console.log('✅ All nodes and relationships deleted from Neo4j');
   } finally {
-    await client.disconnect();
+    await session.close();
+    await driver.close();
   }
 }
 

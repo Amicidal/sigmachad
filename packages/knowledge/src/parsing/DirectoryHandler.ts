@@ -3,19 +3,19 @@
  * Handles directory hierarchy creation and path normalization
  */
 
-import { Entity } from '@memento/shared-types.js';
+import { Entity } from '@memento/shared-types';
 import {
   GraphRelationship,
   RelationshipType,
   StructuralRelationship,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 import {
   createHash,
   normalizeRelPath,
-  parseFilePath,
-  getPathDepth,
-  isParentPath,
-} from './utils.js';
+  
+  
+  
+} from '@memento/knowledge/utils';
 
 /**
  * Handles directory-related operations for the AST Parser
@@ -119,7 +119,7 @@ export class DirectoryHandler {
       | RelationshipType.DEFINES
       | RelationshipType.EXPORTS
       | RelationshipType.IMPORTS,
-    metadata?: any
+    _metadata?: any
   ): StructuralRelationship {
     const baseRel: StructuralRelationship = {
       id: `${fromId}-${type}-${toId}`,

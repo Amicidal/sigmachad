@@ -1,21 +1,32 @@
 version: "3.8"
 
 services:
-  # Test Graph Database (FalkorDB)
-  falkordb-test:
-    image: falkordb/falkordb:latest
+  # Test Graph Database (Neo4j)
+  neo4j-test:
+    image: neo4j:5.15-community
+    container_name: neo4j-test
     ports:
-      - "6380:6379"
-    command: ["falkordb", "--port", "6379", "--dir", "/data"]
+      - "7688:7687"
+      - "7475:7474"
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
     networks:
       - memento-test-network
-    tmpfs:
-      - /data
-    restart: unless-stopped
+    volumes:
+      - neo4j_test_data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Test Vector Database (Qdrant)
   qdrant-test:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.7.4
+    container_name: qdrant-test
     ports:
       - "6335:6333"
       - "6336:6334"
@@ -24,13 +35,18 @@ services:
       - QDRANT__SERVICE__GRPC_PORT=6334
     networks:
       - memento-test-network
-    tmpfs:
-      - /qdrant/storage
-    restart: unless-stopped
+    volumes:
+      - qdrant_test_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Test Relational Database (PostgreSQL)
   postgres-test:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
+    container_name: postgres-test
     ports:
       - "5433:5432"
     environment:
@@ -39,21 +55,36 @@ services:
       - POSTGRES_PASSWORD=memento_test
     networks:
       - memento-test-network
-    tmpfs:
-      - /var/lib/postgresql/data
-    restart: unless-stopped
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Test Redis for caching and session management
   redis-test:
     image: redis:7-alpine
+    container_name: redis-test
     ports:
       - "6381:6379"
     command: ["redis-server", "--appendonly", "yes"]
     networks:
       - memento-test-network
-    tmpfs:
-      - /data
-    restart: unless-stopped
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  neo4j_test_data:
+  qdrant_test_data:
+  postgres_test_data:
+  redis_test_data:
 
 networks:
   memento-test-network:

@@ -282,7 +282,7 @@ export class IntegratedRollbackManager extends EventEmitter {
         const duration = Date.now() - startTime;
         this.metricsCollector.recordRollbackCreation(rollbackPoint, duration);
         this.metricsCollector.incrementCounter('rollback_points_created', {
-          session_id: rollbackPoint.sessionId || 'none',
+          session_id: rollbackPoint.sessionId || 'none', // Compatibility prop
         });
       }
 
@@ -759,11 +759,12 @@ export class IntegratedRollbackManager extends EventEmitter {
           success: operation.status === RollbackStatus.COMPLETED,
           rolledBackEntities: 0, // Would need to be tracked in operation
           rolledBackRelationships: 0,
+          // Map operation-level error into structured RollbackIssue
           errors: operation.error
             ? [
                 {
                   type: 'entity',
-                  id: 'unknown',
+                  id: operation.id,
                   action: 'rollback',
                   error: operation.error,
                   recoverable: false,

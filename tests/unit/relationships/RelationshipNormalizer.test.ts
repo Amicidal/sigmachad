@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { normalizeStructuralRelationship } from "../../../src/services/relationships/RelationshipNormalizer";
-import { RelationshipType } from "../../../src/models/relationships.js";
+import { normalizeStructuralRelationship } from "@memento/graph/services/RelationshipNormalizer";
+import { RelationshipType } from "@memento/shared-types";
 
 const timestamp = new Date("2024-07-04T10:00:00Z");
 

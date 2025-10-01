@@ -4,8 +4,12 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TestResultParser, ParsedTestSuite, ParsedTestResult } from '../../../src/services/testing/TestResultParser.js';
-import { TestSuiteResult } from '../../../src/services/testing/TestEngine.js';
+import { TestResultParser } from '@memento/testing/TestResultParser';
+import type {
+  ParsedTestResult,
+  ParsedTestSuite,
+  TestSuiteResult,
+} from '@memento/shared-types';
 
 describe('TestResultParser', () => {
   let parser: TestResultParser;

@@ -9,16 +9,12 @@
 import {
   TestExecutionRecord,
   TestEvolutionEvent,
-  TestEvolutionEventType,
   TestTrend,
   TestTrendMetric,
   TrendPeriod,
   TrendDirection,
   TrendDataPoint,
   TestConfiguration,
-  TestImpactAnalysis,
-  ImpactFactor,
-  RiskLevel
 } from './TestTypes.js';
 
 export interface ITestEvolution {
@@ -596,7 +592,7 @@ export class TestEvolution implements ITestEvolution {
   private determineOverallTrend(
     coverageEvolution: CoverageEvolutionAnalysis,
     performanceEvolution: PerformanceEvolutionAnalysis,
-    flakinessEvolution: FlakinessAnalysis
+    _flakinessEvolution: FlakinessAnalysis
   ): TrendDirection {
     const trends = [coverageEvolution.coverageTrend, performanceEvolution.performanceTrend];
     const increasing = trends.filter(t => t === 'increasing').length;
@@ -687,7 +683,7 @@ export class TestEvolution implements ITestEvolution {
     return regressions;
   }
 
-  private findPerformanceImprovements(executions: TestExecutionRecord[]): PerformanceImprovement[] {
+  private findPerformanceImprovements(_executions: TestExecutionRecord[]): PerformanceImprovement[] {
     // Similar logic to regressions but looking for improvements
     return [];
   }
@@ -720,17 +716,17 @@ export class TestEvolution implements ITestEvolution {
     };
   }
 
-  private identifyFlakyPeriods(executions: TestExecutionRecord[]): FlakyPeriod[] {
+  private identifyFlakyPeriods(_executions: TestExecutionRecord[]): FlakyPeriod[] {
     // Implementation for identifying periods of high flakiness
     return [];
   }
 
-  private findStabilizationEvents(executions: TestExecutionRecord[]): StabilizationEvent[] {
+  private findStabilizationEvents(_executions: TestExecutionRecord[]): StabilizationEvent[] {
     // Implementation for finding stabilization events
     return [];
   }
 
-  private analyzeRootCauses(executions: TestExecutionRecord[]): FlakinessRootCause[] {
+  private analyzeRootCauses(_executions: TestExecutionRecord[]): FlakinessRootCause[] {
     // Implementation for root cause analysis
     return [];
   }
@@ -744,12 +740,12 @@ export class TestEvolution implements ITestEvolution {
     );
   }
 
-  private findSimilarities(executions1: TestExecutionRecord[], executions2: TestExecutionRecord[]): ComparisonSimilarity[] {
+  private findSimilarities(_executions1: TestExecutionRecord[], _executions2: TestExecutionRecord[]): ComparisonSimilarity[] {
     // Implementation for finding similarities between test executions
     return [];
   }
 
-  private findDifferences(executions1: TestExecutionRecord[], executions2: TestExecutionRecord[]): ComparisonDifference[] {
+  private findDifferences(_executions1: TestExecutionRecord[], _executions2: TestExecutionRecord[]): ComparisonDifference[] {
     // Implementation for finding differences between test executions
     return [];
   }
@@ -786,8 +782,8 @@ export class TestEvolution implements ITestEvolution {
   }
 
   private generateComparisonRecommendations(
-    similarities: ComparisonSimilarity[],
-    differences: ComparisonDifference[]
+    _similarities: ComparisonSimilarity[],
+    _differences: ComparisonDifference[]
   ): string[] {
     // Implementation for generating comparison recommendations
     return [];

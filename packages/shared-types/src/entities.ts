@@ -1,44 +1,61 @@
-import type { SecuritySeverity } from './security.js';
 import type { TimeRangeParams } from './api-types.js';
+import type {
+  DocumentationIntent,
+  DocumentationNodeType,
+  DocumentationSource,
+  DocumentationStatus,
+  DocumentationCoverageScope,
+  DocumentationQuality,
+  DocumentationPolicyType,
+} from './relationships.js';
+import type { SecurityIssue, Vulnerability } from './security.js';
 
 export interface CodebaseEntity {
   id: string;
-  type: string;
+  type?: string;
   path: string;
-  name: string;
-  createdAt: Date;
-  updatedAt: Date;
+  name?: string;
+  hash?: string;
+  language?: string;
+  created?: Date;
+  lastModified?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   metadata?: Record<string, any>;
 }
 
-export type Entity =
-  | File
-  | Directory
-  | Module
-  | Symbol
-  | FunctionSymbol
-  | ClassSymbol
-  | InterfaceSymbol
-  | TypeAliasSymbol
-  | Test
-  | Spec
-  | Change
-  | Session
-  | Version
-  | Checkpoint
-  | DocumentationNode
-  | BusinessDomain
-  | SemanticCluster
-  | SecurityIssueEntity;
-
 export interface File extends CodebaseEntity {
   type: 'file';
+  name: string;
+  hash: string;
+  language: string;
   extension: string;
   size: number;
   lines: number;
   isTest: boolean;
   isConfig: boolean;
   dependencies: string[];
+}
+
+export interface Directory extends CodebaseEntity {
+  type: 'directory';
+  name?: string;
+  children: string[];
+  depth?: number;
+  fileCount?: number;
+  subdirectoryCount?: number;
+}
+
+export interface Module extends CodebaseEntity {
+  type: 'module';
+  name: string;
+  version: string;
+  packageJson: any;
+  entryPoint: string;
+  exports?: string[];
+  imports?: string[];
+  dependencies?: string[];
+  isEntryPoint?: boolean;
 }
 
 export interface Symbol extends CodebaseEntity {
@@ -76,13 +93,23 @@ export interface FunctionParameter {
   defaultValue?: string;
 }
 
+export interface FunctionSymbol extends Symbol {
+  kind: 'function';
+  parameters: FunctionParameter[];
+  returnType: string;
+  isAsync: boolean;
+  isGenerator: boolean;
+  complexity: number;
+  calls: string[];
+}
+
 export interface ClassSymbol extends Symbol {
   kind: 'class';
   extends?: string[];
   implements?: string[];
   methods: string[];
   properties: string[];
-  constructors: string[];
+  constructors?: string[];
   isAbstract: boolean;
 }
 
@@ -96,39 +123,66 @@ export interface InterfaceSymbol extends Symbol {
 export interface TypeAliasSymbol extends Symbol {
   kind: 'typeAlias';
   aliasedType: string;
+  isUnion?: boolean;
+  isIntersection?: boolean;
 }
 
-export interface FunctionSymbol extends Symbol {
-  kind: 'function';
-  parameters: FunctionParameter[];
-  returnType: string;
-  isAsync: boolean;
-  isGenerator: boolean;
-  complexity: number;
-  calls: string[];
-}
-
-// Add other interfaces as needed, e.g.
 export interface CoverageMetrics {
-  statements: number;
+  lines: number;
   branches: number;
   functions: number;
-  lines: number;
+  statements: number;
 }
 
-export interface TestExecution {
+export interface TestPerformanceData {
+  memoryUsage?: number;
+  cpuUsage?: number;
+  networkRequests?: number;
+  databaseQueries?: number;
+  fileOperations?: number;
+}
+
+export interface TestBenchmark {
+  benchmark: string;
+  value: number;
+  status: 'above' | 'below' | 'at';
+  threshold: number;
+}
+
+export interface TestHistoricalData {
   timestamp: Date;
-  duration: number;
-  status: 'passed' | 'failed' | 'skipped';
-  error?: string;
-  coverage?: CoverageMetrics;
+  executionTime: number;
+  averageExecutionTime: number;
+  p95ExecutionTime: number;
+  successRate: number;
+  coveragePercentage: number;
+  runId?: string;
 }
 
 export interface TestPerformanceMetrics {
-  averageDuration: number;
-  p95Duration: number;
-  slowestRuns: number[];
-  fastestRuns: number[];
+  averageExecutionTime: number;
+  p95ExecutionTime: number;
+  successRate: number;
+  trend: 'improving' | 'stable' | 'degrading';
+  benchmarkComparisons: TestBenchmark[];
+  historicalData: TestHistoricalData[];
+  averageDuration?: number;
+  p95Duration?: number;
+  slowestRuns?: number[];
+  fastestRuns?: number[];
+}
+
+export interface TestExecution {
+  id: string;
+  timestamp: Date;
+  status: 'passed' | 'failed' | 'skipped' | 'error';
+  duration: number;
+  error?: string;
+  errorMessage?: string;
+  stackTrace?: string;
+  coverage?: CoverageMetrics;
+  performance?: TestPerformanceData;
+  environment?: Record<string, any>;
 }
 
 export interface Test extends CodebaseEntity {
@@ -145,19 +199,6 @@ export interface Test extends CodebaseEntity {
   performanceMetrics: TestPerformanceMetrics;
   dependencies: string[];
   tags: string[];
-}
-
-export interface Session {
-  id: string;
-  type: 'session';
-  startTime: Date;
-  endTime?: Date;
-  agentType: string;
-  userId?: string;
-  changes: string[];
-  specs: string[];
-  status: 'active' | 'completed' | 'failed';
-  metadata?: Record<string, any>;
 }
 
 export interface Spec extends CodebaseEntity {
@@ -182,29 +223,23 @@ export interface Change {
   author?: string;
   commitHash?: string;
   diff?: string;
-  previousState?: any;
-  newState?: any;
+  previousState?: unknown;
+  newState?: unknown;
   sessionId?: string;
   specId?: string;
 }
 
-export interface Directory extends CodebaseEntity {
-  type: 'directory';
-  children: string[];
-  fileCount: number;
-  subdirectoryCount: number;
-}
-
-export interface Module extends CodebaseEntity {
-  type: 'module';
-  name: string;
-  version: string;
-  packageJson: any;
-  entryPoint: string;
-  exports: string[];
-  imports: string[];
-  dependencies: string[];
-  isEntryPoint: boolean;
+export interface Session {
+  id: string;
+  type: 'session';
+  startTime: Date;
+  endTime?: Date;
+  agentType: string;
+  userId?: string;
+  changes: string[];
+  specs: string[];
+  status: 'active' | 'completed' | 'failed';
+  metadata?: Record<string, any>;
 }
 
 export interface Version {
@@ -213,8 +248,12 @@ export interface Version {
   entityId: string;
   hash: string;
   timestamp: Date;
+  path?: string;
+  language?: string;
   metadata?: Record<string, any>;
 }
+
+export type CheckpointReason = 'daily' | 'incident' | 'manual';
 
 export interface Checkpoint {
   id: string;
@@ -223,6 +262,7 @@ export interface Checkpoint {
   timestamp: Date;
   hops: number;
   seedEntities: string[];
+  reason?: CheckpointReason;
   metadata?: Record<string, any>;
 }
 
@@ -230,40 +270,69 @@ export interface DocumentationNode extends CodebaseEntity {
   type: 'documentation';
   title: string;
   content: string;
+  docType?: DocumentationNodeType;
+  businessDomains?: string[];
+  stakeholders?: string[];
+  technologies?: string[];
+  status?: DocumentationStatus;
+  docVersion?: string;
+  docHash?: string;
+  docIntent?: DocumentationIntent;
+  docSource?: DocumentationSource;
+  docLocale?: string;
+  lastIndexed?: Date;
+  coverageScope?: DocumentationCoverageScope;
+  quality?: DocumentationQuality;
+  policyType?: DocumentationPolicyType;
+  tags?: string[];
 }
 
-export interface BusinessDomain {
-  id: string;
-  type: 'businessDomain';
+export interface BusinessDomain extends CodebaseEntity {
+  type: 'businessDomain' | 'business-domain';
   name: string;
-  description?: string;
-}
-
-export interface SemanticCluster {
-  id: string;
-  type: 'semanticCluster';
-  name: string;
-  description?: string;
-}
-
-export interface SecurityIssueEntity extends CodebaseEntity {
-  type: 'security-issue';
-  severity: SecuritySeverity;
-  ruleId: string;
   description: string;
-  remediation: string;
-  cwe?: string;
-  owasp?: string;
-  confidence: number;
-  status: 'open' | 'closed' | 'suppressed';
-  discoveredAt: Date;
-  lastScanned: Date;
-  affectedFile?: string;
-  lineNumber?: number;
+  parentDomain?: string;
+  criticality: 'core' | 'supporting' | 'utility';
+  stakeholders: string[];
+  keyProcesses: string[];
+  extractedFrom?: string[];
 }
 
-// Additional types from core package
-export type CheckpointReason = 'daily' | 'incident' | 'manual';
+export interface SemanticCluster extends CodebaseEntity {
+  type: 'semanticCluster' | 'semantic-cluster';
+  name: string;
+  description: string;
+  businessDomainId?: string;
+  clusterType?: 'feature' | 'module' | 'capability' | 'service';
+  cohesionScore?: number;
+  lastAnalyzed?: Date;
+  memberEntities?: string[];
+  concepts?: string[];
+  confidence?: number;
+}
+
+export type SecurityIssueEntity = SecurityIssue;
+
+export type Entity =
+  | File
+  | Directory
+  | Module
+  | Symbol
+  | FunctionSymbol
+  | ClassSymbol
+  | InterfaceSymbol
+  | TypeAliasSymbol
+  | Test
+  | Spec
+  | Change
+  | Session
+  | Version
+  | Checkpoint
+  | DocumentationNode
+  | BusinessDomain
+  | SemanticCluster
+  | SecurityIssueEntity
+  | Vulnerability;
 
 export interface CheckpointCreateRequest {
   seedEntities: string[];
@@ -289,17 +358,37 @@ export interface HistoryConfig {
   };
 }
 
-export interface CodebaseEntity {
-  id: string;
-  type: string;
-  path: string;
-  name: string;
-  hash: string;
-  language: string;
-  lastModified: Date;
-  created: Date;
-  metadata?: Record<string, any>;
-}
+export const isFile = (
+  entity: Entity | null | undefined,
+): entity is File => entity != null && entity.type === 'file';
 
-// Re-export from security for convenience
-export type { SecuritySeverity } from './security.js';
+export const isDirectory = (
+  entity: Entity | null | undefined,
+): entity is Directory => entity != null && entity.type === 'directory';
+
+export const isSymbol = (
+  entity: Entity | null | undefined,
+): entity is Symbol => entity != null && entity.type === 'symbol';
+
+export const isFunction = (
+  entity: Entity | null | undefined,
+): entity is FunctionSymbol =>
+  isSymbol(entity) && entity.kind === 'function';
+
+export const isClass = (
+  entity: Entity | null | undefined,
+): entity is ClassSymbol => isSymbol(entity) && entity.kind === 'class';
+
+export const isInterface = (
+  entity: Entity | null | undefined,
+): entity is InterfaceSymbol => isSymbol(entity) && entity.kind === 'interface';
+
+export const isTest = (
+  entity: Entity | null | undefined,
+): entity is Test => entity != null && entity.type === 'test';
+
+export const isSpec = (
+  entity: Entity | null | undefined,
+): entity is Spec => entity != null && entity.type === 'spec';
+
+export type { SecuritySeverity, SecurityIssue, Vulnerability } from './security.js';

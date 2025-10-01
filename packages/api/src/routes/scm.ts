@@ -7,11 +7,24 @@ import { FastifyInstance } from "fastify";
 import path from "path";
 import { KnowledgeGraphService } from "@memento/knowledge";
 import { DatabaseService } from "@memento/database";
-import { GitService } from "@memento/sync/scm";
-import { SCMService, ValidationError } from "@memento/sync/scm";
-import { LocalGitProvider } from "@memento/sync/scm";
-import { SCMProviderNotConfiguredError } from "@memento/sync/scm";
-import type { CommitPRRequest } from "@memento/core";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+let GitService: any;
+let SCMService: any;
+let LocalGitProvider: any;
+let ValidationError: any;
+let SCMProviderNotConfiguredError: any;
+try {
+  const scmMod = require("@memento/sync/scm");
+  GitService = scmMod?.GitService;
+  SCMService = scmMod?.SCMService;
+  LocalGitProvider = scmMod?.LocalGitProvider;
+  ValidationError = scmMod?.ValidationError;
+  SCMProviderNotConfiguredError = scmMod?.SCMProviderNotConfiguredError;
+} catch {
+  // Fall back to undefined constructors; routes will respond 501 if service unavailable
+}
+import type { CommitPRRequest } from "@memento/shared-types";
 
 const SCM_FEATURE_FLAG = String(process.env.FEATURE_SCM ?? "true").toLowerCase();
 const SCM_FEATURE_ENABLED = !["0", "false", "off"].includes(SCM_FEATURE_FLAG);
@@ -41,7 +54,7 @@ const respondNotImplemented = (
 
 const respondValidationError = (
   reply: ReplyLike,
-  error: ValidationError
+  error: any
 ): void => {
   reply.status(400).send({
     success: false,
@@ -79,7 +92,7 @@ export async function registerSCMRoutes(
     ? path.resolve(gitWorkdirEnv)
     : undefined;
 
-  const gitService = new GitService(gitWorkdir);
+  const gitService = GitService ? new GitService(gitWorkdir) : null;
   const remoteName = process.env.SCM_REMOTE || process.env.SCM_REMOTE_NAME;
   const provider =
     SCM_FEATURE_ENABLED && kgService && dbService
@@ -96,7 +109,7 @@ export async function registerSCMRoutes(
         )
       : null;
 
-  const ensureService = (reply: ReplyLike): SCMService | null => {
+  const ensureService = (reply: ReplyLike): any | null => {
     if (!SCM_FEATURE_ENABLED || !scmService) {
       respondNotImplemented(reply);
       return null;
@@ -155,11 +168,12 @@ export async function registerSCMRoutes(
           return;
         }
         if (error instanceof SCMProviderNotConfiguredError) {
+          const msg = error instanceof Error ? error.message : String(error);
           reply.status(503).send({
             success: false,
             error: {
               code: "SCM_PROVIDER_NOT_CONFIGURED",
-              message: error.message,
+              message: msg,
             },
           });
           return;
@@ -244,11 +258,12 @@ export async function registerSCMRoutes(
           return;
         }
         if (error instanceof SCMProviderNotConfiguredError) {
+          const msg = error instanceof Error ? error.message : String(error);
           reply.status(503).send({
             success: false,
             error: {
               code: "SCM_PROVIDER_NOT_CONFIGURED",
-              message: error.message,
+              message: msg,
             },
           });
           return;

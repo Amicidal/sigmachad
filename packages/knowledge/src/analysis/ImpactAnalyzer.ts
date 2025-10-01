@@ -4,27 +4,11 @@
  */
 
 import { EventEmitter } from 'events';
+import type { Entity } from '@memento/shared-types';
 
-// Local type definitions (temporarily until @memento/core is available)
-export interface Entity {
-  id: string;
-  type: string;
-  name?: string;
-  metadata?: Record<string, any>;
-}
-
-export interface ImpactAnalysis {
-  impactScore: number;
-  affectedEntities: string[];
-  cascadePath: string[];
-  recommendations: string[];
-}
-
-export interface ImpactAnalysisRequest {
-  entityId: string;
-  changeType: 'modification' | 'deletion' | 'addition';
-  scope?: 'direct' | 'transitive' | 'global';
-}
+// Import shared types from AnalysisService to avoid duplication
+export type { ImpactAnalysis, ImpactAnalysisRequest } from './AnalysisService.js';
+import type { ImpactAnalysis, ImpactAnalysisRequest } from './AnalysisService.js';
 
 export class ImpactAnalyzer extends EventEmitter {
   constructor() {

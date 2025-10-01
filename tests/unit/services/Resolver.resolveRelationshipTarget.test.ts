@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { SynchronizationCoordinator } from "@/services/synchronization/SynchronizationCoordinator";
+import { SynchronizationCoordinator } from "@memento/sync/synchronization/SynchronizationCoordinator";
 
 class KGMock {
   async getEntity(id: string) {

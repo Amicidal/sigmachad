@@ -4,8 +4,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
-import { CodeScanner } from '../../../packages/testing/src/security/code-scanner.js';
-import { SecurityScanOptions } from '../../../packages/testing/src/security/types.js';
+import { CodeScanner } from '@memento/testing/security/code-scanner';
+import { SecurityScanOptions } from '@memento/testing/security/types';
 
 // Mock fs module
 vi.mock('fs');

@@ -7,11 +7,7 @@
 
 import { EventEmitter } from 'events';
 import type { RedisClientType } from 'redis';
-import {
-  SessionDocument,
-  SessionEvent,
-  SessionError,
-} from './SessionTypes.js';
+import { SessionEvent } from './SessionTypes.js';
 
 export interface PrometheusMetric {
   name: string;
@@ -662,7 +658,7 @@ export class SessionMetrics extends EventEmitter {
   /**
    * Get value for alert rule
    */
-  private getAlertValue(rule: AlertRule, snapshot: SessionMetricsSnapshot): number {
+  private getAlertValue(_rule: AlertRule, _snapshot: SessionMetricsSnapshot): number {
     // This would need to be implemented based on the rule's target metric
     // For now, return a placeholder
     return 0;
@@ -763,7 +759,7 @@ export class SessionMetrics extends EventEmitter {
     return {};
   }
 
-  private determineSystemHealth(snapshot: SessionMetricsSnapshot): 'healthy' | 'degraded' | 'critical' {
+  private determineSystemHealth(_snapshot: SessionMetricsSnapshot): 'healthy' | 'degraded' | 'critical' {
     const criticalAlerts = this.getCriticalAlertCount();
     if (criticalAlerts > 0) return 'critical';
 

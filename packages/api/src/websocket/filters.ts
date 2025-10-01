@@ -4,7 +4,7 @@ import type {
   NormalizedSubscriptionFilter,
   WebSocketEvent,
   WebSocketFilter,
-} from "./types.js";
+} from "@memento/shared-types";
 
 type Collectable = string | string[] | undefined;
 

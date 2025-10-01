@@ -5,17 +5,17 @@
 
 import crypto from "crypto";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/core/DatabaseService";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
 import {
   setupIsolatedServiceTest,
   cleanupIsolatedServiceTest,
   IsolatedTestSetup,
 } from "../../test-utils/database-helpers";
-import { CodebaseEntity, RelationshipType } from "../../../src/models/entities";
-import { GraphRelationship } from "../../../src/models/relationships";
-import { GraphSearchRequest } from "../../../src/models/types";
-import { canonicalRelationshipId } from "../../../src/utils/codeEdges";
+import { CodebaseEntity, RelationshipType } from "@memento/shared-types";
+import { GraphRelationship } from "@memento/shared-types";
+import { GraphSearchRequest } from "@memento/shared-types";
+import { canonicalRelationshipId } from "@memento/core/utils/codeEdges";
 
 const escapeRegex = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

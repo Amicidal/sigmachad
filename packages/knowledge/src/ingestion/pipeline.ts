@@ -5,8 +5,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { Entity } from '@memento/shared-types.js';
-import { GraphRelationship } from '@memento/shared-types.js';
+import { Entity } from '@memento/shared-types';
+import { GraphRelationship } from '@memento/shared-types';
 import type {
   PipelineConfig,
   PipelineMetrics,
@@ -16,38 +16,23 @@ import type {
   TaskPayload,
   IngestionTelemetry,
   AlertConfig,
-  IngestionError,
   EnrichmentTask,
   EnrichmentResult,
-} from './types.js';
-// Event definitions
-export interface IngestionEvents {
-  'pipeline:started': () => void;
-  'pipeline:stopped': () => void;
-  'pipeline:error': (error: Error) => void;
-  'event:received': (event: ChangeEvent) => void;
-  'event:processed': (event: ChangeEvent, duration: number) => void;
-  'batch:created': (batch: BatchMetadata) => void;
-  'batch:completed': (result: BatchResult) => void;
-  'batch:failed': (error: BatchProcessingError) => void;
-  'worker:started': (workerId: string) => void;
-  'worker:stopped': (workerId: string) => void;
-  'worker:error': (error: WorkerError) => void;
-  'queue:overflow': (error: QueueOverflowError) => void;
-  'metrics:updated': (metrics: PipelineMetrics) => void;
-  'alert:triggered': (alert: AlertConfig, value: number) => void;
-  'parse:error': (error: { filePath: string; error: string }) => void;
-  'embedding:error': (error: { entityId: string; error: string }) => void;
-}
+  IngestionEvents,
+} from '@memento/shared-types';
+import type { TypedEventEmitter } from '@memento/shared-types';
+import { IngestionError } from '@memento/shared-types';
 
-import { QueueManager, QueueManagerConfig } from './queue-manager.js';
-import { WorkerPool, WorkerPoolConfig } from './worker-pool.js';
+import { QueueManager, QueueManagerConfig } from './queue-manager';
+import { WorkerPool, WorkerPoolConfig } from './worker-pool';
 import {
   HighThroughputBatchProcessor,
   BatchProcessorConfig,
-} from './batch-processor.js';
-import { ASTParser, ParseResult } from '../parsing/ASTParser.js';
-import { EmbeddingService } from '../embeddings/EmbeddingService.js';
+} from './batch-processor';
+import { ASTParser } from '../parsing/ASTParser';
+import type { ParseResult } from '@memento/shared-types';
+import { EmbeddingService } from '../embeddings/EmbeddingService';
+import { PerformanceMonitor } from './performance-monitor';
 
 export interface KnowledgeGraphServiceIntegration {
   createEntitiesBulk(entities: Entity[], options?: any): Promise<any>;
@@ -58,17 +43,23 @@ export interface KnowledgeGraphServiceIntegration {
   createEmbeddingsBatch(entities: Entity[], options?: any): Promise<any>;
 }
 
-export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvents> {
+export class HighThroughputIngestionPipeline
+  extends EventEmitter
+  implements TypedEventEmitter<IngestionEvents>
+{
   private config: PipelineConfig;
   private state: PipelineState;
   private metrics: PipelineMetrics;
 
   // Core components
-  private queueManager: QueueManager;
-  private workerPool: WorkerPool;
-  private batchProcessor: HighThroughputBatchProcessor;
-  private astParser: ASTParser;
+  // These are initialized synchronously in constructor via initializeComponents().
+  // Use definite assignment assertions to satisfy strictPropertyInitialization.
+  private queueManager!: QueueManager;
+  private workerPool!: WorkerPool;
+  private batchProcessor!: HighThroughputBatchProcessor;
+  private astParser!: ASTParser;
   private embeddingService?: EmbeddingService;
+  private perfMonitor: PerformanceMonitor;
 
   // Integration
   private knowledgeGraphService?: KnowledgeGraphServiceIntegration;
@@ -134,6 +125,21 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       },
     };
 
+    // Initialize performance monitor before registering handlers so listeners can safely reference it
+    this.perfMonitor = new PerformanceMonitor({
+      metricsInterval: this.config.monitoring.metricsInterval,
+      thresholds: {
+        latencyP95Ms: this.config.monitoring.alertThresholds.latency,
+        memoryUsageMB: 1000,
+        errorRate: this.config.monitoring.alertThresholds.errorRate,
+        queueDepth: this.config.monitoring.alertThresholds.queueDepth,
+        throughputLOCPerMin: 0,
+      },
+      retentionPeriod: 60 * 60 * 1000,
+      maxErrorHistory: 100,
+      latencyBufferSize: 1000,
+    });
+
     this.initializeComponents();
     this.setupEventHandlers();
   }
@@ -165,6 +171,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
 
       // Start monitoring
       this.startMonitoring();
+      this.perfMonitor.start();
 
       this.state.status = 'running';
       this.state.startedAt = new Date();
@@ -192,6 +199,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     try {
       // Stop monitoring
       this.stopMonitoring();
+      this.perfMonitor.stop();
 
       // Stop components in reverse order
       await this.batchProcessor.stop();
@@ -452,8 +460,15 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    */
   private setupEventHandlers(): void {
     // Queue manager events
-    this.queueManager.on('metrics:updated', (metrics) => {
-      this.metrics.queueMetrics = metrics;
+    this.queueManager.on('queue:metrics', (qMetrics) => {
+      this.metrics.queueMetrics = qMetrics;
+      // Bridge queue metrics into performance monitor
+      this.perfMonitor?.updateQueueMetrics({
+        depth: qMetrics.queueDepth,
+        processingRate: qMetrics.throughputPerSecond,
+        errorRate: qMetrics.errorRate,
+        oldestItemAge: qMetrics.oldestEventAge,
+      });
     });
 
     this.queueManager.on('queue:overflow', (error) => {
@@ -469,13 +484,24 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     });
 
     // Batch processor events
-    this.batchProcessor.on('batch:completed', (result) => {
+    this.batchProcessor.on('batch:completed', (_result) => {
       this.metrics.batchMetrics.completedBatches++;
     });
 
     this.batchProcessor.on('batch:failed', (error) => {
       this.metrics.batchMetrics.failedBatches++;
       console.error('[IngestionPipeline] Batch processing failed:', error);
+    });
+
+    // Bridge performance monitor metrics into pipeline metrics
+    this.perfMonitor.on('perf:metrics', (perf) => {
+      // Only override latency fields when monitor has data
+      if (perf.latency && (perf.latency.avg > 0 || perf.latency.p95 > 0)) {
+        this.metrics.averageLatency = perf.latency.avg;
+        this.metrics.p95Latency = perf.latency.p95;
+        // Emit an immediate update so observers see fresh latency
+        this.emit('metrics:updated', this.metrics);
+      }
     });
   }
 
@@ -521,10 +547,26 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
     try {
       console.log(`[IngestionPipeline] Parsing file: ${event.filePath}`);
 
+      // Perf: track parse operation
+      const opId = `file-parse-${event.id}`;
+      this.perfMonitor.startOperation(opId, 'file_parse', {
+        filePath: event.filePath,
+        bytes: event.size,
+      });
+
       // Use the real AST parser to parse the file
       const parseResult: ParseResult = await this.astParser.parseFile(
         event.filePath
       );
+
+      // Perf: mark parse completion
+      this.perfMonitor.endOperation(opId, 'file_parse', {
+        filePath: event.filePath,
+        bytes: event.size,
+        loc: (parseResult as any)?.loc,
+      });
+      // Push a metrics update to propagate latency
+      this.perfMonitor.updateMetrics();
 
       const fragments: ChangeFragment[] = [];
 
@@ -536,9 +578,9 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
           changeType: 'entity',
           operation: 'add',
           data: {
-            ...entity,
+            ...(entity as any),
             metadata: {
-              ...entity.metadata,
+              ...((entity as any)?.metadata || {}),
               source: 'ingestion-pipeline',
               parseTimestamp: new Date(),
               namespace: event.namespace,
@@ -559,7 +601,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
           metadata: {
             fragmentId: fragment.id,
             filePath: event.filePath,
-            entityType: entity.type || entity.entityType,
+            entityType: entity.type,
           },
           retryCount: 0,
           maxRetries: 3,
@@ -589,10 +631,10 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
             },
           } as GraphRelationship,
           dependencyHints: [
-            relationship.fromEntityId || (relationship.from as any)?.id,
-            relationship.toEntityId || (relationship.to as any)?.id,
+            relationship.fromEntityId,
+            relationship.toEntityId,
           ].filter(Boolean),
-          confidence: relationship.confidence || 0.8,
+          confidence: ((relationship as any)?.confidence as number | undefined) ?? 0.8,
         };
         fragments.push(fragment);
 
@@ -622,15 +664,28 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
           parseResult.errors
         );
 
-        // Emit error events for monitoring
+        // Emit error events for monitoring (conform to IngestionEvents)
         for (const error of parseResult.errors) {
-          this.emit('parse:error', {
+          // Record into perf monitor error history for rates
+          this.perfMonitor.recordError(error.message, {
             filePath: event.filePath,
-            error: error.message,
             line: error.line,
             column: error.column,
-            severity: error.severity,
           });
+          this.emit(
+            'pipeline:error',
+            new IngestionError(
+              `Parse error in ${event.filePath}: ${error.message}`,
+              'PARSE_ERROR',
+              false,
+              {
+                filePath: event.filePath,
+                line: error.line,
+                column: error.column,
+                severity: error.severity,
+              }
+            )
+          );
         }
       }
 
@@ -646,10 +701,17 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
       );
 
       // Emit error event
-      this.emit('parse:error', {
-        filePath: event.filePath,
-        error: error instanceof Error ? error.message : 'Unknown parsing error',
-      });
+      this.emit(
+        'pipeline:error',
+        new IngestionError(
+          `Failed to parse ${event.filePath}: ${
+            error instanceof Error ? error.message : 'Unknown parsing error'
+          }`,
+          'PARSE_ERROR',
+          false,
+          { filePath: event.filePath }
+        )
+      );
 
       // Return empty fragments array instead of failing completely
       return [];
@@ -660,10 +722,8 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    * Generate a relationship ID for relationships that don't have one
    */
   private generateRelationshipId(relationship: GraphRelationship): string {
-    const fromId =
-      relationship.fromEntityId || (relationship.from as any)?.id || 'unknown';
-    const toId =
-      relationship.toEntityId || (relationship.to as any)?.id || 'unknown';
+    const fromId = relationship.fromEntityId || 'unknown';
+    const toId = relationship.toEntityId || 'unknown';
     const type = relationship.type || 'unknown';
     return `${fromId}-${type}-${toId}`;
   }
@@ -799,12 +859,16 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
         error
       );
 
-      // Emit error event for monitoring
-      this.emit('embedding:error', {
-        entityId: task.entityId,
-        error:
+      // Emit error event for monitoring (align with IngestionEvents)
+      this.emit(
+        'pipeline:error',
+        new IngestionError(
           error instanceof Error ? error.message : 'Unknown embedding error',
-      });
+          'EMBEDDING_ERROR',
+          false,
+          { entityId: task.entityId }
+        )
+      );
 
       return {
         entityId: task.entityId,
@@ -928,7 +992,7 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
    */
   private updateMetrics(): void {
     // Calculate throughput
-    const now = Date.now();
+    // const now = Date.now();
     this.throughputBuffer.push(this.processedEventCount);
 
     if (this.throughputBuffer.length > 60) {
@@ -945,6 +1009,20 @@ export class HighThroughputIngestionPipeline extends EventEmitter<IngestionEvent
 
     // Update worker metrics
     this.metrics.workerMetrics = this.workerPool.getMetrics().workers;
+    // Bridge worker summary into performance monitor
+    const wp = this.workerPool.getMetrics();
+    const totalTasksProcessed = this.metrics.workerMetrics.reduce(
+      (sum, w) => sum + (w.tasksProcessed || 0),
+      0
+    );
+    this.perfMonitor.updateWorkerMetrics({
+      activeWorkers: wp.totalWorkers - wp.idleWorkers - wp.errorWorkers,
+      idleWorkers: wp.idleWorkers,
+      busyWorkers: wp.totalWorkers - wp.idleWorkers,
+      erroringWorkers: wp.errorWorkers,
+      averageTasksPerWorker:
+        wp.totalWorkers > 0 ? totalTasksProcessed / wp.totalWorkers : 0,
+    });
 
     // Update batch metrics
     const batchMetrics = this.batchProcessor.getMetrics();

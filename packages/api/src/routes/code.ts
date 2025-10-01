@@ -10,11 +10,7 @@ import {
   ParseResult,
 } from '@memento/knowledge';
 import { DatabaseService } from '@memento/database';
-import {
-  RelationshipType,
-  ValidationResult,
-  ValidationIssue,
-} from '@memento/core';
+import { RelationshipType, ValidationResult, ValidationIssue } from '@memento/shared-types';
 import {
   SecurityIssue,
   Entity,
@@ -22,7 +18,7 @@ import {
   ClassSymbol,
   Symbol as SymbolEntity,
   Test,
-} from '@memento/core';
+} from '@memento/shared-types';
 import {
   CodeChangeProposal,
   CodeChangeAnalysis,
@@ -944,7 +940,7 @@ async function analyzeCodeChanges(
   }
 
   return {
-    affectedEntities,
+    affectedEntities: (affectedEntities as unknown) as Entity[],
     breakingChanges,
     impactAnalysis: {
       directImpact,

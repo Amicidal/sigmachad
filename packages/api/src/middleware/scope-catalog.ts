@@ -2,19 +2,7 @@
  * Scope catalogue management for the API gateway pre-handler.
  * Allows central declaration and dynamic registration of scope rules.
  */
-
-export interface ScopeRequirement {
-  scopes: string[];
-  mode?: "all" | "any";
-  description?: string;
-}
-
-export interface ScopeRule {
-  matcher: RegExp;
-  method?: string;
-  scopes: string[];
-  description?: string;
-}
+import type { ScopeRequirement, ScopeRule } from '@memento/shared-types';
 
 export class ScopeCatalog {
   private rules: ScopeRule[] = [];

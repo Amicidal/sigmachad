@@ -195,7 +195,7 @@ export class RollbackStore extends EventEmitter {
    */
   async getRollbackPointsForSession(sessionId: string): Promise<RollbackPoint[]> {
     const allPoints = await this.getAllRollbackPoints();
-    return allPoints.filter(point => point.sessionId === sessionId);
+    return allPoints.filter(point => point.sessionId === sessionId); // Compatibility
   }
 
   /**

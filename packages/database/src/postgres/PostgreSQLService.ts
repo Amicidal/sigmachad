@@ -10,13 +10,13 @@ import type {
   PerformanceHistoryOptions,
   PerformanceHistoryRecord,
   SCMCommitRecord,
-} from '@memento/core/types/types.js';
+} from '@memento/shared-types';
 import type {
   PerformanceMetricSample,
   PerformanceRelationship,
-} from '@memento/core/models/relationships.js';
-import { normalizeMetricIdForId } from '@memento/core/utils/codeEdges.js';
-import { sanitizeEnvironment } from '@memento/core/utils/environment.js';
+} from '@memento/shared-types';
+import { normalizeMetricIdForId } from '@memento/core/utils/codeEdges';
+import { sanitizeEnvironment } from '@memento/core/utils/environment';
 import { performance } from 'node:perf_hooks';
 
 interface BulkTelemetryListenerPayload {
@@ -370,7 +370,7 @@ export class PostgreSQLService implements IPostgreSQLService {
       if (transactionStarted && client) {
         try {
           await client.query('ROLLBACK');
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       }
       throw error;
     } finally {

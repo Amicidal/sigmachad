@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { RelationshipType } from "../../../src/models/relationships.js";
+import { RelationshipType } from "@memento/shared-types";
 import {
   computeStructuralBackfillUpdate,
   extractStructuralPersistenceFields,
   type StructuralRelationshipSnapshot,
-} from "../../../src/services/relationships/structuralPersistence.js";
-import { normalizeStructuralRelationship } from "../../../src/services/relationships/RelationshipNormalizer.js";
+} from "@memento/graph/services/structuralPersistence";
+import { normalizeStructuralRelationship } from "@memento/graph/services/RelationshipNormalizer";
 
 const timestamp = new Date("2024-02-01T00:00:00Z");
 

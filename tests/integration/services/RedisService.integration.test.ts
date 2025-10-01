@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { RedisService } from '../../../src/services/database/RedisService';
+import { RedisService } from '@memento/database/redis/RedisService';
 
 // Gate running these integration tests via environment. When not enabled, the
 // whole suite is declared as skipped at definition time (no dummy assertions).

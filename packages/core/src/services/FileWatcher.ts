@@ -1,3 +1,4 @@
+// TODO(2025-09-30.35): Ensure path/event maps are accessed via whitelists.
 /**
  * File Watcher Service for Memento
  * Monitors filesystem changes and triggers graph updates
@@ -462,7 +463,7 @@ export class FileWatcher extends EventEmitter {
         i += 2;
         continue;
       }
-      const ch = pattern[i];
+      const ch = pattern.charAt(i);
       if (ch === '*') {
         // Any chars except path separator
         out += '[^/]*';
@@ -489,6 +490,10 @@ export class FileWatcher extends EventEmitter {
     return this.changeQueue.length;
   }
 
+  getPendingChanges(): FileChange[] {
+    return [...this.changeQueue];
+  }
+
   isProcessing(): boolean {
     return this.processing;
   }
@@ -500,3 +505,5 @@ export class FileWatcher extends EventEmitter {
     console.log('🔄 File rescan complete');
   }
 }
+ 
+// TODO(2025-09-30.35): Ensure path/event maps are accessed via whitelists.

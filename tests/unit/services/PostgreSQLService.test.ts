@@ -10,8 +10,8 @@ declare const process: any;
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { Pool, QueryResult } from 'pg';
-import { PostgreSQLService } from '../../../src/services/database/PostgreSQLService';
-import { IPostgreSQLService } from '../../../src/services/database/interfaces';
+import { PostgreSQLService } from '@memento/database/postgres/PostgreSQLService';
+import { IPostgreSQLService } from '@memento/database/interfaces';
 
 // Import realistic mocks
 import {

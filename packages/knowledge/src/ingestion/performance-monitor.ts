@@ -191,7 +191,7 @@ export class PerformanceMonitor extends EventEmitter {
   /**
    * Record the start of an operation
    */
-  startOperation(operationId: string, operation: string, context?: any): void {
+  startOperation(operationId: string, _operation: string, _context?: any): void {
     this.activeOperations.set(operationId, Date.now());
     this.counters.totalOperations++;
   }
@@ -199,7 +199,7 @@ export class PerformanceMonitor extends EventEmitter {
   /**
    * Record the completion of an operation
    */
-  endOperation(operationId: string, operation: string, context?: any): void {
+  endOperation(operationId: string, _operation: string, _context?: any): void {
     const startTime = this.activeOperations.get(operationId);
     if (!startTime) {
       console.warn(`[PerformanceMonitor] Operation ${operationId} not found in active operations`);
@@ -213,8 +213,8 @@ export class PerformanceMonitor extends EventEmitter {
     this.latencyBuffer.push({
       timestamp: Date.now(),
       latency,
-      operation,
-      context
+      operation: _operation,
+      context: _context
     });
 
     // Trim buffer if needed
@@ -223,7 +223,7 @@ export class PerformanceMonitor extends EventEmitter {
     }
 
     // Update counters based on operation type
-    this.updateCountersFromOperation(operation, context);
+    this.updateCountersFromOperation(_operation, _context);
   }
 
   /**
@@ -287,7 +287,7 @@ export class PerformanceMonitor extends EventEmitter {
    */
   updateMetrics(): void {
     this.currentMetrics = this.calculateCurrentMetrics();
-    this.emit('metrics:updated', this.currentMetrics);
+    this.emit('perf:metrics', this.currentMetrics);
   }
 
   /**
@@ -383,7 +383,7 @@ export class PerformanceMonitor extends EventEmitter {
    */
   private calculateMetricsFromSamples(
     latencySamples: LatencySample[],
-    throughputSamples: ThroughputSample[]
+    _throughputSamples: ThroughputSample[]
   ): PerformanceMetrics {
     // This is a simplified version - in practice you'd aggregate the samples
     const metrics = this.createEmptyMetrics();
@@ -589,7 +589,8 @@ export class PerformanceMonitor extends EventEmitter {
       // This requires the --expose-gc flag or a GC monitoring library
       if (typeof global.gc === 'function') {
         const originalGC = global.gc;
-        global.gc = () => {
+        // Cast to satisfy environments where GCFunction expects Promise<void>
+        global.gc = ((...args: any[]) => {
           const start = Date.now();
           originalGC();
           const duration = Date.now() - start;
@@ -598,7 +599,7 @@ export class PerformanceMonitor extends EventEmitter {
             this.currentMetrics.resources.gcPausesMs = [];
           }
           this.currentMetrics.resources.gcPausesMs.push(duration);
-        };
+        }) as unknown as typeof global.gc;
       }
     } catch (error) {
       console.warn('[PerformanceMonitor] Could not setup GC monitoring:', error);

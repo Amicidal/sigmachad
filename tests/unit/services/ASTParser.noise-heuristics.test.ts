@@ -5,8 +5,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
-import { ASTParser } from '../../../src/services/knowledge/ASTParser';
-import { RelationshipType } from '@/models/relationships';
+import { ASTParser } from '@memento/knowledge';
+import { RelationshipType } from '@memento/shared-types';
 
 describe('ASTParser noise heuristics', () => {
   let parser: ASTParser;

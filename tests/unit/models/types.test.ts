@@ -84,7 +84,7 @@ import type {
   MCPTool,
   MCPRequest,
   MCPResponse,
-} from '@/models/types';
+} from '@memento/shared-types';
 
 import type {
   Entity,
@@ -95,7 +95,7 @@ import type {
   CoverageMetrics,
   GraphRelationship,
   RelationshipType,
-} from '@/models/entities';
+} from '@memento/shared-types';
 
 describe('API Types and Interfaces', () => {
   let testDate: Date;

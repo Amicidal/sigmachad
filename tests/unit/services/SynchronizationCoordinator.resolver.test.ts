@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SynchronizationCoordinator } from '../../../src/services/synchronization/SynchronizationCoordinator';
-import { RelationshipType } from '@/models/relationships';
+import { SynchronizationCoordinator } from '@memento/sync/synchronization/SynchronizationCoordinator';
+import { RelationshipType } from '@memento/shared-types';
 
 describe('SynchronizationCoordinator.resolveRelationshipTarget with toRef/fromRef', () => {
   let kgService: any;

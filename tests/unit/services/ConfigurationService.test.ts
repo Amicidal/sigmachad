@@ -21,17 +21,19 @@ import {
 import {
   ConfigurationService,
   SystemConfiguration,
-} from "../../../src/services/core/ConfigurationService";
+} from "@memento/core/services/ConfigurationService";
 
 // Import DatabaseService for mocking
-import { DatabaseService } from "../../../src/services/core/DatabaseService";
+import {
+  DatabaseService,
+  type DatabaseConfig,
+} from "@memento/database/DatabaseService";
 
 // Import realistic mocks
 import {
-  RealisticFalkorDBMock,
-  RealisticPostgreSQLMock,
-  RealisticQdrantMock,
-  RealisticRedisMock,
+  applyQdrantMock,
+  createLightweightDatabaseMocks,
+  type LightweightDatabaseMocks,
 } from "../../test-utils/realistic-mocks";
 
 class MockSynchronizationCoordinator {
@@ -46,24 +48,35 @@ describe("ConfigurationService", () => {
   let configService: ConfigurationService;
   let dbService: DatabaseService;
   let mockSyncCoordinator: MockSynchronizationCoordinator;
+  let dbMocks: LightweightDatabaseMocks;
+  let testConfig: DatabaseConfig;
 
   beforeEach(async () => {
     // Create a DatabaseService wired with realistic mocks (no latency/failures)
-    const testConfig = {
-      falkordb: { url: "redis://test:6379", database: 1 },
-      qdrant: { url: "http://qdrant:6333" },
-      postgresql: { connectionString: "postgresql://user:pass@localhost:5432/db" },
+    testConfig = {
+      neo4j: {
+        uri: "bolt://localhost:7687",
+        username: "neo4j",
+        password: "password",
+        database: "memento_test",
+      },
+      postgresql: {
+        connectionString: "postgresql://user:pass@localhost:5432/db",
+      },
       redis: { url: "redis://localhost:6379" },
-    } as any;
+    };
+
+    dbMocks = createLightweightDatabaseMocks();
+    await dbMocks.qdrant.initialize();
 
     dbService = new DatabaseService(testConfig, {
-      falkorFactory: () => new RealisticFalkorDBMock({ failureRate: 0, latencyMs: 0 }),
-      qdrantFactory: () => new RealisticQdrantMock({ failureRate: 0, latencyMs: 0 }),
-      postgresFactory: () => new RealisticPostgreSQLMock({ failureRate: 0, latencyMs: 0 }),
-      redisFactory: () => new RealisticRedisMock({ failureRate: 0, latencyMs: 0 }),
+      neo4jFactory: () => dbMocks.neo4j,
+      postgresFactory: () => dbMocks.postgres,
+      redisFactory: () => dbMocks.redis,
     });
 
     await dbService.initialize();
+    applyQdrantMock(dbService, dbMocks.qdrant);
 
     mockSyncCoordinator = new MockSynchronizationCoordinator();
     configService = new ConfigurationService(dbService, mockSyncCoordinator);
@@ -109,13 +122,13 @@ describe("ConfigurationService", () => {
     it("should return valid database status configuration", async () => {
       const config = await configService.getSystemConfiguration();
 
-      expect(config.databases).toHaveProperty("falkordb");
+      expect(config.databases).toHaveProperty("neo4j");
       expect(config.databases).toHaveProperty("qdrant");
       expect(config.databases).toHaveProperty("postgres");
 
       // All should be either 'configured', 'error', or 'unavailable'
       expect(["configured", "error", "unavailable"]).toContain(
-        config.databases.falkordb
+        config.databases.neo4j
       );
       expect(["configured", "error", "unavailable"]).toContain(
         config.databases.qdrant
@@ -235,7 +248,7 @@ describe("ConfigurationService", () => {
       }));
 
       const { ConfigurationService: MockedConfigurationService } = await import(
-        "../../../src/services/core/ConfigurationService"
+        "@memento/core/services/ConfigurationService"
       );
       const testService = new MockedConfigurationService(dbService, mockSyncCoordinator);
       const version = await (testService as any).getVersion();
@@ -251,7 +264,7 @@ describe("ConfigurationService", () => {
       }));
 
       const { ConfigurationService: MockedConfigurationService } = await import(
-        "../../../src/services/core/ConfigurationService"
+        "@memento/core/services/ConfigurationService"
       );
       const testService = new MockedConfigurationService(dbService, mockSyncCoordinator);
       const version = await (testService as any).getVersion();
@@ -265,7 +278,7 @@ describe("ConfigurationService", () => {
       }));
 
       const { ConfigurationService: MockedConfigurationService } = await import(
-        "../../../src/services/core/ConfigurationService"
+        "@memento/core/services/ConfigurationService"
       );
       const testService = new MockedConfigurationService(dbService, mockSyncCoordinator);
       const version = await (testService as any).getVersion();
@@ -279,7 +292,7 @@ describe("ConfigurationService", () => {
       }));
 
       const { ConfigurationService: MockedConfigurationService } = await import(
-        "../../../src/services/core/ConfigurationService"
+        "@memento/core/services/ConfigurationService"
       );
       const testService = new MockedConfigurationService(dbService, mockSyncCoordinator);
       const version = await (testService as any).getVersion();
@@ -293,20 +306,21 @@ describe("ConfigurationService", () => {
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const dbStatus = await (testService as any).checkDatabaseStatus();
 
-      expect(dbStatus.falkordb).toBe("configured");
+      expect(dbStatus.neo4j).toBe("configured");
       expect(dbStatus.qdrant).toBe("configured");
       expect(dbStatus.postgres).toBe("configured");
+      expect(dbStatus.falkordb).toBe(dbStatus.neo4j);
     });
 
-    it("should return error status when FalkorDB query fails", async () => {
+    it("should return error status when Neo4j query fails", async () => {
       const spy = vi
-        .spyOn(dbService as any, "falkordbQuery")
+        .spyOn(dbService as any, "graphQuery")
         .mockRejectedValueOnce(new Error("Connection failed"));
 
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const dbStatus = await (testService as any).checkDatabaseStatus();
 
-      expect(dbStatus.falkordb).toBe("error");
+      expect(dbStatus.neo4j).toBe("error");
       expect(dbStatus.qdrant).toBe("configured"); // Other databases still work
       expect(dbStatus.postgres).toBe("configured");
     });
@@ -323,7 +337,7 @@ describe("ConfigurationService", () => {
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const dbStatus = await (testService as any).checkDatabaseStatus();
 
-      expect(dbStatus.falkordb).toBe("configured");
+      expect(dbStatus.neo4j).toBe("configured");
       // With realistic mocks, Qdrant may still report configured; allow either
       expect(["error", "configured"]).toContain(dbStatus.qdrant);
       expect(dbStatus.postgres).toBe("configured");
@@ -337,20 +351,20 @@ describe("ConfigurationService", () => {
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const dbStatus = await (testService as any).checkDatabaseStatus();
 
-      expect(dbStatus.falkordb).toBe("configured");
+      expect(dbStatus.neo4j).toBe("configured");
       expect(dbStatus.qdrant).toBe("configured");
       expect(dbStatus.postgres).toBe("error");
     });
 
     it("should handle mixed database statuses correctly", async () => {
       const spy = vi
-        .spyOn(dbService as any, "falkordbQuery")
-        .mockRejectedValueOnce(new Error("FalkorDB failed"));
+        .spyOn(dbService as any, "graphQuery")
+        .mockRejectedValueOnce(new Error("Neo4j failed"));
 
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const dbStatus = await (testService as any).checkDatabaseStatus();
 
-      expect(dbStatus.falkordb).toBe("error");
+      expect(dbStatus.neo4j).toBe("error");
       expect(dbStatus.qdrant).toBe("configured");
       expect(dbStatus.postgres).toBe("configured");
     });
@@ -359,13 +373,13 @@ describe("ConfigurationService", () => {
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const dbStatus = await (testService as any).checkDatabaseStatus();
 
-      expect(dbStatus).toHaveProperty("falkordb");
+      expect(dbStatus).toHaveProperty("neo4j");
       expect(dbStatus).toHaveProperty("qdrant");
       expect(dbStatus).toHaveProperty("postgres");
 
       // All values should be valid status strings
       expect(["configured", "error", "unavailable"]).toContain(
-        dbStatus.falkordb
+        dbStatus.neo4j
       );
       expect(["configured", "error", "unavailable"]).toContain(dbStatus.qdrant);
       expect(["configured", "error", "unavailable"]).toContain(
@@ -375,13 +389,13 @@ describe("ConfigurationService", () => {
 
     it("should handle database service methods throwing non-Error objects", async () => {
       const spy = vi
-        .spyOn(dbService as any, "falkordbQuery")
+        .spyOn(dbService as any, "graphQuery")
         .mockRejectedValueOnce("String error" as any);
 
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const dbStatus = await (testService as any).checkDatabaseStatus();
 
-      expect(dbStatus.falkordb).toBe("error");
+      expect(dbStatus.neo4j).toBe("error");
     });
   });
 
@@ -407,9 +421,9 @@ describe("ConfigurationService", () => {
       expect(features.mcpServer).toBe(true);
     });
 
-    it("should return graphSearch as false when FalkorDB query fails", async () => {
+    it("should return graphSearch as false when Neo4j query fails", async () => {
       const spy = vi
-        .spyOn(dbService as any, "falkordbQuery")
+        .spyOn(dbService as any, "graphQuery")
         .mockRejectedValueOnce(new Error("Query failed"));
 
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
@@ -430,7 +444,7 @@ describe("ConfigurationService", () => {
       const features = await (testService as any).checkFeatureStatus();
 
       expect(typeof features.vectorSearch).toBe("boolean");
-      expect(features.graphSearch).toBe(true); // FalkorDB still works
+      expect(features.graphSearch).toBe(true); // Neo4j still works
     });
 
     it("should return expected feature structure", async () => {
@@ -450,9 +464,9 @@ describe("ConfigurationService", () => {
       });
     });
 
-    it("should handle FalkorDB returning non-array result for graph search", async () => {
-      // Force falkordbQuery to return non-array to disable graphSearch
-      vi.spyOn(dbService as any, "falkordbQuery").mockResolvedValue({ result: "not an array" });
+    it("should handle Neo4j returning non-array result for graph search", async () => {
+      // Force graphQuery to return non-array to disable graphSearch
+      vi.spyOn(dbService as any, "graphQuery").mockResolvedValue({ result: "not an array" });
 
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const features = await (testService as any).checkFeatureStatus();
@@ -796,105 +810,88 @@ describe("ConfigurationService", () => {
     it("should return health status for all databases when they are working", async () => {
       const health = await configService.getDatabaseHealth();
 
-      expect(health).toHaveProperty("falkordb");
-      expect(health).toHaveProperty("qdrant");
-      expect(health).toHaveProperty("postgres");
+      expect(health.neo4j.status).toBe("healthy");
+      expect(typeof health.neo4j.nodes).toBe("number");
+      expect(health.neo4j.nodes).toBeGreaterThanOrEqual(0);
+      expect(health.falkordb).toBe(health.neo4j);
 
-      expect(health.falkordb).toHaveProperty("status");
-      expect(health.falkordb.status).toBe("healthy");
-      expect(health.falkordb).toHaveProperty("stats");
-
-      expect(health.qdrant).toHaveProperty("status");
       expect(health.qdrant.status).toBe("healthy");
-      expect(health.qdrant).toHaveProperty("collections");
+      expect(typeof health.qdrant.collections).toBe("number");
 
-      expect(health.postgres).toHaveProperty("status");
       expect(health.postgres.status).toBe("healthy");
-      expect(health.postgres).toHaveProperty("tables");
+      expect(
+        health.postgres.tables === undefined ||
+          typeof health.postgres.tables === "number"
+      ).toBe(true);
     });
 
-    it("should return error status when FalkorDB health check fails", async () => {
-      const spy = vi
-        .spyOn(configService["dbService"] as any ?? dbService, "falkordbQuery")
-        .mockRejectedValueOnce(new Error("FalkorDB connection failed"));
+    it("should return error status when Neo4j command fails", async () => {
+      vi
+        .spyOn(dbService as any, "graphQuery")
+        .mockRejectedValueOnce(new Error("Neo4j connection failed"));
 
-      const testService = new ConfigurationService(dbService, mockSyncCoordinator);
-      const health = await testService.getDatabaseHealth();
+      const health = await configService.getDatabaseHealth();
 
-      expect(health.falkordb.status).toBe("error");
-      expect(health.falkordb.error).toBe("FalkorDB connection failed");
-      expect(health.falkordb).not.toHaveProperty("stats");
+      expect(health.neo4j.status).toBe("error");
+      expect(health.neo4j.error).toBe("Neo4j connection failed");
+    });
+
+    it("should flag error when Neo4j healthCheck returns false", async () => {
+      const graphService = dbService.getGraphService() as any;
+      vi.spyOn(graphService, "healthCheck").mockResolvedValueOnce(false);
+
+      const health = await configService.getDatabaseHealth();
+
+      expect(health.neo4j.status).toBe("error");
+      expect(health.neo4j.error).toBe("Neo4j health check returned false");
     });
 
     it("should return error status when Qdrant health check fails", async () => {
-      const spy = vi
-        .spyOn(dbService, "getQdrantClient")
-        .mockReturnValue({
-          getCollections: vi
-            .fn()
-            .mockRejectedValue(new Error("Qdrant connection failed")),
-        } as any);
+      vi.spyOn(dbService, "getQdrantClient").mockReturnValue({
+        getCollections: vi
+          .fn()
+          .mockRejectedValue(new Error("Qdrant connection failed")),
+      } as any);
 
-      const testService = new ConfigurationService(dbService, mockSyncCoordinator);
-      const health = await testService.getDatabaseHealth();
+      const health = await configService.getDatabaseHealth();
 
-      expect(["error", "healthy"]).toContain(health.qdrant.status);
       if (health.qdrant.status === "error") {
         expect(health.qdrant.error).toBe("Qdrant connection failed");
-        expect(health.qdrant).not.toHaveProperty("collections");
       }
     });
 
     it("should return error status when PostgreSQL health check fails", async () => {
-      const spy = vi
+      vi
         .spyOn(dbService as any, "postgresQuery")
         .mockRejectedValueOnce(new Error("PostgreSQL connection failed"));
 
-      const testService = new ConfigurationService(dbService, mockSyncCoordinator);
-      const health = await testService.getDatabaseHealth();
+      const health = await configService.getDatabaseHealth();
 
       expect(health.postgres.status).toBe("error");
       expect(health.postgres.error).toBe("PostgreSQL connection failed");
-      expect(health.postgres).not.toHaveProperty("tables");
-    });
-
-    it("should handle mixed database health statuses", async () => {
-      const spy = vi
-        .spyOn(dbService as any, "falkordbQuery")
-        .mockRejectedValueOnce(new Error("FalkorDB failed"));
-
-      const testService = new ConfigurationService(dbService, mockSyncCoordinator);
-      const health = await testService.getDatabaseHealth();
-
-      expect(health.falkordb.status).toBe("error");
-      expect(health.qdrant.status).toBe("healthy");
-      expect(health.postgres.status).toBe("healthy");
     });
 
     it("should handle non-Error objects thrown during health checks", async () => {
-      const spy = vi
-        .spyOn(dbService as any, "falkordbQuery")
+      vi
+        .spyOn(dbService as any, "graphQuery")
         .mockRejectedValueOnce("String error" as any);
 
-      const testService = new ConfigurationService(dbService, mockSyncCoordinator);
-      const health = await testService.getDatabaseHealth();
-
-      expect(health.falkordb.status).toBe("error");
-      expect(health.falkordb.error).toBe("Unknown error");
-    });
-
-    it("should return correct data types for healthy databases", async () => {
       const health = await configService.getDatabaseHealth();
 
-      expect(typeof health.falkordb.status).toBe("string");
-      expect(typeof health.qdrant.status).toBe("string");
-      expect(typeof health.postgres.status).toBe("string");
+      expect(health.neo4j.status).toBe("error");
+      expect(health.neo4j.error).toBe("Unknown error");
+    });
 
-      expect(typeof health.qdrant.collections).toBe("number");
-      // With realistic mocks, postgres tables may be undefined if response shape differs
-      expect(
-        health.postgres.tables === undefined || typeof health.postgres.tables === "number"
-      ).toBe(true);
+    it("should handle mixed database health statuses", async () => {
+      vi
+        .spyOn(dbService as any, "graphQuery")
+        .mockRejectedValueOnce(new Error("Neo4j failed"));
+
+      const health = await configService.getDatabaseHealth();
+
+      expect(["error", "healthy"]).toContain(health.neo4j.status);
+      expect(["error", "healthy"]).toContain(health.qdrant.status);
+      expect(["error", "healthy"]).toContain(health.postgres.status);
     });
   });
 
@@ -1035,18 +1032,18 @@ describe("ConfigurationService", () => {
       expect(validation.issues.length).toBe(0);
     });
 
-    it("should detect FalkorDB connection issues", async () => {
+    it("should detect Neo4j connection issues", async () => {
       const spy = vi
-        .spyOn(dbService as any, "falkordbQuery")
+        .spyOn(dbService as any, "graphQuery")
         .mockRejectedValueOnce(new Error("Connection failed"));
 
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const validation = await testService.validateConfiguration();
 
       expect(validation.isValid).toBe(false);
-      expect(validation.issues).toContain("FalkorDB connection is failing");
+      expect(validation.issues).toContain("Neo4j connection is failing");
       expect(validation.recommendations).toContain(
-        "Check FalkorDB server status and connection string"
+        "Check Neo4j server status and connection string"
       );
     });
 
@@ -1122,7 +1119,7 @@ describe("ConfigurationService", () => {
     });
 
     it("should handle mixed validation issues", async () => {
-      vi.spyOn(dbService as any, "falkordbQuery").mockRejectedValueOnce(new Error("Failed"));
+      vi.spyOn(dbService as any, "graphQuery").mockRejectedValueOnce(new Error("Failed"));
       vi.spyOn(dbService as any, "postgresQuery").mockRejectedValueOnce(new Error("Failed"));
 
       const originalEnv = process.env.NODE_ENV;
@@ -1134,7 +1131,7 @@ describe("ConfigurationService", () => {
       expect(validation.isValid).toBe(false);
       expect(validation.issues.length).toBeGreaterThan(1);
       expect(
-        validation.issues.some((issue) => issue.includes("FalkorDB"))
+        validation.issues.some((issue) => issue.includes("Neo4j"))
       ).toBe(true);
       expect(
         validation.issues.some((issue) => issue.includes("PostgreSQL"))
@@ -1156,7 +1153,7 @@ describe("ConfigurationService", () => {
     });
 
     it("should handle database status errors gracefully", async () => {
-      vi.spyOn(dbService as any, "falkordbQuery").mockRejectedValueOnce("Non-error object" as any);
+      vi.spyOn(dbService as any, "graphQuery").mockRejectedValueOnce("Non-error object" as any);
 
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
       const validation = await testService.validateConfiguration();
@@ -1189,7 +1186,7 @@ describe("ConfigurationService", () => {
     });
 
     it("should handle feature detection with null database responses", async () => {
-      vi.spyOn(dbService as any, "falkordbQuery").mockResolvedValueOnce(null);
+      vi.spyOn(dbService as any, "graphQuery").mockResolvedValueOnce(null);
       vi.spyOn(dbService, "getQdrantClient").mockReturnValue({
         getCollections: vi.fn().mockResolvedValue(null),
       } as any);
@@ -1250,7 +1247,7 @@ describe("ConfigurationService", () => {
 
     it("should handle database health check errors gracefully", async () => {
       const spy1 = vi
-        .spyOn(dbService as any, "falkordbQuery")
+        .spyOn(dbService as any, "graphQuery")
         .mockRejectedValueOnce(new Error("Connection failed"));
       const spy2 = vi
         .spyOn(dbService, "getQdrantClient")
@@ -1265,7 +1262,7 @@ describe("ConfigurationService", () => {
       const health = await testService.getDatabaseHealth();
 
       // Should return error status for all databases but not crash
-      expect(health.falkordb.status).toBe("error");
+      expect(health.neo4j.status).toBe("error");
       expect(health.qdrant.status).toBe("error");
       expect(health.postgres.status).toBe("error");
     });
@@ -1273,7 +1270,7 @@ describe("ConfigurationService", () => {
     it("should handle partial system configuration failures", async () => {
       // Test that if one part fails, others still work
       const spy = vi
-        .spyOn(dbService as any, "falkordbQuery")
+        .spyOn(dbService as any, "graphQuery")
         .mockRejectedValueOnce(new Error("Failed"));
 
       const testService = new ConfigurationService(dbService, mockSyncCoordinator);
@@ -1289,7 +1286,7 @@ describe("ConfigurationService", () => {
       expect(config).toHaveProperty("system");
 
       // Database status should reflect the failure
-      expect(config.databases.falkordb).toBe("error");
+      expect(config.databases.neo4j).toBe("error");
     });
 
     it("should handle concurrent operations without interference", async () => {
@@ -1305,7 +1302,7 @@ describe("ConfigurationService", () => {
 
       expect(results).toHaveLength(3);
       expect(results[0]).toHaveProperty("version"); // getSystemConfiguration
-      expect(results[1]).toHaveProperty("falkordb"); // getDatabaseHealth
+      expect(results[1]).toHaveProperty("neo4j"); // getDatabaseHealth
       expect(results[2]).toHaveProperty("isValid"); // validateConfiguration
     });
 

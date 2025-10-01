@@ -2,12 +2,16 @@
  * Unit tests for HighThroughputIngestionPipeline
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { HighThroughputIngestionPipeline } from '../../src/ingestion/pipeline.js';
-import { createDefaultPipelineConfig } from '../../src/ingestion/index.js';
-import { ChangeEvent, ChangeFragment, EnrichmentTask } from '../../src/ingestion/types.js';
-import { Entity } from '../../../models/entities.js';
-import { GraphRelationship } from '../../../models/relationships.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { HighThroughputIngestionPipeline } from '@memento/knowledge/ingestion/pipeline';
+import { createDefaultPipelineConfig } from '@memento/knowledge/ingestion';
+import {
+  ChangeEvent,
+  ChangeFragment,
+  EnrichmentTask,
+} from '@memento/knowledge/ingestion/types';
+import { Entity } from '@memento/shared-types/entities';
+import { GraphRelationship } from '@memento/shared-types/relationships';
 
 // Mock KnowledgeGraphService integration
 const mockKnowledgeGraphService = {

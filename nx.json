@@ -20,20 +20,22 @@
   },
   "targetDefaults": {
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": [],
       "inputs": ["production", "^production"],
-      "outputs": ["{projectRoot}/dist"],
+      "outputs": ["{options.outputPath}"],
       "cache": true
     },
     "test": {
       "inputs": ["default", "^production"],
       "outputs": ["{projectRoot}/coverage"],
-      "cache": true,
-      "dependsOn": ["build"]
+      "cache": true
     },
     "lint": {
       "inputs": ["default"],
-      "cache": true
+      "cache": true,
+      "options": {
+        "maxWarnings": -1
+      }
     },
     "test:integration": {
       "inputs": ["default", "^production"],

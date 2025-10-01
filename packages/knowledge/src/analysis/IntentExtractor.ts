@@ -8,7 +8,7 @@ import type { ParsedDocument } from '../embeddings/DocTokenizer.js';
 import {
   DocumentationIntent,
   DocumentationSource,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 export interface DomainExtraction {
   name: string;

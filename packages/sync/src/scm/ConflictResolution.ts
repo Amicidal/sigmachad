@@ -9,7 +9,7 @@ import { GraphRelationship } from '@memento/graph';
 import { KnowledgeGraphService } from '@memento/knowledge';
 import {
   Conflict,
-  ConflictResolution,
+  SyncConflictResolution as ConflictResolutionPayload,
   ConflictResolutionResult,
   MergeStrategy,
   ManualOverrideRecord,
@@ -173,7 +173,7 @@ export class ConflictResolution {
 
     for (const rawRelationship of incomingRelationships) {
       const normalizedIncoming =
-        this.normalizeRelationshipInput(rawRelationship);
+        await this.normalizeRelationshipInput(rawRelationship);
       if (!normalizedIncoming.id) {
         continue;
       }
@@ -229,7 +229,7 @@ export class ConflictResolution {
 
   async resolveConflict(
     conflictId: string,
-    resolution: ConflictResolution
+    resolution: ConflictResolutionPayload
   ): Promise<boolean> {
     const conflict = this.conflicts.get(conflictId);
     if (!conflict || conflict.resolved) {
@@ -428,7 +428,7 @@ export class ConflictResolution {
     source: Record<string, any>,
     ignoreKeys: Set<string>
   ): Record<string, any> {
-    const prepared: Record<string, any> = {};
+    const entries: Array<[string, any]> = [];
 
     for (const [key, value] of Object.entries(source || {})) {
       if (ignoreKeys.has(key) || typeof value === 'function') {
@@ -437,10 +437,11 @@ export class ConflictResolution {
       if (value === undefined) {
         continue;
       }
-      prepared[key] = this.prepareValue(value, ignoreKeys);
+      const preparedValue = this.prepareValue(value, ignoreKeys);
+      entries.push([key, preparedValue]);
     }
 
-    return prepared;
+    return Object.fromEntries(entries);
   }
 
   private prepareValue(value: any, ignoreKeys: Set<string>): any {
@@ -454,21 +455,21 @@ export class ConflictResolution {
       return value.map((item) => this.prepareValue(item, ignoreKeys));
     }
     if (value instanceof Map) {
-      const obj: Record<string, any> = {};
+      const outEntries: Array<[string, any]> = [];
       for (const [k, v] of value.entries()) {
-        obj[k] = this.prepareValue(v, ignoreKeys);
+        outEntries.push([k, this.prepareValue(v, ignoreKeys)]);
       }
-      return obj;
+      return Object.fromEntries(outEntries);
     }
     if (typeof value === 'object') {
-      const entries = Object.entries(value)
+      const outEntries = Object.entries(value)
         .filter(([k]) => !ignoreKeys.has(k))
-        .sort(([a], [b]) => a.localeCompare(b));
-      const obj: Record<string, any> = {};
-      for (const [k, v] of entries) {
-        obj[k] = this.prepareValue(v, ignoreKeys);
-      }
-      return obj;
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map<[string, any]>(([_k, _v]) => [
+          _k,
+          this.prepareValue((_v as any), ignoreKeys),
+        ]);
+      return Object.fromEntries(outEntries);
     }
     if (typeof value === 'number' && Number.isNaN(value)) {
       return null;
@@ -482,14 +483,21 @@ export class ConflictResolution {
     path: string[] = []
   ): DiffMap {
     const diff: DiffMap = {};
+
+    const currentMap = new Map<string, any>(
+      Object.entries(current || {})
+    );
+    const incomingMap = new Map<string, any>(
+      Object.entries(incoming || {})
+    );
     const keys = new Set<string>([
-      ...Object.keys(current || {}),
-      ...Object.keys(incoming || {}),
+      ...currentMap.keys(),
+      ...incomingMap.keys(),
     ]);
 
     for (const key of keys) {
-      const currentValue = current ? current[key] : undefined;
-      const incomingValue = incoming ? incoming[key] : undefined;
+      const currentValue = currentMap.get(key);
+      const incomingValue = incomingMap.get(key);
       const currentPath = [...path, key];
 
       if (this.deepEqual(currentValue, incomingValue)) {
@@ -538,9 +546,9 @@ export class ConflictResolution {
     targetId: string,
     diff: DiffMap
   ): string {
-    const serializedDiff = Object.keys(diff)
-      .sort()
-      .map((key) => `${key}:${JSON.stringify(diff[key])}`)
+    const serializedDiff = Object.entries(diff)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => `${key}:${JSON.stringify(value)}`)
       .join('|');
 
     return crypto
@@ -610,18 +618,30 @@ export class ConflictResolution {
       return false;
     }
 
-    const keysA = Object.keys(a).sort();
-    const keysB = Object.keys(b).sort();
-    if (keysA.length !== keysB.length) {
+    const entriesA = Object.entries(a).sort(([ka], [kb]) =>
+      ka.localeCompare(kb)
+    );
+    const entriesB = Object.entries(b).sort(([ka], [kb]) =>
+      ka.localeCompare(kb)
+    );
+    if (entriesA.length !== entriesB.length) {
       return false;
     }
 
-    for (let i = 0; i < keysA.length; i += 1) {
-      if (keysA[i] !== keysB[i]) {
+    const iterA = entriesA[Symbol.iterator]();
+    const iterB = entriesB[Symbol.iterator]();
+    // lengths are equal; iterate in lockstep without index access
+    while (true) {
+      const na = iterA.next();
+      const nb = iterB.next();
+      if (na.done && nb.done) break;
+      if (na.done !== nb.done) return false;
+      const [keyA, valA] = na.value as [string, unknown];
+      const [keyB, valB] = nb.value as [string, unknown];
+      if (keyA !== keyB) {
         return false;
       }
-      const key = keysA[i];
-      if (JSON.stringify(a[key]) !== JSON.stringify(b[key])) {
+      if (JSON.stringify(valA) !== JSON.stringify(valB)) {
         return false;
       }
     }
@@ -665,7 +685,7 @@ export class ConflictResolution {
               );
             }
             await this.kgService.upsertRelationship(
-              this.normalizeRelationshipInput(payload)
+              await this.normalizeRelationshipInput(payload)
             );
           }
           break;
@@ -682,7 +702,7 @@ export class ConflictResolution {
               );
             } else if (conflict.relationshipId) {
               await this.kgService.upsertRelationship(
-                this.normalizeRelationshipInput(
+                await this.normalizeRelationshipInput(
                   resolution.resolvedValue as GraphRelationship
                 )
               );
@@ -722,14 +742,14 @@ export class ConflictResolution {
       targetId,
       resolvedValue: resolution.resolvedValue,
       manualResolution: resolution.manualResolution,
-      resolvedBy: resolution.resolvedBy,
-      timestamp: resolution.timestamp,
+      resolvedBy: resolution.resolvedBy ?? 'unknown',
+      timestamp: resolution.timestamp ?? new Date(),
     });
   }
 
-  private normalizeRelationshipInput(
+  private async normalizeRelationshipInput(
     relationship: GraphRelationship
-  ): GraphRelationship {
+  ): Promise<GraphRelationship> {
     const rel: any = { ...(relationship as any) };
     rel.fromEntityId = rel.fromEntityId ?? rel.sourceId;
     rel.toEntityId = rel.toEntityId ?? rel.targetId;
@@ -737,7 +757,9 @@ export class ConflictResolution {
     delete rel.targetId;
 
     if (rel.fromEntityId && rel.toEntityId && rel.type) {
-      return this.kgService.canonicalizeRelationship(rel as GraphRelationship);
+      return await this.kgService.canonicalizeRelationship(
+        rel as GraphRelationship
+      );
     }
 
     return rel as GraphRelationship;

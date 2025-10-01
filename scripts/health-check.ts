@@ -13,7 +13,7 @@ async function main() {
     const health = await dbService.healthCheck();
 
     const statuses: Record<string, 'healthy' | 'unhealthy' | 'unknown'> = {
-      falkordb: health.falkordb?.status ?? 'unknown',
+      neo4j: health.neo4j?.status ?? 'unknown',
       qdrant: health.qdrant?.status ?? 'unknown',
       postgresql: health.postgresql?.status ?? 'unknown',
       redis: health.redis?.status ?? 'unknown',

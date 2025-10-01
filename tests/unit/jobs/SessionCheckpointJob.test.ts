@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SessionCheckpointJobRunner } from "../../../src/jobs/SessionCheckpointJob.js";
+import { SessionCheckpointJobRunner } from "@memento/jobs/SessionCheckpointJob";
 
 const noop = () => undefined;
 

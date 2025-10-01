@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   DatabaseService,
   createTestDatabaseConfig,
-} from "../../../src/services/core/DatabaseService";
+} from "@memento/database/DatabaseService";
 import { v4 as uuidv4 } from "uuid";
 
 describe("DatabaseService Methods Coverage", () => {

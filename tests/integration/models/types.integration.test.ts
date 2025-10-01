@@ -6,10 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { v4 as uuidv4 } from "uuid";
-import {
-  DatabaseService,
-  createTestDatabaseConfig,
-} from "../../src/services/DatabaseService";
+import { DatabaseService, createTestDatabaseConfig } from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -42,7 +39,7 @@ import {
   SecurityScanResult,
   SystemHealth,
   APIError,
-} from "../../../src/models/types";
+} from "@memento/shared-types";
 
 describe("Types Integration Tests", () => {
   let dbService: DatabaseService;

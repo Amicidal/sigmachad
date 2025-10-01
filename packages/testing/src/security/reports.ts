@@ -16,6 +16,7 @@ import {
   SecurityTrends,
   SecurityMetrics
 } from "./types.js";
+import { graphQuery } from "./graph-utils.js";
 
 export class SecurityReports {
   private db: any;
@@ -348,7 +349,7 @@ export class SecurityReports {
     if (!this.db) return [];
 
     try {
-      const results = await this.db.falkordbQuery(
+      const results = await graphQuery(this.db, 
         `
         MATCH (v:Vulnerability)
         RETURN v
@@ -368,7 +369,7 @@ export class SecurityReports {
     if (!this.db) return { issues: [], total: 0 };
 
     try {
-      const results = await this.db.falkordbQuery(
+      const results = await graphQuery(this.db, 
         `
         MATCH (i:SecurityIssue)
         RETURN i
@@ -389,7 +390,7 @@ export class SecurityReports {
     if (!this.db) return null;
 
     try {
-      const results = await this.db.falkordbQuery(
+      const results = await graphQuery(this.db, 
         `
         MATCH (i:SecurityIssue {id: $id})
         RETURN i
@@ -564,12 +565,18 @@ export class SecurityReports {
     return Math.max(0, score);
   }
 
-  private async calculateVulnerabilityTrends(): Promise<VulnerabilityReport["trends"]> {
-    // Mock trend calculation
+  private async calculateVulnerabilityTrends(): Promise<SecurityTrends> {
+    // Mock trend calculation mapped to unified SecurityTrends shape
     return {
-      newVulnerabilities: 2,
-      resolvedVulnerabilities: 1,
-      trend: "improving"
+      period: "last-30-days",
+      newIssues: 2,
+      resolvedIssues: 1,
+      averageResolutionTime: 2.5,
+      securityScore: {
+        current: 85,
+        previous: 80,
+        trend: "improving"
+      }
     };
   }
 

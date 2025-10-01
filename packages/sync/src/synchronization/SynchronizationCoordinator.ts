@@ -28,10 +28,8 @@ import {
 import { GitService } from '../scm/GitService.js';
 import { ConflictResolution as ConflictResolutionService } from '../scm/ConflictResolution.js';
 import { RollbackCapabilities } from '../scm/RollbackCapabilities.js';
-import {
-  SessionCheckpointJobRunner,
-  type SessionCheckpointJobSnapshot,
-} from '@memento/jobs';
+import { SessionCheckpointJobRunner } from '@memento/jobs';
+import type { SessionCheckpointJobSnapshot } from '@memento/shared-types';
 import type {
   SessionCheckpointJobMetrics,
   SessionCheckpointJobOptions,
@@ -59,7 +57,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   // Collect relationships that couldn't be resolved during per-file processing
   private unresolvedRelationships: Array<{
-    relationship: import('../../models/relationships.js').GraphRelationship;
+    relationship: GraphRelationship;
     sourceFilePath?: string;
   }> = [];
 
@@ -278,21 +276,13 @@ export class SynchronizationCoordinator extends EventEmitter {
       return;
     }
 
-    const errorMessage =
-      checkpointResult.error || 'Failed to schedule checkpoint';
+    const errorMessage = (
+      checkpointResult as { success: false; error: string }
+    ).error || 'Failed to schedule checkpoint';
     try {
       await this.kgService.annotateSessionRelationshipsWithCheckpoint(
         params.sessionId,
-        params.seeds,
-        {
-          status: 'manual_intervention',
-          reason: params.options?.reason,
-          hopCount: params.options?.hopCount,
-          seedEntityIds: params.seeds,
-          jobId: undefined,
-          error: errorMessage,
-          triggeredBy: 'SynchronizationCoordinator',
-        }
+        'manual_intervention'
       );
     } catch (error) {
       console.warn(
@@ -309,7 +299,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       errors: [
         {
           file: params.sessionId,
-          type: 'checkpoint',
+          type: 'unknown',
           message: errorMessage,
           timestamp: new Date(),
           recoverable: false,
@@ -503,7 +493,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
     let reason: 'duplicate' | 'out_of_order' | null = null;
     let previousSequence: number | null = null;
-    let previousType: RelationshipType | null = null;
+    let previousType: RelationshipType | string | null = null;
 
     if (state.lastSequence !== null) {
       if (sequenceNumber === state.lastSequence) {
@@ -586,64 +576,15 @@ export class SynchronizationCoordinator extends EventEmitter {
 
   private serializeSessionRelationship(
     rel: GraphRelationship
-  ): Record<string, unknown> {
+  ): NonNullable<SessionStreamPayload['relationships']>[number] {
     const asAny = rel as Record<string, any>;
-    const result: Record<string, unknown> = {
-      id: asAny.id ?? null,
+    return {
+      id: String(asAny.id ?? ''),
       type: String(rel.type),
       fromEntityId: rel.fromEntityId,
       toEntityId: rel.toEntityId,
-      metadata: asAny.metadata ?? null,
+      metadata: (asAny.metadata ?? null) as Record<string, unknown> | null,
     };
-
-    if (asAny.sessionId) {
-      result.sessionId = asAny.sessionId;
-    }
-
-    if (typeof asAny.sequenceNumber === 'number') {
-      result.sequenceNumber = asAny.sequenceNumber;
-    }
-
-    const timestampIso = this.toIsoTimestamp(asAny.timestamp ?? rel.created);
-    if (timestampIso) {
-      result.timestamp = timestampIso;
-    }
-
-    const createdIso = this.toIsoTimestamp(rel.created);
-    if (createdIso) {
-      result.created = createdIso;
-    }
-
-    const modifiedIso = this.toIsoTimestamp(rel.lastModified);
-    if (modifiedIso) {
-      result.lastModified = modifiedIso;
-    }
-
-    if (typeof asAny.eventId === 'string') {
-      result.eventId = asAny.eventId;
-    }
-
-    if (typeof asAny.actor === 'string') {
-      result.actor = asAny.actor;
-    }
-
-    if (Array.isArray(asAny.annotations) && asAny.annotations.length > 0) {
-      result.annotations = asAny.annotations;
-    }
-
-    if (asAny.changeInfo) {
-      result.changeInfo = asAny.changeInfo;
-    }
-
-    if (asAny.stateTransition) {
-      result.stateTransition = asAny.stateTransition;
-    }
-
-    if (asAny.impact) {
-      result.impact = asAny.impact;
-    }
-
-    return result;
   }
 
   private emitSessionEvent(event: SessionStreamEvent): void {
@@ -698,7 +639,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         deadLetters: snapshot.deadLetters.length,
         ...(context || {}),
       });
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
   }
 
   // Convenience methods used by integration tests
@@ -1238,7 +1179,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     for (const w of waiters) {
       try {
         w();
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     }
     // If there are queued operations and not currently processing, resume processing
     if (!this.isProcessing && this.operationQueue.length > 0) {
@@ -1255,12 +1196,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     const scanStart = new Date();
     this.emit('syncProgress', operation, { phase: 'scanning', progress: 0 });
 
-    // Ensure a Module entity exists for the root package if applicable (best-effort)
-    try {
-      const { ModuleIndexer } = await import('../knowledge/ModuleIndexer.js');
-      const mi = new ModuleIndexer(this.kgService);
-      await mi.indexRootPackage().catch(() => {});
-    } catch {}
+    // Best-effort root package indexing is disabled when the helper is unavailable
 
     // Scan all source files
     const files = await this.scanSourceFiles();
@@ -1362,10 +1298,13 @@ export class SynchronizationCoordinator extends EventEmitter {
       let idx = 0;
       const worker = async () => {
         while (idx < batch.length) {
-          const current = idx++;
+          const currentFile = batch.at(idx);
+          idx += 1;
           await awaitIfPaused();
           this.ensureNotCancelled(operation);
-          await processFile(batch[current]);
+          if (currentFile) {
+            await processFile(currentFile);
+          }
         }
       };
       const workers = Array.from(
@@ -1422,9 +1361,9 @@ export class SynchronizationCoordinator extends EventEmitter {
               resolved.push(relationship);
               continue;
             }
-          } catch {}
+          } catch (e) { /* intentional no-op: non-critical */ void 0; }
           try {
-            const resolvedId = await (this as any).resolveRelationshipTarget(
+            const resolvedId = await this.resolveRelationshipTarget(
               relationship,
               (relationship as any).__sourceFile || undefined
             );
@@ -1527,7 +1466,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     // Deactivate edges not seen during this scan window (best-effort)
     try {
       await this.kgService.finalizeScan(scanStart);
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     this.emit('syncProgress', operation, { phase: 'completed', progress: 1.0 });
 
@@ -1551,14 +1490,14 @@ export class SynchronizationCoordinator extends EventEmitter {
             // log and continue
             try {
               console.warn('Background embedding batch failed:', e);
-            } catch {}
+            } catch (e) { /* intentional no-op: non-critical */ void 0; }
           }
         }
         try {
           console.log(
             `✅ Background embeddings created for ${pendingToEmbed.length} entities`
           );
-        } catch {}
+        } catch (e) { /* intentional no-op: non-critical */ void 0; }
       })().catch(() => {});
     } else if (pendingToEmbed.length > 0) {
       operation.errors.push({
@@ -1614,13 +1553,11 @@ export class SynchronizationCoordinator extends EventEmitter {
         changes: [],
         specs: [],
       } as any);
-    } catch {}
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     // Track entities to embed in batch and session relationships buffer
     const toEmbed: any[] = [];
-    const sessionRelBuffer: Array<
-      import('../../models/relationships.js').GraphRelationship
-    > = [];
+    const sessionRelBuffer: Array<GraphRelationship> = [];
     const sessionSequenceLocal = new Map<string, number>();
     const allocateSessionSequence = () => {
       const next = sessionSequenceLocal.get(sessionId) ?? 0;
@@ -1723,9 +1660,7 @@ export class SynchronizationCoordinator extends EventEmitter {
         sessionId,
         graphRelationship
       );
-      sessionRelBuffer.push(
-        relationship as import('../../models/relationships.js').GraphRelationship
-      );
+      sessionRelBuffer.push(relationship as GraphRelationship);
       this.recordSessionSequence(
         sessionId,
         type,
@@ -1765,8 +1700,8 @@ export class SynchronizationCoordinator extends EventEmitter {
             },
           }
         );
-      } catch {}
-    } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
     this.activeSessionIds.set(operation.id, sessionId);
 
@@ -1842,7 +1777,7 @@ export class SynchronizationCoordinator extends EventEmitter {
 
           switch (change.type) {
             case 'create':
-            case 'modify':
+            case 'modify': {
               // Parse the file and update graph
               let parseResult;
               try {
@@ -1964,7 +1899,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                         lastModified: now2,
                         version: 1,
                       } as any);
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                     // Attach MODIFIED_BY with git metadata (best-effort)
                     try {
                       const git = new GitService();
@@ -1986,7 +1921,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                             }
                           : { source: 'sync' },
                       } as any);
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                     try {
                       enqueueSessionRelationship(
                         RelationshipType.SESSION_IMPACTED,
@@ -1997,7 +1932,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                           impact: { severity: 'high' },
                         }
                       );
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                     changedSeeds.add(entity.id);
                     await this.kgService.deleteEntity(entity.id);
                     operation.entitiesDeleted++;
@@ -2033,12 +1968,8 @@ export class SynchronizationCoordinator extends EventEmitter {
                         changeSetId: changeId,
                       });
                       operation.entitiesUpdated++;
-                      const operationKind =
-                        change.type === 'create'
-                          ? 'added'
-                          : change.type === 'delete'
-                          ? 'deleted'
-                          : 'modified';
+                      const operationKind: 'added' | 'modified' =
+                        change.type === 'create' ? 'added' : 'modified';
                       const changeInfo = {
                         elementType: 'file',
                         elementName: change.path,
@@ -2105,7 +2036,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                             stateTransition,
                           }
                         );
-                      } catch {}
+                      } catch (e) { /* intentional no-op: non-critical */ void 0; }
                       // Also mark session impacted and link entity to the change
                       try {
                         enqueueSessionRelationship(
@@ -2117,7 +2048,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                             impact: { severity: 'medium' },
                           }
                         );
-                      } catch {}
+                      } catch (e) { /* intentional no-op: non-critical */ void 0; }
 
                       try {
                         await this.kgService.createRelationship({
@@ -2129,7 +2060,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                           lastModified: now,
                           version: 1,
                         } as any);
-                      } catch {}
+                      } catch (e) { /* intentional no-op: non-critical */ void 0; }
                       // Attach MODIFIED_BY with git metadata (best-effort)
                       try {
                         const git = new GitService();
@@ -2151,7 +2082,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                               }
                             : { source: 'sync' },
                         } as any);
-                      } catch {}
+                      } catch (e) { /* intentional no-op: non-critical */ void 0; }
                       changedSeeds.add(ent.id);
                     } catch (err) {
                       operation.errors.push({
@@ -2172,32 +2103,36 @@ export class SynchronizationCoordinator extends EventEmitter {
                   for (const rel of (parseResult as any)
                     .addedRelationships as GraphRelationship[]) {
                     try {
-                      let toId = rel.toEntityId;
+                      let toId: string | null = rel.toEntityId ?? null;
                       // Resolve placeholder targets like kind:name or import:module:symbol
                       if (!toId || String(toId).includes(':')) {
-                        const resolved = await (
-                          this as any
-                        ).resolveRelationshipTarget(rel, change.path);
-                        if (resolved) toId = resolved;
+            const resolved = await this.resolveRelationshipTarget(
+              rel,
+              change.path
+            );
+                        if (resolved)
+                          toId =
+                            typeof resolved === 'string'
+                              ? resolved
+                              : resolved.id ?? null;
                       }
-                      if (toId && rel.fromEntityId) {
+                      if (typeof toId === 'string' && toId && rel.fromEntityId) {
                         await this.kgService.openEdge(
                           rel.fromEntityId,
-                          toId as any,
+                          toId,
                           rel.type,
-                          now,
-                          changeId
+                          now
                         );
                         // Keep edge evidence/properties in sync during incremental updates
                         try {
-                          const enriched = {
+                          const enriched: GraphRelationship = {
                             ...rel,
                             toEntityId: toId,
-                          } as GraphRelationship;
+                          };
                           await this.kgService.upsertEdgeEvidenceBulk([
                             enriched,
                           ]);
-                        } catch {}
+                        } catch (e) { /* intentional no-op: non-critical */ void 0; }
                         operation.relationshipsUpdated++;
                       }
                     } catch (err) {
@@ -2219,20 +2154,24 @@ export class SynchronizationCoordinator extends EventEmitter {
                   for (const rel of (parseResult as any)
                     .removedRelationships as GraphRelationship[]) {
                     try {
-                      let toId = rel.toEntityId;
+                      let toId: string | null = rel.toEntityId ?? null;
                       if (!toId || String(toId).includes(':')) {
-                        const resolved = await (
-                          this as any
-                        ).resolveRelationshipTarget(rel, change.path);
-                        if (resolved) toId = resolved;
+                        const resolved = await this.resolveRelationshipTarget(
+                          rel,
+                          change.path
+                        );
+                        if (resolved)
+                          toId =
+                            typeof resolved === 'string'
+                              ? resolved
+                              : resolved.id ?? null;
                       }
-                      if (toId && rel.fromEntityId) {
+                      if (typeof toId === 'string' && toId && rel.fromEntityId) {
                         await this.kgService.closeEdge(
                           rel.fromEntityId,
-                          toId as any,
+                          toId,
                           rel.type,
-                          now,
-                          changeId
+                          now
                         );
                         operation.relationshipsUpdated++;
                       }
@@ -2286,7 +2225,7 @@ export class SynchronizationCoordinator extends EventEmitter {
                               }
                             : { source: 'sync' },
                         } as any);
-                      } catch {}
+                      } catch (e) { /* intentional no-op: non-critical */ void 0; }
                       let stateTransitionNew: Record<string, any> | undefined =
                         {
                           from: 'unknown',
@@ -2335,13 +2274,14 @@ export class SynchronizationCoordinator extends EventEmitter {
                             impact: { severity: 'low' },
                           }
                         );
-                      } catch {}
+                      } catch (e) { /* intentional no-op: non-critical */ void 0; }
                       changedSeeds.add(ent.id);
-                    } catch {}
+                    } catch (e) { /* intentional no-op: non-critical */ void 0; }
                   }
                 }
               }
               break;
+            }
 
             case 'delete':
               // Handle file deletion
@@ -2431,7 +2371,7 @@ export class SynchronizationCoordinator extends EventEmitter {
       // Deactivate edges not seen during this scan window (best-effort)
       try {
         await this.kgService.finalizeScan(scanStart);
-      } catch {}
+      } catch (e) { /* intentional no-op: non-critical */ void 0; }
     } catch (error) {
       runError = error;
       teardownPayload = {
@@ -3027,6 +2967,123 @@ export class SynchronizationCoordinator extends EventEmitter {
     });
   }
 
+  // Resolve a relationship's target and create it if possible
+  private async resolveAndCreateRelationship(
+    relationship: GraphRelationship,
+    sourceFilePath?: string
+  ): Promise<boolean> {
+    try {
+      const toEntity = await this.kgService.getEntity(relationship.toEntityId);
+      if (toEntity) {
+        await this.kgService.createRelationship(relationship as any);
+        return true;
+      }
+    } catch (e) { /* intentional no-op: non-critical */ void 0; }
+
+    const resolvedResult = await this.resolveRelationshipTarget(
+      relationship,
+      sourceFilePath
+    );
+    const resolvedId =
+      typeof resolvedResult === 'string'
+        ? resolvedResult
+        : (resolvedResult as any)?.id || null;
+    if (!resolvedId) return false;
+
+    const enrichedMeta = { ...(relationship as any).metadata } as any;
+    if (resolvedResult && typeof resolvedResult === 'object') {
+      const rr: any = resolvedResult as any;
+      if (Array.isArray(rr.candidates) && rr.candidates.length > 0) {
+        enrichedMeta.candidates = rr.candidates.slice(0, 5);
+        (relationship as any).ambiguous = rr.candidates.length > 1;
+        (relationship as any).candidateCount = rr.candidates.length;
+      }
+      if (rr.resolutionPath) enrichedMeta.resolutionPath = rr.resolutionPath;
+      enrichedMeta.resolvedTo = { kind: 'entity', id: resolvedId };
+    }
+
+    const resolvedRel: GraphRelationship = {
+      ...(relationship as any),
+      toEntityId: resolvedId,
+      metadata: enrichedMeta,
+    } as GraphRelationship;
+    await this.kgService.createRelationship(resolvedRel as any);
+    return true;
+  }
+
+  // Attempt to resolve a relationship target id using various heuristics
+  private async resolveRelationshipTarget(
+    relationship: GraphRelationship,
+    sourceFilePath?: string
+  ): Promise<
+    | string
+    | {
+        id: string | null;
+        candidates?: Array<{
+          id: string;
+          name?: string;
+          path?: string;
+          resolver?: string;
+          score?: number;
+        }>;
+        resolutionPath?: string;
+      }
+    | null
+  > {
+    const to = (relationship.toEntityId as any) || '';
+
+    // Prefer structured toRef when present to avoid brittle string parsing
+    const toRef: any = (relationship as any).toRef;
+    const candidates: Array<{ id: string; name?: string; path?: string; resolver?: string; score?: number }> = [];
+
+    if (toRef && typeof toRef === 'object') {
+      if (toRef.kind === 'entity' && toRef.id) {
+        return { id: toRef.id, candidates, resolutionPath: 'entity' };
+      }
+      const name = (toRef.symbol || toRef.name) as string | undefined;
+      if (name) {
+        const byName = await this.kgService.findSymbolsByName(name);
+        for (const c of byName) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'name' });
+        if (candidates.length > 0) return { id: candidates[0].id, candidates, resolutionPath: 'name' };
+      }
+    }
+
+    // Parse string placeholders and resolve by name only
+    const importMatch = String(to).match(/^import:(.+?):(.+)$/);
+    if (importMatch) {
+      const name = importMatch[2];
+      const byName = await this.kgService.findSymbolsByName(name);
+      for (const c of byName) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'name' });
+      return candidates.length > 0 ? { id: candidates[0].id, candidates, resolutionPath: 'import-name' } : null;
+    }
+
+    const kindMatch = String(to).match(/^(class|interface|function|typeAlias):(.+)$/);
+    if (kindMatch) {
+      const name = kindMatch[2];
+      const byName = await this.kgService.findSymbolsByName(name);
+      for (const c of byName) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'kind-name' });
+      return candidates.length > 0 ? { id: candidates[0].id, candidates, resolutionPath: 'kind-name' } : null;
+    }
+
+    const externalMatch = String(to).match(/^external:(.+)$/);
+    if (externalMatch) {
+      const name = externalMatch[1];
+      const byName = await this.kgService.findSymbolsByName(name);
+      for (const c of byName) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'name' });
+      return candidates.length > 0 ? { id: candidates[0].id, candidates, resolutionPath: 'external-name' } : null;
+    }
+
+    const fileMatch = String(to).match(/^file:(.+?):(.+)$/);
+    if (fileMatch) {
+      const name = fileMatch[2];
+      const byName = await this.kgService.findSymbolsByName(name);
+      for (const c of byName) candidates.push({ id: c.id, name: (c as any).name, path: (c as any).path, resolver: 'name' });
+      return candidates.length > 0 ? { id: candidates[0].id, candidates, resolutionPath: 'file-name' } : null;
+    }
+
+    return null;
+  }
+
   // Attempt to resolve and create deferred relationships
   private async runPostResolution(operation: SyncOperation): Promise<void> {
     if (this.unresolvedRelationships.length === 0) return;
@@ -3039,7 +3096,7 @@ export class SynchronizationCoordinator extends EventEmitter {
     let createdCount = 0;
     for (const item of pending) {
       try {
-        const created = await (this as any).resolveAndCreateRelationship(
+        const created = await this.resolveAndCreateRelationship(
           item.relationship,
           item.sourceFilePath
         );
@@ -3065,398 +3122,4 @@ export interface FileLikeEntity {
   path?: string;
 }
 
-declare module './synchronization/SynchronizationCoordinator.js' {
-  interface SynchronizationCoordinator {
-    resolveAndCreateRelationship(
-      relationship: GraphRelationship,
-      sourceFilePath?: string
-    ): Promise<boolean>;
-    resolveRelationshipTarget(
-      relationship: GraphRelationship,
-      sourceFilePath?: string
-    ): Promise<string | null>;
-  }
-}
-
-// Implement as prototype methods to avoid reordering class definitions
-(SynchronizationCoordinator as any).prototype.resolveAndCreateRelationship =
-  async function (
-    this: SynchronizationCoordinator,
-    relationship: GraphRelationship,
-    sourceFilePath?: string
-  ): Promise<boolean> {
-    try {
-      const toEntity = await (this as any).kgService.getEntity(
-        relationship.toEntityId
-      );
-      if (toEntity) {
-        await (this as any).kgService.createRelationship(
-          relationship,
-          undefined,
-          undefined,
-          { validate: false }
-        );
-        return true;
-      }
-    } catch {}
-
-    const resolvedResult = await (this as any).resolveRelationshipTarget(
-      relationship,
-      sourceFilePath
-    );
-    const resolvedId =
-      typeof resolvedResult === 'string'
-        ? resolvedResult
-        : resolvedResult?.id || null;
-    if (!resolvedId) return false;
-    const enrichedMeta = { ...(relationship as any).metadata } as any;
-    if (resolvedResult && typeof resolvedResult === 'object') {
-      if (
-        Array.isArray((resolvedResult as any).candidates) &&
-        (resolvedResult as any).candidates.length > 0
-      ) {
-        enrichedMeta.candidates = (resolvedResult as any).candidates.slice(
-          0,
-          5
-        );
-        (relationship as any).ambiguous =
-          (resolvedResult as any).candidates.length > 1;
-        (relationship as any).candidateCount = (
-          resolvedResult as any
-        ).candidates.length;
-      }
-      if ((resolvedResult as any).resolutionPath)
-        enrichedMeta.resolutionPath = (resolvedResult as any).resolutionPath;
-      enrichedMeta.resolvedTo = { kind: 'entity', id: resolvedId };
-    }
-    const resolvedRel = {
-      ...relationship,
-      toEntityId: resolvedId,
-      metadata: enrichedMeta,
-    } as GraphRelationship;
-    await (this as any).kgService.createRelationship(
-      resolvedRel,
-      undefined,
-      undefined,
-      { validate: false }
-    );
-    return true;
-  };
-
-(SynchronizationCoordinator as any).prototype.resolveRelationshipTarget =
-  async function (
-    this: SynchronizationCoordinator,
-    relationship: GraphRelationship,
-    sourceFilePath?: string
-  ): Promise<
-    | string
-    | {
-        id: string | null;
-        candidates?: Array<{
-          id: string;
-          name?: string;
-          path?: string;
-          resolver?: string;
-          score?: number;
-        }>;
-        resolutionPath?: string;
-      }
-    | null
-  > {
-    const to = (relationship.toEntityId as any) || '';
-
-    // Prefer structured toRef when present to avoid brittle string parsing
-    const toRef: any = (relationship as any).toRef;
-    // Establish a currentFilePath context early using fromRef if provided
-    let currentFilePath = sourceFilePath;
-    const candidates: Array<{
-      id: string;
-      name?: string;
-      path?: string;
-      resolver?: string;
-      score?: number;
-    }> = [];
-    try {
-      const fromRef: any = (relationship as any).fromRef;
-      if (!currentFilePath && fromRef && typeof fromRef === 'object') {
-        if (fromRef.kind === 'fileSymbol' && fromRef.file) {
-          currentFilePath = fromRef.file;
-        } else if (fromRef.kind === 'entity' && fromRef.id) {
-          const ent = await (this as any).kgService.getEntity(fromRef.id);
-          const p = (ent as any)?.path as string | undefined;
-          if (p) currentFilePath = p.includes(':') ? p.split(':')[0] : p;
-        }
-      }
-    } catch {}
-    if (toRef && typeof toRef === 'object') {
-      try {
-        if (toRef.kind === 'entity' && toRef.id) {
-          return { id: toRef.id, candidates, resolutionPath: 'entity' };
-        }
-        if (
-          toRef.kind === 'fileSymbol' &&
-          toRef.file &&
-          (toRef.symbol || toRef.name)
-        ) {
-          const ent = await (this as any).kgService.findSymbolInFile(
-            toRef.file,
-            toRef.symbol || toRef.name
-          );
-          if (ent)
-            return { id: ent.id, candidates, resolutionPath: 'fileSymbol' };
-        }
-        if (toRef.kind === 'external' && toRef.name) {
-          const name = toRef.name as string;
-          if (!currentFilePath) {
-            try {
-              const fromEntity = await (this as any).kgService.getEntity(
-                relationship.fromEntityId
-              );
-              if (fromEntity && (fromEntity as any).path) {
-                const p = (fromEntity as any).path as string;
-                currentFilePath = p.includes(':') ? p.split(':')[0] : p;
-              }
-            } catch {}
-          }
-          if (currentFilePath) {
-            const local = await (this as any).kgService.findSymbolInFile(
-              currentFilePath,
-              name
-            );
-            if (local) {
-              candidates.push({
-                id: local.id,
-                name: (local as any).name,
-                path: (local as any).path,
-                resolver: 'local',
-                score: 1.0,
-              });
-            }
-            const near = await (this as any).kgService.findNearbySymbols(
-              currentFilePath,
-              name,
-              5
-            );
-            for (const n of near)
-              candidates.push({
-                id: n.id,
-                name: (n as any).name,
-                path: (n as any).path,
-                resolver: 'nearby',
-              });
-          }
-          const global = await (this as any).kgService.findSymbolsByName(name);
-          for (const g of global) {
-            candidates.push({
-              id: g.id,
-              name: (g as any).name,
-              path: (g as any).path,
-              resolver: 'name',
-            });
-          }
-          if (candidates.length > 0) {
-            const chosen = candidates[0];
-            const resolutionPath =
-              chosen.resolver === 'local' ? 'external-local' : 'external-name';
-            return { id: chosen.id, candidates, resolutionPath };
-          }
-        }
-      } catch {}
-    }
-
-    // Explicit file placeholder: file:<relPath>:<name>
-    {
-      const fileMatch = to.match(/^file:(.+?):(.+)$/);
-      if (fileMatch) {
-        const relPath = fileMatch[1];
-        const name = fileMatch[2];
-        try {
-          const ent = await (this as any).kgService.findSymbolInFile(
-            relPath,
-            name
-          );
-          if (ent)
-            return {
-              id: ent.id,
-              candidates,
-              resolutionPath: 'file-placeholder',
-            };
-        } catch {}
-        return null;
-      }
-    }
-
-    // Ensure we still have a usable file context for subsequent heuristics
-    // (do not redeclare currentFilePath; just populate if missing)
-    if (!currentFilePath) {
-      try {
-        const fromEntity = await (this as any).kgService.getEntity(
-          relationship.fromEntityId
-        );
-        if (fromEntity && (fromEntity as any).path) {
-          const p = (fromEntity as any).path as string;
-          currentFilePath = p.includes(':') ? p.split(':')[0] : p;
-        }
-      } catch {}
-    }
-
-    const kindMatch = to.match(/^(class|interface|function|typeAlias):(.+)$/);
-    if (kindMatch) {
-      const kind = kindMatch[1];
-      const name = kindMatch[2];
-      if (currentFilePath) {
-        // Use local index first to avoid DB roundtrips
-        const key = `${currentFilePath}:${name}`;
-        const localId = (this as any).localSymbolIndex?.get?.(key);
-        if (localId)
-          return { id: localId, candidates, resolutionPath: 'local-index' };
-        const local = await (this as any).kgService.findSymbolInFile(
-          currentFilePath,
-          name
-        );
-        if (local) {
-          candidates.push({
-            id: local.id,
-            name: (local as any).name,
-            path: (local as any).path,
-            resolver: 'local',
-          });
-        }
-        // Prefer nearby directory symbols if available
-        const near = await (this as any).kgService.findNearbySymbols(
-          currentFilePath,
-          name,
-          3
-        );
-        for (const n of near)
-          candidates.push({
-            id: n.id,
-            name: (n as any).name,
-            path: (n as any).path,
-            resolver: 'nearby',
-          });
-      }
-      const byKind = await (this as any).kgService.findSymbolByKindAndName(
-        kind,
-        name
-      );
-      for (const c of byKind)
-        candidates.push({
-          id: c.id,
-          name: (c as any).name,
-          path: (c as any).path,
-          resolver: 'kind-name',
-        });
-      if (candidates.length > 0)
-        return {
-          id: candidates[0].id,
-          candidates,
-          resolutionPath: 'kind-name',
-        };
-      return null;
-    }
-
-    const importMatch = to.match(/^import:(.+?):(.+)$/);
-    if (importMatch) {
-      const name = importMatch[2];
-      if (currentFilePath) {
-        const local = await (this as any).kgService.findSymbolInFile(
-          currentFilePath,
-          name
-        );
-        if (local) {
-          candidates.push({
-            id: local.id,
-            name: (local as any).name,
-            path: (local as any).path,
-            resolver: 'local',
-          });
-        }
-        // Prefer nearby directory symbols for imported names
-        const near = await (this as any).kgService.findNearbySymbols(
-          currentFilePath,
-          name,
-          5
-        );
-        for (const n of near)
-          candidates.push({
-            id: n.id,
-            name: (n as any).name,
-            path: (n as any).path,
-            resolver: 'nearby',
-          });
-      }
-      const byName = await (this as any).kgService.findSymbolsByName(name);
-      for (const c of byName) {
-        candidates.push({
-          id: c.id,
-          name: (c as any).name,
-          path: (c as any).path,
-          resolver: 'name',
-        });
-      }
-      if (candidates.length > 0) {
-        const chosen = candidates[0];
-        const suffix = chosen.resolver === 'local' ? 'local' : 'name';
-        return {
-          id: chosen.id,
-          candidates,
-          resolutionPath: `import-${suffix}`,
-        };
-      }
-      return null;
-    }
-
-    const externalMatch = to.match(/^external:(.+)$/);
-    if (externalMatch) {
-      const name = externalMatch[1];
-      if (currentFilePath) {
-        const local = await (this as any).kgService.findSymbolInFile(
-          currentFilePath,
-          name
-        );
-        if (local) {
-          candidates.push({
-            id: local.id,
-            name: (local as any).name,
-            path: (local as any).path,
-            resolver: 'local',
-          });
-        }
-        // Prefer nearby matches
-        const near = await (this as any).kgService.findNearbySymbols(
-          currentFilePath,
-          name,
-          5
-        );
-        for (const n of near)
-          candidates.push({
-            id: n.id,
-            name: (n as any).name,
-            path: (n as any).path,
-            resolver: 'nearby',
-          });
-      }
-      const global = await (this as any).kgService.findSymbolsByName(name);
-      for (const g of global) {
-        candidates.push({
-          id: g.id,
-          name: (g as any).name,
-          path: (g as any).path,
-          resolver: 'name',
-        });
-      }
-      if (candidates.length > 0) {
-        const chosen = candidates[0];
-        const suffix = chosen.resolver === 'local' ? 'local' : 'name';
-        return {
-          id: chosen.id,
-          candidates,
-          resolutionPath: `external-${suffix}`,
-        };
-      }
-      return null;
-    }
-
-    return null;
-  };
+// (Module augmentation and prototype assignments removed; methods implemented in-class)

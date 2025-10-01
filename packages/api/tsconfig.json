@@ -1,17 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "./src",
-    "outDir": "./dist",
-    "composite": true,
-    "declaration": true,
-    "declarationMap": true
+    
+    "declarationMap": false
   },
   "include": ["src/**/*"],
+  "files": ["src/types/fastify.d.ts"],
   "exclude": ["node_modules", "dist"],
-  "references": [
-    { "path": "../core" },
-    { "path": "../database" },
-    { "path": "../knowledge" }
-  ]
+  "references": []
 }

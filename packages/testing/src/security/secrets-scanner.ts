@@ -160,7 +160,7 @@ export class SecretsScanner {
         severity: "medium",
         cwe: "CWE-798",
         owasp: "A05:2021-Security Misconfiguration",
-        pattern: /eyJ[A-Za-z0-9_\/+=]+\.eyJ[A-Za-z0-9_\/+=]+\.[A-Za-z0-9_\/+=]+/gi,
+        pattern: /eyJ[A-Za-z0-9_/+=]+\.eyJ[A-Za-z0-9_/+=]+\.[A-Za-z0-9_/+=]+/gi,
         category: "secrets",
         remediation: "Remove JWT tokens from code and generate them dynamically",
         confidence: 0.8,
@@ -190,7 +190,7 @@ export class SecretsScanner {
         severity: "high",
         cwe: "CWE-798",
         owasp: "A05:2021-Security Misconfiguration",
-        pattern: /(mongodb|mysql|postgresql|postgres):\/\/[^:\s]+:[^@\s]+@[^\/\s]+/gi,
+        pattern: /(mongodb|mysql|postgresql|postgres):\/\/[^:\s]+:[^@\s]+@[^/\s]+/gi,
         category: "secrets",
         remediation: "Remove credentials from connection strings and use environment variables",
         confidence: 0.9,
@@ -404,7 +404,7 @@ export class SecretsScanner {
         severity: "critical",
         cwe: "CWE-798",
         owasp: "A05:2021-Security Misconfiguration",
-        pattern: /mongodb\+srv:\/\/[^:]+:[^@]+@[^\/]+\.mongodb\.net/gi,
+        pattern: /mongodb\+srv:\/\/[^:]+:[^@]+@[^/]+\.mongodb\.net/gi,
         category: "secrets",
         remediation: "Remove credentials from MongoDB connection strings",
         confidence: 0.95,
@@ -419,7 +419,7 @@ export class SecretsScanner {
         severity: "high",
         cwe: "CWE-798",
         owasp: "A05:2021-Security Misconfiguration",
-        pattern: /redis:\/\/(:[^@]+@)?[^\/]+/gi,
+        pattern: /redis:\/\/(:[^@]+@)?[^/]+/gi,
         category: "secrets",
         remediation: "Remove Redis auth from connection strings",
         confidence: 0.8,
@@ -434,7 +434,7 @@ export class SecretsScanner {
         severity: "high",
         cwe: "CWE-798",
         owasp: "A05:2021-Security Misconfiguration",
-        pattern: /(https?:\/\/[^:]+:[^@]+@[^\/]+\/(es|elasticsearch))/gi,
+        pattern: /(https?:\/\/[^:]+:[^@]+@[^/]+\/(es|elasticsearch))/gi,
         category: "secrets",
         remediation: "Remove Elasticsearch credentials from URLs",
         confidence: 0.9,
@@ -616,7 +616,7 @@ export class SecretsScanner {
         severity: "medium",
         cwe: "CWE-798",
         owasp: "A05:2021-Security Misconfiguration",
-        pattern: /https?:\/\/[^\/\s]+\/[^?\s]*\?[^=\s]*token[^=\s]*=[^&\s]+/gi,
+        pattern: /https?:\/\/[^/\s]+\/[^?\s]*\?[^=\s]*token[^=\s]*=[^&\s]+/gi,
         category: "secrets",
         remediation: "Remove tokens from webhook URLs and use header-based authentication",
         confidence: 0.7,
@@ -772,8 +772,10 @@ export class SecretsScanner {
       case "GOOGLE_API_KEY":
         return /^AIza[0-9A-Za-z\-_]{35}$/.test(value);
       case "JWT_TOKEN":
-        const parts = value.split('.');
-        return parts.length === 3 && parts.every(part => part.length > 0);
+        {
+          const parts = value.split('.');
+          return parts.length === 3 && parts.every(part => part.length > 0);
+        }
       default:
         return false;
     }

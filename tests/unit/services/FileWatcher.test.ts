@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
-import type { FileChange } from '../../../src/services/FileWatcher';
+import type { FileChange } from '@memento/core/services/FileWatcher';
 
 const {
   watchSpy,
@@ -55,7 +55,7 @@ vi.mock('crypto', async () => {
   };
 });
 
-import { FileWatcher } from '../../../src/services/FileWatcher';
+import { FileWatcher } from '@memento/core/services/FileWatcher';
 
 describe('FileWatcher (unit)', () => {
   beforeEach(() => {

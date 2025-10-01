@@ -9,7 +9,9 @@ import { SecretsScanner } from './secrets-scanner.js';
 import { DependencyScanner } from './dependency-scanner.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as crypto from 'crypto';
+
+const testingRoot = path.resolve(__dirname, '..', '..');
+const packagesRoot = path.resolve(testingRoot, '..');
 
 export interface BenchmarkResult {
   testName: string;
@@ -48,9 +50,9 @@ export class SecurityBenchmark {
 
   constructor() {
     this.mockDb = {
-      falkordbQuery: async () => [],
-      falkordbCommand: async () => undefined,
-      getConfig: () => ({ falkordb: { graphKey: 'benchmark' } })
+      graphQuery: async () => [],
+      graphCommand: async () => undefined,
+      getConfig: () => ({ neo4j: { graphKey: 'benchmark' } })
     };
 
     this.mockKgService = {
@@ -261,7 +263,7 @@ export class SecurityBenchmark {
     options: { minSize?: number; maxSize?: number } = {}
   ): Promise<any[]> {
     const entities: any[] = [];
-    const tempDir = path.join(__dirname, `../../../temp-benchmark-${prefix}`);
+    const tempDir = path.resolve(packagesRoot, `temp-benchmark-${prefix}`);
 
     // Create temp directory
     if (!fs.existsSync(tempDir)) {
@@ -472,7 +474,7 @@ module.exports = app;`
     ];
 
     for (const dir of tempDirs) {
-      const fullPath = path.join(__dirname, `../../../${dir}`);
+      const fullPath = path.resolve(packagesRoot, dir);
       if (fs.existsSync(fullPath)) {
         fs.rmSync(fullPath, { recursive: true, force: true });
       }

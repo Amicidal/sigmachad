@@ -3,13 +3,10 @@
  * Provides common setup and teardown functions for database tests
  */
 
-import {
-  DatabaseService,
-  DatabaseConfig,
-} from "../../src/services/core/DatabaseService";
+import { DatabaseService, DatabaseConfig } from "@memento/database";
 import { v4 as uuidv4 } from "uuid";
-import { KnowledgeGraphService } from "../../src/services/knowledge/KnowledgeGraphService.js";
-import { RelationshipType } from "../../src/models/relationships.js";
+import { KnowledgeGraphService } from "@memento/knowledge/orchestration/KnowledgeGraphService";
+import { RelationshipType } from "@memento/shared-types";
 import { setupOGMServices, ComparisonTestSetup, OGMTestSetup } from "./ogm-helpers.js";
 
 // Integration test utilities for services that need to use database isolation
@@ -165,7 +162,7 @@ export const TEST_FIXTURE_IDS = {
     code: "00000000-0000-4000-8000-000000000001",
     documentation: "00000000-0000-4000-8000-000000000002",
   },
-  falkorEntities: {
+  graphEntities: {
     typescriptFile: "00000000-0000-4000-8000-000000000101",
     javascriptFile: "00000000-0000-4000-8000-000000000102",
     pythonFile: "00000000-0000-4000-8000-000000000103",
@@ -177,9 +174,11 @@ export const TEST_FIXTURE_IDS = {
 
 // Test database configuration using test containers
 export const TEST_DATABASE_CONFIG: DatabaseConfig = {
-  falkordb: {
-    url: process.env.FALKORDB_URL || "redis://localhost:6380",
-    database: 1, // Use separate database for tests
+  neo4j: {
+    uri: process.env.NEO4J_URI || "bolt://localhost:7688",
+    username: process.env.NEO4J_USERNAME || "neo4j",
+    password: process.env.NEO4J_PASSWORD || "password",
+    database: process.env.NEO4J_DATABASE || "memento_test",
   },
   qdrant: {
     url: process.env.QDRANT_URL || "http://localhost:6335",
@@ -205,7 +204,7 @@ export const TEST_DATABASE_CONFIG: DatabaseConfig = {
 export interface TestIsolationContext {
   id: string;
   postgresSchema: string;
-  falkorGraph: string;
+  graphNamespace: string;
   qdrantPrefix: string;
   redisPrefix: string;
   entityPrefix: string;
@@ -299,7 +298,7 @@ export async function createTestIsolationContext(
   const context: TestIsolationContext = {
     id: contextId,
     postgresSchema: `test_${contextId}`,
-    falkorGraph: `test_${contextId}`,
+    graphNamespace: `test_${contextId}`,
     qdrantPrefix: `test_${contextId}_`,
     redisPrefix: `test:${contextId}:`,
     entityPrefix: `test_${contextId}_`,
@@ -319,10 +318,10 @@ export async function createTestIsolationContext(
       `);
     });
 
-    // Create FalkorDB named graph
-    await dbService.falkordbCommand(
+    // Create graph namespace
+    await dbService.graphCommand(
       "GRAPH.QUERY",
-      context.falkorGraph,
+      context.graphNamespace,
       "RETURN 1"
     );
 
@@ -377,8 +376,8 @@ export async function cleanupTestIsolationContext(
       );
     });
 
-    // Delete FalkorDB graph
-    await dbService.falkordbCommand("GRAPH.DELETE", context.falkorGraph);
+    // Delete graph namespace
+    await dbService.graphCommand("GRAPH.DELETE", context.graphNamespace);
 
     // Delete Qdrant collections with prefix
     const collectionsResponse = await dbService.qdrant.getCollections();
@@ -439,7 +438,7 @@ export async function initializeSharedTestDatabase(
     log("📊 Shared database health check:", health);
 
     const allCoreHealthy =
-      health.falkordb?.status === "healthy" &&
+      health.neo4j?.status === "healthy" &&
       health.qdrant?.status === "healthy" &&
       health.postgresql?.status === "healthy";
 
@@ -633,14 +632,17 @@ export async function clearTestData(
     cleanupTasks.push(
       (async () => {
         try {
-          await dbService.falkordbCommand(
+          await dbService.graphCommand(
             "GRAPH.QUERY",
             "memento",
             "MATCH (n) DETACH DELETE n"
           );
-          log("✅ Cleared FalkorDB graph data");
+          log("✅ Cleared Neo4j graph data");
         } catch (error) {
-          warn("⚠️ Could not clear FalkorDB graph data:", error);
+          warn(
+            "⚠️ Could not clear Neo4j graph data:",
+            error
+          );
         }
       })()
     );
@@ -758,12 +760,7 @@ export async function waitForDatabaseReady(
       const health = await dbService.healthCheck();
 
       // Check if all required databases are healthy
-      if (
-        health.falkordb &&
-        health.qdrant &&
-        health.postgresql &&
-        health.redis
-      ) {
+      if (health.neo4j && health.qdrant && health.postgresql && health.redis) {
         return;
       }
     } catch {
@@ -1172,7 +1169,7 @@ export async function insertTestFixtures(
     }
   });
 
-  // Insert FalkorDB entities for testing
+// Insert Neo4j entities for testing
   try {
     const now = Date.now();
     const toIso = (offsetMs: number) => new Date(now - offsetMs).toISOString();
@@ -1180,7 +1177,7 @@ export async function insertTestFixtures(
 
     const entities = [
       {
-        id: TEST_FIXTURE_IDS.falkorEntities.typescriptFile,
+      id: TEST_FIXTURE_IDS.graphEntities.typescriptFile,
         type: "file",
         name: "test.ts",
         path: "test.ts",
@@ -1190,7 +1187,7 @@ export async function insertTestFixtures(
         lastModified: toIso(0),
       },
       {
-        id: TEST_FIXTURE_IDS.falkorEntities.javascriptFile,
+      id: TEST_FIXTURE_IDS.graphEntities.javascriptFile,
         type: "file",
         name: "utils.js",
         path: "utils.js",
@@ -1200,7 +1197,7 @@ export async function insertTestFixtures(
         lastModified: toIso(3600000),
       },
       {
-        id: TEST_FIXTURE_IDS.falkorEntities.pythonFile,
+      id: TEST_FIXTURE_IDS.graphEntities.pythonFile,
         type: "file",
         name: "main.py",
         path: "main.py",
@@ -1210,7 +1207,7 @@ export async function insertTestFixtures(
         lastModified: toIso(7200000),
       },
       {
-        id: TEST_FIXTURE_IDS.falkorEntities.goFile,
+      id: TEST_FIXTURE_IDS.graphEntities.goFile,
         type: "file",
         name: "server.go",
         path: "server.go",
@@ -1220,7 +1217,7 @@ export async function insertTestFixtures(
         lastModified: toIso(10800000),
       },
       {
-        id: TEST_FIXTURE_IDS.falkorEntities.rustFile,
+      id: TEST_FIXTURE_IDS.graphEntities.rustFile,
         type: "file",
         name: "app.rs",
         path: "app.rs",
@@ -1230,7 +1227,7 @@ export async function insertTestFixtures(
         lastModified: toIso(14400000),
       },
       {
-        id: TEST_FIXTURE_IDS.falkorEntities.typescriptFunction,
+      id: TEST_FIXTURE_IDS.graphEntities.typescriptFunction,
         type: "symbol",
         kind: "function",
         name: "testHelper",
@@ -1248,14 +1245,14 @@ export async function insertTestFixtures(
 
     const relationshipFixtures = [
       {
-        fromId: TEST_FIXTURE_IDS.falkorEntities.javascriptFile,
-        toId: TEST_FIXTURE_IDS.falkorEntities.typescriptFile,
+        fromId: TEST_FIXTURE_IDS.graphEntities.javascriptFile,
+        toId: TEST_FIXTURE_IDS.graphEntities.typescriptFile,
         type: RelationshipType.CALLS,
         metadata: { line: 12 },
       },
       {
-        fromId: TEST_FIXTURE_IDS.falkorEntities.typescriptFile,
-        toId: TEST_FIXTURE_IDS.falkorEntities.pythonFile,
+        fromId: TEST_FIXTURE_IDS.graphEntities.typescriptFile,
+        toId: TEST_FIXTURE_IDS.graphEntities.pythonFile,
         type: RelationshipType.REFERENCES,
         metadata: { confidence: 0.9 },
       },
@@ -1270,7 +1267,10 @@ export async function insertTestFixtures(
       } as any);
     }
   } catch (error) {
-    console.warn("⚠️ Could not insert FalkorDB fixtures:", error);
+    console.warn(
+      "⚠️ Could not insert Neo4j fixtures:",
+      error
+    );
   }
 }
 
@@ -1281,10 +1281,10 @@ export async function checkDatabaseHealth(
   dbService: DatabaseService
 ): Promise<boolean> {
   const health = await dbService.healthCheck();
-  const falkorOk = health.falkordb?.status === "healthy";
+  const neo4jOk = health.neo4j?.status === "healthy";
   const qdrantOk = health.qdrant?.status === "healthy";
   const postgresOk = health.postgresql?.status === "healthy";
   // Redis is optional in tests; treat undefined as acceptable
   const redisOk = health.redis ? health.redis.status === "healthy" : true;
-  return falkorOk && qdrantOk && postgresOk && redisOk;
+  return neo4jOk && qdrantOk && postgresOk && redisOk;
 }

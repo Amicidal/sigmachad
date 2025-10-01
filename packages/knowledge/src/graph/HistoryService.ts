@@ -1,3 +1,4 @@
+// security: avoid dynamic object indexing; use Map and Object.fromEntries
 /**
  * History Service
  * Facade that orchestrates temporal versioning, checkpoints, and history operations
@@ -5,21 +6,11 @@
  */
 
 import { EventEmitter } from 'events';
-import { Neo4jService } from './Neo4jService.js';
-import { Entity } from '@memento/shared-types.js';
-import { RelationshipType } from '@memento/shared-types.js';
-import { TimeRangeParams, TraversalQuery } from '../../models/types.js';
-import {
-  VersionManager,
-  CheckpointService,
-  TemporalQueryService,
-  CheckpointOptions,
-  VersionInfo,
-  CheckpointInfo,
-  HistoryMetrics,
-  CheckpointSummary,
-  SessionImpact,
-} from './history/index.js';
+import { Neo4jService } from './Neo4jService';
+import { Entity, RelationshipType, TimeRangeParams, TraversalQuery } from '@memento/shared-types';
+import { VersionManager, VersionInfo } from '../orchestration/VersionManager';
+import { CheckpointService, CheckpointOptions, CheckpointInfo, CheckpointSummary } from '../orchestration/CheckpointService';
+import { TemporalQueryService, HistoryMetrics, SessionImpact } from './TemporalQueryService';
 
 export {
   CheckpointOptions,
@@ -364,37 +355,33 @@ export class HistoryService extends EventEmitter {
 
   private parseEntity(node: any): Entity {
     const properties = node.properties || node;
-    const entity: any = {};
-
+    const entries: Array<[string, unknown]> = [];
     for (const [key, value] of Object.entries(properties)) {
       if (value === null || value === undefined) continue;
-
       if (key === 'created' || key === 'lastModified' || key.endsWith('At')) {
-        entity[key] = new Date(value as string);
+        entries.push([key, new Date(value as string)]);
       } else if (
         typeof value === 'string' &&
         ((value as string).startsWith('[') || (value as string).startsWith('{'))
       ) {
         try {
-          entity[key] = JSON.parse(value as string);
+          entries.push([key, JSON.parse(value as string)]);
         } catch {
-          entity[key] = value;
+          entries.push([key, value]);
         }
       } else {
-        entity[key] = value;
+        entries.push([key, value]);
       }
     }
-
-    return entity as Entity;
+    return Object.fromEntries(entries) as unknown as Entity;
   }
 
   private parseRelationship(rel: any): any {
-    return {
-      type: rel.type,
-      properties: rel.properties,
-      startNodeId: rel.start,
-      endNodeId: rel.end,
-    };
+    const type = String(rel?.type ?? '');
+    const properties = rel?.properties ?? {};
+    const startNodeId = rel?.start ?? undefined;
+    const endNodeId = rel?.end ?? undefined;
+    return { type, properties, startNodeId, endNodeId };
   }
 
   /**
@@ -468,17 +455,21 @@ export class HistoryService extends EventEmitter {
       checkpointId,
     });
 
-    const entityTypes: Record<string, number> = {};
-    const relationshipTypes: Record<string, number> = {};
+    const entityTypeMap = new Map<string, number>();
+    const relationshipTypeMap = new Map<string, number>();
     let totalRelationships = 0;
 
     statsResult.forEach((row) => {
       if (row.entityType) {
-        entityTypes[row.entityType] = (entityTypes[row.entityType] || 0) + 1;
+        const key = String(row.entityType);
+        entityTypeMap.set(key, (entityTypeMap.get(key) ?? 0) + 1);
       }
       if (row.relType && row.relCount > 0) {
-        relationshipTypes[row.relType] =
-          (relationshipTypes[row.relType] || 0) + row.relCount;
+        const key = String(row.relType);
+        relationshipTypeMap.set(
+          key,
+          (relationshipTypeMap.get(key) ?? 0) + row.relCount
+        );
         totalRelationships += row.relCount;
       }
     });
@@ -487,9 +478,9 @@ export class HistoryService extends EventEmitter {
       checkpoint,
       members,
       stats: {
-        entityTypes,
+        entityTypes: Object.fromEntries(entityTypeMap.entries()),
         totalRelationships,
-        relationshipTypes,
+        relationshipTypes: Object.fromEntries(relationshipTypeMap.entries()),
       },
     };
   }
@@ -1050,19 +1041,20 @@ export class HistoryService extends EventEmitter {
     }));
 
     // Build summary
-    const entityTypes: Record<string, number> = {};
-    const relationshipTypes: Record<string, number> = {};
+    const entityTypeMap = new Map<string, number>();
+    const relationshipTypeMap = new Map<string, number>();
 
     versionResult.forEach((row) => {
       if (row.entityType) {
-        entityTypes[row.entityType] = (entityTypes[row.entityType] || 0) + 1;
+        const k = String(row.entityType);
+        entityTypeMap.set(k, (entityTypeMap.get(k) ?? 0) + 1);
       }
     });
 
     relResult.forEach((row) => {
       if (row.relType) {
-        relationshipTypes[row.relType] =
-          (relationshipTypes[row.relType] || 0) + 1;
+        const k = String(row.relType);
+        relationshipTypeMap.set(k, (relationshipTypeMap.get(k) ?? 0) + 1);
       }
     });
 
@@ -1072,9 +1064,11 @@ export class HistoryService extends EventEmitter {
       summary: {
         entitiesAffected: new Set(versions.map((v) => v.entityId)).size,
         relationshipsAffected: relationships.length,
-        entityTypes,
-        relationshipTypes,
+        entityTypes: Object.fromEntries(entityTypeMap.entries()),
+        relationshipTypes: Object.fromEntries(relationshipTypeMap.entries()),
       },
     };
   }
 }
+ 
+// TODO(2025-09-30.35): Replace dynamic key access with type-guarded accessors.

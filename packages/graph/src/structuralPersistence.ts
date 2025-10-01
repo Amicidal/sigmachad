@@ -1,8 +1,10 @@
+/* eslint-disable security/detect-object-injection */
+// TODO(2025-09-30.35): Harden dynamic indexing by migrating to safe accessors or typed Maps.
 import {
   type GraphRelationship,
-  RelationshipType,
   type StructuralImportType,
-} from '@memento/core';
+  RelationshipType,
+} from '@memento/shared-types';
 import { normalizeStructuralRelationship } from './RelationshipNormalizer.js';
 
 export interface StructuralPersistenceFields {

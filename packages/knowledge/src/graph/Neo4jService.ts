@@ -1,3 +1,4 @@
+// security: avoid dynamic object indexing by using Object.fromEntries and guarded key building
 /**
  * Neo4j Base Service
  * Facade that orchestrates Neo4j operations through modular components
@@ -11,13 +12,13 @@ import {
   Neo4jConfig,
   CypherQueryOptions,
   BenchmarkOptions,
-} from './CypherExecutor';
-import { GdsService, GdsAlgorithmConfig, PathExpandConfig } from './GdsService';
+} from './CypherExecutor.js';
+import { GdsService, GdsAlgorithmConfig, PathExpandConfig } from './GdsService.js';
 import {
   VectorService,
   VectorSearchOptions,
   VectorIndexConfig,
-} from '../embeddings/VectorService';
+} from '../embeddings/VectorService.js';
 
 export {
   Neo4jConfig,
@@ -201,10 +202,15 @@ export class Neo4jService extends EventEmitter {
     `;
 
     if (options.filter) {
-      const filterClauses = Object.entries(options.filter)
-        .map(([key, value]) => `node.${key} = $filter_${key}`)
+      const safeEntries = Object.entries(options.filter).filter(([key]) =>
+        Neo4jService.isSafePropertyName(key)
+      );
+      const filterClauses = safeEntries
+        .map(([key]) => `node.${key} = $filter_${key}`)
         .join(' AND ');
-      query += ` AND ${filterClauses}`;
+      if (filterClauses) {
+        query += ` AND ${filterClauses}`;
+      }
     }
 
     query += `
@@ -222,9 +228,10 @@ export class Neo4jService extends EventEmitter {
     };
 
     if (options.filter) {
-      Object.entries(options.filter).forEach(([key, value]) => {
-        params[`filter_${key}`] = value;
-      });
+      const safeEntries = Object.entries(options.filter)
+        .filter(([key]) => Neo4jService.isSafePropertyName(key))
+        .map(([key, value]) => [`filter_${key}`, value] as const);
+      Object.assign(params, Object.fromEntries(safeEntries));
     }
 
     return this.executeCypher(query, params);
@@ -239,6 +246,9 @@ export class Neo4jService extends EventEmitter {
     searchText: string,
     options: { fuzzy?: boolean; limit?: number } = {}
   ): Promise<any[]> {
+    if (!Neo4jService.isSafePropertyName(property)) {
+      throw new Error(`Unsafe property name: ${property}`);
+    }
     if (options.fuzzy) {
       const query = `
         MATCH (n:${label})
@@ -264,6 +274,10 @@ export class Neo4jService extends EventEmitter {
         limit: options.limit || 50,
       });
     }
+  }
+
+  private static isSafePropertyName(name: string): boolean {
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
   }
 
   /**
@@ -323,19 +337,35 @@ export class Neo4jService extends EventEmitter {
       },
     ];
 
-    const stats: any = {};
+    const statEntries: Array<[string, unknown]> = [];
     for (const { name, query } of queries) {
       try {
         const result = await this.executeCypher(query);
-        stats[name] =
-          result[0]?.[
-            name === 'nodes' || name === 'relationships' ? 'count' : name
-          ] || 0;
+        const r0: any = result[0] ?? {};
+        let val: unknown;
+        switch (name) {
+          case 'nodes':
+          case 'relationships':
+            val = r0.count ?? 0;
+            break;
+          case 'labels':
+            val = r0.labels ?? [];
+            break;
+          case 'types':
+            val = r0.types ?? [];
+            break;
+          case 'indexes':
+            val = r0.indexes ?? [];
+            break;
+          default:
+            val = 0;
+        }
+        statEntries.push([name, val]);
       } catch (error) {
-        stats[name] = 'unavailable';
+        statEntries.push([name, 'unavailable']);
       }
     }
-    return stats;
+    return Object.fromEntries(statEntries);
   }
 
   /**
@@ -378,11 +408,9 @@ export class Neo4jService extends EventEmitter {
     if (Array.isArray(value))
       return value.map((v) => this.convertNeo4jValue(v));
     if (typeof value === 'object') {
-      const converted: any = {};
-      for (const [k, v] of Object.entries(value)) {
-        converted[k] = this.convertNeo4jValue(v);
-      }
-      return converted;
+      return Object.fromEntries(
+        Object.entries(value).map(([k, v]) => [k, this.convertNeo4jValue(v)])
+      );
     }
     return value;
   }
@@ -396,13 +424,19 @@ export class Neo4jService extends EventEmitter {
   }
 
   private convertRelationship(rel: any): any {
-    return {
-      id: rel.identity.toNumber(),
-      type: rel.type,
-      startNodeId: rel.start.toNumber(),
-      endNodeId: rel.end.toNumber(),
-      properties: this.convertNeo4jValue(rel.properties),
-    };
+    const id =
+      typeof rel?.identity?.toNumber === 'function'
+        ? rel.identity.toNumber()
+        : undefined;
+    const type = String(rel?.type ?? '');
+    const startNodeId =
+      typeof rel?.start?.toNumber === 'function'
+        ? rel.start.toNumber()
+        : undefined;
+    const endNodeId =
+      typeof rel?.end?.toNumber === 'function' ? rel.end.toNumber() : undefined;
+    const properties = this.convertNeo4jValue(rel?.properties ?? {});
+    return { id, type, startNodeId, endNodeId, properties };
   }
 
   private convertPath(path: any): any {
@@ -703,6 +737,9 @@ export class Neo4jService extends EventEmitter {
    * Close the driver connection
    */
   async close(): Promise<void> {
-    await this.driver.close();
+    // Delegate to executor which manages the underlying driver lifecycle
+    await this.executor.close();
   }
 }
+ 
+// TODO(2025-09-30.35): Guard dynamic parameter/property access in query handling.

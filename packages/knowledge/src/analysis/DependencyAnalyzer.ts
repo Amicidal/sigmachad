@@ -4,20 +4,11 @@
  */
 
 import { EventEmitter } from 'events';
+import type { Entity } from '@memento/shared-types';
 
-// Local type definitions (temporarily until @memento/core is available)
-export interface Entity {
-  id: string;
-  type: string;
-  name?: string;
-  metadata?: Record<string, any>;
-}
-
-export interface DependencyAnalysis {
-  dependencies: string[];
-  dependents: string[];
-  couplingScore: number;
-}
+// Import shared type from AnalysisService to avoid duplication
+export type { DependencyAnalysis } from './AnalysisService.js';
+import type { DependencyAnalysis } from './AnalysisService.js';
 
 export class DependencyAnalyzer extends EventEmitter {
   constructor() {

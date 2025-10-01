@@ -8,32 +8,21 @@
  * Extracted from the original 5,197-line ASTParser.ts as part of modular refactoring.
  */
 
-import { Project, Node, SourceFile, SyntaxKind } from 'ts-morph';
+import { Project, Node, SourceFile } from 'ts-morph';
 import * as ts from 'typescript';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as crypto from 'crypto';
-import {
-  Entity,
-  File,
-  FunctionSymbol,
-  ClassSymbol,
-  InterfaceSymbol,
-  TypeAliasSymbol,
-  Symbol as SymbolEntity,
-} from '@memento/shared-types.js';
+import { Entity, File, Symbol as SymbolEntity } from '@memento/shared-types';
 import {
   GraphRelationship,
   RelationshipType,
   StructuralRelationship,
-} from '@memento/shared-types.js';
-import {
-  normalizeCodeEdge,
-  canonicalRelationshipId,
-} from '../../utils/codeEdges.js';
-import { noiseConfig } from '../../config/noise.js';
-import { scoreInferredEdge } from '../../utils/confidence.js';
+} from '@memento/shared-types';
+// (removed unused imports normalizeCodeEdge, canonicalRelationshipId)
+import { noiseConfig } from '@memento/core/config/noise';
+// (removed unused import scoreInferredEdge)
 
 // Import shared utilities and types
 import {
@@ -41,25 +30,16 @@ import {
   normalizeRelPath,
   detectLanguage,
   extractDependencies,
-} from './utils.js';
-import {
-  ParseResult,
-  ParseError,
-  IncrementalParseResult,
-  PartialUpdate,
-  ChangeRange,
-} from './types.js';
+} from '@memento/knowledge/utils';
+import { ParseResult, ParseError, IncrementalParseResult } from '@memento/knowledge/types';
 
 // Import the extracted modules
-import { CacheManager, CachedFileInfo } from './CacheManager.js';
-import { DirectoryHandler } from './DirectoryHandler.js';
-import { TypeCheckerBudget } from './TypeCheckerBudget.js';
-import { SymbolExtractor } from './SymbolExtractor.js';
-import { ModuleResolver, ModuleResolverOptions } from './ModuleResolver.js';
-import {
-  RelationshipBuilder,
-  RelationshipBuilderOptions,
-} from './RelationshipBuilder.js';
+import { CacheManager } from '@memento/knowledge/orchestration/CacheManager';
+import { DirectoryHandler } from '@memento/knowledge/parsing/DirectoryHandler';
+import { TypeCheckerBudget } from '@memento/knowledge/parsing/TypeCheckerBudget';
+import { SymbolExtractor } from '@memento/knowledge/parsing/SymbolExtractor';
+import { ModuleResolver } from '@memento/knowledge/parsing/ModuleResolver';
+import { RelationshipBuilder } from '@memento/knowledge/graph/RelationshipBuilder';
 
 // Re-export types for backward compatibility
 export type {
@@ -68,7 +48,7 @@ export type {
   IncrementalParseResult,
   PartialUpdate,
   ChangeRange,
-} from './types.js';
+} from '@memento/knowledge/types';
 
 /**
  * Main AST Parser facade that orchestrates specialized parsing modules
@@ -510,6 +490,7 @@ export class ASTParserCore {
         id: `file:${fileRelPath}`,
         type: 'file',
         path: fileRelPath,
+        name: path.basename(filePath),
         extension: path.extname(filePath),
         size: content.length,
         lines: content.split('\n').length,
@@ -669,14 +650,14 @@ export class ASTParserCore {
   // Placeholder methods for TypeScript checker integration
   // These would need to be implemented based on the original ASTParser logic
 
-  private resolveWithTypeChecker(node: Node, sourceFile: SourceFile): any {
+  private resolveWithTypeChecker(_node: Node, _sourceFile: SourceFile): any {
     // Placeholder - would implement TypeScript type checker resolution
     return null;
   }
 
   private resolveCallTargetWithChecker(
-    call: Node,
-    sourceFile: SourceFile
+    _call: Node,
+    _sourceFile: SourceFile
   ): any {
     // Placeholder - would implement call target resolution with type checker
     return null;

@@ -2,29 +2,27 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "types": ["node"],
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": [
-    "src/**/*",
-    "tests/**/*",
-    "**/*.test.ts",
-    "**/*.spec.ts"
+    "packages/api/src/types/fastify.d.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "coverage"
+    "coverage",
+    "packages/**/tests/**",
+    "packages/core/tests/**",
+    "packages/testing/**",
+    "packages/backup/**",
+    "tests/e2e/**",
+    "tests/integration/**",
+    "tests/benchmarks/**"
   ],
   "ts-node": {
     "esm": true,
     "experimentalSpecifierResolution": "node"
   }
 }
-
-
-
-
-
-

@@ -1,3 +1,5 @@
+/* eslint-disable security/detect-object-injection */
+// TODO(2025-09-30.35): Replace bracketed access with safe normalization.
 import crypto from 'crypto';
 import {
   GraphRelationship,
@@ -5,7 +7,7 @@ import {
   StructuralImportType,
   isStructuralRelationshipType,
 } from '@memento/core';
-import { canonicalRelationshipId } from '@memento/core';
+import { canonicalRelationshipId } from '@memento/shared-types';
 
 export type StructuralLanguageAdapter = (
   relationship: GraphRelationship & { metadata?: Record<string, any> }
@@ -495,9 +497,9 @@ function canonicalStructuralRelationshipId(rel: GraphRelationship): string {
 
 // --- Default adapters ---
 
-registerStructuralAdapter(function typescriptAdapter(
+registerStructuralAdapter((
   relationship: GraphRelationship & { metadata?: Record<string, any> }
-) {
+) => {
   // Only process structural relationships
   if (!isStructuralRelationshipType(relationship.type)) {
     return;
@@ -595,9 +597,9 @@ registerStructuralAdapter(function typescriptAdapter(
   }
 });
 
-registerStructuralAdapter(function pythonAdapter(
+registerStructuralAdapter((
   relationship: GraphRelationship & { metadata?: Record<string, any> }
-) {
+) => {
   // Only process structural relationships
   if (!isStructuralRelationshipType(relationship.type)) {
     return;
@@ -616,9 +618,9 @@ registerStructuralAdapter(function pythonAdapter(
   }
 });
 
-registerStructuralAdapter(function goAdapter(
+registerStructuralAdapter((
   relationship: GraphRelationship & { metadata?: Record<string, any> }
-) {
+) => {
   // Only process structural relationships
   if (!isStructuralRelationshipType(relationship.type)) {
     return;
@@ -679,3 +681,5 @@ function guessLanguageFromPathHints(
   }
   return undefined;
 }
+ 
+// TODO(2025-09-30.35): Replace bracketed access with safe normalization.

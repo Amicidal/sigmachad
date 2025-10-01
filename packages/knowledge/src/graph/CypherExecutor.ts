@@ -1,3 +1,4 @@
+// security: avoid dynamic object indexing; use Object.fromEntries and safe builders
 /**
  * Cypher Executor
  * Handles raw Cypher execution, transactions, and database operations
@@ -62,14 +63,11 @@ export class CypherExecutor extends EventEmitter {
         timeout: options.timeout || this.defaultTimeout,
       });
 
-      return result.records.map((record) => {
-        const obj: any = {};
-        record.keys.forEach((key) => {
-          const value = record.get(key);
-          obj[key] = this.convertNeo4jValue(value);
-        });
-        return obj;
-      });
+      return result.records.map((record) =>
+        Object.fromEntries(
+          record.keys.map((key) => [key, this.convertNeo4jValue(record.get(key))])
+        )
+      );
     } catch (error) {
       this.emit('error', { query, params, error });
       throw error;
@@ -96,14 +94,11 @@ export class CypherExecutor extends EventEmitter {
       const results: any[] = [];
       for (const { query, params = {} } of queries) {
         const result = await transaction.run(query, params);
-        const records = result.records.map((record) => {
-          const obj: any = {};
-          record.keys.forEach((key) => {
-            const value = record.get(key);
-            obj[key] = this.convertNeo4jValue(value);
-          });
-          return obj;
-        });
+        const records = result.records.map((record) =>
+          Object.fromEntries(
+            record.keys.map((key) => [key, this.convertNeo4jValue(record.get(key))])
+          )
+        );
         results.push(records);
       }
 
@@ -309,13 +304,13 @@ export class CypherExecutor extends EventEmitter {
       return value.map((item) => this.convertNeo4jValue(item));
     }
     if (typeof value === 'object' && value !== null) {
-      const converted: any = {};
-      for (const [key, val] of Object.entries(value)) {
-        converted[key] = this.convertNeo4jValue(val);
-      }
-      return converted;
+      return Object.fromEntries(
+        Object.entries(value).map(([k, v]) => [k, this.convertNeo4jValue(v)])
+      );
     }
 
     return value;
   }
 }
+ 
+// TODO(2025-09-30.35): Harden dynamic map/object access around query params.

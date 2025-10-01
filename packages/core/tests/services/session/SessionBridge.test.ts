@@ -5,16 +5,12 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { SessionBridge } from '../../../src/services/SessionBridge.js';
-import { SessionManager } from '../../../src/services/SessionManager.js';
+import { SessionBridge } from '@memento/core/services/SessionBridge';
 import {
   SessionDocument,
   SessionEvent,
   SessionQuery,
-  TransitionResult,
-  HandoffContext,
-  IsolationResult,
-} from '../../../src/services/SessionTypes.js';
+} from '@memento/core/services/SessionTypes';
 
 describe('SessionBridge', () => {
   let sessionBridge: SessionBridge;

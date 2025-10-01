@@ -6,10 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { randomUUID } from "crypto";
-import {
-  DatabaseService,
-  createTestDatabaseConfig,
-} from "../../src/services/DatabaseService";
+import { DatabaseService, createTestDatabaseConfig } from "@memento/database/DatabaseService";
 import {
   setupTestDatabase,
   cleanupTestDatabase,
@@ -45,7 +42,7 @@ import {
   isInterface,
   isTest,
   isSpec,
-} from "../../../src/models/entities";
+} from "@memento/shared-types";
 
 import {
   Relationship,
@@ -59,14 +56,14 @@ import {
   DocumentationRelationship,
   SecurityRelationship,
   PerformanceRelationship,
-} from "../../../src/models/relationships";
+} from "@memento/shared-types";
 
 import {
   APIResponse,
   PaginatedResponse,
   ValidationResult,
   ImpactAnalysis,
-} from "../../../src/models/types";
+} from "@memento/shared-types";
 
 describe("Models Integration Tests", () => {
   let dbService: DatabaseService;

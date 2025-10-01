@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { KnowledgeGraphService } from '../../../src/services/knowledge/KnowledgeGraphService.js';
-import type { DatabaseService } from '../../../src/services/core/DatabaseService.js';
+import type { KnowledgeGraphService } from '@memento/knowledge';
+import type { DatabaseService } from '@memento/database/DatabaseService';
 
 // --- Shared spies for constructor side effects --------------------------------
 const fastifyStubs: Array<ReturnType<typeof createFastifyStub>> = [];
@@ -42,7 +42,7 @@ vi.mock('fastify', () => ({
 }));
 
 const testEngineCtor = vi.fn();
-vi.mock('../../../src/services/testing/TestEngine.js', () => ({
+vi.mock('@memento/testing/TestEngine', () => ({
   TestEngine: vi.fn().mockImplementation(function TestEngineMock(...args: unknown[]) {
     testEngineCtor(...args);
     return { executePlan: vi.fn() };
@@ -50,7 +50,7 @@ vi.mock('../../../src/services/testing/TestEngine.js', () => ({
 }));
 
 const securityScannerCtor = vi.fn();
-vi.mock('../../../src/services/testing/SecurityScanner.js', () => ({
+vi.mock('@memento/testing/security/scanner', () => ({
   SecurityScanner: vi.fn().mockImplementation(function SecurityScannerMock(...args: unknown[]) {
     securityScannerCtor(...args);
     return { scan: vi.fn() };
@@ -58,7 +58,7 @@ vi.mock('../../../src/services/testing/SecurityScanner.js', () => ({
 }));
 
 const astParserCtor = vi.fn();
-vi.mock('../../../src/services/knowledge/ASTParser.js', () => ({
+vi.mock('@memento/knowledge', () => ({
   ASTParser: vi.fn().mockImplementation(function ASTParserMock() {
     astParserCtor();
     return { initialize: vi.fn(), clearCache: vi.fn() };
@@ -66,7 +66,7 @@ vi.mock('../../../src/services/knowledge/ASTParser.js', () => ({
 }));
 
 const documentationParserCtor = vi.fn();
-vi.mock('../../../src/services/knowledge/DocumentationParser.js', () => ({
+vi.mock('@memento/knowledge', () => ({
   DocumentationParser: vi.fn().mockImplementation(function DocumentationParserMock(...args: unknown[]) {
     documentationParserCtor(...args);
     return { parse: vi.fn() };
@@ -74,7 +74,7 @@ vi.mock('../../../src/services/knowledge/DocumentationParser.js', () => ({
 }));
 
 const backupServiceCtor = vi.fn();
-vi.mock('../../../src/services/backup/BackupService.js', () => ({
+vi.mock('@memento/backup/BackupService', () => ({
   BackupService: vi.fn().mockImplementation(function BackupServiceMock(...args: unknown[]) {
     backupServiceCtor(...args);
     return { createCheckpoint: vi.fn() };
@@ -82,7 +82,7 @@ vi.mock('../../../src/services/backup/BackupService.js', () => ({
 }));
 
 const loggingServiceCtor = vi.fn();
-vi.mock('../../../src/services/core/LoggingService.js', () => ({
+vi.mock('@memento/core/services/LoggingService', () => ({
   LoggingService: vi.fn().mockImplementation(function LoggingServiceMock(...args: unknown[]) {
     loggingServiceCtor(...args);
     return { log: vi.fn() };
@@ -90,7 +90,7 @@ vi.mock('../../../src/services/core/LoggingService.js', () => ({
 }));
 
 const maintenanceServiceCtor = vi.fn();
-vi.mock('../../../src/services/core/MaintenanceService.js', () => ({
+vi.mock('@memento/core/services/MaintenanceService', () => ({
   MaintenanceService: vi.fn().mockImplementation(function MaintenanceServiceMock(...args: unknown[]) {
     maintenanceServiceCtor(...args);
     return { runMaintenance: vi.fn() };
@@ -98,7 +98,7 @@ vi.mock('../../../src/services/core/MaintenanceService.js', () => ({
 }));
 
 const configurationServiceCtor = vi.fn();
-vi.mock('../../../src/services/core/ConfigurationService.js', () => ({
+vi.mock('@memento/core/services/ConfigurationService', () => ({
   ConfigurationService: vi.fn().mockImplementation(function ConfigurationServiceMock(...args: unknown[]) {
     configurationServiceCtor(...args);
     return { getSettings: vi.fn() };
@@ -106,7 +106,7 @@ vi.mock('../../../src/services/core/ConfigurationService.js', () => ({
 }));
 
 const mcpRouterCtor = vi.fn();
-vi.mock('../../../src/api/mcp-router.js', () => ({
+vi.mock('@memento/api/mcp-router', () => ({
   MCPRouter: vi.fn().mockImplementation(function MCPRouterMock(...args: unknown[]) {
     mcpRouterCtor(...args);
     return { registerRoutes: vi.fn(), getToolCount: vi.fn() };
@@ -114,7 +114,7 @@ vi.mock('../../../src/api/mcp-router.js', () => ({
 }));
 
 const wsRouterCtor = vi.fn();
-vi.mock('../../../src/api/websocket-router.js', () => ({
+vi.mock('@memento/api/websocket-router', () => ({
   WebSocketRouter: vi.fn().mockImplementation(function WebSocketRouterMock(...args: unknown[]) {
     wsRouterCtor(...args);
     return { registerRoutes: vi.fn(), shutdown: vi.fn() };
@@ -126,7 +126,7 @@ vi.mock('@fastify/websocket', () => ({ default: vi.fn() }));
 vi.mock('@trpc/server/adapters/fastify', () => ({ fastifyTRPCPlugin: vi.fn() }));
 vi.mock('@fastify/static', () => ({ default: vi.fn() }));
 
-import { APIGateway } from '../../../src/api/APIGateway.js';
+import { APIGateway } from '@memento/api/APIGateway';
 
 function makeServices(): {
   kg: KnowledgeGraphService;

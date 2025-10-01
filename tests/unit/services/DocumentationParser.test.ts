@@ -7,14 +7,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "fs";
-import { DocumentationParser } from "../../../src/services/knowledge/DocumentationParser";
-import { KnowledgeGraphService } from "../../../src/services/knowledge/KnowledgeGraphService";
-import { DatabaseService } from "../../../src/services/core/DatabaseService";
+import { DocumentationParser } from "@memento/knowledge";
+import { KnowledgeGraphService } from "@memento/knowledge";
+import { DatabaseService } from "@memento/database/DatabaseService";
 import {
   DocumentationIntelligenceProvider,
   DocumentationIntelligenceRequest,
   DocumentationSignals,
-} from "../../../src/services/DocumentationIntelligenceProvider";
+} from "@memento/knowledge";
 
 // Mock file system
 vi.mock("fs", () => ({

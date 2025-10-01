@@ -11,7 +11,7 @@ import {
   ApiKeyRegistry,
   ApiKeyVerification,
   ApiKeyRegistryProvider,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 const DEFAULT_ALGORITHM = 'sha256';
 

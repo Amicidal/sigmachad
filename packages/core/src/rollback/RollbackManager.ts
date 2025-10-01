@@ -131,9 +131,12 @@ export class RollbackManager extends EventEmitter {
 
     const rollbackPoint: RollbackPoint = {
       id: uuidv4(),
+      operationId: `create_${Date.now()}`,
       name,
-      description,
+      description: description || '',
       timestamp: new Date(),
+      entities: [],
+      relationships: [],
       metadata: metadata || {},
       sessionId,
       expiresAt
@@ -379,7 +382,9 @@ export class RollbackManager extends EventEmitter {
           targetRollbackPoint: rollbackPoint,
           snapshots,
           diff: diff.changes,
-          conflictResolution: options?.conflictResolution || { strategy: ConflictStrategy.ABORT }
+          conflictResolution:
+            options?.conflictResolution ||
+            ({ strategy: ConflictStrategy.ABORT, timestamp: new Date(), resolvedBy: 'system' } as unknown as ConflictResolution)
         });
       }
 
@@ -392,7 +397,9 @@ export class RollbackManager extends EventEmitter {
         targetRollbackPoint: rollbackPoint,
         snapshots,
         diff: diff.changes,
-        conflictResolution: options?.conflictResolution || { strategy: ConflictStrategy.ABORT },
+        conflictResolution:
+          options?.conflictResolution ||
+          ({ strategy: ConflictStrategy.ABORT, timestamp: new Date(), resolvedBy: 'system' } as unknown as ConflictResolution),
         onProgress: (progress: number) => {
           operation.progress = progress;
           this.store.updateOperation(operation);

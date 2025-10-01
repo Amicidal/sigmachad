@@ -3,10 +3,10 @@ import {
   TestPlanningService,
   SpecNotFoundError,
   TestPlanningValidationError,
-} from '../../../src/services/testing/TestPlanningService.js';
-import { RelationshipType, type GraphRelationship } from '../../../src/models/relationships.js';
-import type { Spec, Test, Symbol } from '../../../src/models/entities.js';
-import type { TestPlanRequest } from '../../../src/models/types.js';
+} from '@memento/testing/TestPlanningService';
+import { RelationshipType, type GraphRelationship } from '@memento/shared-types';
+import type { Spec, Test, Symbol } from '@memento/shared-types';
+import type { TestPlanRequest } from '@memento/shared-types';
 
 describe('TestPlanningService', () => {
   const now = new Date('2024-03-20T12:00:00Z');

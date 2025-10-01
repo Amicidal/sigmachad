@@ -57,10 +57,13 @@ export type {
   EnrichmentResult,
   IngestionTelemetry,
   AlertConfig,
+  IngestionEvents,
+};
+
+// Re-export error classes as runtime values
+export {
   IngestionError,
   BatchProcessingError,
   WorkerError,
   QueueOverflowError,
 };
-
-export type { IngestionEvents };

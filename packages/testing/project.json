@@ -5,12 +5,10 @@
   "projectType": "library",
   "targets": {
     "build": {
-      "executor": "@nx/js:tsc",
-      "outputs": ["{options.outputPath}"],
+      "executor": "nx:run-commands",
+      "outputs": [],
       "options": {
-        "outputPath": "packages/testing/dist",
-        "main": "packages/testing/src/index.ts",
-        "tsConfig": "packages/testing/tsconfig.json"
+        "command": "tsc -p packages/testing/tsconfig.json --noEmit"
       }
     },
     "lint": {
@@ -27,12 +25,9 @@
       }
     },
     "dev": {
-      "executor": "@nx/js:tsc",
+      "executor": "nx:run-commands",
       "options": {
-        "outputPath": "packages/testing/dist",
-        "main": "packages/testing/src/index.ts",
-        "tsConfig": "packages/testing/tsconfig.json",
-        "watch": true
+        "command": "tsc -p packages/testing/tsconfig.json --noEmit --watch"
       }
     }
   }

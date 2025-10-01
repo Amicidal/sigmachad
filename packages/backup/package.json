@@ -1,17 +1,26 @@
 {
   "name": "@memento/backup",
-  "version": "1.0.0",
-  "type": "module",
-  "main": "src/index.ts",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/**/*.ts"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./dist/index.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.454.0",
     "@memento/core": "workspace:*",
     "@memento/database": "workspace:*",
-    "@aws-sdk/client-s3": "^3.454.0",
+    "@memento/shared-types": "workspace:*",
     "tar": "^6.2.0",
     "zlib": "^1.0.5"
+  },
+  "optionalDependencies": {
+    "@aws-sdk/lib-storage": "^3.454.0"
   },
   "devDependencies": {
     "@types/node": "^20.8.0",

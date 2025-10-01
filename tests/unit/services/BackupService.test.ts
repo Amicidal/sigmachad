@@ -22,11 +22,11 @@ import {
   BackupService,
   BackupOptions,
   BackupMetadata,
-} from "../../../src/services/backup/BackupService";
+} from "@memento/backup/BackupService";
 import {
   DatabaseService,
   DatabaseConfig,
-} from "../../../src/services/core/DatabaseService";
+} from "@memento/database/DatabaseService";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -37,14 +37,15 @@ import { Readable, Writable } from "stream";
 import type {
   BackupFileStat,
   BackupStorageProvider,
-} from "../../../src/services/backup/BackupStorageProvider";
+} from "@memento/backup/BackupStorageProvider";
 
 // Import realistic mocks
 import {
-  RealisticFalkorDBMock,
+  RealisticNeo4jMock,
   RealisticQdrantMock,
   RealisticPostgreSQLMock,
   RealisticRedisMock,
+  applyQdrantMock,
 } from "../../test-utils/realistic-mocks";
 
 // Mock file system operations
@@ -178,10 +179,11 @@ class InMemoryStorageProvider implements BackupStorageProvider {
 describe("BackupService", () => {
   let backupService: BackupService;
   let mockDbService: DatabaseService;
-  let mockFalkorDB: RealisticFalkorDBMock;
+  let mockNeo4j: RealisticNeo4jMock;
   let mockQdrant: RealisticQdrantMock;
   let mockPostgres: RealisticPostgreSQLMock;
   let testConfig: DatabaseConfig;
+  let dbServiceConfig: DatabaseConfig;
 
   beforeEach(async () => {
     // Mock fs operations
@@ -221,11 +223,13 @@ describe("BackupService", () => {
     (createWriteStream as any).mockReturnValue({} as any);
     (createReadStream as any).mockReturnValue({} as any);
 
-    // Setup test configuration
+    // Setup test configuration used by the backup service (includes Qdrant metadata)
     testConfig = {
-      falkordb: {
-        url: "redis://localhost:6379",
-        database: 0,
+      neo4j: {
+        uri: "bolt://localhost:7688",
+        username: "neo4j",
+        password: "password",
+        database: "memento_test",
       },
       qdrant: {
         url: "http://localhost:6333",
@@ -241,18 +245,85 @@ describe("BackupService", () => {
       },
     };
 
+    dbServiceConfig = {
+      neo4j: testConfig.neo4j,
+      postgresql: testConfig.postgresql,
+      redis: testConfig.redis,
+      backups: testConfig.backups,
+    };
+
     // Create mock services via DI and initialize
-    mockFalkorDB = new RealisticFalkorDBMock({ failureRate: 0 });
+    mockNeo4j = new RealisticNeo4jMock({ failureRate: 0 });
     mockQdrant = new RealisticQdrantMock({ failureRate: 0 });
     mockPostgres = new RealisticPostgreSQLMock({ failureRate: 0 });
+    mockPostgres.healthCheck = vi.fn().mockResolvedValue(true);
+    const originalPostgresQuery = mockPostgres.query.bind(mockPostgres);
+    mockPostgres.query = vi.fn(async (query: string, params?: any[]) => {
+      const normalized = query.trim().toLowerCase();
 
-    mockDbService = new DatabaseService(testConfig, {
-      falkorFactory: () => mockFalkorDB,
-      qdrantFactory: () => mockQdrant,
-      postgresFactory: () => mockPostgres,
-      redisFactory: () => new RealisticRedisMock({ failureRate: 0 }),
+      if (normalized.startsWith("select tablename from pg_tables")) {
+        return {
+          rows: [
+            { tablename: "users" },
+            { tablename: "projects" },
+          ],
+        };
+      }
+
+      if (normalized.includes("information_schema.columns")) {
+        return {
+          rows: [
+            {
+              column_name: "id",
+              data_type: "integer",
+              udt_name: "int4",
+              is_nullable: "NO",
+              column_default: null,
+              character_maximum_length: null,
+              numeric_precision: 32,
+              numeric_scale: 0,
+            },
+            {
+              column_name: "name",
+              data_type: "text",
+              udt_name: "text",
+              is_nullable: "YES",
+              column_default: null,
+              character_maximum_length: null,
+              numeric_precision: null,
+              numeric_scale: null,
+            },
+          ],
+        };
+      }
+
+      if (normalized.includes("pg_index") && normalized.includes("indisprimary")) {
+        return { rows: [{ column_name: "id" }] };
+      }
+
+      if (normalized.startsWith("select * from")) {
+        return {
+          rows: [
+            { id: 1, name: "Alice" },
+            { id: 2, name: "Bob" },
+          ],
+        };
+      }
+
+      return originalPostgresQuery(query, params);
     });
+
+    const mockRedis = new RealisticRedisMock({ failureRate: 0 });
+
+    mockDbService = new DatabaseService(dbServiceConfig, {
+      neo4jFactory: () => mockNeo4j,
+      postgresFactory: () => mockPostgres,
+      redisFactory: () => mockRedis,
+    });
+
     await mockDbService.initialize();
+    await mockQdrant.initialize();
+    applyQdrantMock(mockDbService, mockQdrant);
 
     // Create backup service
     backupService = new BackupService(mockDbService, testConfig);
@@ -415,8 +486,8 @@ describe("BackupService", () => {
   });
 
   describe("Individual Component Backup Methods", () => {
-    describe("FalkorDB Backup", () => {
-      it("should backup FalkorDB data successfully", async () => {
+    describe("Graph Backup (legacy Falkor artifact)", () => {
+      it("should backup graph data successfully", async () => {
         const backupId = "test-backup-123";
         const backupDir = "/tmp/backups";
 
@@ -428,16 +499,19 @@ describe("BackupService", () => {
         );
       });
 
-      it("should handle FalkorDB backup failures gracefully", async () => {
-        // Create service with failing FalkorDB via DI
-        const failingFalkorDB = new RealisticFalkorDBMock({ failureRate: 100 });
-        const failingDbService = new DatabaseService(testConfig, {
-          falkorFactory: () => failingFalkorDB,
-          qdrantFactory: () => mockQdrant,
+      it("should handle graph backup failures gracefully", async () => {
+        // Create service with failing Neo4j via DI while retaining Falkor artifact naming
+        const failingNeo4j = new RealisticNeo4jMock({ failureRate: 100 });
+        const failingRedis = new RealisticRedisMock({ failureRate: 0 });
+        const failingDbService = new DatabaseService(dbServiceConfig, {
+          neo4jFactory: () => failingNeo4j,
           postgresFactory: () => mockPostgres,
-          redisFactory: () => new RealisticRedisMock({ failureRate: 0 }),
+          redisFactory: () => failingRedis,
         });
         await failingDbService.initialize();
+        const qdrantForFailure = new RealisticQdrantMock({ failureRate: 0 });
+        await qdrantForFailure.initialize();
+        applyQdrantMock(failingDbService, qdrantForFailure);
 
         const backupServiceWithFailingDB = new BackupService(
           failingDbService,
@@ -469,13 +543,15 @@ describe("BackupService", () => {
 
       it("should handle Qdrant backup failures", async () => {
         const failingQdrant = new RealisticQdrantMock({ failureRate: 100 });
-        const failingDbService = new DatabaseService(testConfig, {
-          falkorFactory: () => mockFalkorDB,
-          qdrantFactory: () => failingQdrant,
+        const qdrantRedis = new RealisticRedisMock({ failureRate: 0 });
+        const failingDbService = new DatabaseService(dbServiceConfig, {
+          neo4jFactory: () => mockNeo4j,
           postgresFactory: () => mockPostgres,
-          redisFactory: () => new RealisticRedisMock({ failureRate: 0 }),
+          redisFactory: () => qdrantRedis,
         });
         await failingDbService.initialize();
+        await failingQdrant.initialize();
+        applyQdrantMock(failingDbService, failingQdrant);
 
         const backupServiceWithFailingDB = new BackupService(
           failingDbService,
@@ -497,20 +573,74 @@ describe("BackupService", () => {
         const backupId = "test-backup-123";
         const backupDir = "/tmp/backups";
 
-        // Mock PostgreSQL service to return table names
+        // Mock PostgreSQL service to return deterministic schema/data
         const mockPostgresService = {
-          query: vi.fn().mockResolvedValue({
-            rows: [{ tablename: "users" }, { tablename: "projects" }],
-            rowCount: 2,
+          healthCheck: vi.fn().mockResolvedValue(true),
+          query: vi.fn(async (query: string) => {
+            const normalized = query.trim().toLowerCase();
+
+            if (normalized.startsWith("select tablename from pg_tables")) {
+              return {
+                rows: [
+                  { tablename: "users" },
+                  { tablename: "projects" },
+                ],
+              };
+            }
+
+            if (normalized.includes("information_schema.columns")) {
+              return {
+                rows: [
+                  {
+                    column_name: "id",
+                    data_type: "integer",
+                    udt_name: "int4",
+                    is_nullable: "NO",
+                    column_default: null,
+                    character_maximum_length: null,
+                    numeric_precision: 32,
+                    numeric_scale: 0,
+                  },
+                  {
+                    column_name: "name",
+                    data_type: "text",
+                    udt_name: "text",
+                    is_nullable: "YES",
+                    column_default: null,
+                    character_maximum_length: null,
+                    numeric_precision: null,
+                    numeric_scale: null,
+                  },
+                ],
+              };
+            }
+
+            if (normalized.includes("pg_index") && normalized.includes("indisprimary")) {
+              return { rows: [{ column_name: "id" }] };
+            }
+
+            if (normalized.startsWith("select * from")) {
+              return {
+                rows: [
+                  { id: 1, name: "Alice" },
+                  { id: 2, name: "Bob" },
+                ],
+              };
+            }
+
+            return { rows: [] };
           }),
         };
-        const svc = new DatabaseService(testConfig, {
-          falkorFactory: () => mockFalkorDB,
-          qdrantFactory: () => mockQdrant,
+        const svcRedis = new RealisticRedisMock({ failureRate: 0 });
+        const svc = new DatabaseService(dbServiceConfig, {
+          neo4jFactory: () => mockNeo4j,
           postgresFactory: () => mockPostgresService as any,
-          redisFactory: () => new RealisticRedisMock({ failureRate: 0 }),
+          redisFactory: () => svcRedis,
         });
         await svc.initialize();
+        const svcQdrant = new RealisticQdrantMock({ failureRate: 0 });
+        await svcQdrant.initialize();
+        applyQdrantMock(svc, svcQdrant);
 
         const backupServiceWithMockPostgres = new BackupService(
           svc,
@@ -532,13 +662,17 @@ describe("BackupService", () => {
         const failingPostgres = new RealisticPostgreSQLMock({
           failureRate: 100,
         });
-        const failingDbService = new DatabaseService(testConfig, {
-          falkorFactory: () => mockFalkorDB,
-          qdrantFactory: () => mockQdrant,
+        failingPostgres.healthCheck = vi.fn().mockResolvedValue(true);
+        const failingRedis = new RealisticRedisMock({ failureRate: 0 });
+        const failingDbService = new DatabaseService(dbServiceConfig, {
+          neo4jFactory: () => mockNeo4j,
           postgresFactory: () => failingPostgres,
-          redisFactory: () => new RealisticRedisMock({ failureRate: 0 }),
+          redisFactory: () => failingRedis,
         });
         await failingDbService.initialize();
+        const failingQdrant = new RealisticQdrantMock({ failureRate: 0 });
+        await failingQdrant.initialize();
+        applyQdrantMock(failingDbService, failingQdrant);
 
         const backupServiceWithFailingDB = new BackupService(
           failingDbService,
@@ -1077,13 +1211,15 @@ describe("Backup Restore", () => {
 
         // Make Qdrant backup fail but others succeed using DI
         const failingQdrant = new RealisticQdrantMock({ failureRate: 100 });
-        const svc = new DatabaseService(testConfig, {
-          falkorFactory: () => mockFalkorDB,
-          qdrantFactory: () => failingQdrant,
+        const partialRedis = new RealisticRedisMock({ failureRate: 0 });
+        const svc = new DatabaseService(dbServiceConfig, {
+          neo4jFactory: () => mockNeo4j,
           postgresFactory: () => mockPostgres,
-          redisFactory: () => new RealisticRedisMock({ failureRate: 0 }),
+          redisFactory: () => partialRedis,
         });
         await svc.initialize();
+        await failingQdrant.initialize();
+        applyQdrantMock(svc, failingQdrant);
 
         const bs = new BackupService(svc, testConfig);
         await bs.createBackup(options);

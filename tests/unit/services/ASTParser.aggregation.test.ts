@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import path from "path";
 import fs from "fs/promises";
-import { ASTParser } from "../../../src/services/knowledge/ASTParser";
-import { RelationshipType } from "@/models/relationships";
-import { noiseConfig } from "@/config/noise";
+import { ASTParser } from "@memento/knowledge";
+import { RelationshipType } from "@memento/shared-types";
+import { noiseConfig } from "@memento/core/config/noise";
 
 describe("ASTParser code edge aggregation", () => {
   let parser: ASTParser;

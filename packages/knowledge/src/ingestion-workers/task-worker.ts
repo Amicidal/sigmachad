@@ -7,8 +7,8 @@ import { parentPort, workerData } from 'worker_threads';
 import type {
   WorkerTaskMessage,
   WorkerTaskResult,
-} from '@memento/utils';
-import type { TaskPayload } from '../ingestion/types.js';
+} from '@memento/shared-types';
+import type { TaskPayload } from '../ingestion/types';
 
 interface WorkerStartupConfig {
   workerId?: string;

@@ -1,13 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "../../dist/apps/mcp-server",
-    "module": "esnext",
-    "target": "es2022",
-    "moduleResolution": "node",
-    "types": ["node"],
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
+    "outDir": "../../dist/apps/mcp-server"
   },
   "include": ["src/**/*.ts"]
 }

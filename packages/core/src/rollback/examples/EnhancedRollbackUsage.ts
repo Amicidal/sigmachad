@@ -14,7 +14,7 @@ import {
   createDefaultStoreOptions,
   RollbackOperationType,
   RollbackStrategy,
-  ConflictStrategy
+  
 } from '../index.js';
 
 // Example interfaces for demonstration
@@ -172,7 +172,11 @@ export async function partialRollbackExample() {
         newValue: { fromEntityId: 'user-service', toEntityId: 'auth-service', type: 'DEPENDS_ON' }
       }
     ],
-    conflictResolution: { strategy: ConflictStrategy.MERGE },
+    conflictResolution: {
+      strategy: 'manual',
+      timestamp: new Date(),
+      resolvedBy: 'example'
+    } as any,
     partialSelections: [
       {
         type: 'entity' as any,
@@ -251,7 +255,11 @@ export async function timebasedRollbackExample() {
         metadata: { timestamp: new Date(Date.now() - 23 * 60 * 60 * 1000) } // 23 hours ago
       }
     ],
-    conflictResolution: { strategy: ConflictStrategy.SKIP },
+    conflictResolution: {
+      strategy: 'manual',
+      timestamp: new Date(),
+      resolvedBy: 'example'
+    } as any,
     timebasedFilter: {
       rollbackToTimestamp: new Date(Date.now() - 10 * 60 * 1000), // 10 min ago
       maxChangeAge: 30 * 60 * 1000 // 30 minutes
@@ -359,7 +367,11 @@ export async function dryRunExample() {
       name: 'Test Rollback',
       timestamp: new Date(),
       metadata: {},
-      sessionId: 'session-123'
+      sessionId: 'session-123',
+      operationId: 'example-op',
+      entities: [],
+      relationships: [],
+      description: 'Example point'
     },
     snapshots: [],
     diff: [
@@ -382,7 +394,7 @@ export async function dryRunExample() {
         newValue: { from: 'service-a', to: 'service-b', type: 'DEPENDS_ON' }
       }
     ],
-    conflictResolution: { strategy: ConflictStrategy.MERGE },
+    conflictResolution: { strategy: 'merge', timestamp: new Date(), resolvedBy: 'system' } as any,
     dryRun: true
   };
 
@@ -432,26 +444,26 @@ export async function fullIntegrationExample() {
     restoreSessionCheckpoint: async (sessionId, checkpointId) => {
       console.log(`Restored checkpoint ${checkpointId} for session ${sessionId}`);
     },
-    on: (event, listener) => {
+    on: (_event, _listener) => {
       // Mock event listener registration
     }
   };
 
   // Mock audit logger
   const mockAuditLogger: MockAuditLogger = {
-    logRollbackCreation: async (rollbackPoint, context) => {
-      console.log('Audit: Rollback point created', { id: rollbackPoint.id, context });
+    logRollbackCreation: async (rollbackPoint, _context) => {
+      console.log('Audit: Rollback point created', { id: rollbackPoint.id, context: _context });
     },
-    logRollbackExecution: async (operation, result, context) => {
+    logRollbackExecution: async (operation, result, _context) => {
       console.log('Audit: Rollback executed', { operationId: operation.id, success: result.success });
     },
-    logConflictResolution: async (conflict, resolution, context) => {
+    logConflictResolution: async (conflict, resolution, _context) => {
       console.log('Audit: Conflict resolved', { path: conflict.path, strategy: resolution?.strategy });
     },
-    logSystemEvent: async (event, context) => {
+    logSystemEvent: async (event, _context) => {
       console.log('Audit: System event', { type: event.type, severity: event.severity });
     },
-    getAuditTrail: async (filters) => {
+    getAuditTrail: async (_filters) => {
       return []; // Mock empty audit trail
     }
   };

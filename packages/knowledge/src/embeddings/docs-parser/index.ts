@@ -1,12 +1,12 @@
 // Re-exports for backward compatibility
-export { DocTokenizer } from '../DocTokenizer.js';
-export { IntentExtractor } from '../../analysis/IntentExtractor.js';
-export { SyncOrchestrator } from '../../orchestration/SyncOrchestrator.js';
-export { ParsedDocument } from '../DocTokenizer.js';
-export { DomainExtraction } from '../../analysis/IntentExtractor.js';
+export { DocTokenizer } from '../DocTokenizer';
+export { IntentExtractor } from '../../analysis/IntentExtractor';
+export { SyncOrchestrator } from '../../orchestration/SyncOrchestrator';
+export { ParsedDocument } from '../DocTokenizer';
+export { DomainExtraction } from '../../analysis/IntentExtractor';
 
 // Import types from SyncOrchestrator to avoid conflicts
 export type {
   SyncResult,
   SearchResult,
-} from '../../orchestration/SyncOrchestrator.js';
+} from '../../orchestration/SyncOrchestrator';

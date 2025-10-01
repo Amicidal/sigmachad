@@ -1,5 +1,5 @@
-import type { AuthContext } from '../middleware/authentication.js';
-import type {
+export type { AuthContext } from '@memento/shared-types';
+export type {
   WebSocketFilter,
   WebSocketMessage,
   SubscriptionRequest,

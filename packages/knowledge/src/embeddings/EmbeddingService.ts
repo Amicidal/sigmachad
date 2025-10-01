@@ -1,12 +1,13 @@
+// security: avoid dynamic object indexing; use Object.fromEntries and guarded access
 /**
  * Embedding Service
  * Handles vector generation, storage, and search using Neo4j's native vector support
  */
 
 import { EventEmitter } from 'events';
-import { Neo4jService } from '../graph/Neo4jService.js';
-import { Entity } from '@memento/shared-types.js';
-import { embeddingService } from '@memento/core/utils/embedding.js';
+import { Neo4jService } from '../graph/Neo4jService';
+import { Entity } from '@memento/shared-types';
+import { embeddingService } from '@memento/core/utils/embedding';
 
 export interface EmbeddingOptions {
   indexName?: string;
@@ -462,30 +463,26 @@ export class EmbeddingService extends EventEmitter {
    */
   private parseEntity(node: any): Entity {
     const properties = node.properties || node;
-    const entity: any = {};
-
+    const entries: Array<[string, unknown]> = [];
     for (const [key, value] of Object.entries(properties)) {
       if (key === 'embedding') continue; // Skip embedding vector
-
       if (value === null || value === undefined) continue;
-
       if (key === 'created' || key === 'lastModified' || key.endsWith('At')) {
-        entity[key] = new Date(value as string);
+        entries.push([key, new Date(value as string)]);
       } else if (
         typeof value === 'string' &&
         ((value as string).startsWith('[') || (value as string).startsWith('{'))
       ) {
         try {
-          entity[key] = JSON.parse(value as string);
+          entries.push([key, JSON.parse(value as string)]);
         } catch {
-          entity[key] = value;
+          entries.push([key, value]);
         }
       } else {
-        entity[key] = value;
+        entries.push([key, value]);
       }
     }
-
-    return entity as Entity;
+    return Object.fromEntries(entries) as unknown as Entity;
   }
 
   /**
@@ -493,22 +490,16 @@ export class EmbeddingService extends EventEmitter {
    */
   private extractMetadata(node: any): Record<string, any> {
     const properties = node.properties || node;
-    const metadata: Record<string, any> = {};
-
-    const metadataKeys = [
-      'embeddingVersion',
-      'embeddingUpdatedAt',
-      'checkpointId',
-      'confidence',
-      'source',
-    ];
-
-    for (const key of metadataKeys) {
-      if (properties[key]) {
-        metadata[key] = properties[key];
-      }
-    }
-
-    return metadata;
+    const entries: Array<[string, unknown]> = [];
+    const p: any = properties;
+    if (p.embeddingVersion !== undefined)
+      entries.push(['embeddingVersion', p.embeddingVersion]);
+    if (p.embeddingUpdatedAt !== undefined)
+      entries.push(['embeddingUpdatedAt', p.embeddingUpdatedAt]);
+    if (p.checkpointId !== undefined)
+      entries.push(['checkpointId', p.checkpointId]);
+    if (p.confidence !== undefined) entries.push(['confidence', p.confidence]);
+    if (p.source !== undefined) entries.push(['source', p.source]);
+    return Object.fromEntries(entries);
   }
 }

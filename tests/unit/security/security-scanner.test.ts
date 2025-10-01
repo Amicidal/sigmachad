@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { SecurityScanner } from '../../../packages/testing/src/security/scanner.js';
-import { SecurityScanOptions, SecurityScanRequest } from '../../../packages/testing/src/security/types.js';
+import { SecurityScanner } from '@memento/testing/security/scanner';
+import { SecurityScanOptions, SecurityScanRequest } from '@memento/testing/security/types';
 
 // Mock dependencies
 const mockDb = {

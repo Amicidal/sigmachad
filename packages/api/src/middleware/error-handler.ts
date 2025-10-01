@@ -10,7 +10,7 @@ import {
   ErrorContext,
   ErrorMetadata,
   StandardErrorResponse,
-} from '@memento/shared-types.js';
+} from '@memento/shared-types';
 
 const getErrorMetadata = (error: any): ErrorMetadata => {
   // TRPC Errors
@@ -53,7 +53,10 @@ const getErrorMetadata = (error: any): ErrorMetadata => {
       code: error.code,
       statusCode,
       category,
-      retryable: ['TIMEOUT', 'INTERNAL_SERVER_ERROR'].includes(error.code),
+      // Treat 429 (TOO_MANY_REQUESTS) as retryable to encourage clients to back off
+      retryable: ['TIMEOUT', 'INTERNAL_SERVER_ERROR', 'TOO_MANY_REQUESTS'].includes(
+        error.code
+      ),
       details: error.cause ? { cause: String(error.cause) } : undefined,
     };
   }

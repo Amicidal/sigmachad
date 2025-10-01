@@ -37,7 +37,7 @@ import {
   // Impact analysis interfaces
   ImpactQuery,
   ImpactResult,
-} from '@/models/relationships';
+} from '@memento/shared-types';
 
 describe('Relationship Types and Enums', () => {
   describe('RelationshipType Enum', () => {
@@ -837,7 +837,7 @@ describe('Performance Relationship Interface', () => {
       unit: 'ms',
       sampleSize: 8,
       confidenceInterval: { lower: 110, upper: 190 },
-      trend: 'regression',
+      trend: 'degrading',
       severity: 'high',
       riskScore: 1.5,
       runId: 'run-123',

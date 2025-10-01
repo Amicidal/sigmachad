@@ -535,7 +535,7 @@ export class GitService {
 
       if (first.startsWith('##')) {
         const info = first.slice(2).trim();
-        const headMatch = info.match(/^([^\.\s]+)/);
+      const headMatch = info.match(/^([^.\s]+)/);
         if (headMatch) {
           branch = headMatch[1];
         }
@@ -549,8 +549,7 @@ export class GitService {
       const unstaged: string[] = [];
       const untracked: string[] = [];
 
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i];
+      for (const line of lines.slice(1)) {
         if (!line) continue;
         if (line.startsWith('??')) {
           untracked.push(line.slice(3).trim());
@@ -559,8 +558,8 @@ export class GitService {
         const status = line.slice(0, 2);
         const file = line.slice(3).trim();
         if (!file) continue;
-        const stagedFlag = status[0];
-        const unstagedFlag = status[1];
+        const stagedFlag = status.charAt(0);
+        const unstagedFlag = status.charAt(1);
         if (stagedFlag && stagedFlag !== ' ') {
           staged.push(file);
         }

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { registerSecurityRoutes } from '../../../src/api/routes/security.js';
+import { registerSecurityRoutes } from '@memento/api/routes/security';
 import {
   createMockRequest,
   createMockReply,
@@ -13,13 +13,13 @@ import {
 } from '../../test-utils.js';
 
 // Mock services
-vi.mock('../../../src/services/testing/SecurityScanner.js', () => ({
+vi.mock('@memento/testing/security/scanner', () => ({
   SecurityScanner: vi.fn()
 }));
-vi.mock('../../../src/services/core/DatabaseService.js', () => ({
+vi.mock('@memento/database/DatabaseService', () => ({
   DatabaseService: vi.fn()
 }));
-vi.mock('../../../src/services/knowledge/KnowledgeGraphService.js', () => ({
+vi.mock('@memento/knowledge', () => ({
   KnowledgeGraphService: vi.fn()
 }));
 

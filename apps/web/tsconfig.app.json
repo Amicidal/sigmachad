@@ -3,11 +3,10 @@
   "compilerOptions": {
     "outDir": "../../dist/out-tsc",
     "types": [
-      "node",
-      "@nx/react/typings/cssmodule.d.ts",
-      "@nx/react/typings/image.d.ts",
-      "vite/client"
-    ]
+      "node"
+    ],
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "jsx": "react-jsx"
   },
   "exclude": [
     "src/**/*.spec.ts",
