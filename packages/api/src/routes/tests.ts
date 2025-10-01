@@ -65,10 +65,16 @@ export const aggregatePerformanceMetrics = (
     }
   );
 
-  const trendPriority: Record<TestPerformanceMetrics['trend'], number> = {
-    degrading: 0,
-    improving: 1,
-    stable: 2,
+  const getTrendPriority = (t: TestPerformanceMetrics['trend']): number => {
+    switch (t) {
+      case 'degrading':
+        return 0;
+      case 'improving':
+        return 1;
+      case 'stable':
+      default:
+        return 2;
+    }
   };
   const dominantTrend = (
     Object.entries(sum.trend) as Array<
@@ -81,7 +87,7 @@ export const aggregatePerformanceMetrics = (
       }
       if (
         count === best.count &&
-        trendPriority[trend] < trendPriority[best.trend]
+        getTrendPriority(trend) < getTrendPriority(best.trend)
       ) {
         return { trend, count };
       }

@@ -135,7 +135,8 @@
       "Bash(nx g:*)",
       "Bash(python3 -m json.tool:*)",
       "Bash(mkdir:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(pnpm nx run:*)"
     ],
     "deny": [],
     "ask": []

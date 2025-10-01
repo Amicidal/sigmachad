@@ -319,7 +319,20 @@ export async function registerImpactRoutes(
 
         const riskSummary = records.reduce(
           (acc, record) => {
-            acc[record.riskLevel] += 1;
+            switch (record.riskLevel) {
+              case "critical":
+                acc.critical += 1;
+                break;
+              case "high":
+                acc.high += 1;
+                break;
+              case "medium":
+                acc.medium += 1;
+                break;
+              case "low":
+                acc.low += 1;
+                break;
+            }
             return acc;
           },
           { critical: 0, high: 0, medium: 0, low: 0 }
@@ -333,22 +346,35 @@ export async function registerImpactRoutes(
             acc.missingDocs += record.metrics.missingDocs;
             acc.staleDocs += record.metrics.staleDocs;
             acc.coverageImpact += record.metrics.coverageImpact;
-            for (const key of ["critical", "high", "medium", "low"] as const) {
-              acc.specSummary.byPriority[key] +=
-                record.metrics.specSummary.byPriority[key];
-              acc.specSummary.byImpactLevel[key] +=
-                record.metrics.specSummary.byImpactLevel[key];
-            }
-            for (const key of [
-              "draft",
-              "approved",
-              "implemented",
-              "deprecated",
-              "unknown",
-            ] as const) {
-              acc.specSummary.statuses[key] +=
-                record.metrics.specSummary.statuses[key];
-            }
+            // Expand explicit fields to avoid dynamic indexing
+            acc.specSummary.byPriority.critical +=
+              record.metrics.specSummary.byPriority.critical;
+            acc.specSummary.byPriority.high +=
+              record.metrics.specSummary.byPriority.high;
+            acc.specSummary.byPriority.medium +=
+              record.metrics.specSummary.byPriority.medium;
+            acc.specSummary.byPriority.low +=
+              record.metrics.specSummary.byPriority.low;
+
+            acc.specSummary.byImpactLevel.critical +=
+              record.metrics.specSummary.byImpactLevel.critical;
+            acc.specSummary.byImpactLevel.high +=
+              record.metrics.specSummary.byImpactLevel.high;
+            acc.specSummary.byImpactLevel.medium +=
+              record.metrics.specSummary.byImpactLevel.medium;
+            acc.specSummary.byImpactLevel.low +=
+              record.metrics.specSummary.byImpactLevel.low;
+
+            acc.specSummary.statuses.draft +=
+              record.metrics.specSummary.statuses.draft;
+            acc.specSummary.statuses.approved +=
+              record.metrics.specSummary.statuses.approved;
+            acc.specSummary.statuses.implemented +=
+              record.metrics.specSummary.statuses.implemented;
+            acc.specSummary.statuses.deprecated +=
+              record.metrics.specSummary.statuses.deprecated;
+            acc.specSummary.statuses.unknown +=
+              record.metrics.specSummary.statuses.unknown;
             acc.specSummary.acceptanceCriteriaReferences +=
               record.metrics.specSummary.acceptanceCriteriaReferences;
             acc.specSummary.pendingSpecs +=

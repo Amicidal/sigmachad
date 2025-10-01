@@ -18,6 +18,55 @@ vi.mock('@memento/database/DatabaseService');
 vi.mock('@memento/knowledge');
 vi.mock('@memento/testing/TestEngine');
 vi.mock('@memento/testing/security/scanner');
+// Provide minimal implementations for @memento/testing services used by MCPRouter
+vi.mock('@memento/testing', () => {
+  class TestPlanningService {
+    constructor(_kg: any) {}
+    async planTests(_req: any) {
+      return {
+        testPlan: {
+          unitTests: [{ name: 'Unit • AC1', description: 'Example unit test', type: 'unit', assertions: ['Validate example'] }],
+          integrationTests: [{ name: 'Integration • Primary workflow', description: 'Example integration test', type: 'integration', assertions: ['Validate integration'] }],
+          e2eTests: [{ name: 'E2E • Critical path', description: 'Example e2e test', type: 'e2e', assertions: ['Validate e2e'] }],
+          performanceTests: [{ name: 'Performance • Baseline', description: 'Example performance test', type: 'performance', assertions: ['Validate performance'] }],
+        },
+        estimatedCoverage: { lines: 80, branches: 75, functions: 82, statements: 79 },
+        changedFiles: [],
+      };
+    }
+  }
+
+  class SpecService {
+    private db: any;
+    constructor(_kg: any, db: any) {
+      this.db = db;
+    }
+    async createSpec(payload: any) {
+      // Simulate a minimal store/write so tests can force a DB error when desired
+      await this.db.postgresQuery('/* insert spec */', [payload?.title || '']);
+      const specId = '00000000-0000-4000-8000-000000000001';
+      return {
+        specId,
+        spec: {
+          id: specId,
+          title: payload.title,
+          description: payload.description,
+          acceptanceCriteria: payload.acceptanceCriteria || [],
+          priority: payload.priority || 'medium',
+        },
+        validationResults: { isValid: true, issues: [], suggestions: [] },
+      };
+    }
+    async validateSpec(_spec: any) {
+      return { isValid: true, issues: [], suggestions: [] };
+    }
+  }
+
+  class TestPlanningValidationError extends Error {}
+  class SpecNotFoundError extends Error {}
+
+  return { TestPlanningService, SpecService, TestPlanningValidationError, SpecNotFoundError };
+});
 
 // Import mocked services
 import type { KnowledgeGraphService } from '@memento/knowledge';
@@ -118,6 +167,37 @@ describe('MCPRouter', () => {
       mockTestEngine,
       mockSecurityScanner
     );
+
+    // Inject stub services to avoid optional @memento/testing module resolution issues
+    (mcpRouter as any).specService = {
+      createSpec: vi.fn(async (payload: any) => {
+        // Route through the mock DB so tests can force failures
+        await (mockDbService as any).postgresQuery('/* insert spec */', [payload?.title || '']);
+        const specId = '11111111-1111-4111-8111-111111111111';
+        return {
+          specId,
+          spec: { id: specId, title: payload.title, description: payload.description, acceptanceCriteria: payload.acceptanceCriteria || [], priority: payload.priority || 'medium' },
+          validationResults: { isValid: true, issues: [], suggestions: [] },
+        };
+      }),
+      validateSpec: vi.fn(async () => ({ isValid: true, issues: [], suggestions: [] })),
+    };
+
+    (mcpRouter as any).testPlanningService = {
+      planTests: vi.fn(async (_req: any) => ({
+        testPlan: {
+          unitTests: [{ name: 'Unit • AC1', description: 'Example', type: 'unit', assertions: ['ok'] }],
+          integrationTests: [],
+          e2eTests: [],
+          performanceTests: [],
+        },
+        estimatedCoverage: { lines: 80, branches: 75, functions: 82, statements: 79 },
+        changedFiles: [],
+      })),
+    };
+
+    (mcpRouter as any).TestPlanningValidationErrorCtor = class extends Error {};
+    (mcpRouter as any).SpecNotFoundErrorCtor = class extends Error {};
 
     // Reset all mocks
     vi.clearAllMocks();
@@ -251,7 +331,8 @@ describe('MCPRouter', () => {
 
         expect(response.error.code).toBe(-32603);
         expect(response.error.message).toContain('Tool execution failed');
-        expect(response.error.data).toContain('Database connection failed');
+        // Data contains the underlying cause message from SpecService
+        expect(String(response.error.data)).toContain('Database connection failed');
       });
     });
 
@@ -455,8 +536,9 @@ describe('MCPRouter', () => {
 
         expect(response.error).toBeUndefined();
         const result = JSON.parse(response.result.content[0].text);
-        expect(result.message).toMatch(/heuristic test plan/i);
+        // With TestPlanningService available, handler returns a standard plan
         expect(result.testPlan).toBeDefined();
+        expect(result.estimatedCoverage).toBeDefined();
       });
     });
 

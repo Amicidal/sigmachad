@@ -1112,10 +1112,10 @@ export class WebSocketRouter extends EventEmitter {
     stalledConnections: number;
     backpressureDisconnects: number;
   } {
-    const activeSubscriptions: Record<string, number> = {};
-    for (const [event, connections] of this.subscriptions) {
-      activeSubscriptions[event] = connections.size;
-    }
+    // Build without dynamic object indexing
+    const activeSubscriptions = Object.fromEntries(
+      Array.from(this.subscriptions, ([event, connections]) => [event, connections.size])
+    ) as Record<string, number>;
 
     return {
       totalConnections: this.connections.size,

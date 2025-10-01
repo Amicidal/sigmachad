@@ -237,10 +237,31 @@ export function createSessionConfig(environment?: string): SessionManagerConfig 
 
 // ========== Configuration Utilities ==========
 
-export function validateRedisConnection(config: RedisConfig): Promise<boolean> {
-  return new Promise((resolve) => {
-    const Redis = require('redis');
-    const client = Redis.createClient({
+export function validateRedisConnection(
+  config: RedisConfig,
+  createClient?: (opts: any) => {
+    connect: () => Promise<any>;
+    ping: () => Promise<any>;
+    quit: () => Promise<any>;
+    on: (event: string, cb: (...args: any[]) => void) => void;
+  }
+): Promise<boolean> {
+  return new Promise(async (resolve) => {
+    // Allow tests to inject a client factory to avoid hard module coupling
+    let clientFactory = createClient;
+    if (!clientFactory) {
+      try {
+        // Dynamic import so we don't bind at module-eval time (improves mockability)
+        // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+        const redisMod: any = await import('redis');
+        clientFactory = redisMod.createClient as typeof createClient;
+      } catch {
+        resolve(false);
+        return;
+      }
+    }
+
+    const client = clientFactory!({
       url: config.url,
       socket: {
         host: config.host,
@@ -251,25 +272,33 @@ export function validateRedisConnection(config: RedisConfig): Promise<boolean> {
       database: config.db,
     });
 
-    client.on('error', () => {
-      resolve(false);
-    });
+    let settled = false;
+    const safeResolve = (ok: boolean) => {
+      if (!settled) {
+        settled = true;
+        resolve(ok);
+      }
+    };
 
-    client.connect()
-      .then(() => {
-        client.ping()
-          .then(() => {
-            client.quit();
-            resolve(true);
-          })
-          .catch(() => {
-            client.quit();
-            resolve(false);
-          });
-      })
-      .catch(() => {
-        resolve(false);
+    try {
+      client.on('error', () => {
+        safeResolve(false);
       });
+
+      await client.connect();
+      try {
+        await client.ping();
+        await client.quit();
+        safeResolve(true);
+      } catch {
+        try {
+          await client.quit();
+        } catch {}
+        safeResolve(false);
+      }
+    } catch {
+      safeResolve(false);
+    }
   });
 }
 

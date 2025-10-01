@@ -181,21 +181,23 @@ export class StatsCollector extends EventEmitter {
   async computeBatchStats(
     entityIds: string[]
   ): Promise<Record<string, EntityEdgeStats>> {
-    const stats: Record<string, EntityEdgeStats> = {};
+    // Use Map to avoid dynamic object indexing; convert to object at the end
+    const statsMap = new Map<string, EntityEdgeStats>();
 
     // Process in batches to avoid overwhelming the database
     const batchSize = 10;
     for (let i = 0; i < entityIds.length; i += batchSize) {
       const batch = entityIds.slice(i, i + batchSize);
-      const batchPromises = batch.map((id) => this.getEntityEdgeStats(id));
-      const batchResults = await Promise.all(batchPromises);
+      const pairs = await Promise.all(
+        batch.map(async (id) => [id, await this.getEntityEdgeStats(id)] as const)
+      );
 
-      batch.forEach((id, index) => {
-        stats[id] = batchResults[index];
-      });
+      for (const [id, value] of pairs) {
+        if (value) statsMap.set(id, value);
+      }
     }
 
-    return stats;
+    return Object.fromEntries(statsMap.entries());
   }
 
   /**

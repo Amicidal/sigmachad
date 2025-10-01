@@ -1,62 +1,55 @@
 # Memento Database Service Tests
 
-This directory contains comprehensive tests for the Memento DatabaseService, including unit tests and integration tests.
+This directory contains comprehensive tests for the Memento workspace, including fast offline unit tests and opt-in integration/e2e suites.
 
 ## Test Structure
 
 ### Unit Tests (`tests/unit/**`)
-- **Purpose**: Test individual components in isolation
-- **Scope**: Method behavior, error handling, configuration, and edge cases
-- **Mocking**: Uses realistic, deterministic mocks for external dependencies
+- Purpose: Test components in isolation (no network/services)
+- Scope: Method behavior, error handling, configuration, edge cases
+- Mocking: Realistic deterministic doubles via Vitest + `tests/test-utils/*`
+- Offline by default: `vitest.config.ts` excludes `tests/integration/**` unless `RUN_INTEGRATION=1`.
 
 ### Integration Tests (`tests/integration/**`)
-- **Purpose**: Test real-world scenarios and cross-service/database operations
-- **Scope**: Complex workflows, performance, data consistency, analytics
-- **Mocking**: No mocking - full end-to-end testing with test containers
+- Purpose: Real service/database interactions and cross-module flows
+- Scope: Complex workflows, data consistency, analytics
+- Mocking: None (uses dockerized test stack)
+- Gating: Only included when `RUN_INTEGRATION=1`.
 
 ### Test Utilities (`tests/test-utils/database-helpers.ts`)
 - **Purpose**: Shared utilities for database test setup and teardown
 - **Features**: Database health checks, fixture loading, cleanup utilities
 
-## Database Setup
+## Database Setup (Integration Only)
 
-Tests require the following test databases to be running:
+Unit tests do not require any services. For integration runs, use the provided compose stack:
 
-### Using Docker Compose (Recommended)
 ```bash
-# Start test databases
-pnpm run docker:test-up
+# Start integration services (Neo4j, Postgres, Redis, Qdrant)
+docker compose -f tests/e2e/docker-compose.test.yml up -d
 
-# Run tests
-pnpm run test
+# Run integration tests
+RUN_INTEGRATION=1 pnpm -s vitest run tests/integration
 
-# Stop test databases
-pnpm run docker:test-down
+# Tear down
+docker compose -f tests/e2e/docker-compose.test.yml down -v
 ```
-
-### Manual Setup
-If you prefer to run databases manually, ensure these services are available:
-
-- **Neo4j**: `bolt://localhost:7688` (user `neo4j`, password `password`)
-- **Qdrant**: `http://localhost:6335`
-- **PostgreSQL**: `postgresql://memento_test:memento_test@localhost:5433/memento_test`
-- **Redis**: `redis://localhost:6381`
 
 ## Running Tests
 
-### All Tests
+### Offline Unit Tests
 ```bash
-pnpm run test
+pnpm -s vitest run tests/unit
 ```
 
-### Unit Tests Only
+### Targeted Unit Files
 ```bash
-pnpm run test -- tests/unit/services/DatabaseService.test.ts
+pnpm -s vitest run tests/unit/services/DatabaseService.test.ts
 ```
 
-### Integration Tests Only
+### Integration Tests
 ```bash
-pnpm run test -- tests/integration/services/DatabaseService.integration.test.ts
+RUN_INTEGRATION=1 pnpm -s vitest run tests/integration
 ```
 
 ### With Coverage
@@ -167,9 +160,8 @@ NODE_ENV=test
 3. Check database logs: `docker-compose -f docker-compose.test.yml logs`
 
 ### Test Timeouts
-- Database operations may take longer than unit test timeouts
-- Tests are configured with 30-60 second timeouts for setup operations
-- Integration tests may take several minutes to complete
+- Unit tests default to 30s per test and run offline.
+- Integration tests may take several minutes; ensure services are healthy.
 
 ### Port Conflicts
 - Ensure no other services are using test ports (6379-6381, 5433, 6335-6336)
@@ -183,8 +175,8 @@ NODE_ENV=test
 ## Contributing
 
 When adding new tests:
-1. Follow the existing patterns (no mocking, real database operations)
-2. Add appropriate setup/teardown for new test scenarios
-3. Include both success and failure cases
-4. Update this README if adding new test categories
-5. Ensure tests work with the test database containers
+1. Prefer unit tests with deterministic doubles; avoid sleeps.
+2. Use `testUtils.useFakeTimers()` and `testUtils.waitFor(...)` helpers.
+3. Reserve `tests/integration/**` for real service interactions.
+4. Document any new flows briefly here if novel.
+5. For integration, ensure compose stack covers new requirements.

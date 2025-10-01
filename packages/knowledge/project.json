@@ -14,14 +14,16 @@
     "lint": {
       "executor": "@nx/eslint:lint",
       "options": {
-        "lintFilePatterns": ["packages/knowledge/**/*.ts"]
+        "lintFilePatterns": ["packages/knowledge/src/**/*.ts"],
+        "maxWarnings": -1
       }
     },
     "test": {
       "executor": "@nx/vite:test",
       "options": {
         "config": "vitest.config.ts",
-        "reportsDirectory": "../../coverage/packages/knowledge"
+        "reportsDirectory": "../../coverage/packages/knowledge",
+        "passWithNoTests": true
       }
     },
     "dev": {

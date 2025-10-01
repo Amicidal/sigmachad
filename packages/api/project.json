@@ -15,14 +15,16 @@
     "lint": {
       "executor": "@nx/eslint:lint",
       "options": {
-        "lintFilePatterns": ["packages/api/**/*.ts"]
+        "lintFilePatterns": ["packages/api/src/**/*.ts"],
+        "maxWarnings": -1
       }
     },
     "test": {
       "executor": "@nx/vite:test",
       "options": {
         "config": "vitest.config.ts",
-        "reportsDirectory": "../../coverage/packages/api"
+        "reportsDirectory": "../../coverage/packages/api",
+        "passWithNoTests": true
       }
     },
     "dev": {

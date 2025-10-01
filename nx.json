@@ -34,7 +34,8 @@
       "inputs": ["default"],
       "cache": true,
       "options": {
-        "maxWarnings": -1
+        "maxWarnings": -1,
+        "format": "stylish"
       }
     },
     "test:integration": {

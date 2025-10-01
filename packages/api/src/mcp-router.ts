@@ -1631,8 +1631,7 @@ export class MCPRouter {
       const recommendations: any[] = [];
 
       // Analyze each proposed change
-      for (let i = 0; i < params.changes.length; i++) {
-        const change = params.changes[i];
+      for (const [i, change] of params.changes.entries()) {
 
         // Create unique IDs for each change
         const entityId = `entity_${Date.now()}_${i}`;

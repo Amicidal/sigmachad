@@ -229,24 +229,34 @@ describe('AgentRegistry', () => {
       await registry.register(agent1);
     });
 
-    it('should update heartbeat', () => {
-      const registrationsBefore = registry.getAllRegistrations();
-      const originalHeartbeat = registrationsBefore[0].lastHeartbeat;
+    it('should update heartbeat', async () => {
+      const beforeRegs = registry.getAllRegistrations();
+      const originalHeartbeat = beforeRegs[0].lastHeartbeat;
 
-      // Wait a bit to ensure timestamp difference
-      setTimeout(() => {
-        registry.updateHeartbeat('agent-1');
+      // Act
+      registry.updateHeartbeat('agent-1');
 
-        const registrationsAfter = registry.getAllRegistrations();
-        const newHeartbeat = registrationsAfter[0].lastHeartbeat;
-
-        expect(newHeartbeat.getTime()).toBeGreaterThan(originalHeartbeat.getTime());
-      }, 10);
+      // Assert the Date object changed and time is not earlier
+      const afterRegs = registry.getAllRegistrations();
+      const newHeartbeat = afterRegs[0].lastHeartbeat;
+      expect(newHeartbeat).not.toBe(originalHeartbeat);
+      expect(newHeartbeat.getTime()).toBeGreaterThanOrEqual(
+        originalHeartbeat.getTime()
+      );
     });
 
     it('should handle heartbeat for non-existent agent', () => {
-      // Should not throw
+      const beforeTimes = registry
+        .getAllRegistrations()
+        .map((r) => r.lastHeartbeat.getTime());
+
+      // Should not throw and should not modify existing registrations
       registry.updateHeartbeat('non-existent');
+
+      const afterTimes = registry
+        .getAllRegistrations()
+        .map((r) => r.lastHeartbeat.getTime());
+      expect(afterTimes).toEqual(beforeTimes);
     });
   });
 

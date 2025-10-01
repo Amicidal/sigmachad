@@ -439,7 +439,7 @@ describe('validateRedisConnection', () => {
       port: 6379,
     };
 
-    const isValid = await validateRedisConnection(config);
+    const isValid = await validateRedisConnection(config, mockCreateClient as any);
 
     expect(isValid).toBe(true);
     expect(mockClient.connect).toHaveBeenCalled();
@@ -465,7 +465,7 @@ describe('validateRedisConnection', () => {
       port: 6379,
     };
 
-    const isValid = await validateRedisConnection(config);
+    const isValid = await validateRedisConnection(config, mockCreateClient as any);
 
     expect(isValid).toBe(false);
   });
@@ -490,7 +490,7 @@ describe('validateRedisConnection', () => {
       port: 6379,
     };
 
-    const isValid = await validateRedisConnection(config);
+    const isValid = await validateRedisConnection(config, mockCreateClient as any);
 
     expect(isValid).toBe(false);
     expect(mockClient.quit).toHaveBeenCalled();

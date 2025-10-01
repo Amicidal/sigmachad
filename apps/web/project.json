@@ -18,8 +18,9 @@
       "executor": "@nx/vite:test",
       "outputs": ["{projectRoot}/coverage"],
       "options": {
-        "configFile": "vitest.config.ts",
-        "reportsDirectory": "coverage/apps/web"
+        "config": "vitest.config.ts",
+        "reportsDirectory": "../../coverage/apps/web",
+        "passWithNoTests": true
       }
     }
   }

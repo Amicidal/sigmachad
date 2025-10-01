@@ -52,11 +52,12 @@ export class DirectoryHandler {
 
     // Create directory entities with stable ids based on path
     const dirIds: string[] = [];
-    for (let i = 0; i < segments.length; i++) {
-      const dpath = segments[i];
-      const depth = i + 1;
+    let lastDirId: string | undefined;
+    for (const [idx, dpath] of segments.entries()) {
+      const depth = idx + 1;
       const id = `dir:${dpath}`;
       dirIds.push(id);
+      lastDirId = id;
       dirEntities.push({
         id,
         type: 'directory',
@@ -71,21 +72,23 @@ export class DirectoryHandler {
     }
 
     // Link parent->child directories
-    for (let i = 1; i < dirIds.length; i++) {
-      dirRelationships.push(
-        this.createRelationship(
-          dirIds[i - 1],
-          dirIds[i],
-          RelationshipType.CONTAINS
-        )
-      );
+    {
+      let previous: string | undefined;
+      for (const current of dirIds) {
+        if (previous) {
+          dirRelationships.push(
+            this.createRelationship(previous, current, RelationshipType.CONTAINS)
+          );
+        }
+        previous = current;
+      }
     }
 
     // Link last directory to the file
-    if (dirIds.length > 0) {
+    if (dirIds.length > 0 && lastDirId) {
       dirRelationships.push(
         this.createRelationship(
-          dirIds[dirIds.length - 1],
+          lastDirId,
           fileEntityId,
           RelationshipType.CONTAINS
         )

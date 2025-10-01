@@ -424,14 +424,15 @@ export class SyncOrchestrator {
     const matchedSections: string[] = [];
     const queryLower = query.toLowerCase();
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+    for (const [i, line] of lines.entries()) {
       if (line.toLowerCase().includes(queryLower)) {
-        // Find the section header for this line
+        // Search up to 10 lines above for the nearest header without dynamic indexing
+        const start = Math.max(0, i - 9);
+        const window = lines.slice(start, i + 1).reverse();
         let sectionHeader = '';
-        for (let j = i; j >= 0 && j > i - 10; j--) {
-          if (lines[j].match(/^#{1,6}\s/) || lines[j].match(/^=+\s*$/)) {
-            sectionHeader = lines[j]
+        for (const headerLine of window) {
+          if (/^#{1,6}\s/.test(headerLine) || /^=+\s*$/.test(headerLine)) {
+            sectionHeader = headerLine
               .replace(/^#{1,6}\s*/, '')
               .replace(/^=+\s*$/, '');
             break;

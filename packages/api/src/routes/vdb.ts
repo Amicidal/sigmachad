@@ -139,7 +139,7 @@ export async function registerVDBRoutes(
             text,
             embedding: (await embeddingService.generateEmbedding(text)).embedding,
             model: model || 'text-embedding-3-small',
-            metadata: metadata?.[index] || {},
+            metadata: Array.isArray(metadata) ? metadata.at(index) ?? {} : {},
           }))
         );
 

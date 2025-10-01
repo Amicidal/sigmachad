@@ -41,13 +41,18 @@ export default defineConfig({
     ],
     coverage: {
       reporter: ['text', 'html', 'lcov'],
-      include: ['src/**/*.{ts,js}'],
+      // Cover code across the monorepo, not just a local src folder
+      include: [
+        'packages/*/src/**/*.{ts,js}',
+        'apps/*/src/**/*.{ts,js}'
+      ],
       exclude: [
-        'src/**/*.d.ts',
-        'src/**/*.test.{ts,js}',
-        'src/**/*.spec.{ts,js}',
-        'src/**/__tests__/**',
-        'src/index.ts'
+        'packages/*/src/**/*.d.ts',
+        'packages/*/src/**/*.{test,spec}.{ts,js}',
+        'packages/*/src/**/__tests__/**',
+        'apps/*/src/**/*.d.ts',
+        'apps/*/src/**/*.{test,spec}.{ts,js}',
+        'apps/*/src/**/__tests__/**'
       ],
       all: true, // Include all files to identify untested code
       reportOnFailure: true, // Generate coverage report even when tests fail

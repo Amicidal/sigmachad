@@ -43,25 +43,25 @@ export function normalizeRelPath(filePath: string): string {
  */
 export function detectLanguage(filePath: string): string {
   const extension = path.extname(filePath).toLowerCase();
-  const languageMap: { [key: string]: string } = {
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".py": "python",
-    ".java": "java",
-    ".cpp": "cpp",
-    ".c": "c",
-    ".cs": "csharp",
-    ".go": "go",
-    ".rs": "rust",
-    ".php": "php",
-    ".rb": "ruby",
-    ".swift": "swift",
-    ".kt": "kotlin",
-    ".scala": "scala",
-  };
-  return languageMap[extension] || "unknown";
+  const languageMap = new Map<string, string>([
+    [".ts", "typescript"],
+    [".tsx", "typescript"],
+    [".js", "javascript"],
+    [".jsx", "javascript"],
+    [".py", "python"],
+    [".java", "java"],
+    [".cpp", "cpp"],
+    [".c", "c"],
+    [".cs", "csharp"],
+    [".go", "go"],
+    [".rs", "rust"],
+    [".php", "php"],
+    [".rb", "ruby"],
+    [".swift", "swift"],
+    [".kt", "kotlin"],
+    [".scala", "scala"],
+  ]);
+  return languageMap.get(extension) ?? "unknown";
 }
 
 /**

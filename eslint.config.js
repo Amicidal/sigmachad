@@ -389,8 +389,9 @@ export default [
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'warn',
+      // Loosen temporarily per request; treat unused vars as warnings in scripts.
       '@typescript-eslint/no-unused-vars': [
-        'error',
+        'warn',
         {
           argsIgnorePattern: '^_',
           varsIgnorePattern: '^_',
@@ -419,9 +420,9 @@ export default [
   },
   {
     ignores: [
-      'dist/',
+      '**/dist/**',
       'node_modules/',
-      'coverage/',
+      '**/coverage/**',
       '**/*.d.ts',
       'eslint.config.js',
       'tests/setup.ts',

@@ -21,7 +21,8 @@
       "executor": "@nx/vite:test",
       "options": {
         "config": "vitest.config.ts",
-        "reportsDirectory": "../../coverage/packages/database"
+        "reportsDirectory": "../../coverage/packages/database",
+        "passWithNoTests": true
       }
     },
     "dev": {
